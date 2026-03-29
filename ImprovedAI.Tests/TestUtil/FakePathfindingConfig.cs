@@ -1,4 +1,4 @@
-﻿using ImprovedAI.Config;
+using ImprovedAI.Config;
 using System;
 
 namespace ImprovedAI.Tests.TestUtil
@@ -35,5 +35,7 @@ namespace ImprovedAI.Tests.TestUtil
         public int MaxPathNodes() => maxPathNodes;
         public TimeSpan maxPathfindingTime { get; set; } = TimeSpan.FromMilliseconds(50);
         public TimeSpan MaxPathfindingTime() => maxPathfindingTime;
+        public float raycastCooldownSeconds { get; set; } = 1.0f;
+        public float RaycastCooldownSeconds() => raycastCooldownSeconds;
     }
 }

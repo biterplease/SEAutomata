@@ -1,4 +1,4 @@
-﻿using ImprovedAI.Config;
+using ImprovedAI.Config;
 using ImprovedAI.Pathfinding;
 using ImprovedAI.VirtualNetwork;
 using Moq;
@@ -239,13 +239,25 @@ namespace ImprovedAI.Tests.TestUtil
     {
         public string returnValue { get; set; }
         public object returnObject { get; set; }
-        public byte[] SerializeToBinary<T> (T obj)
+
+        public byte[] SerializeToBinary<T>(T obj)
         {
-            return Encoding.ASCII.GetBytes(returnValue);
+            return Encoding.ASCII.GetBytes(returnValue ?? string.Empty);
         }
-        public T SerializeFromBinary<T>(byte[] data) where T : class
+
+        public T SerializeFromBinary<T>(byte[] data)
         {
-            return returnObject as T;
+            return (T)returnObject;
+        }
+
+        public string SerializeToXML<T>(T objectToSerialize)
+        {
+            return returnValue ?? string.Empty;
+        }
+
+        public T SerializeFromXML<T>(string buffer)
+        {
+            return (T)returnObject;
         }
     }
 

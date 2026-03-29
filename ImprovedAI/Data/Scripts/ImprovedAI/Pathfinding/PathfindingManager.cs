@@ -145,7 +145,7 @@ namespace ImprovedAI.Pathfinding
             IMyGamePruningStructureDelegate pruningStructure = null,
             IMyPlanetDelegate planetDelegate = null)
         {
-            config = pathfindingConfig ?? IAISession.Instance?.GetConfig()?.Pathfinding;
+            config = pathfindingConfig ?? IAISession.GetConfig()?.Pathfinding;
             this.pruningStructure = pruningStructure ?? new MyGamePruningStructureDelegate();
             this.planetDelegate = planetDelegate ?? new MyPlanetDelegate();
 

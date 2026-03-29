@@ -102,6 +102,9 @@ namespace ImprovedAI.VirtualNetwork
         public Drone.State? DroneState;
         [ProtoMember(12)]
         public Drone.Capabilities? Capabilities;
+        /// <summary>EntityId of the drone that produced this report.</summary>
+        [ProtoMember(13)]
+        public long DroneEntityId;
     }
 
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
@@ -133,6 +136,11 @@ namespace ImprovedAI.VirtualNetwork
         public List<Vector3D> Connectors;
         [ProtoMember(3)]
         public LogisticsComputer.OperationMode OperationMode;
+        /// <summary>EntityId of the LogisticsComputer that sent this update.</summary>
+        [ProtoMember(4)]
+        public long EntityId;
+        [ProtoMember(5)]
+        public DateTime Timestamp;
     }
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class InventoryRequisition : IMessagePayload
@@ -143,11 +151,14 @@ namespace ImprovedAI.VirtualNetwork
         public Vector3D ConnectorLocation;
         [ProtoMember(3)]
         public Inventory.RequisitionType RequisitionType;
-        /// <summary>
-        /// Does the grid move.
-        /// </summary>
+        /// <summary>Does the grid move.</summary>
         [ProtoMember(4)]
         public bool IsStatic;
+        /// <summary>EntityId of the LogisticsComputer requesting the inventory transfer.</summary>
+        [ProtoMember(5)]
+        public long RequestingEntityId;
+        [ProtoMember(6)]
+        public DateTime Timestamp;
     }
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class RelayMessage : IMessagePayload

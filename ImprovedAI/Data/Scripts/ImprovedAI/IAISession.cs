@@ -1,4 +1,4 @@
-﻿using ImprovedAI.Config;
+using ImprovedAI.Config;
 using ImprovedAI.Util.Logging;
 using ImprovedAI.VirtualNetwork;
 using Sandbox.ModAPI;
@@ -23,6 +23,7 @@ namespace ImprovedAI
 
         // Shared message queue for all AI components
         public static MessageQueue _messageQueue;
+        public MessageQueue MessageQueue => _messageQueue;
 
         // Mod-wide settings and management
         private bool isInitialized = false;

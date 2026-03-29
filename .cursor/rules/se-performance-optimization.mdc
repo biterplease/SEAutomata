@@ -1,0 +1,29 @@
+---
+description: Strict performance and optimization guidelines for Space Engineers server-side logic
+globs: **/*.cs
+---
+
+# Performance-First Development (Server-Side)
+
+Efficiency is the absolute priority. Code must be written to minimize GC pressure, CPU spikes, and main-thread blocking.
+
+## 1. Zero-Allocation & GC Management
+- **Avoid Linq**: Never use `.Where()`, `.Select()`, or `.Any()` in update loops. Use `for` or `foreach` on pooled lists.
+- **No String Interpolation in Loops**: Do not use `$"Value: {x}"` inside `UpdateAfterSimulation`. Use cached `StringBuilder` or pre-defined strings.
+- **Ref Structs & Passing by Ref**: Use `ref` or `in` for large structs like `Vector3D`, `MatrixD`, and `PathfindingContext` to avoid copying data on the stack.
+- **Primitive Collections**: Prefer `MyConcurrentDictionary` or `MyConcurrentQueue` from `VRage.Collections` for thread-safe operations.
+
+## 2. API Specific Optimizations
+- **Square the Distances**: Always use `Vector3D.DistanceSquared` instead of `Vector3D.Distance` for comparisons to avoid unnecessary `Math.Sqrt` calls.
+- **Cached Connectivity**: Never call `IMyInventory.IsConnectedTo` every tick. Result must be cached in the `ConveyorNetwork` object and only refreshed on grid change.
+- **Terminal Control Throttling**: Only update `DetailedInfo` or Terminal UI elements every 30-60 ticks, not every frame.
+- **Grid Crawling**: Use `MyAPIGateway.Entities.GetEntitiesInAABB` or `GetEntitiesInSphere` sparingly. Cache results.
+
+## 3. Logic Branching & Shortcuts
+- **Early Exits**: Place the cheapest checks (booleans, enums) at the top of a method. If `!IsEnabled`, return immediately before doing any math.
+- **Instruction Counting**: If logic is complex, spread it across multiple frames using a state machine or a counter (`if (tick++ % 10 == 0)`).
+- **Bitwise Enums**: Use `[Flags]` enums for `WorkModes` and `Capabilities` to perform lightning-fast capability checks using `&` operators.
+
+## 4. Pathfinding Specifics
+- **Heuristics Over Logic**: Drones must bid using `DistanceSquared` arithmetic only. No raycasting or path-building is allowed during the bidding phase.
+- **One-Path-Per-Tick**: Limit the `PathfindingManager` to processing only one "Heavy" A* request per tick across the entire mod if possible (Global Queue).

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -16,6 +16,7 @@ namespace ImprovedAI.Config
         bool AllowDirectPathfinding();
         bool AllowAStar();
         //bool AllowDStarLite();
+        float MinAltitudeBuffer();
         float MinWaypointDistance();
         float MaxWaypointDistance();
         int MaxRepositionAttempts();
@@ -82,6 +83,8 @@ namespace ImprovedAI.Config
         /// Minimum distance between waypoint, in meters. If target is closer than this, a one-step move at ApproachSpeed
         /// is performed.
         /// </summary>
+        public float minAltitudeBuffer { get; internal set; } = 50f;
+        public float MinAltitudeBuffer() => minAltitudeBuffer;
         public float minWaypointDistance { get; internal set; } = 12.5f;
         public float MinWaypointDistance() => minWaypointDistance;
         /// <summary>

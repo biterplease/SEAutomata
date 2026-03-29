@@ -1162,6 +1162,7 @@ namespace ImprovedAI
             {
                 Payload = new DroneReport
                 {
+                    DroneEntityId = _entityId,
                     Flags = Drone.UpdateFlags.Registration,
                     DroneState = currentState,
                     Capabilities = capabilities,
@@ -1234,6 +1235,7 @@ namespace ImprovedAI
             {
                 Payload = new DroneReport
                 {
+                    DroneEntityId = _entityId,
                     Flags = flags,
                     DroneState = currentState,
                     BatteryChargePercent = currentBatteryLevel,
@@ -1261,7 +1263,9 @@ namespace ImprovedAI
             {
                 Payload = new DroneReport
                 {
+                    DroneEntityId = _entityId,
                     TaskId = currentTaskId,
+                    Flags = Drone.UpdateFlags.TaskComplete,
                     BatteryChargePercent = currentBatteryLevel,
                     H2Level = currentH2Level,
                 },
@@ -1295,17 +1299,18 @@ namespace ImprovedAI
 
             foreach (var message in _messageCache)
             {
-                if (message.RecipientId != _entityId)
+                if (!TaskAssignmentMessageHandling.IsDirectMessageForDrone(message.RecipientId, _entityId))
                 {
                     Log.Warning("drone {0} recived a message intended for entity id {1} type {2}", _entityId, message.RecipientId, message.RecipientBlockType.ToString());
                     continue;
                 }
-                if (message.Payload is TaskAssignment)
+                TaskAssignment payload = message.Payload as TaskAssignment;
+                int enqueued = TaskAssignmentMessageHandling.EnqueueFromTaskAssignment(payload, taskQueue);
+                if (enqueued > 0 && payload != null)
                 {
-                    var payload = (TaskAssignment)message.Payload;
-                    foreach (var task in payload.Tasks)
+                    for (int ti = 0; ti < payload.Tasks.Count; ti++)
                     {
-                        taskQueue.Enqueue(task);
+                        Scheduler.Task task = payload.Tasks[ti];
                         Log.LogDroneOrders("Drone {0} received task {1} type {2}", _entityId, task.TaskId, task.TaskType);
                     }
                 }

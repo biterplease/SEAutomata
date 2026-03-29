@@ -1,0 +1,33 @@
+---
+description: Specific logic for Precise Welding, Repair, and Grinding tasks
+globs: IAIScheduler.cs, IAIDroneControllerBlock.cs, Scheduler.cs, TaskProcessor.cs
+---
+
+# Task Focus: Precise Welding & Grinding
+
+Only the following `WorkModes` from `Scheduler.cs` are currently active for implementation. All other modes (Scan, AirDrop, etc.) should be treated as stubs.
+
+## 1. Precise Welding & Repair
+- **Active Modes**: `WeldUnfinishedBlocks`, `RepairDamagedBlocks`, `WeldProjectedBlocks`.
+- **Logic Constraints**:
+    - **Targeting**: Use the Scheduler to identify blocks with `BuildLevel < 1.0` or `SlimBlock.CurrentDamage > 0`.
+    - **Proximity**: Drones must stay within 2.5m (Large Grid) or 1.5m (Small Grid) of the target block's center to activate tools.
+    - **Obstacle Avoidance**: If the block is "inside" a shell, the drone must use the @se-pathfinding-enforcement rules to find a safe approach vector.
+
+## 2. Grinding
+- **Active Modes**: `Grind`.
+- **Targeting**: 
+    - Identify blocks matching the `GrindColor` or `GrindIgnoreList` defined in `IAISchedulerSettings.cs`.
+    - Prioritize functional blocks (Power, Control) to disable the grid quickly.
+- **Safety**: Drones must maintain a "Back-off" distance if the target grid is moving or rotating to avoid collisions.
+
+## 3. Implementation Priorities
+- **Payload Handling**: Ensure the `Task.Payload` (Inventory) for these tasks is populated with the required components (for welding) or expected scrap (for grinding).
+- **Tool Management**: Drones must toggle `Enabled` on all `IMyShipWelder` or `IMyShipGrinder` blocks only when the `PathfindingManager` confirms the drone is "On Station."
+- **Completion Criteria**:
+    - **Weld**: Task is complete when `SlimBlock.IsFullIntegrity == true`.
+    - **Grind**: Task is complete when the block is removed from the grid.
+
+## 4. Performance Guardrails
+- **Throttled Search**: The Scheduler should only scan for new Weld/Grind targets every 100 ticks.
+- **Batching**: Group adjacent damaged blocks into a single "Task Area" to prevent drones from oscillating between individual blocks.

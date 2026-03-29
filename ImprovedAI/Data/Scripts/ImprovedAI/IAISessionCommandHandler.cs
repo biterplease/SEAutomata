@@ -1,11 +1,6 @@
-﻿using Sandbox.ModAPI;
+using Sandbox.ModAPI;
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using VRage;
 
 namespace ImprovedAI
 {
@@ -34,23 +29,22 @@ namespace ImprovedAI
                     switch (args[0].Trim())
                     {
                         case LIST_TASKS:
-
-
+                            MyAPIGateway.Utilities.ShowMessage(IAISession.MOD_NAME, GetTaskList());
+                            break;
                     }
                 }
             }
         }
         private string GetTaskList()
         {
-
+            return "Task list: (not yet implemented)";
         }
+
         private string GetHelpText()
         {
-            var text = string.Format(Texts.Cmd_HelpClient.String, IAISession.VERSION, CmdHelp1, CmdHelp2,
-               CmdLogLevel, CmdLogLevel_All, CmdLogLevel_Default,
-               CmdWriteTranslation, string.Join(",", Enum.GetNames(typeof(MyLanguagesEnum))), MyAPIGateway.Utilities.GamePaths.UserDataPath + Path.DirectorySeparatorChar + "Storage" + Path.DirectorySeparatorChar + MyAPIGateway.Utilities.GamePaths.ModScopeName);
-            if (MyAPIGateway.Session.IsServer) text += string.Format(Texts.Cmd_HelpServer.String, CmdCwsf, CmdCpsf);
-            return text;
+            return string.Format(
+                "ImprovedAI {0} - Commands: {1} {2}",
+                IAISession.VERSION, LIST_TASKS, TASK_CMD);
         }
     }
 }

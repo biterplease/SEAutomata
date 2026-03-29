@@ -223,9 +223,10 @@ namespace ImprovedAI.VirtualNetwork
             _config = config ?? new MessageQueueConfig();
             MyUtilitiesDelegate = myUtilitiesDelegate ?? new MyUtilitiesDelegate();
             InterlockedDelegate = interlockedDelegate ?? new InterlockedDelegate();
-            _messageExpiration = TimeUtil.TickToTimeSpan(config.MessageRetentionTicks());
-            _dlqMessageExpiration = TimeUtil.TickToTimeSpan(config.DlqMessageRetentionTicks());
-            _cleanupInterval = TimeUtil.TickToTimeSpan(config.MessageCleanupIntervalTicks());
+            serializationMode = _config.SerializationMode();
+            _messageExpiration = TimeUtil.TickToTimeSpan(_config.MessageRetentionTicks());
+            _dlqMessageExpiration = TimeUtil.TickToTimeSpan(_config.DlqMessageRetentionTicks());
+            _cleanupInterval = TimeUtil.TickToTimeSpan(_config.MessageCleanupIntervalTicks());
 
             _channelQueues = new MyConcurrentDictionary<Channel, MyConcurrentQueue<TimestampedMessage>>();
             foreach (var channel in (Channel[])Enum.GetValues(typeof(Channel)))
@@ -254,6 +255,39 @@ namespace ImprovedAI.VirtualNetwork
                 _instance = new MessageQueue(config, myUtilitiesDelegate, interlockedDelegate);
                 _isInitialized = true;
             }
+        }
+
+        /// <summary>
+        /// Internal channel broadcast: posts payload to all current subscribers of <paramref name="channelOrdinal"/>
+        /// without antenna range checks. Used for intra-scheduler routing (e.g. re-queuing a DroneReport).
+        /// </summary>
+        public ErrorCode SendMessage<T>(ushort channelOrdinal, T payload, long senderId, bool requiresAck = false)
+            where T : class, IMessagePayload
+        {
+            if (_isShuttingDown)
+                return ErrorCode.ShutdownInProgress;
+
+            var channel = (Channel)channelOrdinal;
+            MyConcurrentHashSet<long> subscribers;
+            if (!_channelSubscribers.TryGetValue(channel, out subscribers) || subscribers.Count == 0)
+                return ErrorCode.NoSubscribers;
+
+            var validRecipients = new HashSet<long>(subscribers);
+
+            var msg = new Message<T>
+            {
+                MessageId = (uint)InterlockedDelegate.Increment(ref _messageCounter),
+                Payload = payload,
+                CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
+                SenderId = senderId,
+                SenderOwnerId = 0,
+                Channel = channel,
+                RequiresAck = requiresAck,
+                SerializationMode = serializationMode,
+                RecipientBlockType = IAIBlockType.None,
+            };
+            EnqueueMessage(ref msg, validRecipients);
+            return ErrorCode.None;
         }
 
         /// <summary>
@@ -673,14 +707,25 @@ namespace ImprovedAI.VirtualNetwork
                             }
                             continue; // expired message is ignored, and dropped
                         }
-                        if (!iaiEntityIdToProxy.TryGetValue(msg.SenderId, out senderProxyId))
+                        bool isInternalMessage = !iaiEntityIdToProxy.TryGetValue(msg.SenderId, out senderProxyId) && msg.SenderOwnerId == 0;
+                        if (!isInternalMessage && !iaiEntityIdToProxy.ContainsKey(msg.SenderId))
                             continue; // sender antenna no longer registered, drop message and continue
 
                         if (msg.ValidRecipients.Contains(subscriberId))
                         {
-                            var senderInfo = antennaTree.GetUserData<AntennaInfo>(senderProxyId);
-                            // check if caller is in range from sender to receive
-                            if (IsInCommunicationRange(msg.SenderId, senderInfo.Antenna, ref subscriberInfo, false))
+                            bool inRange;
+                            if (isInternalMessage)
+                            {
+                                // Internal routing messages (SenderOwnerId==0, no antenna) bypass range checks.
+                                inRange = true;
+                            }
+                            else
+                            {
+                                var senderInfo = antennaTree.GetUserData<AntennaInfo>(senderProxyId);
+                                inRange = IsInCommunicationRange(msg.SenderId, senderInfo.Antenna, ref subscriberInfo, false);
+                            }
+
+                            if (inRange)
                             {
                                 if (messageFilters != PayloadType.None && ((msg.PayloadType & messageFilters) == 0))
                                 {
@@ -845,9 +890,10 @@ namespace ImprovedAI.VirtualNetwork
             return _cleanupBuffer.Count;
         }
 
+        /// <summary>Returns true when the message is older than <paramref name="expiration"/>.</summary>
         private bool IsMessageExpired(DateTime currentTime, ulong sentAt, TimeSpan expiration)
         {
-            return (currentTime - TimeUtil.TimestampToDateTime(sentAt)) <= expiration;
+            return (currentTime - TimeUtil.TimestampToDateTime(sentAt)) > expiration;
         }
 
         private void CleanupStaleMessages()
@@ -921,6 +967,7 @@ namespace ImprovedAI.VirtualNetwork
         public void Reset()
         {
             _instance = null;
+            _isInitialized = false;
         }
 
         public byte[] SerializeForSave()

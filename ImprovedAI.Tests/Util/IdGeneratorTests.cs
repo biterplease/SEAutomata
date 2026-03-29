@@ -1,4 +1,4 @@
-﻿using ImprovedAI.Util;
+using ImprovedAI.Util;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 using System.Collections.Generic;
@@ -280,6 +280,11 @@ namespace ImprovedAI.Tests.Util
         public int Exchange(ref int location, int value)
         {
             return Interlocked.Exchange(ref _value, value);
+        }
+
+        public T Exchange<T>(ref T location1, T value) where T : class
+        {
+            return Interlocked.Exchange(ref location1, value);
         }
     }
 }

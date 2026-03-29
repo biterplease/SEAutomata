@@ -1,0 +1,28 @@
+---
+description: Testing and Mocking guidelines using existing SEMockFactory and Reflection utilities
+globs: **/*Tests.cs
+---
+
+# Space Engineers Testing Standards
+
+All tests must integrate with the existing `ImprovedAI.Tests` infrastructure. Focus on high-efficiency execution and strict isolation from the Space Engineers runtime.
+
+## 1. Existing Infrastructure Integration
+- **Mock Factory**: Always use `SEMockFactory` (from `ImprovedAI.Tests.TestUtil`) to generate boilerplate mocks for Grids and Controllers. Extend  or modify `SEMockFactory` as needed.
+- **Reflection for Private Members**: Use the existing `InvokePrivateMethod` and `GetPrivateField` patterns found in `IAIDroneControllerRotationTests` to test internal logic without breaking encapsulation in the main project.
+- **Framework**: Use `MSTest` (`[TestClass]`, `[TestMethod]`) as defined in `ImprovedAI.Tests.csproj`.
+
+## 2. Mocking Guidelines
+- **IMySession**: Always mock `IMySession.GameplayFrameCounter` in `[TestInitialize]` to handle throttled logic (e.g., logic that only runs every 10 or 100 ticks).
+- **Grid Setup**: When testing Welding or Grinding, mock the `IMyCubeGrid` to return a specific set of `IMySlimBlock` objects with varying `BuildLevel` or `Integrity`.
+- **Hardware Dictionaries**: For Drone tests, follow the pattern of creating `Dictionary<Base6Directions.Direction, List<T>>` for tools, thrusters, and gyros before initializing the controller.
+
+## 3. Performance & Validation
+- **Ref Parameters**: When using reflection to invoke methods with `ref` or `out` parameters (common in VRage math), ensure the `parameters` array is updated via the `invokeParams` copy-back logic in your test utilities.
+- **Vector Math**: Utilize `VRageMath` primitives directly. They are safe for unit tests and do not require mocking.
+- **Constraint**: No tests should ever trigger `MyAPIGateway` calls that aren't explicitly mocked, as this will cause `NullReferenceException` in the headless MSTest runner.
+
+## 4. Test Categories
+- **Logic Tests**: Pure math/state changes (e.g., Task priority sorting).
+- **Mocked Interaction**: Testing how the blocks interact with each other using mocks.
+- **Virtual Network Tests**: Inter-component communication via the virtual network

@@ -73,7 +73,28 @@ namespace ImprovedAI
         private IMyRadioAntenna ownAntenna;
         private List<Message<IMessagePayload>> _messageCache = new List<Message<IMessagePayload>>();
         private readonly List<Message<TaskAborted>> _taskAbortCache = new List<Message<TaskAborted>>();
+        private readonly List<Message<DroneReport>> _droneRegistrationCache = new List<Message<DroneReport>>();
+        private readonly List<Message<DroneReport>> _droneReportCache = new List<Message<DroneReport>>();
+        private readonly List<Message<LogisticsUpdate>> _logisticsRegistrationCache = new List<Message<LogisticsUpdate>>();
+        private readonly List<Message<LogisticsUpdate>> _logisticsUpdateCache = new List<Message<LogisticsUpdate>>();
         private readonly object _taskLock = new object();
+        private int _taskIdCounter = 0;
+
+        private static readonly Channel[] DroneManagementChannels = new Channel[]
+        {
+            Channel.DRONE_REGISTRATION,
+            Channel.DRONE_REPORTS,
+            Channel.DRONE_PERFORMANCE,
+            Channel.DRONE_TASK_ASSIGNMENT,
+        };
+
+        private static readonly Channel[] logisticsManagementTopics = new Channel[]
+        {
+            Channel.LOGISTIC_REGISTRATION,
+            Channel.LOGISTIC_UPDATE,
+            Channel.LOGISTIC_REQUEST,
+            Channel.LOGISTIC_PUSH,
+        };
         /// <summary>
         /// Range in meters after which tasks are ignored.
         /// </summary>
@@ -147,6 +168,7 @@ namespace ImprovedAI
                     ReadTaskAbortedMessages();
                     ReadDroneRegistrations();
                     ReadDroneReports((ushort)messageReadLimit);
+                    ReadLogisticsRegistrationAndUpdates();
                 }
             }
             catch (Exception ex)
@@ -362,18 +384,18 @@ namespace ImprovedAI
                     Task task;
                     if (taskQueue.TryDequeue(out task))
                     {
-                        var needsAck = true; // delegated messages should be checked, perhaps there is no onet o pick them up
-                        var messageId = messaging.SendMessage((ushort)Channel.SCHEDULER_FORWARD, task, entityId, needsAck);
-                        delegatedTasksNeedingAck.Add(messageId, task.TaskId);
-
-                        if (assigned > _maxTasksAssignedPerBatch)
+                        var taskAssignment = new TaskAssignment
                         {
-
-                        }
+                            Tasks = new List<Task> { task }
+                        };
+                        var msgId = IdGenerator.GenerateId(ref _taskIdCounter, entityId);
+                        var errorCode = messaging.SendMessage((ushort)Channel.SCHEDULER_FORWARD, taskAssignment, entityId, true);
+                        if (errorCode == ErrorCode.None)
+                            delegatedTasksNeedingAck.Add((ushort)(msgId & 0xFFFF), task.TaskId);
                         assigned++;
                     }
                     else
-                    { // no more tasks to deque
+                    {
                         break;
                     }
                 }
@@ -508,7 +530,7 @@ namespace ImprovedAI
                         block.GetMissingComponents(componentsDict);
                         taskQueue.Enqueue(new Task
                         {
-                            TaskId = _idGenerator.GenerateId(),
+                            TaskId = IdGenerator.GenerateId(ref _taskIdCounter, entityId),
                             TaskType = TaskType.PreciseWelding,
                             Payload = new Inventory(componentsDict),
                             Position = blockPosition,
@@ -520,7 +542,7 @@ namespace ImprovedAI
                     {
                         taskQueue.Enqueue(new Task
                         {
-                            TaskId = _idGenerator.GenerateId(),
+                            TaskId = IdGenerator.GenerateId(ref _taskIdCounter, entityId),
                             TaskType = TaskType.PreciseGrinding,
                             Position = blockPosition,
                             OutOfSchedulerRange = isOutOfAntennaRange
@@ -536,20 +558,22 @@ namespace ImprovedAI
 
         private void ReadDroneRegistrations()
         {
-            messaging.ReadMessages(entityId,ownAntenna,Channel.DIRECT_MESSAGE, _messageCache,50,true, PayloadType.DroneReport);
-            var droneReports = messaging.ReadMessages<DroneReport>(entityId, (ushort)Channel.DRONE_REGISTRATION, 50);
+            messaging.ReadMessages(entityId, ownAntenna, Channel.DIRECT_MESSAGE, _messageCache, 50, true, PayloadType.DroneReport);
+            messaging.ReadMessages(entityId, ownAntenna, Channel.DRONE_REGISTRATION, _droneRegistrationCache, 50, true, PayloadType.DroneReport);
             Drone drone;
-            foreach (var reg in droneReports)
+            foreach (var message in _droneRegistrationCache)
             {
+                var reg = message.Payload;
+                long droneId = reg.DroneEntityId != 0 ? reg.DroneEntityId : message.SenderId;
                 // if exists, redirect the message to drone report queue
-                if (registeredDrones.TryGetValue(reg.DroneEntityId, out drone))
+                if (registeredDrones.TryGetValue(droneId, out drone))
                 {
                     messaging.SendMessage<DroneReport>((ushort)Channel.DRONE_REPORTS, reg, this.entityId, false);
                     continue;
                 }
                 drone = new Drone(
-                    reg.DroneEntityId,
-                    reg.Capabilities.GetValueOrDefault(Drone.Capabilities.None), // if this drone reported without capabilities, its probably unusable
+                    droneId,
+                    reg.Capabilities.GetValueOrDefault(Drone.Capabilities.None),
                     reg.DroneState.GetValueOrDefault(Drone.State.Standby),
                     reg.BatteryChargePercent.GetValueOrDefault(100.0f),
                     reg.BatteryRechargeThreshold.GetValueOrDefault(25.0f),
@@ -557,18 +581,19 @@ namespace ImprovedAI
                     reg.H2Level.GetValueOrDefault(100.0f),
                     reg.H2RefuelThreshold.GetValueOrDefault(25.0f),
                     reg.H2OperationalThreshold.GetValueOrDefault(80.0f)
-                   );
-
-                registeredDrones.Add(reg.DroneEntityId, drone);
+                );
+                registeredDrones.Add(droneId, drone);
             }
         }
         private void ReadDroneReports(ushort maxMessages)
         {
-            var droneReports = messaging.ReadMessages<DroneReport>(entityId, (ushort)Channel.DRONE_REPORTS, maxMessages);
-            foreach (var report in droneReports)
+            messaging.ReadMessages(entityId, ownAntenna, Channel.DRONE_REPORTS, _droneReportCache, maxMessages, true, PayloadType.DroneReport);
+            foreach (var message in _droneReportCache)
             {
+                var report = message.Payload;
+                long droneId = report.DroneEntityId != 0 ? report.DroneEntityId : message.SenderId;
                 Drone drone;
-                if (registeredDrones.TryGetValue(report.DroneEntityId, out drone))
+                if (registeredDrones.TryGetValue(droneId, out drone))
                 {
                     if (report.Flags.HasFlag(Drone.UpdateFlags.StateChanged))
                         drone._State = report.DroneState.GetValueOrDefault(drone._State);
@@ -587,20 +612,18 @@ namespace ImprovedAI
                         drone.H2OperationalThreshold = report.H2OperationalThreshold.GetValueOrDefault(drone.H2OperationalThreshold);
                     }
                     if (report.Flags.HasFlag(Drone.UpdateFlags.TaskComplete))
-                        HandleTaskCompletion(report.DroneEntityId, report.TaskId.Value);
-                    // GoingOutOfRange unregisters, must be evaluated last
+                        HandleTaskCompletion(droneId, report.TaskId.Value);
                     if (report.Flags.HasFlag(Drone.UpdateFlags.GoingOutOfRange))
                     {
                         drone.IsOutOfRange = true;
                         drone.LastSeenTime = DateTime.UtcNow;
-                        Log.LogDroneNetwork("AI scheduler {0}: Drone {1} going out of range",
-                            entityId, report.DroneEntityId);
+                        Log.LogDroneNetwork(LogLevel.Info, "AI scheduler {0}: Drone {1} going out of range", entityId, droneId);
                     }
                     if (report.Flags.HasFlag(Drone.UpdateFlags.ReturningIntoRange))
                     {
                         drone.IsOutOfRange = false;
                         drone.LastSeenTime = DateTime.UtcNow;
-                        Log.LogDroneNetwork("AI scheduler {0}: Drone {1} returning into range", entityId, report.DroneEntityId);
+                        Log.LogDroneNetwork(LogLevel.Info, "AI scheduler {0}: Drone {1} returning into range", entityId, droneId);
                     }
                 }
                 else
@@ -608,6 +631,42 @@ namespace ImprovedAI
                     // if not registered, redirect to registration queue
                     messaging.SendMessage<DroneReport>((ushort)Channel.DRONE_REGISTRATION, report, this.entityId, false);
                 }
+            }
+        }
+
+        /// <summary>
+        /// Messaging-only: merge LC registration/update snapshots into <see cref="registeredLogisticsComputers"/>.
+        /// </summary>
+        private void ReadLogisticsRegistrationAndUpdates()
+        {
+            messaging.ReadMessages(
+                entityId,
+                ownAntenna,
+                Channel.LOGISTIC_REGISTRATION,
+                _logisticsRegistrationCache,
+                messageReadLimit,
+                clear: true,
+                messageFilters: PayloadType.LogisticsUpdate);
+            for (int i = 0; i < _logisticsRegistrationCache.Count; i++)
+            {
+                Message<LogisticsUpdate> message = _logisticsRegistrationCache[i];
+                LogisticsComputer merged = SchedulerLogisticsUpdateMerge.ToLogisticsComputer(message.Payload, message.SenderId);
+                registeredLogisticsComputers[merged.EntityId] = merged;
+            }
+
+            messaging.ReadMessages(
+                entityId,
+                ownAntenna,
+                Channel.LOGISTIC_UPDATE,
+                _logisticsUpdateCache,
+                messageReadLimit,
+                clear: true,
+                messageFilters: PayloadType.LogisticsUpdate);
+            for (int i = 0; i < _logisticsUpdateCache.Count; i++)
+            {
+                Message<LogisticsUpdate> message = _logisticsUpdateCache[i];
+                LogisticsComputer merged = SchedulerLogisticsUpdateMerge.ToLogisticsComputer(message.Payload, message.SenderId);
+                registeredLogisticsComputers[merged.EntityId] = merged;
             }
         }
 
@@ -755,8 +814,8 @@ namespace ImprovedAI
 
         private void ReadForwardedSchedulerMessages()
         {
-            var droneReports = messaging.ReadMessages<DroneReport>(entityId, (ushort)Channel.DRONE_REPORTS, (ushort)messageReadLimit);
-            foreach (var report in droneReports) { }
+            // Placeholder: forwarded scheduler messages processed as drone reports
+            messaging.ReadMessages(entityId, ownAntenna, Channel.SCHEDULER_FORWARD, _droneReportCache, messageReadLimit, true, PayloadType.None);
         }
 
         private int ScanForLogisticTasks()

@@ -1,4 +1,4 @@
-﻿using ImprovedAI.Pathfinding;
+using ImprovedAI.Pathfinding;
 using ImprovedAI.VirtualNetwork;
 using Moq;
 using Sandbox.Definitions;
@@ -18,7 +18,6 @@ namespace ImprovedAI.Tests.TestUtil
             var mock = new Mock<IMyUtilitiesDelegate>();
             mock.Setup(m => m.SerializeFromBinary<IMessagePayload>(It.IsAny<byte[]>()))
                 .Returns<byte[]>(bytes => returnObject);
-            T SerializeFromXML<T>(string buffer);
             return mock.Object;
         }
         public static IMyShipController CreateMockController(
