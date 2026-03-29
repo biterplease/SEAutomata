@@ -11,7 +11,7 @@ namespace ImprovedAI
     {
         public static ServerConfig.SchedulerBlockConfig BlockConfig = ServerConfig.Instance.SchedulerBounds;
 
-        const string IdPrefix = IAISession.ModName + "_";
+        const string IdPrefix = IAISession.MOD_NAME + "_";
         static bool Done = false;
 
         private static readonly HashSet<string> defaultControlIdsToHide = new HashSet<string>

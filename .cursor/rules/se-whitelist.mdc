@@ -1,0 +1,9 @@
+---
+description: Sandbox Whitelist Guardrails for Space Engineers
+globs: **/*.cs
+---
+# SE Sandbox Whitelist
+Only use allowed VRage and Keen namespaces. 
+- **ALLOWED**: `Sandbox.ModAPI`, `Interfaces.Gameplay`, `VRage.Game.ModAPI`, `VRageMath`.
+- **FORBIDDEN**: `System.IO`, `System.Reflection`, `System.Threading` (except where specifically allowed by ModAPI).
+- **Reference**: Use @ModAPI (Documentation) to verify if a method is accessible in the Sandbox.

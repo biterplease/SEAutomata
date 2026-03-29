@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using VRage.Game;
 using VRageMath;
 
@@ -30,6 +30,11 @@ namespace ImprovedAI.Pathfinding
         public float MinAltitudeBuffer;
         public int MaxPathNodes;
         public int MaxRepositionAttempts;
+        /// <summary>
+        /// Set by DirectPathfinder when the last successful waypoint required obstacle reposition (not NeedRaycast).
+        /// PathfindingManager merges this into its per-target complexity budget.
+        /// </summary>
+        public int RepositionComplexityIncrement;
         public bool RequireSensorsForPathfinding;
         public bool RequireCamerasForPathfinding;
         public bool UsePlanetAwarePathfinding;

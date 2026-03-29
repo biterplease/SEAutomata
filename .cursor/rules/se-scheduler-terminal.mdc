@@ -1,0 +1,12 @@
+---
+description: Terminal Controls and Settings Synchronization
+globs: IAISchedulerTerminalControls.cs, IAISchedulerSettings.cs, IAISchedulerBlock.cs
+---
+
+# Scheduler Settings & Sync
+- **Terminal Controls**: Defined in `IAISchedulerTerminalControls.cs`.
+- **Settings Storage**: `IAISchedulerSettings.cs` holds the serializable state.
+- **Multiplayer Sync**: 
+    - When a player changes a setting in the UI (Client), the `IAISchedulerBlock` must send a network packet to the Server.
+    - Refer to @SE-NanobotBuildAndRepairMod for the "SyncValue" or "RequestSettingChange" pattern.
+    - Use `ProtoBuf` for the settings payload.

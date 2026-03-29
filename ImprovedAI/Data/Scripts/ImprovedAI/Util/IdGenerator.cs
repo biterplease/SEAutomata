@@ -1,138 +1,62 @@
 ﻿using System;
-using System.Threading;
 
 namespace ImprovedAI.Util
 {
     /// <summary>
-    /// Thread-safe unique ID generator that combines an entity ID prefix with a counter.
+    /// Thread-safe static ID generator that combines an entity ID prefix with a counter.
     /// Configurable bit distribution between entity ID and counter.
     /// </summary>
-    public class IdGenerator
+    public static class IdGenerator
     {
-        private int _nextId = 0;
-        private readonly uint _entityPrefix;
-        private readonly int _entityBits;
-        private readonly int _counterBits;
-        private readonly int _maxCounter;
-        private readonly uint _counterMask;
-        private IInterlockedDelegate _interlockedDelegate;
-
         /// <summary>
-        /// Create an ID generator for the specified entity
+        /// Generate next unique ID for the specified entity
         /// </summary>
+        /// <param name="counter">Reference to counter to increment</param>
         /// <param name="entityId">Unique entity ID (only lower N bits are used based on entityBits)</param>
         /// <param name="entityBits">Number of bits to use for entity ID (1-31, default 16)</param>
-        /// <param name="interlockedDelegate">Optional interlocked operations delegate for testing</param>
-        public IdGenerator(long entityId, int entityBits = 16, IInterlockedDelegate interlockedDelegate = null)
+        /// <param name="interlockedDelegate">Interlocked operations delegate</param>
+        /// <returns>Unique uint ID combining entity prefix and counter</returns>
+        public static uint GenerateId(ref int counter, long entityId, int entityBits = 16, IInterlockedDelegate interlockedDelegate = null)
         {
             if (entityBits < 1 || entityBits > 31)
                 throw new ArgumentException("Entity bits must be between 1 and 31", nameof(entityBits));
 
-            _interlockedDelegate = interlockedDelegate ?? new InterlockedDelegate();
-            _entityBits = entityBits;
-            _counterBits = 32 - entityBits;
-            _maxCounter = (1 << _counterBits) - 1;
-            _counterMask = (uint)_maxCounter;
+            var interlocked = interlockedDelegate ?? new InterlockedDelegate();
+            int counterBits = 32 - entityBits;
+            int maxCounter = (1 << counterBits) - 1;
+            uint counterMask = (uint)maxCounter;
 
-            // Extract lower N bits of entity ID
             ulong entityMask = (1UL << entityBits) - 1;
             uint extractedEntityId = (uint)((ulong)entityId & entityMask);
-            _entityPrefix = extractedEntityId << _counterBits;
-            EntityId = extractedEntityId;
-        }
+            uint entityPrefix = extractedEntityId << counterBits;
 
-        /// <summary>
-        /// Generate next unique ID for this entity
-        /// </summary>
-        /// <returns>Unique uint ID combining entity prefix and counter</returns>
-        public uint GenerateId()
-        {
-            int counter = _interlockedDelegate.Increment(ref _nextId);
+            int currentCounter = interlocked.Increment(ref counter);
 
-            // Handle wrap-around
-            if (counter > _maxCounter)
+            if (currentCounter > maxCounter)
             {
-                _interlockedDelegate.CompareExchange(ref _nextId, 0, counter);
-                counter = _interlockedDelegate.Increment(ref _nextId);
+                interlocked.CompareExchange(ref counter, 0, currentCounter);
+                currentCounter = interlocked.Increment(ref counter);
             }
 
-            return _entityPrefix | ((uint)counter & _counterMask);
+            return entityPrefix | ((uint)currentCounter & counterMask);
         }
 
-        /// <summary>
-        /// Extract entity ID from a generated ID
-        /// </summary>
-        /// <param name="id">Generated ID</param>
-        /// <param name="entityBits">Number of entity bits used when ID was generated (default 16)</param>
-        /// <returns>Entity ID portion (upper N bits)</returns>
         public static uint ExtractEntityId(uint id, int entityBits = 16)
         {
-            int counterBits = 32 - entityBits;
-            return id >> counterBits;
+            return id >> (32 - entityBits);
         }
 
-        /// <summary>
-        /// Extract counter from a generated ID
-        /// </summary>
-        /// <param name="id">Generated ID</param>
-        /// <param name="entityBits">Number of entity bits used when ID was generated (default 16)</param>
-        /// <returns>Counter portion (lower N bits)</returns>
         public static uint ExtractCounter(uint id, int entityBits = 16)
         {
             int counterBits = 32 - entityBits;
-            uint counterMask = (uint)((1 << counterBits) - 1);
-            return id & counterMask;
+            return id & (uint)((1 << counterBits) - 1);
         }
 
-        /// <summary>
-        /// Get the entity ID for this generator
-        /// </summary>
-        public uint EntityId { get; }
-
-        /// <summary>
-        /// Get the number of bits used for entity ID
-        /// </summary>
-        public int EntityBits => _entityBits;
-
-        /// <summary>
-        /// Get the number of bits used for counter
-        /// </summary>
-        public int CounterBits => _counterBits;
-
-        /// <summary>
-        /// Get the maximum number of unique IDs this generator can produce before wrapping
-        /// </summary>
-        public int MaxUniqueIds => _maxCounter + 1;
-
-        /// <summary>
-        /// Get the current counter value
-        /// </summary>
-        public int CurrentCounter => _nextId;
-
-        /// <summary>
-        /// Reset the counter to zero (use with caution - may cause ID collisions with active IDs)
-        /// </summary>
-        public void ResetCounter()
-        {
-            _interlockedDelegate.Exchange(ref _nextId, 0);
-        }
-
-        /// <summary>
-        /// Check if two IDs were generated by the same entity
-        /// </summary>
-        /// <param name="id1">First ID</param>
-        /// <param name="id2">Second ID</param>
-        /// <param name="entityBits">Number of entity bits used when IDs were generated (default 16)</param>
         public static bool SameEntity(uint id1, uint id2, int entityBits = 16)
         {
             return ExtractEntityId(id1, entityBits) == ExtractEntityId(id2, entityBits);
         }
 
-        /// <summary>
-        /// Format ID as human-readable string showing entity and counter components
-        /// </summary>
-        /// <param name="id">ID to format</param>
-        /// <param name="entityBits">Number of entity bits used when ID was generated (default 16)</param>
         public static string FormatId(uint id, int entityBits = 16)
         {
             return $"[Entity:{ExtractEntityId(id, entityBits)}, Counter:{ExtractCounter(id, entityBits)}]";

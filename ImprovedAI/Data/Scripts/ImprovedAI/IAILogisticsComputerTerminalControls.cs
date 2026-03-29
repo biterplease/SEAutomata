@@ -16,7 +16,7 @@ namespace ImprovedAI
     {
         public static ServerConfig.LogisticsComputerConfig BlockConfig = ServerConfig.Instance.LogisticsComputer;
 
-        const string IdPrefix = IAISession.ModName + "_";
+        const string IdPrefix = IAISession.MOD_NAME + "_IAIDC_";
         static bool Done = false;
 
         private static readonly HashSet<string> defaultControlIdsToHide = new HashSet<string>
@@ -302,7 +302,7 @@ namespace ImprovedAI
                         logic.Terminal_OperationModeRequest = v;
                 };
 
-                MyAPIGateway.TerminalControls.AddControl<IMyGyro>(c);
+                MyAPIGateway.TerminalControls.AddControl<IMyProgrammableBlock>(c);
             }
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlCheckbox, IMyProgrammableBlock>(IdPrefix + "CheckboxLCUseItemLimits");

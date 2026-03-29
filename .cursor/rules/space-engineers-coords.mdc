@@ -1,0 +1,16 @@
+---
+alwaysApply: true
+---
+---
+description: Space Engineers Coordinate System and Gyroscope Logic
+globs: **/Movement/*.cs, **/Pathfinding/*.cs, **/Drones/*.cs
+---
+# SE Coordinate System
+- **Up/Down**: +Y / -Y
+- **Right/Left**: +X / -X
+- **Back/Forward**: +Z / -Z
+
+# Gyroscope Control (Relative to IShipController)
+- **Yaw**: Negative = CCW (towards -X); Positive = CW (towards +X).
+- **Pitch**: Negative = Nose Down (-Y); Positive = Nose Up (+Y).
+- **Roll**: Negative = CCW around Z; Positive = CW around Z.

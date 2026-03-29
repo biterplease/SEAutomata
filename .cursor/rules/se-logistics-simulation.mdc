@@ -1,0 +1,23 @@
+---
+description: Virtualized Inventory and Logistics Logic
+globs: IAIScheduler.cs, **/Logistics/*.cs
+---
+
+# Logistics Simulation
+- **Registration**: `IAILogisticsComputer` must send a `RelayMessage` via the `MessageQueue` to register with a `Scheduler`.
+- **Virtual Inventory**: 
+    - The Scheduler tracks inventories of all friendly `LogisticsComputers` within antenna range.
+    - Updates are pushed periodically from the LogisticsComputer to the Scheduler.
+
+## Supply Chain Logic: Push vs. Pull
+The Scheduler must resolve two types of logistics imbalances:
+
+1. **Pull (Requisition)**: 
+   - **Trigger**: A LogisticsComputer reports inventory below a "Minimum" threshold.
+   - **Action**: Scheduler searches the virtual network for a friendly LogisticsComputer with surplus and dispatches a drone to fetch.
+
+2. **Push (Overflow/Cleanup)**:
+   - **Trigger 1 (Max Cap)**: A LogisticsComputer has an item count > "Maximum" setting (e.g., 1001/1000 Steel Plates).
+   - **Trigger 2 (Whitelisting)**: A LogisticsComputer contains items not on its "Allowed" list.
+   - **Action**: The LogisticsComputer sends a "Push Request." The Scheduler must find a "Storage" or "Global" LogisticsComputer that has room/need for these specific items and dispatch a drone to clear the inventory.
+   - **Priority**: Push requests from "Mining" or "Drill" drones/grids should be treated as high priority to prevent drills from backing up.

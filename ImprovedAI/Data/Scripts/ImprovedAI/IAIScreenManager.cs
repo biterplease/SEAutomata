@@ -1,13 +1,25 @@
-﻿namespace ImprovedAI
+﻿using Sandbox.ModAPI;
+using VRage.Collections;
+
+namespace ImprovedAI
 {
-    public enum DisplayManagerOperationMode
+    public class ScreenManager
     {
-        SingleDrone = 1,
-        MultipleDrones = 2
-    }
-    public class DisplayManager
-    {
-        //private List<IMyTextSurface> screens;
+        public enum OperationMode : byte
+        {
+            Drone = 1,
+            Scheduler = 2,
+            LogisticsComputer = 4,
+        }
+        private int displayIndex = 0;
+        private OperationMode operationMode;
+        private MyConcurrentList<IMyTextSurface> screens;
+        private const string droneFormat = @"Drone [{0}] status:
+State : {1}
+Status: {2}
+
+";
+
         //private readonly BAIController controller;
         //private readonly BAIConstructorDroneConfig config;
         //private IMyTextSurface textPanel;

@@ -1,39 +1,31 @@
-﻿using ImprovedAI.Config;
-using ImprovedAI.Data.Scripts.ImprovedAI.Config;
+using ImprovedAI.Config;
 using ImprovedAI.Util;
 using ImprovedAI.Util.Logging;
 using ProtoBuf;
-using Sandbox.Engine.Multiplayer;
 using Sandbox.ModAPI;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.ConstrainedExecution;
-using System.Runtime.Remoting.Channels;
-using System.Text;
-using System.Threading;
 using VRage.Collections;
 using VRage.Game;
-using VRage.Game.ModAPI;
-using VRage.ModAPI;
-using VRage.Scripting;
-using VRage.Utils;
 using VRageMath;
 
 
 namespace ImprovedAI.VirtualNetwork
 {
+        [Flags]
+        public enum PayloadType : byte
+        {
+            None = 0,
+            DroneReport = 1,
+            TaskAssignment = 2,
+            LogisticsUpdate = 4,
+            InventoryRequisition = 8,
+            RelayMessage = 16,
+            TaskAborted = 32,
+        }
     public sealed class MessageQueue
     {
-        private enum PayloadType : byte
-        {
-            None,
-            DroneReport,
-            TaskAssignment,
-            LogisticsUpdate,
-            InventoryRequisition,
-            RelayMessage,
-        }
 
         /// <summary>
         /// For use during world save/reload.
@@ -158,25 +150,7 @@ namespace ImprovedAI.VirtualNetwork
 
 
 
-        private static MessageQueue _instance;
-        private static readonly object _instanceLock = new object();
-        public static MessageQueue Instance
-        {
-            get
-            {
-                if (_instance == null)
-                {
-                    lock (_instanceLock)
-                    {
-                        if (_instance == null)
-                        {
-                            _instance = new MessageQueue();
-                        }
-                    }
-                }
-                return _instance;
-            }
-        }
+
 
 
 
@@ -220,6 +194,7 @@ namespace ImprovedAI.VirtualNetwork
         private DateTime _lastCleanup = DateTime.UtcNow;
         private readonly TimeSpan _cleanupInterval;
         private int _messageCounter = 0;
+        private static bool _isInitialized = false;
         private volatile bool _isShuttingDown = false;
 
 
@@ -228,7 +203,19 @@ namespace ImprovedAI.VirtualNetwork
         /// </summary>
         private readonly MyConcurrentDictionary<long, MyConcurrentHashSet<long>> _sharingGroupCache = new MyConcurrentDictionary<long, MyConcurrentHashSet<long>>();
         private readonly IMessageQueueConfig _config;
-        public MessageQueue(
+
+        private static MessageQueue _instance;
+        private static readonly object _instanceLock = new object();
+        public static MessageQueue Instance
+        {
+            get
+            {
+                if (!_isInitialized)
+                    throw new InvalidOperationException("MessageQueue must be initialized before use");
+                return _instance;
+            }
+        }
+        private MessageQueue(
             IMessageQueueConfig config = null,
             IMyUtilitiesDelegate myUtilitiesDelegate = null,
             InterlockedDelegate interlockedDelegate = null)
@@ -250,6 +237,23 @@ namespace ImprovedAI.VirtualNetwork
             _lastReadTimes = new MyConcurrentDictionary<long, DateTime>();
             _readThrottleIntervals = new MyConcurrentDictionary<long, TimeSpan>();
             _pendingAcknowledgments = new MyConcurrentDictionary<long, MyConcurrentHashSet<uint>>();
+        }
+
+        public static void Init(
+             IMessageQueueConfig config = null,
+            IMyUtilitiesDelegate myUtilitiesDelegate = null,
+            InterlockedDelegate interlockedDelegate = null)
+        {
+            lock (_instanceLock)
+            {
+                if (_isInitialized)
+                {
+                    Log.Error("MessageQueue is already initialized.");
+                    return;
+                }
+                _instance = new MessageQueue(config, myUtilitiesDelegate, interlockedDelegate);
+                _isInitialized = true;
+            }
         }
 
         /// <summary>
@@ -324,7 +328,7 @@ namespace ImprovedAI.VirtualNetwork
         /// Send message to all valid recipients in range
         /// </summary>
         public ErrorCode BroadcastMessage<T>(
-            ref IMyRadioAntenna senderAntenna,
+            IMyRadioAntenna senderAntenna,
             Message<T> message,
             bool enforceCommsRange = false) where T : class, IMessagePayload
         {
@@ -382,6 +386,8 @@ namespace ImprovedAI.VirtualNetwork
                 return PayloadType.LogisticsUpdate;
             if (payload is TaskAssignment)
                 return PayloadType.TaskAssignment;
+            if (payload is TaskAborted)
+                return PayloadType.TaskAborted;
             return PayloadType.None;
         }
 
@@ -392,7 +398,7 @@ namespace ImprovedAI.VirtualNetwork
             var msg = new TimestampedMessage
             {
                 Channel = message.Channel,
-                CreatedAt = TimeUtil.DateTimeToTimestamp(message.CreatedAt),
+                CreatedAt = message.CreatedAt,
                 SentAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
                 SenderId = message.SenderId,
                 ValidRecipients = validRecipients,
@@ -613,7 +619,14 @@ namespace ImprovedAI.VirtualNetwork
 
 
 
-        public ErrorCode ReadMessages<T>(long subscriberId, IMyRadioAntenna subscriberAntenna, Channel channel, List<T> outMessages, int maxMessages = 10, bool clear = true)
+        public ErrorCode ReadMessages<T>(
+            long subscriberId,
+            IMyRadioAntenna subscriberAntenna,
+            Channel channel,
+            List<Message<T>> outMessages,
+            int maxMessages = 10,
+            bool clear = true,
+            PayloadType messageFilters = PayloadType.None)
             where T : class, IMessagePayload
         {
             if (_isShuttingDown)
@@ -644,10 +657,13 @@ namespace ImprovedAI.VirtualNetwork
                     var tempMessages = new List<TimestampedMessage>();
                     int messagesToProcess = 0;
                     int senderProxyId;
+                    int dequeueScanCount = 0;
+                    const int maxDequeueScan = 512;
                     // Collect all messages
                     TimestampedMessage msg;
-                    while (messagesToProcess < maxMessages && queue.TryDequeue(out msg))
+                    while (messagesToProcess < maxMessages && dequeueScanCount < maxDequeueScan && queue.TryDequeue(out msg))
                     {
+                        dequeueScanCount++;
                         if (IsMessageExpired(currentTime, msg.SentAt, _messageExpiration))
                         {
                             if (msg.RequiresAck)
@@ -666,6 +682,11 @@ namespace ImprovedAI.VirtualNetwork
                             // check if caller is in range from sender to receive
                             if (IsInCommunicationRange(msg.SenderId, senderInfo.Antenna, ref subscriberInfo, false))
                             {
+                                if (messageFilters != PayloadType.None && ((msg.PayloadType & messageFilters) == 0))
+                                {
+                                    messagesToReEnqueue.Add(msg);
+                                    continue;
+                                }
                                 ++messagesToProcess;
                                 tempMessages.Add(msg);
                                 if (channel != Channel.DIRECT_MESSAGE)
@@ -704,7 +725,23 @@ namespace ImprovedAI.VirtualNetwork
                         {
                             AckMessage(message.SenderId, message.MessageId);
                         }
-                        outMessages.Add(decoded);
+                        long recipientId = message.ValidRecipients.Count == 1 ? message.ValidRecipients.First() : 0;
+                        var outMsg = new Message<T>
+                        {
+                            Payload = decoded,
+                            MessageId = message.MessageId,
+                            CreatedAt = message.CreatedAt,
+                            SentAt = message.SentAt,
+                            RecipientId = recipientId,
+                            RecipientBlockType = message.RecipientBlockType,
+                            SenderId = message.SenderId,
+                            SenderOwnerId = message.SenderOwnerId,
+                            Channel = message.Channel,
+                            SerializationMode = message.SerializationMode,
+                            RequiresAck = message.RequiresAck,
+
+                        };
+                        outMessages.Add(outMsg);
                     }
                 }
 

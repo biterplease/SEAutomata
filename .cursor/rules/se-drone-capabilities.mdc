@@ -1,0 +1,22 @@
+---
+description: Physical Capabilities and Environmental Constraints for Drones
+alwaysApply: false
+---
+# Drone Physicality & Environment
+Drones must validate their `Capabilities` against their physical blocks and current environment.
+
+## 1. Thrust & Environment Logic
+- **Atmospheric**: Ion thrusters = 0% effectiveness; Atmospheric thrusters = 100%.
+- **Space**: Atmospheric thrusters = 0% effectiveness; Ion thrusters = 100%.
+- **Hydrogen**: Works in both, but requires monitoring `H2Level`.
+- **Rovers**: If `Capabilities` include `Wheeled`, navigation must prioritize surface pathfinding over 3D flight.
+
+## 2. Cargo & Mass Calculations
+- **Planetary**: Max load is limited by thrust-to-weight ratio. Use the player-configured `MaxLoadKg` as a hard cap to respect design intent.
+- **Zero-G**: Max load is limited only by `CargoVolume`.
+- **Logic**: When reporting to a Scheduler, a drone must calculate its "Current Max Cargo" based on gravity and remaining thrust.
+
+## 3. Handshake Protocol
+- Before accepting a `TaskAssignment`, the Drone must perform a self-check:
+  - "Do I have the required `Capabilities` for this `TaskType`?"
+  - "Do I have enough fuel/battery to reach the target and return to `HomePosition`?"

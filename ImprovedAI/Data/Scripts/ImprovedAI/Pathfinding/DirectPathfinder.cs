@@ -1,4 +1,4 @@
-﻿using ImprovedAI.Util.Logging;
+using ImprovedAI.Util.Logging;
 using System;
 using System.Collections.Generic;
 using VRageMath;
@@ -74,6 +74,7 @@ namespace ImprovedAI.Pathfinding
         {
             waypoint = default(Vector3D);
             request = default(PathfindingRequest);
+            context.RepositionComplexityIncrement = 0;
 
             double distanceToTarget = Vector3D.Distance(start, end);
 
@@ -105,6 +106,8 @@ namespace ImprovedAI.Pathfinding
                 PathfindingResult result = TryRepositionWaypoint(
                     ref context, ref start, ref end, ref proposedWaypoint,
                     out waypoint, out request);
+                if (result == PathfindingResult.Success)
+                    context.RepositionComplexityIncrement = 1;
                 return result;
             }
 

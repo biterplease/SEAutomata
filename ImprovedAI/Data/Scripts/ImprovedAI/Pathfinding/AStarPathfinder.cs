@@ -1,4 +1,4 @@
-﻿using ImprovedAI.Config;
+using ImprovedAI.Config;
 using ImprovedAI.Util.Logging;
 using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
@@ -67,6 +67,7 @@ namespace ImprovedAI.Pathfinding
         {
             waypoint = default(Vector3D);
             request = default(PathfindingRequest);
+            context.RepositionComplexityIncrement = 0;
 
             double distance = Vector3D.Distance(start, end);
 

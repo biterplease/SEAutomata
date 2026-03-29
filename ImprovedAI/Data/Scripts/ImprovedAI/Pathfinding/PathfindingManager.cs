@@ -1,4 +1,4 @@
-﻿using ImprovedAI.Config;
+using ImprovedAI.Config;
 using ImprovedAI.Util.Logging;
 using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
@@ -102,6 +102,17 @@ namespace ImprovedAI.Pathfinding
         private bool hasTarget;
         private Vector3D? currentWaypoint;
         private bool needsRecalculation;
+
+        /// <summary>
+        /// Accumulates cost for NeedRaycast and obstacle reposition across GetNextWaypoint calls for the current target.
+        /// </summary>
+        private int complexityBudget;
+
+        /// <summary>
+        /// True when the last GetNextWaypoint failed because <see cref="complexityBudget"/> exceeded
+        /// <c>MaxRepositionAttempts * 2</c> (TaskAborted handshake should be sent by the drone).
+        /// </summary>
+        public bool LastGetNextWaypointFailedDueToComplexityBudget { get; private set; }
 
         // Cached nodes
         private readonly List<Vector3D> cachedNodes;
@@ -436,6 +447,8 @@ namespace ImprovedAI.Pathfinding
             hasTarget = true;
             currentWaypoint = null;
             needsRecalculation = false;
+            complexityBudget = 0;
+            LastGetNextWaypointFailedDueToComplexityBudget = false;
 
             // Reset waypoint tracking for new path
             context.WaypointTracking.Reset();
@@ -444,27 +457,30 @@ namespace ImprovedAI.Pathfinding
         /// <summary>
         /// Get the next waypoint (uses stored target)
         /// </summary>
-        public bool GetNextWaypoint(ref Vector3D currentPosition, out Vector3D waypoint)
+        public PathfindingResult GetNextWaypoint(ref Vector3D currentPosition, out Vector3D waypoint)
         {
             waypoint = default(Vector3D);
+            LastGetNextWaypointFailedDueToComplexityBudget = false;
 
             if (isDisposed)
             {
                 Log.Error("PathfindingManager: Manager is disposed");
-                return false;
+                return PathfindingResult.Failed;
             }
 
             if (!hasTarget)
             {
                 Log.Error("PathfindingManager: No target set");
-                return false;
+                return PathfindingResult.Failed;
             }
 
             if (config == null)
             {
                 Log.Error("PathfindingManager: Configuration not loaded");
-                return false;
+                return PathfindingResult.Failed;
             }
+
+            int budgetLimit = Math.Max(1, context.MaxRepositionAttempts) * 2;
 
             // Update current position
             context.ControllerPosition = currentPosition;
@@ -503,7 +519,21 @@ namespace ImprovedAI.Pathfinding
                     default:
                         Log.Error("PathfindingManager: No pathfinder available");
                         waypoint = targetPosition;
-                        return false;
+                        return PathfindingResult.Failed;
+                }
+
+                if (result == PathfindingResult.NeedRaycast)
+                    complexityBudget++;
+                else if (result == PathfindingResult.Success)
+                    complexityBudget += context.RepositionComplexityIncrement;
+
+                if (complexityBudget > budgetLimit)
+                {
+                    LastGetNextWaypointFailedDueToComplexityBudget = true;
+                    Log.Warning(
+                        "PathfindingManager: Complexity budget exceeded ({0} > {1}), aborting pathfinding",
+                        complexityBudget, budgetLimit);
+                    return PathfindingResult.Failed;
                 }
 
                 if (result == PathfindingResult.Success)
@@ -511,7 +541,7 @@ namespace ImprovedAI.Pathfinding
                     currentWaypoint = waypoint;
                     needsRecalculation = false;
                     CacheNode(waypoint);
-                    return true;
+                    return PathfindingResult.Success;
                 }
 
                 if (result == PathfindingResult.NeedRaycast)
@@ -526,17 +556,17 @@ namespace ImprovedAI.Pathfinding
                     {
                         // Raycast failed
                         Log.Warning("PathfindingManager: Raycast failed");
-                        return false;
+                        return PathfindingResult.Failed;
                     }
                 }
 
                 // Failed
                 Log.Warning("PathfindingManager: Pathfinding failed on iteration {0}", iteration);
-                return false;
+                return PathfindingResult.Failed;
             }
 
             Log.Error("PathfindingManager: Max iterations reached");
-            return false;
+            return PathfindingResult.Failed;
         }
 
         /// <summary>
@@ -641,6 +671,8 @@ namespace ImprovedAI.Pathfinding
             cachedNodes.Clear();
             currentWaypoint = null;
             needsRecalculation = false;
+            complexityBudget = 0;
+            LastGetNextWaypointFailedDueToComplexityBudget = false;
 
             // Reset waypoint tracking
             context.WaypointTracking.Reset();
@@ -686,6 +718,8 @@ namespace ImprovedAI.Pathfinding
             hasTarget = false;
             currentWaypoint = null;
             needsRecalculation = false;
+            complexityBudget = 0;
+            LastGetNextWaypointFailedDueToComplexityBudget = false;
 
             isDisposed = true;
             Log.Verbose("PathfindingManager: Closed and cleaned up");
@@ -862,12 +896,12 @@ namespace ImprovedAI.Pathfinding
             context.WaypointTracking.DistanceToCurrentWaypoint = (float)distanceVector.Length();
 
             // Check if we need to request next waypoint for lookahead
-            if (!context.WaypointTracking.NextWaypointRequested &&
+                if (!context.WaypointTracking.NextWaypointRequested &&
                 context.WaypointTracking.DistanceToCurrentWaypoint <= WAYPOINT_LOOKAHEAD_DISTANCE)
             {
                 // Request next waypoint
                 Vector3D nextWaypoint;
-                if (GetNextWaypoint(ref currentWaypoint, out nextWaypoint))
+                if (GetNextWaypoint(ref currentWaypoint, out nextWaypoint) == PathfindingResult.Success)
                 {
                     context.WaypointTracking.NextWaypoint = nextWaypoint;
                     context.WaypointTracking.NextWaypointRequested = true;

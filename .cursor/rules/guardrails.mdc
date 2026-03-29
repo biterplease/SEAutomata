@@ -1,0 +1,7 @@
+---
+alwaysApply: true
+---
+# Backend Guardrails
+- Use Primary Constructors (C# 12) where possible.
+- DO NOT use `var` for primitive types (int, string, bool).
+- Every service method must have a corresponding Unit Test.

@@ -1,8 +1,8 @@
-﻿using ImprovedAI.Config;
-using ImprovedAI.VirtualNetwork;
+using ImprovedAI.Config;
 using ImprovedAI.Pathfinding;
 using ImprovedAI.Util;
 using ImprovedAI.Util.Logging;
+using ImprovedAI.VirtualNetwork;
 using Sandbox.Common.ObjectBuilders;
 using Sandbox.Definitions;
 using Sandbox.Game.Entities.Blocks;
@@ -12,10 +12,12 @@ using Sandbox.ModAPI;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using VRage.Game.Components;
 using VRage.Game.ModAPI;
 using VRage.ModAPI;
 using VRage.ObjectBuilders;
+using VRage.Utils;
 using VRageMath;
 
 namespace ImprovedAI
@@ -30,9 +32,9 @@ namespace ImprovedAI
     public class IAIDroneControllerBlock : MyGameLogicComponent
     {
         #region Fields - Core References
-        private long entityId;
+        private long _entityId;
+        private int _messageCounter = 0;
         private MessageQueue messaging;
-        private readonly IdGenerator idGenerator;
         private IMyRemoteControl remoteControl;
         private IMyCubeBlock block;
         private IMyUtilitiesDelegate myUtilitiesDelegate;
@@ -47,12 +49,11 @@ namespace ImprovedAI
 
         #region Fields - State
         private Drone.State currentState = Drone.State.Initializing;
-        public bool isEnabled { get; set; }
         private bool _initialized = false;
         private bool _componentInitialized = false;
         private int _initializationTicks = 0;
         private int _consecutiveErrors = 0;
-        private const int INITIALIZATION_DELAY = 10;
+        private const int INITIALIZATION_DELAY_TICKS = 180;
         #endregion
 
         #region Fields - Components
@@ -74,14 +75,14 @@ namespace ImprovedAI
         private float currentMass = 0f;
         private float maxLoad = 0f;
         private Vector3D gravityVector = Vector3D.Zero;
-        private Inventory cachedInventory;
-        private List<RelayMessage<Scheduler.Task>> _carriedMessages;
+        //private List<RelayMessage<Scheduler.Task>> _carriedMessages;
         #endregion
 
         #region Fields - Task Management
         private Scheduler.Task currentTask;
         private Queue<Scheduler.Task> taskQueue = new Queue<Scheduler.Task>();
         private ushort currentTaskId = 0;
+        private List<Message<IMessagePayload>> _messageCache = new List<Message<IMessagePayload>>();
         #endregion
 
         #region Fields - Update Tracking
@@ -151,12 +152,6 @@ namespace ImprovedAI
         private int POWER_CHECK_INTERVAL_TICKS;
         #endregion
 
-        #region Properties - Public Access
-        /// <summary>
-        /// Gets whether the drone is enabled
-        /// </summary>
-        public bool IsEnabled => isEnabled;
-        #endregion
 
         #region Fields - Tool Offsets
         private struct ToolOffset
@@ -183,13 +178,12 @@ namespace ImprovedAI
         public override void Init(MyObjectBuilder_EntityBase objectBuilder)
         {
             base.Init(objectBuilder);
-            entityId = Entity.EntityId;
+            _entityId = Entity.EntityId;
             block = (IMyCubeBlock)Entity;
             settings = new IAIDroneControllerSettings();
             settings.OperationMode = operationMode;
-            cachedInventory = new Inventory();
 
-            config = IAISession.Instance.GetConfig().Drone;
+            config = IAISession.GetConfig().Drone;
             foreach (Base6Directions.Direction direction in Enum.GetValues(typeof(Base6Directions.Direction)))
             {
                 gyroscopes[direction] = new List<IMyGyro>();
@@ -215,7 +209,7 @@ namespace ImprovedAI
             // general navigation (except rotations) are updated every 10th frame
             NeedsUpdate |= MyEntityUpdateEnum.EACH_10TH_FRAME;
             // task reading and assignment, triggers every 100 frames but has a delay checker
-            // in reality should be around 600-700 frames
+            // in reality should be around 600-700 frames 
             NeedsUpdate |= MyEntityUpdateEnum.EACH_100TH_FRAME;
 
         }
@@ -231,7 +225,7 @@ namespace ImprovedAI
                 if (!_componentInitialized)
                 {
                     _initializationTicks++;
-                    if (_initializationTicks >= INITIALIZATION_DELAY)
+                    if (_initializationTicks >= INITIALIZATION_DELAY_TICKS)
                     {
                         InitializeComponent();
                     }
@@ -244,7 +238,7 @@ namespace ImprovedAI
                     return;
                 }
 
-                if (!isEnabled || currentState == Drone.State.Error)
+                if (!settings.IsEnabled || currentState == Drone.State.Error)
                     return;
 
                 // Main update logic handled in UpdateBeforeSimulation10
@@ -305,7 +299,7 @@ namespace ImprovedAI
                 }
 
                 // Update AI state machine
-                if (isEnabled)
+                if (settings.IsEnabled)
                 {
                     UpdateAI();
                 }
@@ -337,81 +331,67 @@ namespace ImprovedAI
         #region Initialization Logic
         private void InitializeComponent()
         {
-            try
-            {
-                if (_componentInitialized)
-                    return;
+            if (_componentInitialized)
+                return;
 
-                // Load configuration from block storage if available
+            // Load configuration from block storage if available
 
-                // Mark component as initialized
-                _componentInitialized = true;
+            // Mark component as initialized
+            _componentInitialized = true;
 
-                // Register with session
-                IAISession.Instance?.RegisterDroneController(this);
+            // Register with session
+            IAISession.Instance?.RegisterDroneController(this);
 
-                Log.Verbose("ImprovedAI Drone controller component initialized: {0}", Entity.DisplayName);
-            }
-            catch (Exception ex)
-            {
-                Log.Error("IAIDroneController block {0}: InitializeComponent error: {1}", Entity.EntityId, ex);
-            }
+            Log.Verbose("ImprovedAI Drone controller component initialized: {0}", Entity.DisplayName);
         }
 
         private void InitializeDroneController()
         {
-            try
+            if (_initialized)
+                return;
+
+            currentState = Drone.State.Initializing;
+
+            // Initialize message queue reference
+            messaging = IAISession.GetMessageQueue();
+
+            // Initialize update intervals from config
+            STATUS_REPORT_INTERVAL_TICKS = IAISession.GetConfig().MessageQueue.DroneMessageThrottlingTicks();
+            POWER_CHECK_INTERVAL_TICKS = IAISession.GetConfig().Drone.PowerCheckIntervalTicks;
+
+            shipController = Entity as IMyShipController;
+            if (shipController == null)
             {
-                if (_initialized)
-                    return;
-
-                currentState = Drone.State.Initializing;
-
-                // Initialize message queue reference
-                messaging = IAISession.Instance.MessageQueue;
-
-                // Initialize update intervals from config
-                STATUS_REPORT_INTERVAL_TICKS = ServerConfig.Instance.DroneNetwork.DroneMessageThrottlingTicks;
-                POWER_CHECK_INTERVAL_TICKS = ServerConfig.Instance.Drone.PowerCheckIntervalTicks;
-
-                shipController = Entity as IMyShipController;
-                if (shipController == null)
-                {
-                    Log.Error("DroneController {0} entity is not a ship controller", entityId);
-                    currentState = Drone.State.Error;
-                    return;
-                }
-
-                if (!CheckCapabilities())
-                {
-                    Log.Error("DroneController {0} failed capability check", entityId);
-                    currentState = Drone.State.Error;
-                    return;
-                }
-
-                // Register antenna if available
-                if (primaryAntenna != null)
-                {
-                    messaging.RegisterAntenna(entityId, primaryAntenna);
-                }
-
-                // Subscribe to messages if managed by scheduler
-                if (operationMode == Drone.OperationMode.ManagedByScheduler)
-                {
-                    messaging.Subscribe(entityId, (ushort)Channel.DRONE_TASK_ASSIGNMENT);
-                    SendDroneRegistration();
-                }
-
-                currentState = Drone.State.Standby;
-                _initialized = true;
-
-                Log.Info("DroneController {0} initialized in mode: {1}", entityId, operationMode);
-            }
-            catch (Exception ex)
-            {
-                Log.Error("DroneController {0} initialization error: {1}", entityId, ex.Message);
+                Log.Error("DroneController {0} entity is not a ship controller", _entityId);
                 currentState = Drone.State.Error;
+                return;
             }
+
+            if (!CheckCapabilities())
+            {
+                Log.Error("DroneController {0} failed capability check", _entityId);
+                currentState = Drone.State.Error;
+                return;
+            }
+
+            // Register antenna if available
+            if (primaryAntenna != null)
+            {
+                messaging.RegisterAntenna(_entityId, MessageQueue.IAIBlockType.Drone, primaryAntenna, false);
+            }
+
+            // Subscribe to messages if managed by scheduler
+            if (operationMode == Drone.OperationMode.ManagedByScheduler)
+            {
+                messaging.Subscribe(_entityId, Channel.DRONE_TASK_ASSIGNMENT);
+                SendDroneRegistration();
+            }
+
+            currentState = Drone.State.Standby;
+            _initialized = true;
+
+            Log.Info("DroneController {0} initialized in mode: {1}", _entityId, operationMode);
+
         }
         #endregion
 
@@ -423,18 +403,18 @@ namespace ImprovedAI
                 if (block == null)
                     return;
                 if (settings == null)
-                    throw new NullReferenceException($"settings == null on drone controller {entityId}; modInstance={IAISession.Instance != null}");
+                    throw new NullReferenceException($"settings == null on drone controller {_entityId}; modInstance={IAISession.Instance != null}");
                 if (MyAPIGateway.Utilities == null)
-                    throw new NullReferenceException($"MyAPIGateway.Utilities == null; entId={entityId}; modInstance={IAISession.Instance != null}");
+                    throw new NullReferenceException($"MyAPIGateway.Utilities == null; entId={_entityId}; modInstance={IAISession.Instance != null}");
                 if (myUtilitiesDelegate == null)
                 {
-                    Log.Error("MyAPIGateway.Utilities not set as Drone controller block {0} delegate", entityId);
+                    Log.Error("MyAPIGateway.Utilities not set as Drone controller block {0} delegate", _entityId);
                     return;
                 }
                 if (Entity.Storage == null)
                     Entity.Storage = new MyModStorageComponent();
 
-                block.Storage.SetValue(IAISession.ModGuid, Convert.ToBase64String(myUtilitiesDelegate.SerializeToBinary(settings)));
+                block.Storage.SetValue(IAISession.MOD_GUID, Convert.ToBase64String(myUtilitiesDelegate.SerializeToBinary(settings)));
             }
             catch (Exception ex)
             {
@@ -473,7 +453,7 @@ namespace ImprovedAI
 
             // Scan connected grids
             var connectedGrids = new List<IMyCubeGrid>();
-            
+
             var ggd = cubeBlock.CubeGrid.GetGridGroup(GridLinkTypeEnum.Mechanical);
 
             ggd.GetGrids(connectedGrids);
@@ -600,7 +580,7 @@ namespace ImprovedAI
                 return true;
             }
 
-            Log.Warning("DroneController {0} missing required components", entityId);
+            Log.Warning("DroneController {0} missing required components", _entityId);
             return false;
         }
 
@@ -613,7 +593,7 @@ namespace ImprovedAI
         {
             if (shipController == null)
             {
-                Log.Warning("Drone {0}: Cannot calculate offsets without ship controller", entityId);
+                Log.Warning("Drone {0}: Cannot calculate offsets without ship controller", _entityId);
                 return;
             }
 
@@ -640,7 +620,7 @@ namespace ImprovedAI
                 // Total offset: (controller to connector) + (0.5m in front)
                 Vector3D.Add(ref controllerToConnector, ref frontOffset, out connectorOffset);
 
-                Log.Verbose("Drone {0} connector offset: {1:F2}m", entityId, connectorOffset.Length());
+                Log.Verbose("Drone {0} connector offset: {1:F2}m", _entityId, connectorOffset.Length());
             }
             else
             {
@@ -662,7 +642,7 @@ namespace ImprovedAI
                         ref controllerPos,
                         weldOffsets);
 
-                    Log.Verbose("Drone {0} calculated {1} weld offsets", entityId, weldOffsets.Count);
+                    Log.Verbose("Drone {0} calculated {1} weld offsets", _entityId, weldOffsets.Count);
                 }
             }
 
@@ -681,7 +661,7 @@ namespace ImprovedAI
                         ref controllerPos,
                         grindOffsets);
 
-                    Log.Verbose("Drone {0} calculated {1} grind offsets", entityId, grindOffsets.Count);
+                    Log.Verbose("Drone {0} calculated {1} grind offsets", _entityId, grindOffsets.Count);
                 }
             }
         }
@@ -848,7 +828,7 @@ namespace ImprovedAI
                 if (!needsHydrogenRefuel && currentH2Level <= settings.HydrogenRefuelThreshold)
                 {
                     needsHydrogenRefuel = true;
-                    Log.Info("Drone {0} H2 low: {1:F1}%", entityId, currentH2Level);
+                    Log.Info("Drone {0} H2 low: {1:F1}%", _entityId, currentH2Level);
 
                     if (currentState != Drone.State.RefuelingHydrogen && currentState != Drone.State.ReturningToBase)
                     {
@@ -858,7 +838,7 @@ namespace ImprovedAI
                 else if (needsHydrogenRefuel && currentH2Level >= settings.HydrogenOperationalThreshold)
                 {
                     needsHydrogenRefuel = false;
-                    Log.Info("Drone {0} H2 refueled: {1:F1}%", entityId, currentH2Level);
+                    Log.Info("Drone {0} H2 refueled: {1:F1}%", _entityId, currentH2Level);
                 }
             }
 
@@ -879,7 +859,7 @@ namespace ImprovedAI
                 if (!needsBatteryRecharge && currentBatteryLevel <= settings.BatteryRefuelThreshold)
                 {
                     needsBatteryRecharge = true;
-                    Log.Info("Drone {0} battery low: {1:F1}%", entityId, currentBatteryLevel);
+                    Log.Info("Drone {0} battery low: {1:F1}%", _entityId, currentBatteryLevel);
 
                     if (currentState != Drone.State.RechargingBattery && currentState != Drone.State.ReturningToBase)
                     {
@@ -889,7 +869,7 @@ namespace ImprovedAI
                 else if (needsBatteryRecharge && currentBatteryLevel >= settings.BatteryOperationalThreshold)
                 {
                     needsBatteryRecharge = false;
-                    Log.Info("Drone {0} battery recharged: {1:F1}%", entityId, currentBatteryLevel);
+                    Log.Info("Drone {0} battery recharged: {1:F1}%", _entityId, currentBatteryLevel);
                 }
             }
         }
@@ -973,17 +953,17 @@ namespace ImprovedAI
                 case Scheduler.TaskType.PreciseWelding:
                 case Scheduler.TaskType.ScanWeld:
                     currentState = Drone.State.NavigatingToTarget;
-                    Log.LogDroneOrders("Drone {0} starting weld task at {1}", entityId, task.Position);
+                    Log.LogDroneOrders("Drone {0} starting weld task at {1}", _entityId, task.Position);
                     break;
 
                 case Scheduler.TaskType.PreciseGrinding:
                 case Scheduler.TaskType.ScanGrind:
                     currentState = Drone.State.NavigatingToTarget;
-                    Log.LogDroneOrders("Drone {0} starting grind task at {1}", entityId, task.Position);
+                    Log.LogDroneOrders("Drone {0} starting grind task at {1}", _entityId, task.Position);
                     break;
 
                 default:
-                    Log.Warning("Drone {0} received unsupported task type: {1}", entityId, task.TaskType);
+                    Log.Warning("Drone {0} received unsupported task type: {1}", _entityId, task.TaskType);
                     CompleteCurrentTask();
                     break;
             }
@@ -993,7 +973,7 @@ namespace ImprovedAI
         {
             if (welder == null)
             {
-                Log.Error("Drone {0} cannot weld - no welder", entityId);
+                Log.Error("Drone {0} cannot weld - no welder", _entityId);
                 CompleteCurrentTask();
                 return;
             }
@@ -1011,7 +991,7 @@ namespace ImprovedAI
         {
             if (grinder == null)
             {
-                Log.Error("Drone {0} cannot grind - no grinder", entityId);
+                Log.Error("Drone {0} cannot grind - no grinder", _entityId);
                 CompleteCurrentTask();
                 return;
             }
@@ -1102,7 +1082,7 @@ namespace ImprovedAI
             {
                 // Aligned! Proceed to docking
                 currentState = Drone.State.Docking;
-                Log.Info("Drone {0} aligned to home orientation", entityId);
+                Log.Info("Drone {0} aligned to home orientation", _entityId);
             }
             else
             {
@@ -1112,7 +1092,7 @@ namespace ImprovedAI
                     bool rotationStarted = InitiateRotation(ref targetPoint);
                     if (!rotationStarted)
                     {
-                        Log.Warning("Drone {0} failed to start home alignment rotation", entityId);
+                        Log.Warning("Drone {0} failed to start home alignment rotation", _entityId);
                         // Proceed to docking anyway
                         currentState = Drone.State.Docking;
                     }
@@ -1129,7 +1109,7 @@ namespace ImprovedAI
             if (!needsHydrogenRefuel && !needsBatteryRecharge)
             {
                 currentState = Drone.State.Standby;
-                Log.Info("Drone {0} refueling complete", entityId);
+                Log.Info("Drone {0} refueling complete", _entityId);
             }
         }
 
@@ -1140,8 +1120,7 @@ namespace ImprovedAI
             if (_consecutiveErrors >= ServerConfig.Instance.SchedulerBounds.MaxConsecutiveErrors)
             {
                 // Critical error - disable drone
-                isEnabled = false;
-                Log.Error("Drone {0} critical error - disabling", entityId);
+                Log.Error("Drone {0} critical error - disabling", _entityId);
             }
         }
 
@@ -1173,24 +1152,62 @@ namespace ImprovedAI
         #endregion
 
         #region Message Handling
+        private uint GenerateId()
+        {
+            return IdGenerator.GenerateId(ref _messageCounter, _entityId);
+        }
         private void SendDroneRegistration()
         {
-            var report = new DroneReport
+            var msg = new Message<DroneReport>
             {
-                DroneEntityId = entityId,
-                Flags = Drone.UpdateFlags.Registration,
-                DroneState = currentState,
-                Capabilities = capabilities,
-                BatteryChargePercent = currentBatteryLevel,
-                BatteryRechargeThreshold = settings.BatteryRefuelThreshold,
-                BatteryOperationalThreshold = settings.BatteryOperationalThreshold,
-                H2Level = currentH2Level,
-                H2RefuelThreshold = settings.HydrogenRefuelThreshold,
-                H2OperationalThreshold = settings.HydrogenOperationalThreshold
+                Payload = new DroneReport
+                {
+                    Flags = Drone.UpdateFlags.Registration,
+                    DroneState = currentState,
+                    Capabilities = capabilities,
+                    BatteryChargePercent = currentBatteryLevel,
+                    BatteryRechargeThreshold = settings.BatteryRefuelThreshold,
+                    BatteryOperationalThreshold = settings.BatteryOperationalThreshold,
+                    H2Level = currentH2Level,
+                    H2RefuelThreshold = settings.HydrogenRefuelThreshold,
+                    H2OperationalThreshold = settings.HydrogenOperationalThreshold
+                },
+                MessageId = GenerateId(),
+                CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
+                RecipientId = settings.managingScheduler,
+                SenderId = _entityId,
+                SenderOwnerId = block.OwnerId,
+                RequiresAck = false,
+                RecipientBlockType = MessageQueue.IAIBlockType.Scheduler,
+                Channel = Channel.DIRECT_MESSAGE,
+
             };
 
-            messaging.SendMessage((ushort)Channel.DRONE_REGISTRATION, report, entityId, requiresAck: false);
-            Log.LogDroneNetwork("Drone {0} sent registration", entityId);
+            var errorCode = messaging.SendDirectMessage(primaryAntenna, msg, false);
+            if (errorCode != ErrorCode.None)
+                HandleErrorCode(errorCode, msg);
+
+            Log.LogDroneNetwork(LogLevel.Verbose, "Drone {0} sent registration", _entityId);
+        }
+        private void HandleErrorCode<T>(ErrorCode errorCode, Message<T> msg = null) where T : class, IMessagePayload
+        {
+            switch (errorCode)
+            {
+                case ErrorCode.None:
+                    return;
+                case ErrorCode.MessageIsNull:
+                    Log.Error("null mesasge sent from Drone: {0}", _entityId);
+                    break;
+                case ErrorCode.InvalidChannel:
+                    Log.Error("message to invalid channel {0} sent by drone {1}", msg?.Channel, _entityId);
+                    break;
+                case ErrorCode.ShutdownInProgress:
+                    Log.Warning("drone {0} attempting to send message during mod shutdown", _entityId);
+                    break;
+                default:
+                    Log.Verbose("drone {0} received message response {1}", _entityId, errorCode.ToString());
+                    return;
+            }
         }
 
         private void SendStatusReport()
@@ -1198,13 +1215,13 @@ namespace ImprovedAI
             var flags = Drone.UpdateFlags.None;
 
             // Determine what changed
-            if (Math.Abs(currentH2Level - lastH2Level) > 1.0f)
+            if (Math.Abs(currentH2Level - lastH2Level) > 0.05f)
             {
                 flags |= Drone.UpdateFlags.H2Update;
                 lastH2Level = currentH2Level;
             }
 
-            if (Math.Abs(currentBatteryLevel - lastBatteryLevel) > 1.0f)
+            if (Math.Abs(currentBatteryLevel - lastBatteryLevel) > 0.05f)
             {
                 flags |= Drone.UpdateFlags.BatteryUpdate;
                 lastBatteryLevel = currentBatteryLevel;
@@ -1213,44 +1230,84 @@ namespace ImprovedAI
             if (flags == Drone.UpdateFlags.None)
                 return; // Nothing to report
 
-            var report = new DroneReport
+            var msg = new Message<DroneReport>
             {
-                DroneEntityId = entityId,
-                Flags = flags,
-                DroneState = currentState,
-                BatteryChargePercent = currentBatteryLevel,
-                H2Level = currentH2Level
+                Payload = new DroneReport
+                {
+                    Flags = flags,
+                    DroneState = currentState,
+                    BatteryChargePercent = currentBatteryLevel,
+                    H2Level = currentH2Level
+                },
+                MessageId = GenerateId(),
+                CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
+                RecipientId = settings.managingScheduler,
+                SenderId = _entityId,
+                SenderOwnerId = block.OwnerId,
+                RequiresAck = false,
+                RecipientBlockType = MessageQueue.IAIBlockType.Scheduler,
+                Channel = Channel.DIRECT_MESSAGE,
+
             };
 
-            messaging.SendMessage(MessageQueue.Cha.DRONE_REPORTS, report, entityId, requiresAck: false);
+            var errorCode = messaging.SendDirectMessage(primaryAntenna, msg, false);
+            HandleErrorCode(errorCode, msg);
+            Log.LogDroneNetwork(LogLevel.Verbose, "Drone {0} sent task {1} status update", _entityId, msg.Payload.TaskId);
         }
 
         private void SendTaskCompleteReport()
         {
-            var report = new DroneReport
+            var msg = new Message<DroneReport>
             {
-                DroneEntityId = entityId,
-                Flags = Drone.UpdateFlags.TaskComplete,
-                TaskId = currentTaskId
+                Payload = new DroneReport
+                {
+                    TaskId = currentTaskId,
+                    BatteryChargePercent = currentBatteryLevel,
+                    H2Level = currentH2Level,
+                },
+                MessageId = GenerateId(),
+                CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
+                RecipientId = settings.managingScheduler,
+                SenderId = _entityId,
+                SenderOwnerId = block.OwnerId,
+                RequiresAck = false,
+                RecipientBlockType = MessageQueue.IAIBlockType.Scheduler,
+                Channel = Channel.DIRECT_MESSAGE,
+
             };
 
-            messaging.SendMessage(MessageQueue.Cha.DRONE_REPORTS, report, entityId, requiresAck: false);
-            Log.LogDroneOrders("Drone {0} completed task {1}", entityId, currentTaskId);
+            var errorCode = messaging.SendDirectMessage(primaryAntenna, msg, false);
+            HandleErrorCode(errorCode, msg);
+            Log.LogDroneNetwork(LogLevel.Verbose, "Drone {0} sent task {1} completion", _entityId, msg.Payload.TaskId);
         }
 
         private void ReadTaskAssignments()
         {
-            var assignments = messaging.ReadMessages<TaskAssignment>(entityId, (ushort)Channel.DRONE_TASK_ASSIGNMENT, 10);
 
-            foreach (var assignment in assignments)
+            messaging.ReadMessages(
+                _entityId,
+                primaryAntenna,
+                Channel.DIRECT_MESSAGE,
+                _messageCache,
+                maxMessages: 10,
+                clear: true,
+                messageFilters: PayloadType.TaskAssignment);
+
+            foreach (var message in _messageCache)
             {
-                if (assignment.EntityId != entityId)
-                    continue;
-
-                foreach (var task in assignment.Tasks)
+                if (message.RecipientId != _entityId)
                 {
-                    taskQueue.Enqueue(task);
-                    Log.LogDroneOrders("Drone {0} received task {1} type {2}", entityId, task.TaskId, task.TaskType);
+                    Log.Warning("drone {0} recived a message intended for entity id {1} type {2}", _entityId, message.RecipientId, message.RecipientBlockType.ToString());
+                    continue;
+                }
+                if (message.Payload is TaskAssignment)
+                {
+                    var payload = (TaskAssignment)message.Payload;
+                    foreach (var task in payload.Tasks)
+                    {
+                        taskQueue.Enqueue(task);
+                        Log.LogDroneOrders("Drone {0} received task {1} type {2}", _entityId, task.TaskId, task.TaskType);
+                    }
                 }
             }
         }
@@ -1260,11 +1317,11 @@ namespace ImprovedAI
         //    // TODO: check if listeners in range
         //    // if no return
         //    // if yes, send messages
-        //    var relayMessages = messaging.ReadMessages<RelayMessage<Scheduler.Task>>(entityId, (ushort)Channel.MAILMAN_FORWARD, 10);
+        //    var relayMessages = messaging.ReadMessages<RelayMessage<Scheduler.Task>>(_entityId, (ushort)Channel.MAILMAN_FORWARD, 10);
 
         //    foreach (var relayMessage in relayMessages)
         //    {
-        //        if (relayMessage.DestinationEntityId != entityId)
+        //        if (relayMessage.DestinationEntityId != _entityId)
         //            continue;
 
         //        Scheduler.Task task = relayMessage.Payload;
@@ -1326,7 +1383,7 @@ namespace ImprovedAI
 
             if (functionalGyroCount == 0)
             {
-                Log.Warning("Drone {0} has no functional gyroscopes for rotation", entityId);
+                Log.Warning("Drone {0} has no functional gyroscopes for rotation", _entityId);
                 totalGyroscopeTorque = 0f;
                 shipMomentOfInertia = 0f;
                 return;
@@ -1364,7 +1421,7 @@ namespace ImprovedAI
             shipMomentOfInertia = Math.Max(Math.Max(Ix, Iy), Iz);
 
             Log.Info("Drone {0} rotation calibrated: Torque={1:F0} Nm, Inertia={2:F0} kg⋅m², Mass={3:F0} kg, Gyros={4}",
-                entityId, totalGyroscopeTorque, shipMomentOfInertia, currentMass, functionalGyroCount);
+                _entityId, totalGyroscopeTorque, shipMomentOfInertia, currentMass, functionalGyroCount);
         }
 
         /// <summary>
@@ -1402,25 +1459,25 @@ namespace ImprovedAI
         {
             if (isRotating)
             {
-                Log.Warning("Drone {0} already rotating", entityId);
+                Log.Warning("Drone {0} already rotating", _entityId);
                 return false;
             }
 
             // Check if already aligned
             if (IsOrientedTowards(ref targetPosition))
             {
-                Log.Verbose("Drone {0} already aligned to target", entityId);
+                Log.Verbose("Drone {0} already aligned to target", _entityId);
                 return false;
             }
 
             if (totalGyroscopeTorque <= 0 || shipMomentOfInertia <= 0)
             {
-                Log.Warning("Drone {0} rotation not calibrated", entityId);
+                Log.Warning("Drone {0} rotation not calibrated", _entityId);
                 CalibrateRotationCapabilities();
 
                 if (totalGyroscopeTorque <= 0)
                 {
-                    Log.Error("Drone {0} has no functional gyroscopes", entityId);
+                    Log.Error("Drone {0} has no functional gyroscopes", _entityId);
                     return false;
                 }
             }
@@ -1461,7 +1518,7 @@ namespace ImprovedAI
             if (rotationDurationFrames > 600)
             {
                 Log.Warning("Drone {0} calculated rotation time too long ({1}s), capping at 10s",
-                    entityId, rotationTimeSeconds);
+                    _entityId, rotationTimeSeconds);
                 rotationDurationFrames = 600;
             }
 
@@ -1475,7 +1532,7 @@ namespace ImprovedAI
 
             double angleDegrees = angleRadians * (180.0 / Math.PI);
             Log.Verbose("Drone {0} rotating {1:F1}° over {2:F2}s ({3} frames) [α={4:F2} rad/s², I={5:F0}]",
-                entityId, angleDegrees, rotationTimeSeconds, rotationDurationFrames,
+                _entityId, angleDegrees, rotationTimeSeconds, rotationDurationFrames,
                 angularAcceleration, shipMomentOfInertia);
 
             return true;
@@ -1502,7 +1559,7 @@ namespace ImprovedAI
                 // Check if we're actually aligned
                 if (IsOrientedTowards(ref rotationTarget))
                 {
-                    Log.Verbose("Drone {0} rotation complete and aligned", entityId);
+                    Log.Verbose("Drone {0} rotation complete and aligned", _entityId);
                 }
                 else
                 {
@@ -1523,7 +1580,7 @@ namespace ImprovedAI
                     double remainingAngleDegrees = remainingAngle * (180.0 / Math.PI);
 
                     Log.Verbose("Drone {0} rotation complete but misaligned by {1:F1}°, initiating correction",
-                        entityId, remainingAngleDegrees);
+                        _entityId, remainingAngleDegrees);
 
                     // Initiate correction rotation if error is significant
                     double correctionThreshold = orientationToleranceDegrees * 0.5;
@@ -1544,7 +1601,7 @@ namespace ImprovedAI
             {
                 DisableGyroscopeOverride();
                 isRotating = false;
-                Log.Verbose("Drone {0} rotation cancelled", entityId);
+                Log.Verbose("Drone {0} rotation cancelled", _entityId);
             }
         }
 
@@ -1845,10 +1902,16 @@ namespace ImprovedAI
             {
                 // No waypoint yet, get first one
                 Vector3D waypoint;
-                if (pathfindingManager.GetNextWaypoint(ref currentPos, out waypoint))
+                PathfindingResult wpResult = pathfindingManager.GetNextWaypoint(ref currentPos, out waypoint);
+                if (wpResult == PathfindingResult.Success)
                 {
                     currentWaypoint = waypoint;
                     waypointInfo = pathfindingManager.GetWaypointResponse();
+                }
+                else if (pathfindingManager.LastGetNextWaypointFailedDueToComplexityBudget)
+                {
+                    AbortCurrentTaskDueToPathfindingComplexity();
+                    return;
                 }
                 else
                 {
@@ -1885,12 +1948,55 @@ namespace ImprovedAI
 
                     // Get next waypoint
                     Vector3D nextWaypoint;
-                    if (pathfindingManager.GetNextWaypoint(ref currentPos, out nextWaypoint))
+                    PathfindingResult nextWp = pathfindingManager.GetNextWaypoint(ref currentPos, out nextWaypoint);
+                    if (nextWp == PathfindingResult.Success)
                     {
                         currentWaypoint = nextWaypoint;
                     }
+                    else if (pathfindingManager.LastGetNextWaypointFailedDueToComplexityBudget)
+                    {
+                        AbortCurrentTaskDueToPathfindingComplexity();
+                    }
                 }
             }
+        }
+
+        private void AbortCurrentTaskDueToPathfindingComplexity()
+        {
+            if (currentTask != null && operationMode == Drone.OperationMode.ManagedByScheduler)
+            {
+                SendTaskAborted((ushort)currentTask.TaskId, "Pathfinding complexity budget exceeded");
+            }
+
+            currentTask = null;
+            currentTaskId = 0;
+            pathfindingManager.ClearCache();
+            currentState = Drone.State.ReturningToBase;
+            Log.Warning("Drone {0} aborted task due to pathfinding complexity; returning to base", _entityId);
+        }
+
+        private void SendTaskAborted(ushort taskId, string reason)
+        {
+            var msg = new Message<TaskAborted>
+            {
+                Payload = new TaskAborted
+                {
+                    TaskId = taskId,
+                    Reason = reason
+                },
+                MessageId = GenerateId(),
+                CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
+                RecipientId = settings.managingScheduler,
+                SenderId = _entityId,
+                SenderOwnerId = block.OwnerId,
+                RequiresAck = false,
+                RecipientBlockType = MessageQueue.IAIBlockType.Scheduler,
+                Channel = Channel.DIRECT_MESSAGE,
+            };
+
+            var errorCode = messaging.SendDirectMessage(primaryAntenna, msg, false);
+            HandleErrorCode(errorCode, msg);
+            Log.LogDroneNetwork(LogLevel.Warning, "Drone {0} sent TaskAborted for task {1}", _entityId, taskId);
         }
 
         #region Thrust Management
@@ -2016,7 +2122,7 @@ namespace ImprovedAI
             lastThrustProfileUpdate = MyAPIGateway.Session.GameplayFrameCounter;
 
             Log.Verbose("Drone {0} thrust profile updated - Mass: {1:F0}kg, MaxAccel: F:{2:F1} B:{3:F1} U:{4:F1} D:{5:F1}",
-                entityId, currentMass,
+                _entityId, currentMass,
                 thrustProfile.MaxAccelerationForward,
                 thrustProfile.MaxAccelerationBackward,
                 thrustProfile.MaxAccelerationUp,
@@ -2061,7 +2167,7 @@ namespace ImprovedAI
             if (upThrusters.Count == 0)
             {
                 Log.Warning("Drone {0} has no thrusters to counteract gravity in direction {1}",
-                    entityId, upThrustDirection);
+                    _entityId, upThrustDirection);
                 return;
             }
 
@@ -2075,7 +2181,7 @@ namespace ImprovedAI
 
             if (totalUpThrust < 0.1f)
             {
-                Log.Warning("Drone {0} has no functional thrusters for gravity compensation", entityId);
+                Log.Warning("Drone {0} has no functional thrusters for gravity compensation", _entityId);
                 return;
             }
 
@@ -2086,7 +2192,7 @@ namespace ImprovedAI
             if (thrustPercentage > 0.95f)
             {
                 Log.Warning("Drone {0} requires {1:F1}% thrust just to hover - insufficient thrust margin",
-                    entityId, thrustPercentage * 100f);
+                    _entityId, thrustPercentage * 100f);
             }
 
             // Apply hover thrust
@@ -2358,24 +2464,6 @@ namespace ImprovedAI
 
 
 
-        #region Public API
-        /// <summary>
-        /// Sets the drone operation mode
-        /// </summary>
-        public void SetOperationMode(Drone.OperationMode mode)
-        {
-            operationMode = mode;
-            settings.OperationMode = mode;
-        }
-
-        /// <summary>
-        /// Enables or disables the drone
-        /// </summary>
-        public void SetEnabled(bool enabled)
-        {
-            isEnabled = enabled;
-        }
-
 
         /// <summary>
         /// Gets diagnostic information about the drone
@@ -2398,7 +2486,7 @@ namespace ImprovedAI
 
         public void ResetDrone()
         {
-            Log.Info("Drone {0} reset requested", entityId);
+            Log.Verbose("Drone {0} reset requested", _entityId);
 
             currentTask = null;
             taskQueue.Clear();
@@ -2430,9 +2518,8 @@ namespace ImprovedAI
             _consecutiveErrors = 0;
             currentState = Drone.State.Standby;
 
-            Log.Info("Drone {0} reset complete", entityId);
+            Log.Verbose("Drone {0} reset complete", _entityId);
         }
-        #endregion
 
         #region Lifecycle - Cleanup
         public void SessionRegister()
@@ -2445,7 +2532,7 @@ namespace ImprovedAI
         {
             settings.HomePosition = shipController.GetPosition();
             settings.HomeForwardDirection = shipController.WorldMatrix.Forward;
-            Log.Info("Drone {0} home orientation set to current", entityId);
+            Log.Info("Drone {0} home orientation set to current", _entityId);
         }
         public override void MarkForClose()
         {
@@ -2489,10 +2576,428 @@ namespace ImprovedAI
         #endregion
 
         #region Terminal Controls
-        // TODO: need a way to encode both GPS coords and orientation into one string
-        //public Vector3D Terminal_SetHome
-        //{
-        //}
+        // Entity ID (read-only)
+        public long Terminal_EntityId
+        {
+            get { return _entityId; }
+        }
+
+        // Enabled
+        public bool Terminal_Enabled
+        {
+            get { return settings?.IsEnabled ?? false; }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.IsEnabled = value;
+                    SaveSettings();
+                }
+            }
+        }
+
+        // Operation Mode
+        public long Terminal_OperationModeValue
+        {
+            get { return settings != null ? (long)settings.OperationMode : 0; }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.OperationMode = (Drone.OperationMode)value;
+                    operationMode = (Drone.OperationMode)value;
+                    SaveSettings();
+                }
+            }
+        }
+
+        // Managing Scheduler
+        public long Terminal_ManagingScheduler
+        {
+            get { return settings?.managingScheduler ?? 0; }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.managingScheduler = value;
+                    SaveSettings();
+                }
+            }
+        }
+
+        public void Terminal_FillSchedulerList(List<MyTerminalControlListBoxItem> items, List<MyTerminalControlListBoxItem> selected)
+        {
+            // TODO: Implement scheduler discovery within antenna range
+            var currentScheduler = settings?.managingScheduler ?? 0;
+            if (currentScheduler != 0)
+            {
+                var item = new MyTerminalControlListBoxItem(
+                    MyStringId.GetOrCompute($"Scheduler {currentScheduler}"),
+                    MyStringId.NullOrEmpty,
+                    currentScheduler);
+                items.Add(item);
+                if (settings.managingScheduler == currentScheduler)
+                    selected.Add(item);
+            }
+        }
+
+        // Home Position GPS
+        public StringBuilder Terminal_HomePositionGPS
+        {
+            get
+            {
+                if (settings == null) return new StringBuilder("");
+                var gps = ConvertVectorToGPS("Drone Home", settings.HomePosition);
+                return new StringBuilder(gps);
+            }
+            set
+            {
+                if (settings != null)
+                {
+                    var position = ParseGPSString(value.ToString());
+                    if (position.HasValue)
+                    {
+                        settings.HomePosition = position.Value;
+                        SaveSettings();
+                    }
+                }
+            }
+        }
+
+        public void Terminal_SetCurrentAsHome()
+        {
+            if (remoteControl != null && settings != null)
+            {
+                settings.HomePosition = remoteControl.GetPosition();
+                settings.HomeForwardDirection = remoteControl.WorldMatrix.Forward;
+                SaveSettings();
+                Log.Info("Drone {0} home position set to current location", _entityId);
+            }
+        }
+
+        private string ConvertVectorToGPS(string name, Vector3D position)
+        {
+            return $"GPS:{name}:{position.X:F2}:{position.Y:F2}:{position.Z:F2}:#FF75C9F1:";
+        }
+
+        private Vector3D? ParseGPSString(string gpsString)
+        {
+            if (string.IsNullOrWhiteSpace(gpsString)) return null;
+
+            var parts = gpsString.Split(':');
+            if (parts.Length < 5 || !parts[0].Equals("GPS", StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            double x, y, z;
+            if (double.TryParse(parts[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out x) &&
+                double.TryParse(parts[3], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out y) &&
+                double.TryParse(parts[4], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out z))
+            {
+                return new Vector3D(x, y, z);
+            }
+
+            return null;
+        }
+
+        // Home Orientation
+        public bool Terminal_EnforceHomeOrientation
+        {
+            get { return settings?.EnforceHomeOrientation ?? false; }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.EnforceHomeOrientation = value;
+                    SaveSettings();
+                }
+            }
+        }
+
+        public long Terminal_HomeForwardDirectionValue
+        {
+            get
+            {
+                if (settings == null) return 0;
+                var forward = settings.HomeForwardDirection;
+                return (long)Base6Directions.GetClosestDirection(forward);
+            }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.HomeForwardDirection = Base6Directions.GetVector((Base6Directions.Direction)value);
+                    SaveSettings();
+                }
+            }
+        }
+
+        // Task Type Filters
+        public bool Terminal_UseTaskTypeFilters
+        {
+            get { return settings?.UseTaskTypeFilters ?? false; }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.UseTaskTypeFilters = value;
+                    SaveSettings();
+                }
+            }
+        }
+
+        public Scheduler.TaskType Terminal_TaskTypeFilters
+        {
+            get { return settings?.TaskTypeFilters ?? 0; }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.TaskTypeFilters = value;
+                    SaveSettings();
+                }
+            }
+        }
+
+        // Capability Filters
+        public bool Terminal_UseCapabilityFilters
+        {
+            get { return settings?.UseCapabilityFilters ?? false; }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.UseCapabilityFilters = value;
+                    SaveSettings();
+                }
+            }
+        }
+
+        public Drone.Capabilities Terminal_CapabilityFilters
+        {
+            get { return settings?.CapabilityFilters ?? 0; }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.CapabilityFilters = value;
+                    SaveSettings();
+                }
+            }
+        }
+
+        // Navigation Settings
+        public float Terminal_WaypointTolerance
+        {
+            get { return settings?.WaypointTolerance ?? 5f; }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.WaypointTolerance = MathHelper.Clamp(value, 1f, 50f);
+                    SaveSettings();
+                }
+            }
+        }
+
+        public float Terminal_ApproachSpeed
+        {
+            get { return settings?.ApproachSpeed ?? 5f; }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.ApproachSpeed = MathHelper.Clamp(value, 1f, 50f);
+                    SaveSettings();
+                }
+            }
+        }
+
+        public float Terminal_SpeedLimit
+        {
+            get { return settings?.SpeedLimit ?? 50f; }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.SpeedLimit = MathHelper.Clamp(value, 10f, 100f);
+                    SaveSettings();
+                }
+            }
+        }
+
+        public float Terminal_DockingSpeed
+        {
+            get { return settings?.DockingSpeed ?? 2.5f; }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.DockingSpeed = MathHelper.Clamp(value, 0.5f, 10f);
+                    SaveSettings();
+                }
+            }
+        }
+
+        // Gravity Alignment
+        public bool Terminal_AlignToPGravity
+        {
+            get { return settings?.AlignToPGravity ?? false; }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.AlignToPGravity = value;
+                    SaveSettings();
+                }
+            }
+        }
+
+        public float Terminal_MaxPitchDegrees
+        {
+            get { return settings?.PGravityAlignMaxPitchDegrees ?? 10f; }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.PGravityAlignMaxPitchDegrees = MathHelper.Clamp(value, 0f, 45f);
+                    SaveSettings();
+                }
+            }
+        }
+
+        public float Terminal_MaxRollDegrees
+        {
+            get { return settings?.PGravityAlignMaxRollDegrees ?? 10f; }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.PGravityAlignMaxRollDegrees = MathHelper.Clamp(value, 0f, 45f);
+                    SaveSettings();
+                }
+            }
+        }
+
+        // Display
+        public StringBuilder Terminal_LCDScreenTag
+        {
+            get { return settings != null ? new StringBuilder(settings.LCDScreenTag) : new StringBuilder(""); }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.LCDScreenTag = value != null ? value.ToString() : "[IAIDrone]";
+                    SaveSettings();
+                }
+            }
+        }
+
+        // Power Monitoring - Hydrogen
+        public bool Terminal_MonitorHydrogen
+        {
+            get { return settings?.MonitorHydrogenLevels ?? false; }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.MonitorHydrogenLevels = value;
+                    SaveSettings();
+                }
+            }
+        }
+
+        public float Terminal_H2RefuelThreshold
+        {
+            get { return settings?.HydrogenRefuelThreshold ?? 25f; }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.HydrogenRefuelThreshold = MathHelper.Clamp(value, 5f, 50f);
+                    SaveSettings();
+                }
+            }
+        }
+
+        public float Terminal_H2OperationalThreshold
+        {
+            get { return settings?.HydrogenOperationalThreshold ?? 50f; }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.HydrogenOperationalThreshold = MathHelper.Clamp(value, 10f, 95f);
+                    SaveSettings();
+                }
+            }
+        }
+
+        public bool Terminal_AlwaysRefuel
+        {
+            get { return settings?.AlwaysRefuelWhenDocked ?? false; }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.AlwaysRefuelWhenDocked = value;
+                    SaveSettings();
+                }
+            }
+        }
+
+        // Power Monitoring - Battery
+        public bool Terminal_MonitorBattery
+        {
+            get { return settings?.MonitorBatteryLevels ?? false; }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.MonitorBatteryLevels = value;
+                    SaveSettings();
+                }
+            }
+        }
+
+        public float Terminal_BatteryRefuelThreshold
+        {
+            get { return settings?.BatteryRefuelThreshold ?? 20f; }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.BatteryRefuelThreshold = MathHelper.Clamp(value, 5f, 50f);
+                    SaveSettings();
+                }
+            }
+        }
+
+        public float Terminal_BatteryOperationalThreshold
+        {
+            get { return settings?.BatteryOperationalThreshold ?? 80f; }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.BatteryOperationalThreshold = MathHelper.Clamp(value, 10f, 95f);
+                    SaveSettings();
+                }
+            }
+        }
+
+        // Controller Settings
+        public long Terminal_ControllerForwardDirectionValue
+        {
+            get { return settings != null ? (long)settings.ControllerForwardDirection : (long)Base6Directions.Direction.Forward; }
+            set
+            {
+                if (settings != null)
+                {
+                    settings.ControllerForwardDirection = (Base6Directions.Direction)value;
+                    SaveSettings();
+                }
+            }
+        }
         #endregion
     }
 }

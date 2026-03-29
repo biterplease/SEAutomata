@@ -1,4 +1,4 @@
-﻿using ImprovedAI.Config;
+using ImprovedAI.Config;
 using ProtoBuf;
 using System;
 using System.Collections.Generic;
@@ -96,8 +96,6 @@ namespace ImprovedAI.VirtualNetwork
         public float? H2RefuelThreshold;
         [ProtoMember(8)]
         public float? H2OperationalThreshold;
-        [ProtoMember(9)]
-        public uint MessageId;
         [ProtoMember(10)]
         public Drone.UpdateFlags Flags;
         [ProtoMember(11)]
@@ -111,10 +109,20 @@ namespace ImprovedAI.VirtualNetwork
     {
         [ProtoMember(1)]
         public List<Scheduler.Task> Tasks;
-        [ProtoMember(2)]
-        public uint MessageId;
     }
 
+    /// <summary>
+    /// Drone gives up on an assigned task (e.g. pathfinding complexity budget exceeded).
+    /// Scheduler should release the assignment and may blacklist this drone for the task temporarily.
+    /// </summary>
+    [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
+    public class TaskAborted : IMessagePayload
+    {
+        [ProtoMember(1)]
+        public ushort TaskId;
+        [ProtoMember(2)]
+        public string Reason;
+    }
 
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class LogisticsUpdate : IMessagePayload
@@ -125,8 +133,6 @@ namespace ImprovedAI.VirtualNetwork
         public List<Vector3D> Connectors;
         [ProtoMember(3)]
         public LogisticsComputer.OperationMode OperationMode;
-        [ProtoMember(4)]
-        public uint MessageId;
     }
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class InventoryRequisition : IMessagePayload
@@ -136,25 +142,21 @@ namespace ImprovedAI.VirtualNetwork
         [ProtoMember(2)]
         public Vector3D ConnectorLocation;
         [ProtoMember(3)]
-        public uint MessageId;
-        [ProtoMember(4)]
         public Inventory.RequisitionType RequisitionType;
         /// <summary>
         /// Does the grid move.
         /// </summary>
-        [ProtoMember(5)]
+        [ProtoMember(4)]
         public bool IsStatic;
     }
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class RelayMessage : IMessagePayload
     {
         [ProtoMember(1)]
-        public uint MessageId;
-        [ProtoMember(2)]
         public long DestinationEntityId;
-        [ProtoMember(3)]
+        [ProtoMember(2)]
         public Channel DestinationTopic;
-        [ProtoMember(4)]
+        [ProtoMember(3)]
         public long OriginalSenderId;
     }
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
@@ -162,7 +164,8 @@ namespace ImprovedAI.VirtualNetwork
     {
         public uint MessageId;
         public T Payload;
-        public DateTime CreatedAt;
+        public ulong CreatedAt;
+        public ulong SentAt;
         /// <summary>IAI entity (Drone, Scheduler, LC) id of recipient.</summary>
         public long RecipientId;
         /// <summary>IAI entity (Drone, Scheduler, LC) id of sender.</summary>
@@ -173,4 +176,19 @@ namespace ImprovedAI.VirtualNetwork
         public Channel Channel;
         public MessageQueue.IAIBlockType RecipientBlockType;
     }
+    [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
+    public class TaskAnnouncement : IMessagePayload {
+        [ProtoMember(1)] public uint TaskId;
+        [ProtoMember(2)] public Scheduler.TaskType Type;
+        [ProtoMember(3)] public Vector3D Destination;
+        [ProtoMember(4)] public Drone.Capabilities RequiredCapabilities;
+    }
+
+    [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
+    public class TaskBid : IMessagePayload {
+        [ProtoMember(1)] public uint TaskId;
+        [ProtoMember(2)] public float EstimatedTime; // Seconds
+        [ProtoMember(3)] public float PathComplexity; // 0.0 to 1.0
+    }
+    
 }

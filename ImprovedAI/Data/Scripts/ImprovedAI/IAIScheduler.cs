@@ -1,6 +1,5 @@
-﻿using ImprovedAI.Config;
-using ImprovedAI.Messages;
-using ImprovedAI.Network;
+using ImprovedAI.Config;
+using ImprovedAI.VirtualNetwork;
 using ImprovedAI.Util;
 using ImprovedAI.Util.Logging;
 using Sandbox.ModAPI;
@@ -8,10 +7,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using VRage.Collections;
-using VRage.Game.Components;
 using VRage.Game.ModAPI;
 using VRage.ModAPI;
-using VRage.ObjectBuilders;
 using VRageMath;
 using static ImprovedAI.Scheduler;
 
@@ -45,7 +42,6 @@ namespace ImprovedAI
 
         // Management
         private long entityId;
-        private readonly IdGenerator _idGenerator;
         private int _lastUpdateFrame = 0;
         private int _lastScanFrameAttempt = 0;
         private int _consecutiveErrors = 0;
@@ -63,32 +59,20 @@ namespace ImprovedAI
         private readonly int _errorRecoveryIntervalTicks = ServerConfig.Instance.SchedulerBounds.ErrorRecoveryIntervalTicks;
         private readonly int _maxConsecutiveErrors = ServerConfig.Instance.SchedulerBounds.MaxConsecutiveErrors;
         private readonly int _maintenanceIntervalTicks = ServerConfig.Instance.SchedulerBounds.ManintenanceIntervalTicks;
-        private readonly int _antennaCacheUpdateIntervalTicks = ServerConfig.Instance.DroneNetwork.SchedulerAntennaCacheUpdateIntervalTicks;
+        private readonly int _antennaCacheUpdateIntervalTicks = ServerConfig.Instance.MessageQueue.SchedulerAntennaCacheUpdateIntervalTicks();
         /// <summary>
         /// Timeout after which drones are removed if we don't hear from them again.
         /// </summary>
         //private static readonly int droneTimeoutSeconds = 1800;
         //private static DateTime lastCacheUpdate;
 
-        private static readonly Channel[] DroneManagementTopics = new Channel[]
-        {
-            Channel.DRONE_REGISTRATION,
-            Channel.DRONE_REPORTS,
-            Channel.DRONE_PERFORMANCE,
-        };
-        private static readonly Channel[] logisticsManagementTopics = new Channel[]
-         {
-            Channel.LOGISTIC_REGISTRATION,
-            Channel.LOGISTIC_UPDATE,
-            Channel.LOGISTIC_REQUEST,
-            Channel.LOGISTIC_PUSH,
-        };
 
-        private MessageQueue messaging = new MessageQueue();
-        private int messageReadLimit = ServerConfig.Instance.DroneNetwork.SchedulerMessageReadLimit;
+        private MessageQueue messaging;
+        private int messageReadLimit = IAISession.GetConfig().MessageQueue.SchedulerMessageReadLimit();
         private IMyEntity Entity;
         private IMyRadioAntenna ownAntenna;
-        private int broadcastUpdatesChannel = 1;
+        private List<Message<IMessagePayload>> _messageCache = new List<Message<IMessagePayload>>();
+        private readonly List<Message<TaskAborted>> _taskAbortCache = new List<Message<TaskAborted>>();
         private readonly object _taskLock = new object();
         /// <summary>
         /// Range in meters after which tasks are ignored.
@@ -122,7 +106,6 @@ namespace ImprovedAI
             WorkModes workModes = WorkModes.None)
         {
             this.entityId = entity.EntityId;
-            _idGenerator = new IdGenerator(entityId);
             this.Entity = entity;
             this.operationMode = operationMode;
             this.workModes = workModes;
@@ -161,6 +144,7 @@ namespace ImprovedAI
 
                 if (currentState != State.Error && currentState != State.Initializing)
                 {
+                    ReadTaskAbortedMessages();
                     ReadDroneRegistrations();
                     ReadDroneReports((ushort)messageReadLimit);
                 }
@@ -193,21 +177,17 @@ namespace ImprovedAI
 
         private void Initialize()
         {
-            messaging = IAISession.Instance.MessageQueue;
+            messaging = IAISession.GetMessageQueue();
             currentState = State.Initializing;
-            long schedulerId = this.entityId;
-
-            foreach (var topic in DroneManagementTopics)
-            {
-                Log.Info("scheduler {0} subscribing to topic {1}", schedulerId, MessageUtil.TopicToString(topic));
-                messaging.Subscribe(entityId, (ushort)topic);
-            }
-            foreach (var topic in DroneManagementTopics)
-            {
-                Log.Info("scheduler {0} subscribing to topic {1}", schedulerId, MessageUtil.TopicToString(topic));
-                messaging.Subscribe(entityId, (ushort)topic);
-            }
-            messaging.Subscribe(entityId, (ushort)Channel.SCHEDULER_FORWARD);
+            messaging.Subscribe(entityId, Channel.DRONE_REGISTRATION);
+            messaging.Subscribe(entityId, Channel.DRONE_REPORTS);
+            messaging.Subscribe(entityId, Channel.DRONE_PERFORMANCE);
+            messaging.Subscribe(entityId, Channel.LOGISTIC_REGISTRATION);
+            messaging.Subscribe(entityId, Channel.LOGISTIC_UPDATE);
+            messaging.Subscribe(entityId, Channel.LOGISTIC_REQUEST);
+            messaging.Subscribe(entityId, Channel.LOGISTIC_PUSH);
+            messaging.Subscribe(entityId, Channel.SCHEDULER_FORWARD);
+            messaging.Subscribe(entityId, Channel.DIRECT_MESSAGE);
         }
 
         private void UpdateAI()
@@ -361,15 +341,16 @@ namespace ImprovedAI
         {
             int assigned = 0;
             // scheduler set to only repeater task messages
-            if (operationMode.Equals(OperationMode.Repeater))
-            {
-                Task task;
-                while (taskQueue.TryDequeue(out task))
-                {
-                    var needsAck = false; // repeater does not care
-                    messaging.SendMessage((ushort)Channel.SCHEDULER_FORWARD, task, entityId, needsAck);
-                }
-            }
+            //if (operationMode.Equals(OperationMode.Repeater))
+            //{
+            //    Task task;
+            //    while (taskQueue.TryDequeue(out task))
+            //    {
+            //        var message
+            //        var needsAck = false; // repeater does not care
+            //        messaging.BroadcastMessage((ushort)Channel.SCHEDULER_FORWARD, task, entityId, needsAck);
+            //    }
+            //}
             if (registeredDrones.Count != 0 && operationMode.HasFlag(OperationMode.Orchestrator))
             {
             }
@@ -555,6 +536,7 @@ namespace ImprovedAI
 
         private void ReadDroneRegistrations()
         {
+            messaging.ReadMessages(entityId,ownAntenna,Channel.DIRECT_MESSAGE, _messageCache,50,true, PayloadType.DroneReport);
             var droneReports = messaging.ReadMessages<DroneReport>(entityId, (ushort)Channel.DRONE_REGISTRATION, 50);
             Drone drone;
             foreach (var reg in droneReports)
@@ -626,6 +608,65 @@ namespace ImprovedAI
                     // if not registered, redirect to registration queue
                     messaging.SendMessage<DroneReport>((ushort)Channel.DRONE_REGISTRATION, report, this.entityId, false);
                 }
+            }
+        }
+
+        private void ReadTaskAbortedMessages()
+        {
+            messaging.ReadMessages(
+                entityId,
+                ownAntenna,
+                Channel.DIRECT_MESSAGE,
+                _taskAbortCache,
+                messageReadLimit,
+                clear: true,
+                messageFilters: PayloadType.TaskAborted);
+
+            foreach (var message in _taskAbortCache)
+            {
+                if (message.RecipientId != entityId)
+                    continue;
+                TaskAborted payload = message.Payload;
+                if (payload == null)
+                    continue;
+                HandleTaskAborted(message.SenderId, payload.TaskId, payload.Reason);
+            }
+        }
+
+        /// <summary>
+        /// Drone gave up on a task (pathfinding dead end). Release assignment and re-queue work for another drone.
+        /// </summary>
+        private void HandleTaskAborted(long droneId, ushort taskId, string reason)
+        {
+            lock (_taskLock)
+            {
+                List<Task> taskList;
+                if (!assignedTasks.TryGetValue(droneId, out taskList))
+                {
+                    Log.Warning("AI scheduler {0}: TaskAborted for task {1} from unassigned drone {2}", entityId, taskId, droneId);
+                    return;
+                }
+
+                var taskIndex = taskList.FindIndex(t => t.TaskId == taskId);
+                if (taskIndex < 0)
+                {
+                    Log.Warning("AI scheduler {0}: TaskAborted task {1} not found for drone {2}", entityId, taskId, droneId);
+                    return;
+                }
+
+                var abortedTask = taskList[taskIndex];
+                taskList.RemoveAt(taskIndex);
+                taskQueue.Enqueue(abortedTask);
+
+                if (taskList.Count == 0)
+                {
+                    List<Task> removed;
+                    assignedTasks.TryRemove(droneId, out removed);
+                }
+
+                Log.Info(
+                    "AI scheduler {0}: Drone {1} aborted task {2} ({3}); task re-queued for reassignment",
+                    entityId, droneId, taskId, reason ?? string.Empty);
             }
         }
 
@@ -795,7 +836,7 @@ namespace ImprovedAI
                 }
 
                 // Unsubscribe from all message topics to stop processing
-                foreach (var topic in DroneManagementTopics)
+                foreach (var topic in DroneManagementChannels)
                 {
                     // Note: You'll need to implement Unsubscribe in MessageQueue if not already present
                     // messaging.Unsubscribe(entityId, (ushort)topic);

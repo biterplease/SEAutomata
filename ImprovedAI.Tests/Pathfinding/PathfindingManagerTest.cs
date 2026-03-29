@@ -1,4 +1,4 @@
-﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 using ImprovedAI.Pathfinding;
 using ImprovedAI.Tests.TestUtil;
 using Sandbox.ModAPI;
@@ -212,7 +212,7 @@ namespace ImprovedAI.Tests.Pathfinding
             Vector3D waypoint;
             var result = manager.GetNextWaypoint(ref Vector3D.Zero, out waypoint);
 
-            Assert.IsTrue(result);
+            Assert.AreEqual(PathfindingResult.Success, result);
         }
 
         [TestMethod]
@@ -226,7 +226,7 @@ namespace ImprovedAI.Tests.Pathfinding
             Vector3D waypoint;
             var result = manager.GetNextWaypoint(ref Vector3D.Zero, out waypoint);
 
-            Assert.IsFalse(result);
+            Assert.AreEqual(PathfindingResult.Failed, result);
         }
 
         [TestMethod]
@@ -244,7 +244,7 @@ namespace ImprovedAI.Tests.Pathfinding
             Vector3D waypoint;
             var result = manager.GetNextWaypoint(ref Vector3D.Zero, out waypoint);
 
-            Assert.IsTrue(result);
+            Assert.AreEqual(PathfindingResult.Success, result);
             Assert.AreNotEqual(Vector3D.Zero, waypoint);
         }
 
@@ -302,7 +302,7 @@ namespace ImprovedAI.Tests.Pathfinding
             Vector3D waypoint;
             var result = manager.GetNextWaypoint(ref Vector3D.Zero, out waypoint);
 
-            Assert.IsFalse(result);
+            Assert.AreEqual(PathfindingResult.Failed, result);
         }
 
         [TestMethod]
@@ -412,7 +412,7 @@ namespace ImprovedAI.Tests.Pathfinding
             Vector3D waypoint;
             var result = manager.GetNextWaypoint(ref Vector3D.Zero, out waypoint);
 
-            Assert.IsTrue(result);
+            Assert.AreEqual(PathfindingResult.Success, result);
         }
     }
 }

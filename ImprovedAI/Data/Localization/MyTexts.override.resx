@@ -35,6 +35,9 @@
 	<data name="Description_ImprovedAILogisticsComputer" xml:space="preserve">
 		<value>Enables a grid to access the IAI logistics network.</value>
 	</data>
+	<data name="Description_ImprovedAILogisticsComputer" xml:space="preserve">
+		<value>Enables a grid to access the IAI logistics network.</value>
+	</data>
 	<!-- IAI Terminal controls-->
 	<data name="TerminalControl_LogisticsComputer_OperationMode_ProvideForLogistics_Title" xml:space="preserve">
 		<value>Provide for logistics</value>
@@ -85,4 +88,24 @@
 		<value>How often to request pickups.</value>
 	</data>
 	<!--END IAI Terminal controls-->
+	<!-- Command help-->
+	<data name="CommandHelp_all" xml:space="preserve">
+		<value>Improved AI, {0}\nAvailable commands:\n{1}, {2}: Show this help menu\n{3} {4} {5} [GPS] assign a task to drone with </value>
+	</data>
+	<data name="CommandHelp_Line1" xml:space="preserve">
+		<value>Improved AI, {0}</value>
+	</data>
+	<data name="CommandHelp_Line2" xml:space="preserve">
+		<value>Available commands:</value>
+	</data>
+	<data name="CommandHelp_Line3" xml:space="preserve">
+		<value>{0}, {1}: Show this help menu</value>
+	</data>
+	<data name="CommandHelp_Line3" xml:space="preserve">
+		<value>{0}: List tasks assignable via command</value>
+	</data>
+	<data name="CommandHelp_Line3" xml:space="preserve">
+		<value>{0} {1} [DRONE_ID] [GPS]: Assign a {1} task to Drone with ID [DRONE_ID] at [GPS]</value>
+	</data>
+	<!-- END command help-->
 </root>

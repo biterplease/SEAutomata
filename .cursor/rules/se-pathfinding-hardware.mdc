@@ -1,0 +1,19 @@
+---
+description: Hardware requirements for Pathfinding (Sensors/Cameras)
+globs: **/Pathfinding/*.cs, IAIDroneControllerBlock.cs
+---
+
+# Pathfinding Hardware Simulation
+Drones "see" the world via simulated raycasts, but only if they have the correct hardware or if server settings allow it.
+
+## 1. Short-Range (Sensors: < 50m)
+- **Constraint**: If `requireSensorsForPathfinding` is TRUE, drones without a functional Sensor block are "blind" to obstacles within 50m.
+- **Implementation**: Raycast in 6 directions from the sensor block location, NOT the controller.
+
+## 2. Long-Range (Cameras: 50m - 1000m)
+- **Constraint**: If `requireCamerasForPathfinding` is TRUE, drones require cameras to "look ahead" for `DirectPathfinder` or `AStar`.
+- **Logic**: Use @PathfindingContext to check `HasCameras()`. If no camera exists in the desired travel direction, the path is considered "Unknown/Blocked."
+
+## 3. Server Admin Overrides
+- Admins can designate specific block types to act as "Simulated Sensors" to save performance.
+- Admins can toggle `allowAStar`. If FALSE, `PathfindingManager` must fallback to `DirectPathfinder`.

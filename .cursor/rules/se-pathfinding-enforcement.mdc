@@ -1,0 +1,14 @@
+---
+description: Hierarchy of Pathfinding Settings (Server vs Player)
+globs: PathfindingConfig.cs, IAIDroneControllerSettings.cs, PathfindingContext.cs
+---
+
+# Settings Hierarchy
+1. **Server Bounds**: `globalMinWaypointDistance` and `globalMaxWaypointDistance` are hard limits.
+2. **Player Intent**: Players define `DesiredWaypointDistance` and `MinAltitudeBuffer` in the terminal.
+3. **Validation**: The `PathfindingContext` must always use the CLAMPED value: 
+   `Context.WaypointDistance = Clamp(Player.Value, Server.Min, Server.Max)`.
+
+# Removal Policy
+- **Altitude**: Do NOT use server-wide altitude buffers. This is a per-drone player setting.
+- **Hardware**: Always check `requireSensors` or `requireCameras` before allowing a drone to transition from `Direct` to `AStar` pathfinding.

@@ -1,4 +1,4 @@
-using ImprovedAI.Data.Scripts.ImprovedAI.Config;
+using ImprovedAI.Config;
 using ImprovedAI.Util;
 using ImprovedAI.Util.Logging;
 using Sandbox.ModAPI;
@@ -54,7 +54,6 @@ namespace ImprovedAI.Config
             }
         }
 
-        public const string MOD_NAME = "ImprovedAI";
         private static bool _configLoaded = false;
         private static readonly string CONFIG_FILENAME = "ImprovedAI.ini";
 
@@ -189,18 +188,18 @@ namespace ImprovedAI.Config
                 var configText = LoadConfigFile();
                 if (string.IsNullOrEmpty(configText))
                 {
-                    MyAPIGateway.Utilities.ShowMessage(MOD_NAME, "No config file found, using defaults");
+                    MyAPIGateway.Utilities.ShowMessage(IAISession.MOD_NAME, "No config file found, using defaults");
                     return;
                 }
 
                 ParseConfig(configText);
 
-                MyAPIGateway.Utilities.ShowMessage(MOD_NAME, "Server configuration loaded successfully");
+                MyAPIGateway.Utilities.ShowMessage(IAISession.MOD_NAME, "Server configuration loaded successfully");
             }
             catch (Exception ex)
             {
-                MyAPIGateway.Utilities.ShowMessage(MOD_NAME, $"Error loading config: {ex.Message}");
-                MyLog.Default.WriteLine($"{MOD_NAME}: LoadConfig exception: {ex}");
+                MyAPIGateway.Utilities.ShowMessage(IAISession.MOD_NAME, $"Error loading config: {ex.Message}");
+                MyLog.Default.WriteLine($"{IAISession.MOD_NAME}: LoadConfig exception: {ex}");
             }
         }
 
@@ -210,9 +209,9 @@ namespace ImprovedAI.Config
             {
                 // Get the current mod item
                 var modItem = MyAPIGateway.Session.Mods.FirstOrDefault(m => m.GetPath().Contains("ImprovedAI"));
-                if (modItem.Name != MOD_NAME)
+                if (modItem.Name != IAISession.MOD_NAME)
                 {
-                    Log.Warning($"{MOD_NAME}: Could not find mod item for config loading");
+                    Log.Warning($"{IAISession.MOD_NAME}: Could not find mod item for config loading");
                     return null;
                 }
 
@@ -237,7 +236,7 @@ namespace ImprovedAI.Config
             }
             catch (Exception ex)
             {
-                MyLog.Default.WriteLine($"{MOD_NAME}: LoadConfigFile exception: {ex}");
+                MyLog.Default.WriteLine($"{IAISession.MOD_NAME}: LoadConfigFile exception: {ex}");
                 return null;
             }
         }
@@ -247,7 +246,7 @@ namespace ImprovedAI.Config
             var ini = new MyIni();
             if (!ini.TryParse(configText))
             {
-                MyAPIGateway.Utilities.ShowMessage(MOD_NAME, "Failed to parse config file - using defaults");
+                MyAPIGateway.Utilities.ShowMessage(IAISession.MOD_NAME, "Failed to parse config file - using defaults");
                 return;
             }
 
@@ -302,21 +301,19 @@ namespace ImprovedAI.Config
             Drone.MaxPowerThreshold = MathHelper.Clamp(ini.Get("Drone", "MaxPowerThreshold").ToSingle(Drone.MaxPowerThreshold), 50.0f, 99.0f);
 
             // Parse DroneNetwork section
-            DroneNetwork.AllowNetworkBroadcasting = ini.Get("DroneNetwork", "AllowNetworkBroadcasting").ToBoolean(DroneNetwork.AllowNetworkBroadcasting);
-            DroneNetwork.DefaultAntennaRange = Math.Max(100.0f, ini.Get("DroneNetwork", "DefaultAntennaRange").ToSingle(DroneNetwork.DefaultAntennaRange));
-            DroneNetwork.NetworkUpdateRate = Math.Max(1.0f, ini.Get("DroneNetwork", "NetworkUpdateRate").ToSingle(DroneNetwork.NetworkUpdateRate));
-            DroneNetwork.SchedulerAntennaCacheUpdateIntervalTicks = Math.Max(60, ini.Get("DroneNetwork", "SchedulerAntennaCacheUpdateIntervalTicks").ToInt32(DroneNetwork.SchedulerAntennaCacheUpdateIntervalTicks));
-            DroneNetwork.SchedulerMessageThrottlingTicks = Math.Max(1, ini.Get("DroneNetwork", "SchedulerMessageThrottlingTicks").ToInt32(DroneNetwork.SchedulerMessageThrottlingTicks));
-            DroneNetwork.SchedulerMessageReadLimit = Math.Max(1, ini.Get("DroneNetwork", "SchedulerMessageReadLimit").ToInt32(DroneNetwork.SchedulerMessageReadLimit));
-            DroneNetwork.DroneMessageThrottlingTicks = Math.Max(1, ini.Get("DroneNetwork", "DroneMessageThrottlingTicks").ToInt32(DroneNetwork.DroneMessageThrottlingTicks));
-            DroneNetwork.MessageRetentionTicks = Math.Max(600, ini.Get("DroneNetwork", "MessageRetentionTicks").ToInt32(DroneNetwork.MessageRetentionTicks));
-            DroneNetwork.MessageCleanupIntervalTicks = Math.Max(60, ini.Get("DroneNetwork", "MessageCleanupIntervalTicks").ToInt32(DroneNetwork.MessageCleanupIntervalTicks));
+            MessageQueue.networkUpdateRate = Math.Max(1.0f, ini.Get("MessageQueue", "NetworkUpdateRate").ToSingle(MessageQueue.networkUpdateRate));
+            MessageQueue.schedulerAntennaCacheUpdateIntervalTicks = Math.Max(60, ini.Get("MessageQueue", "SchedulerAntennaCacheUpdateIntervalTicks").ToInt32(MessageQueue.schedulerAntennaCacheUpdateIntervalTicks));
+            MessageQueue.schedulerMessageThrottlingTicks = Math.Max(1, ini.Get("MessageQueue", "SchedulerMessageThrottlingTicks").ToInt32(MessageQueue.schedulerMessageThrottlingTicks));
+            MessageQueue.schedulerMessageReadLimit = Math.Max(1, ini.Get("MessageQueue", "SchedulerMessageReadLimit").ToInt32(MessageQueue.schedulerMessageReadLimit));
+            MessageQueue.droneMessageThrottlingTicks = Math.Max(1, ini.Get("MessageQueue", "DroneMessageThrottlingTicks").ToInt32(MessageQueue.droneMessageThrottlingTicks));
+            MessageQueue.messageRetentionTicks = Math.Max(600, ini.Get("MessageQueue", "MessageRetentionTicks").ToInt32(MessageQueue.messageRetentionTicks));
+            MessageQueue.messageCleanupIntervalTicks = Math.Max(60, ini.Get("MessageQueue", "MessageCleanupIntervalTicks").ToInt32(MessageQueue.messageCleanupIntervalTicks));
 
-            var serializationMode = ini.Get("DroneNetwork", "MessageSerializationMode").ToString("ProtoBuf");
+            var serializationMode = ini.Get("MessageQueue", "MessageSerializationMode").ToString("ProtoBuf");
             MessageSerializationMode mode;
             if (Enum.TryParse<MessageSerializationMode>(serializationMode, true, out mode))
             {
-                DroneNetwork.MessageSerializationMode = mode;
+                MessageQueue.messageSerializationMode = mode;
             }
 
             // Parse LogisticsComputer section

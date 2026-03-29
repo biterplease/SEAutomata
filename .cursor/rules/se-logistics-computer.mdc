@@ -1,0 +1,46 @@
+---
+description: Logic for Logistics Computer Grid Inventory Mapping and Conveyor Networks
+globs: IAILogisticsComputer.cs, IAILogisticsComputerBlock.cs, LogisticsComputer.cs, IAILogisticsComputerSettings.cs
+---
+
+# Logistics Computer (LC) & Conveyor Network Logic
+
+The LC is a Large-Grid exclusive block responsible for managing inventory quotas and interfacing with the IAIScheduler. It treats the grid not as a single container, but as a collection of isolated or interconnected **Conveyor Networks**.
+
+## 1. Conveyor Network Mapping
+- **Definition**: A "Conveyor Network" is a group of inventory-holding blocks (Cargo, Connectors, Collectors) that can physically exchange items.
+- **Connectivity Logic**: 
+    - **CRITICAL**: Use the indexed documentation for `IMyInventory.IsConnectedTo`. 
+    - Implementation must call `bool IMyInventory.IsConnectedTo(IMyInventory other)` to validate if two blocks share a physical path.
+- **Mapping Protocol**:
+    - Iterate through all inventory blocks on the grid.
+    - Group blocks into a `ConveyorNetwork` object if `IsConnectedTo` returns true.
+    - **Caching**: Only re-run this "Grid Crawl" when `OnBlockAdded` or `OnBlockRemoved` is triggered for the grid. Do not run this per-frame.
+- **Inventory Nodes**:
+    - **Connectors**: Bi-directional I/O. These are the primary interaction points for Drones.
+    - **Collectors**: Input-only. Items entering here must be mapped to their destination Network.
+    - **Cargo Containers**: Internal storage nodes.
+- **Update Strategy**:
+    - Perform a full grid crawl to group inventories into `List<ConveyorNetwork>` only when the grid structure changes (`OnBlockAdded`/`OnBlockRemoved`).
+    - Cache these networks to avoid expensive connectivity checks every tick.
+
+## 2. Inventory Quotas & Validation
+- **Scopes**: Quotas can be set per **Specific Container** or per **Conveyor Network**.
+- **Validation**: 
+    - Sum the `MaxVolume` of all containers within a Conveyor Network. 
+    - If `Quota > MaxVolume`, update terminal `DetailedInfo` to notify the player of an "Impossible Quota."
+- **One-Time Requests**: 
+    - The LC monitors its CustomData. If a player enters a request string (Item, Amount) and triggers the "Send Request" action:
+    - The LC generates an immediate `InventoryRequisition` or `TaskAnnouncement`.
+
+## 3. Scheduler Interaction (The Handshake)
+- **Registration**: The LC must register itself with any non-blacklisted `IAIScheduler` in antenna range.
+- **Push (Surplus)**: If a Network's inventory exceeds a quota, the LC broadcasts a `FetchCargo` task.
+- **Pull (Deficit)**: If a Network's inventory falls below a quota, the LC broadcasts a `DeliverCargo` task.
+- **Mutual Blacklisting**:
+    - Both LC and Schedulers maintain a `List<long> BlacklistedIds` (persisted in Settings).
+    - If an ID is blacklisted, ignore all incoming messages/requests from that entity.
+
+## 4. Performance Guardrails
+- **Throttled Scanning**: Use a `lastInventoryScanFrame` timer to ensure inventory volumes are only polled every 100 ticks.
+- **BFS Optimization**: When mapping networks, start the search from Connectors and move inward to Cargo to prioritize access points for drones.

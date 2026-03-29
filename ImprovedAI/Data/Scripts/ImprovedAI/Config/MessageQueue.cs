@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace ImprovedAI.Data.Scripts.ImprovedAI.Config
+namespace ImprovedAI.Config
 {
     public interface IMessageQueueConfig
     {
@@ -61,5 +61,8 @@ namespace ImprovedAI.Data.Scripts.ImprovedAI.Config
         public int MessageCleanupIntervalTicks() => messageCleanupIntervalTicks;
         public MessageSerializationMode messageSerializationMode { get; internal set; } = MessageSerializationMode.ProtoBuf;
         public MessageSerializationMode SerializationMode() => messageSerializationMode;
+
+        public int maxBidsPerTask { get; internal set; } = 10;
+        public int MaxBidsPerTask() => maxBidsPerTask;
     }
 }

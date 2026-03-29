@@ -1,7 +1,8 @@
 ﻿using static ImprovedAI.Drone;
 using ProtoBuf;
 using VRageMath;
-using VRage.Game.ModAPI; // Assuming you are using ProtoBuf for serialization
+using VRage.Game.ModAPI;
+using Sandbox.Game.Screens.Helpers; // Assuming you are using ProtoBuf for serialization
 
 namespace ImprovedAI
 {
@@ -18,7 +19,7 @@ namespace ImprovedAI
         public bool IsEnabled = false;
         [ProtoMember(2)]
         public OperationMode OperationMode = OperationMode.StandAlone;
-        public long managingScheduler;
+        public long managingScheduler; 
         /// <summary>
         /// Drone will always return to this connector when no more tasks are assigned.
         /// WARNING: if this connector is set as home to more than one drone, may have catastrophic consequences.

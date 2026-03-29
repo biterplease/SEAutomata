@@ -115,7 +115,7 @@ namespace ImprovedAI
             {
                 if (Entity.Storage != null)
                 {
-                    var storage = Entity.Storage.GetValue(IAISession.ModGuid);
+                    var storage = Entity.Storage.GetValue(IAISession.MOD_GUID);
                     if (!string.IsNullOrEmpty(storage))
                     {
                         // Parse configuration from storage

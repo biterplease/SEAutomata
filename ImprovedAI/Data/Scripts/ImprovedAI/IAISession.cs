@@ -14,11 +14,15 @@ namespace ImprovedAI
     [MySessionComponentDescriptor(MyUpdateOrder.BeforeSimulation)]
     public class IAISession : MySessionComponentBase
     {
+        public const string VERSION = "v0.0.1";
+        public const string MOD_NAME = "ImprovedAI";
+        public static readonly Guid MOD_GUID = new Guid("1CFDA990-FD26-4950-A127-7BBC99FF1397");
+        private const string MESSAGE_QUEUE_SNAPSHOT_FILE = "IAIMessageQueueSnapshot.dat";
         public static IAISession Instance;
         private static ServerConfig _serverConfig;
 
         // Shared message queue for all AI components
-        public MessageQueue _messageQueue { get; private set; }
+        public static MessageQueue _messageQueue;
 
         // Mod-wide settings and management
         private bool isInitialized = false;
@@ -26,9 +30,6 @@ namespace ImprovedAI
         private int _updateInterval; // DON'T initialize here - will be set in Init()
         private int updateCounter = 0;
         private const int UPDATE_INTERVAL = 60;
-        public static Guid ModGuid = new Guid("1CFDA990-FD26-4950-A127-7BBC99FF1397");
-        public const string ModName = "ImprovedAI";
-        private const string MESSAGE_QUEUE_SNAPSHOT_FILE = "IAIMessageQueueSnapshot.dat";
 
         // _messageQueue
         private int messageQueueCleanupIntervalTicks;
@@ -46,15 +47,13 @@ namespace ImprovedAI
         public Dictionary<long, string> AllComponents;
 
         /// <summary>
-        /// All components: steel plate, metal grid, etc.
+        /// All blocks: steel plate, metal grid, etc.
         /// For use in scheduler grind and weld list filters.
         /// </summary>
         public Dictionary<long, string> AllBlocks;
 
-        public ServerConfig GetConfig()
-        {
-            return _serverConfig;
-        }
+        public static ServerConfig GetConfig() => _serverConfig;
+        public static MessageQueue GetMessageQueue() => _messageQueue;
 
         public override void LoadData()
         {
@@ -79,15 +78,19 @@ namespace ImprovedAI
         {
             try
             {
-                Log.Initialize(ServerConfig.MOD_NAME, 0, "ImprovedAI.log", typeof(IAISession));
+                Log.Initialize(MOD_NAME, 0, "ImprovedAI.log", typeof(IAISession));
                 Log.Info("=== ImprovedAI Initializing ===");
 
-                _messageQueue = MessageQueue.Instance;
                 _serverConfig = ServerConfig.Instance;
                 _serverConfig.LoadConfig();
+                Log.Verbose("Server config loaded.");
+                MessageQueue.Init(_serverConfig.MessageQueue);
+                Log.Verbose("Message queue initialized.");
+                _messageQueue = MessageQueue.Instance;
                 if (MyAPIGateway.Utilities.FileExistsInWorldStorage(MESSAGE_QUEUE_SNAPSHOT_FILE, typeof(IAISession)))
                 {
-                    using (var reader = MyAPIGateway.Utilities.ReadBinaryFileInWorldStorage(MESSAGE_QUEUE_SNAPSHOT_FILE, typeof(IAISession)))
+                    Log.Info("Found existing messages {0}; loading into MessageQueue");
+                    using (BinaryReader reader = MyAPIGateway.Utilities.ReadBinaryFileInWorldStorage(MESSAGE_QUEUE_SNAPSHOT_FILE, typeof(IAISession)))
                     {
                         int length = reader.ReadInt32();
                         byte[] data = reader.ReadBytes(length);
@@ -101,6 +104,7 @@ namespace ImprovedAI
                 Log.Info("Mod loaded successfully");
                 Log.Info("Update interval: {0} ticks", _updateInterval);
                 IAILogisticsComputerTerminalControls.DoOnce(ModContext);
+                IAIDroneControllerTerminalControls.DoOnce(ModContext);
 
                 //LogAllTerminalControlClasses();
 
@@ -383,15 +387,8 @@ namespace ImprovedAI
 
         void LoadLangOverrides()
         {
-            try
-            {
-                string folder = Path.Combine(ModContext.ModPathData, "Localization");
-                MyTexts.LoadTexts(folder, cultureName: "override", subcultureName: null);
-            }
-            catch
-            {
-                // ModContext might not be ready yet, will try again in Init
-            }
+            string folder = Path.Combine(ModContext.ModPathData, "Localization");
+            MyTexts.LoadTexts(folder, cultureName: "override", subcultureName: null);
         }
 
         void GuiControlRemoved(object screen)

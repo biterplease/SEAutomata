@@ -1,0 +1,13 @@
+---
+alwaysApply: true
+---
+# Space Engineers Drone Project
+Automated drones for task completion using a three-tier architecture:
+1. **Drone**: Pathfinding and execution.
+2. **LogisticsComputer**: Inventory analysis.
+3. **Scheduler**: Task coordination.
+
+## Core Constraints
+- **Language**: C# 6.0 features ONLY (No records, no top-level statements).
+- **Communication**: Internal-to-the-mod message queue, that simulates antenna communications by checking signal ranges and antenna ownership.
+- **Orientation**: Refer to @space-engineers-coords.mdc for movement logic.

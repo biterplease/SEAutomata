@@ -19,9 +19,9 @@ namespace ImprovedAI.Config
         float MinWaypointDistance();
         float MaxWaypointDistance();
         int MaxRepositionAttempts();
-        float MinAltitudeBuffer();
         int MaxPathNodes();
         TimeSpan MaxPathfindingTime();
+        float RaycastCooldownSeconds();
     }
     public class PathfindingConfig : IPathfindingConfig
     {
@@ -91,8 +91,6 @@ namespace ImprovedAI.Config
         public float MaxWaypointDistance() => maxWaypointDistance;
         public int maxRepositionAttempts { get; internal set; } = 10;
         public int MaxRepositionAttempts() => maxRepositionAttempts;
-        public float minAltitudeBuffer { get; internal set; } = 20.0f;
-        public float MinAltitudeBuffer() => minAltitudeBuffer;
 
         /// <summary>
         /// Max number of waypoints created when pathfinding.
@@ -101,5 +99,8 @@ namespace ImprovedAI.Config
         public int MaxPathNodes() => maxPathNodes;
         public TimeSpan maxPathfindingTime { get; internal set; } = TimeSpan.FromMilliseconds(50);
         public TimeSpan MaxPathfindingTime() => maxPathfindingTime;
+
+        public float raycastCooldownSeconds { get; internal set; } = 1.0f;
+        public float RaycastCooldownSeconds() => raycastCooldownSeconds;
     }
 }

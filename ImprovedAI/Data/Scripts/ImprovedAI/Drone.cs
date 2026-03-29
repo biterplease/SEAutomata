@@ -4,7 +4,7 @@ using System;
 namespace ImprovedAI
 {
 
-    [ProtoContract(UseProtoMembersOnly = true)]
+    [ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class Drone
     {
         [ProtoContract]

@@ -1,0 +1,19 @@
+---
+description: Player Configuration and Emergency Behaviors
+globs: IAIDroneControllerSettings.cs, IAIDroneControllerTerminalControls.cs
+---
+
+# Drone Player Configuration
+Players control the "Specialization" of their drones via Terminal settings.
+
+## 1. Task Filtering
+- Even if a drone *can* weld, a player may untick "Weld" tasks in the terminal. 
+- The `IAIDroneControllerBlock` must filter the `Tasks` it reports to the Scheduler based on these player-selected toggles.
+
+## 2. Emergency & Risk (Gameplay)
+- **Monitoring**: If `MonitorBatteryLevels` or `MonitorHydrogenLevels` is TRUE, the drone must trigger a "Return to Home" state at the `RefuelThreshold`.
+- **Cost of Failure**: If a player misconfigures thresholds (e.g., sets Refuel to 5% when 10% is needed to get home), allow the drone to run out of power. **Do not "auto-fix" player math errors**—this is an intended gameplay mechanic.
+
+## 3. Combat Ready (Future-Proofing)
+- `Capabilities.CombatReady` is a special-case manual checkbox.
+- In the initial draft, keep combat logic dormant. If checked, the drone simply reports as "Combat Capable" to the scheduler but does not execute engagement logic yet.

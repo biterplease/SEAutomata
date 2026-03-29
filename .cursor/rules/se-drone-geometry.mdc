@@ -1,0 +1,24 @@
+---
+description: Drone Dimensions and Profile-Aware Pathfinding
+globs: **/Pathfinding/*.cs, IAIDroneControllerSettings.cs
+---
+
+# Drone Dimensional Awareness
+Drones must understand their physical "footprint" to avoid getting stuck in tight spaces.
+
+## 1. Profile Definitions
+- **Player Input**: Players select a 2D shape (Rectangle, Triangle, Oval) via terminal for **Top, Side, and Front** views.
+- **Normalization**: 
+  - Rectangle: Full width/height.
+  - Triangle: 50% width at top, 100% at bottom (tapered).
+  - Oval: 80% of bounding box (rounded corners).
+
+## 2. Path Validation
+- When `PathfindingManager` checks a waypoint, it must verify the "Profile Clearance":
+  - If the drone is moving "Forward," it checks the "Front" profile against the opening size.
+  - If the drone is strafing, it checks the "Side" profile.
+- **The "Jet" Example**: A long, narrow drone (15m x 5m) should attempt to fly "head-on" through a narrow canyon rather than "sideways."
+
+## 3. Implementation Plan
+- Start with **Rectangular Profiles** based on the bounding box of the drone's grid.
+- Use `PathfindingUtil` to calculate if the `ControllerWorldMatrix` allows the profile to pass through the current `PathfindingRequest` raycast distance.

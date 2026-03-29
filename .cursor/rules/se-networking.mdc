@@ -1,0 +1,8 @@
+---
+description: Multiplayer Syncing and Client-Server Logic
+globs: **/Networking/*.cs, **/Sync/*.cs
+---
+# Networking Standards
+- For complex syncing (Full Client-Server), refer to logic in @SE-NanobotBuildAndRepairMod.
+- For lightweight client-only logic, refer to @SEInventorySorter.
+- Always use `MyAPIGateway.Multiplayer` for multiplayer message transmission.
