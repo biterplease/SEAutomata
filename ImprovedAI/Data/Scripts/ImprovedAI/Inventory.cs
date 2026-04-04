@@ -1,4 +1,4 @@
-﻿using ProtoBuf;
+using ProtoBuf;
 using System;
 using System.Collections.Generic;
 using VRage.Collections;
@@ -287,6 +287,27 @@ namespace ImprovedAI
         public bool IsEmpty()
         {
             return inventory.Count == 0;
+        }
+
+        /// <summary>
+        /// True if this inventory has at least the quantities in <paramref name="required"/> for every listed item.
+        /// Empty <paramref name="required"/> returns true.
+        /// </summary>
+        public bool ContainsAtLeast(Inventory required)
+        {
+            if (required == null || required.IsEmpty())
+                return true;
+
+            List<KVPair> reqItems = required.GetAllItems();
+            for (int i = 0; i < reqItems.Count; i++)
+            {
+                KVPair pair = reqItems[i];
+                if (pair.Value <= 0)
+                    continue;
+                if (GetItemCount(pair.Key) < pair.Value)
+                    return false;
+            }
+            return true;
         }
 
         /// <summary>

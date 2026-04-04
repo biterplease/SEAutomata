@@ -16,6 +16,13 @@ namespace ImprovedAI
 {
     public class IAIScheduler
     {
+        private sealed class PendingBidRoundState
+        {
+            public Task Task;
+            public long DeadlineFrame;
+            public readonly List<CollectedBid> Bids = new List<CollectedBid>();
+        }
+
         private MyConcurrentDictionary<long, Drone> registeredDrones = new MyConcurrentDictionary<long, Drone>();
         private MyConcurrentDictionary<long, LogisticsComputer> registeredLogisticsComputers = new MyConcurrentDictionary<long, LogisticsComputer>();
         /// <summary>
@@ -60,6 +67,8 @@ namespace ImprovedAI
         private readonly int _maxConsecutiveErrors = ServerConfig.Instance.SchedulerBounds.MaxConsecutiveErrors;
         private readonly int _maintenanceIntervalTicks = ServerConfig.Instance.SchedulerBounds.ManintenanceIntervalTicks;
         private readonly int _antennaCacheUpdateIntervalTicks = ServerConfig.Instance.MessageQueue.SchedulerAntennaCacheUpdateIntervalTicks();
+        private readonly int _bidCollectionWindowTicks = ServerConfig.Instance.SchedulerBounds.BidCollectionWindowTicks;
+        private readonly int _bidBlacklistCooldownTicks = ServerConfig.Instance.SchedulerBounds.BidBlacklistCooldownTicks;
         /// <summary>
         /// Timeout after which drones are removed if we don't hear from them again.
         /// </summary>
@@ -77,8 +86,13 @@ namespace ImprovedAI
         private readonly List<Message<DroneReport>> _droneReportCache = new List<Message<DroneReport>>();
         private readonly List<Message<LogisticsUpdate>> _logisticsRegistrationCache = new List<Message<LogisticsUpdate>>();
         private readonly List<Message<LogisticsUpdate>> _logisticsUpdateCache = new List<Message<LogisticsUpdate>>();
+        private readonly List<Message<TaskBid>> _taskBidCache = new List<Message<TaskBid>>();
+        private readonly List<Message<TaskFulfillmentLost>> _taskFulfillmentLostCache = new List<Message<TaskFulfillmentLost>>();
         private readonly object _taskLock = new object();
         private int _taskIdCounter = 0;
+        private PendingBidRoundState _pendingBidRound;
+        private readonly Dictionary<long, Dictionary<uint, long>> _bidBlacklistUntilFrame = new Dictionary<long, Dictionary<uint, long>>();
+        private readonly object _bidBlacklistLock = new object();
 
         private static readonly Channel[] DroneManagementChannels = new Channel[]
         {
@@ -166,6 +180,7 @@ namespace ImprovedAI
                 if (currentState != State.Error && currentState != State.Initializing)
                 {
                     ReadTaskAbortedMessages();
+                    ReadTaskFulfillmentLostMessages();
                     ReadDroneRegistrations();
                     ReadDroneReports((ushort)messageReadLimit);
                     ReadLogisticsRegistrationAndUpdates();
@@ -361,22 +376,17 @@ namespace ImprovedAI
 
         private void HandleTaskAssignment()
         {
-            int assigned = 0;
-            // scheduler set to only repeater task messages
-            //if (operationMode.Equals(OperationMode.Repeater))
-            //{
-            //    Task task;
-            //    while (taskQueue.TryDequeue(out task))
-            //    {
-            //        var message
-            //        var needsAck = false; // repeater does not care
-            //        messaging.BroadcastMessage((ushort)Channel.SCHEDULER_FORWARD, task, entityId, needsAck);
-            //    }
-            //}
-            if (registeredDrones.Count != 0 && operationMode.HasFlag(OperationMode.Orchestrator))
+            long currentFrame = MyAPIGateway.Session.GameplayFrameCounter;
+
+            if (operationMode.HasFlag(OperationMode.Orchestrator) &&
+                (registeredDrones.Count > 0 || registeredLogisticsComputers.Count > 0))
             {
+                ReadTaskBids(currentFrame);
+                TryFinalizePendingBidRound(currentFrame);
+                TryStartNextBidRound(currentFrame);
+                MaybeTransitionAssigningToStandby();
             }
-            // no registered drones
+
             if (registeredDrones.Count == 0 && operationMode.HasFlag(OperationMode.DelegateIfNoDrones))
             {
                 for (int i = 0; i < _maxTasksAssignedPerBatch; i++)
@@ -388,11 +398,10 @@ namespace ImprovedAI
                         {
                             Tasks = new List<Task> { task }
                         };
-                        var msgId = IdGenerator.GenerateId(ref _taskIdCounter, entityId);
-                        var errorCode = messaging.SendMessage((ushort)Channel.SCHEDULER_FORWARD, taskAssignment, entityId, true);
+                        uint msgId = IdGenerator.GenerateId(ref _taskIdCounter, entityId);
+                        ErrorCode errorCode = messaging.SendMessage((ushort)Channel.SCHEDULER_FORWARD, taskAssignment, entityId, true);
                         if (errorCode == ErrorCode.None)
                             delegatedTasksNeedingAck.Add((ushort)(msgId & 0xFFFF), task.TaskId);
-                        assigned++;
                     }
                     else
                     {
@@ -402,8 +411,311 @@ namespace ImprovedAI
             }
             if (registeredDrones.Count == 0 && !operationMode.HasFlag(OperationMode.DelegateIfNoDrones))
                 Log.Info("Scheduler {0}: No available drones", entityId);
-            return;
+        }
 
+        private long GetSchedulerOwnerId()
+        {
+            IMyCubeBlock cube = Entity as IMyCubeBlock;
+            return cube != null ? cube.OwnerId : 0L;
+        }
+
+        private bool IsBidBlacklisted(long bidderId, uint taskId, long currentFrame)
+        {
+            lock (_bidBlacklistLock)
+            {
+                Dictionary<uint, long> inner;
+                if (!_bidBlacklistUntilFrame.TryGetValue(bidderId, out inner))
+                    return false;
+                long untilFrame;
+                if (!inner.TryGetValue(taskId, out untilFrame))
+                    return false;
+                if (currentFrame >= untilFrame)
+                {
+                    inner.Remove(taskId);
+                    if (inner.Count == 0)
+                        _bidBlacklistUntilFrame.Remove(bidderId);
+                    return false;
+                }
+                return true;
+            }
+        }
+
+        private void AddBidBlacklist(long bidderId, uint taskId, long currentFrame)
+        {
+            lock (_bidBlacklistLock)
+            {
+                Dictionary<uint, long> inner;
+                if (!_bidBlacklistUntilFrame.TryGetValue(bidderId, out inner))
+                {
+                    inner = new Dictionary<uint, long>();
+                    _bidBlacklistUntilFrame[bidderId] = inner;
+                }
+                inner[taskId] = currentFrame + _bidBlacklistCooldownTicks;
+            }
+        }
+
+        private void ReadTaskBids(long currentFrame)
+        {
+            if (_pendingBidRound == null)
+                return;
+
+            messaging.ReadMessages(
+                entityId,
+                ownAntenna,
+                Channel.DIRECT_MESSAGE,
+                _taskBidCache,
+                messageReadLimit,
+                clear: true,
+                messageFilters: PayloadType.TaskBid);
+
+            Task pendingTask = _pendingBidRound.Task;
+            for (int i = 0; i < _taskBidCache.Count; i++)
+            {
+                Message<TaskBid> message = _taskBidCache[i];
+                if (message.RecipientId != entityId)
+                    continue;
+                TaskBid payload = message.Payload;
+                if (payload == null || payload.TaskId != pendingTask.TaskId)
+                    continue;
+
+                long senderId = message.SenderId;
+                if (!registeredDrones.ContainsKey(senderId) && !registeredLogisticsComputers.ContainsKey(senderId))
+                    continue;
+                if (IsBidBlacklisted(senderId, payload.TaskId, currentFrame))
+                    continue;
+
+                bool senderIsDrone = registeredDrones.ContainsKey(senderId);
+                bool senderIsLc = registeredLogisticsComputers.ContainsKey(senderId);
+                if (payload.BidderKind == TaskBidderKind.Drone && !senderIsDrone)
+                    continue;
+                if (payload.BidderKind == TaskBidderKind.LogisticsComputer && !senderIsLc)
+                    continue;
+
+                List<CollectedBid> bids = _pendingBidRound.Bids;
+                int existing = -1;
+                for (int b = 0; b < bids.Count; b++)
+                {
+                    if (bids[b].SenderId == senderId)
+                    {
+                        existing = b;
+                        break;
+                    }
+                }
+                CollectedBid cb = new CollectedBid { SenderId = senderId, Bid = payload };
+                if (existing >= 0)
+                    bids[existing] = cb;
+                else
+                    bids.Add(cb);
+            }
+        }
+
+        private void TryFinalizePendingBidRound(long currentFrame)
+        {
+            if (_pendingBidRound == null)
+                return;
+            if (currentFrame < _pendingBidRound.DeadlineFrame)
+                return;
+
+            PendingBidRoundState round = _pendingBidRound;
+            _pendingBidRound = null;
+
+            Task task = round.Task;
+            List<CollectedBid> bids = round.Bids;
+            int winIdx = TaskBidSelection.PickWinnerIndex(bids, task.TaskType);
+            if (winIdx < 0)
+            {
+                taskQueue.Enqueue(task);
+                Log.Info("AI scheduler {0}: no bids for task {1}, re-queued", entityId, task.TaskId);
+                return;
+            }
+
+            CollectedBid winner = bids[winIdx];
+            AwardTaskToWinner(winner.SenderId, task, winner.Bid.BidderKind);
+            Log.Info("AI scheduler {0}: awarded task {1} to bidder {2}", entityId, task.TaskId, winner.SenderId);
+        }
+
+        private void TryStartNextBidRound(long currentFrame)
+        {
+            if (_pendingBidRound != null)
+                return;
+            if (taskQueue.Count == 0)
+                return;
+
+            Task task;
+            if (!taskQueue.TryDequeue(out task))
+                return;
+
+            Inventory reqPayload = task.Payload;
+            TaskAnnouncement announcement = new TaskAnnouncement
+            {
+                TaskId = task.TaskId,
+                Type = task.TaskType,
+                Destination = task.Position,
+                RequiredCapabilities = SchedulerTaskCapabilities.RequiredCapabilitiesFor(task.TaskType),
+                SchedulerEntityId = entityId,
+                RequiredPayload = reqPayload,
+            };
+
+            Message<TaskAnnouncement> msg = new Message<TaskAnnouncement>
+            {
+                Payload = announcement,
+                MessageId = IdGenerator.GenerateId(ref _taskIdCounter, entityId),
+                CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
+                SenderId = entityId,
+                SenderOwnerId = GetSchedulerOwnerId(),
+                Channel = Channel.DRONE_TASK_ANNOUNCEMENT,
+                RequiresAck = false,
+                RecipientBlockType = MessageQueue.IAIBlockType.Drone | MessageQueue.IAIBlockType.LogisticsComputer,
+            };
+
+            ErrorCode broadcastResult = messaging.BroadcastMessage(ownAntenna, msg, false);
+            if (broadcastResult != ErrorCode.None)
+            {
+                taskQueue.Enqueue(task);
+                Log.Warning(
+                    "AI scheduler {0}: TaskAnnouncement broadcast failed ({1}) for task {2}",
+                    entityId, broadcastResult, task.TaskId);
+                return;
+            }
+
+            _pendingBidRound = new PendingBidRoundState
+            {
+                Task = task,
+                DeadlineFrame = currentFrame + _bidCollectionWindowTicks,
+            };
+            Log.Verbose("AI scheduler {0}: bid round started for task {1}", entityId, task.TaskId);
+        }
+
+        private void AwardTaskToWinner(long winnerId, Task task, TaskBidderKind bidderKind)
+        {
+            task.AssignedBy = entityId;
+            task.AssignedTime = DateTime.UtcNow;
+
+            TaskAssignment assignment = new TaskAssignment
+            {
+                Tasks = new List<Task> { task },
+            };
+
+            MessageQueue.IAIBlockType blockType = MessageQueue.IAIBlockType.Drone;
+            if (bidderKind == TaskBidderKind.LogisticsComputer)
+                blockType = MessageQueue.IAIBlockType.LogisticsComputer;
+
+            Message<TaskAssignment> msg = new Message<TaskAssignment>
+            {
+                Payload = assignment,
+                MessageId = IdGenerator.GenerateId(ref _taskIdCounter, entityId),
+                CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
+                RecipientId = winnerId,
+                SenderId = entityId,
+                SenderOwnerId = GetSchedulerOwnerId(),
+                RequiresAck = false,
+                RecipientBlockType = blockType,
+                Channel = Channel.DIRECT_MESSAGE,
+            };
+
+            ErrorCode sendResult = messaging.SendDirectMessage(ownAntenna, msg, false);
+            if (sendResult != ErrorCode.None)
+            {
+                taskQueue.Enqueue(task);
+                Log.Warning(
+                    "AI scheduler {0}: TaskAssignment to {1} failed ({2}) for task {3}",
+                    entityId, winnerId, sendResult, task.TaskId);
+                return;
+            }
+
+            lock (_taskLock)
+            {
+                List<Task> taskList;
+                if (!assignedTasks.TryGetValue(winnerId, out taskList))
+                {
+                    taskList = new List<Task>();
+                    assignedTasks[winnerId] = taskList;
+                }
+                taskList.Add(task);
+            }
+        }
+
+        private int GetTotalAssignedTaskCount()
+        {
+            int total = 0;
+            foreach (KeyValuePair<long, List<Task>> kvp in assignedTasks)
+            {
+                total += kvp.Value.Count;
+            }
+            return total;
+        }
+
+        private void MaybeTransitionAssigningToStandby()
+        {
+            if (taskQueue.Count != 0 || _pendingBidRound != null)
+                return;
+            if (GetTotalAssignedTaskCount() > 0)
+                return;
+            Log.Verbose("Scheduler {0}: task queue drained, returning to Standby", entityId);
+            currentState = State.Standby;
+        }
+
+        private void ReadTaskFulfillmentLostMessages()
+        {
+            messaging.ReadMessages(
+                entityId,
+                ownAntenna,
+                Channel.DIRECT_MESSAGE,
+                _taskFulfillmentLostCache,
+                messageReadLimit,
+                clear: true,
+                messageFilters: PayloadType.TaskFulfillmentLost);
+
+            for (int i = 0; i < _taskFulfillmentLostCache.Count; i++)
+            {
+                Message<TaskFulfillmentLost> message = _taskFulfillmentLostCache[i];
+                if (message.RecipientId != entityId)
+                    continue;
+                TaskFulfillmentLost payload = message.Payload;
+                if (payload == null)
+                    continue;
+                HandleTaskFulfillmentLost(message.SenderId, payload.TaskId, payload.Reason);
+            }
+        }
+
+        private void HandleTaskFulfillmentLost(long logisticsComputerId, uint taskId, string reason)
+        {
+            long currentFrame = MyAPIGateway.Session.GameplayFrameCounter;
+            lock (_taskLock)
+            {
+                List<Task> taskList;
+                if (!assignedTasks.TryGetValue(logisticsComputerId, out taskList))
+                {
+                    Log.Warning(
+                        "AI scheduler {0}: TaskFulfillmentLost for task {1} from unassigned logistics computer {2}",
+                        entityId, taskId, logisticsComputerId);
+                    return;
+                }
+
+                int taskIndex = taskList.FindIndex(t => t.TaskId == taskId);
+                if (taskIndex < 0)
+                {
+                    Log.Warning(
+                        "AI scheduler {0}: TaskFulfillmentLost task {1} not found for logistics computer {2}",
+                        entityId, taskId, logisticsComputerId);
+                    return;
+                }
+
+                Task lostTask = taskList[taskIndex];
+                taskList.RemoveAt(taskIndex);
+                taskQueue.Enqueue(lostTask);
+
+                if (taskList.Count == 0)
+                {
+                    List<Task> removed;
+                    assignedTasks.TryRemove(logisticsComputerId, out removed);
+                }
+
+                Log.Info(
+                    "AI scheduler {0}: Logistics computer {1} lost fulfillment for task {2} ({3}); task re-queued",
+                    entityId, logisticsComputerId, taskId, reason ?? string.Empty);
+            }
+            AddBidBlacklist(logisticsComputerId, taskId, currentFrame);
         }
         private void UpdateAntennaCache(IMyRadioAntenna schedulerAntenna)
         {
@@ -693,40 +1005,43 @@ namespace ImprovedAI
         }
 
         /// <summary>
-        /// Drone gave up on a task (pathfinding dead end). Release assignment and re-queue work for another drone.
+        /// Drone or logistics computer gave up on an assigned task. Release assignment and re-queue; blacklist bidder for this task.
         /// </summary>
-        private void HandleTaskAborted(long droneId, ushort taskId, string reason)
+        private void HandleTaskAborted(long bidderId, ushort taskId, string reason)
         {
+            uint taskIdU = taskId;
+            long currentFrame = MyAPIGateway.Session.GameplayFrameCounter;
             lock (_taskLock)
             {
                 List<Task> taskList;
-                if (!assignedTasks.TryGetValue(droneId, out taskList))
+                if (!assignedTasks.TryGetValue(bidderId, out taskList))
                 {
-                    Log.Warning("AI scheduler {0}: TaskAborted for task {1} from unassigned drone {2}", entityId, taskId, droneId);
+                    Log.Warning("AI scheduler {0}: TaskAborted for task {1} from unassigned bidder {2}", entityId, taskId, bidderId);
                     return;
                 }
 
-                var taskIndex = taskList.FindIndex(t => t.TaskId == taskId);
+                int taskIndex = taskList.FindIndex(t => t.TaskId == taskIdU);
                 if (taskIndex < 0)
                 {
-                    Log.Warning("AI scheduler {0}: TaskAborted task {1} not found for drone {2}", entityId, taskId, droneId);
+                    Log.Warning("AI scheduler {0}: TaskAborted task {1} not found for bidder {2}", entityId, taskId, bidderId);
                     return;
                 }
 
-                var abortedTask = taskList[taskIndex];
+                Task abortedTask = taskList[taskIndex];
                 taskList.RemoveAt(taskIndex);
                 taskQueue.Enqueue(abortedTask);
 
                 if (taskList.Count == 0)
                 {
                     List<Task> removed;
-                    assignedTasks.TryRemove(droneId, out removed);
+                    assignedTasks.TryRemove(bidderId, out removed);
                 }
 
                 Log.Info(
-                    "AI scheduler {0}: Drone {1} aborted task {2} ({3}); task re-queued for reassignment",
-                    entityId, droneId, taskId, reason ?? string.Empty);
+                    "AI scheduler {0}: Bidder {1} aborted task {2} ({3}); task re-queued for reassignment",
+                    entityId, bidderId, taskId, reason ?? string.Empty);
             }
+            AddBidBlacklist(bidderId, taskIdU, currentFrame);
         }
 
         private void HandleTaskCompletion(long droneId, ushort taskId)
@@ -842,6 +1157,12 @@ namespace ImprovedAI
                 delegatedTasksNeedingAck.Clear();
             }
 
+            _pendingBidRound = null;
+            lock (_bidBlacklistLock)
+            {
+                _bidBlacklistUntilFrame.Clear();
+            }
+
             registeredDrones.Clear();
             registeredLogisticsComputers.Clear();
 
@@ -869,6 +1190,11 @@ namespace ImprovedAI
                 isEnabled = false;
 
                 // Clear any pending work to prevent cascading failures
+                if (_pendingBidRound != null)
+                {
+                    taskQueue.Enqueue(_pendingBidRound.Task);
+                    _pendingBidRound = null;
+                }
                 lock (_taskLock)
                 {
                     var abandonedTaskCount = taskQueue.Count;

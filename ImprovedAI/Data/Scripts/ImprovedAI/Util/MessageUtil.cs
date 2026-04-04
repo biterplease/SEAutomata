@@ -1,4 +1,4 @@
-﻿using ImprovedAI.VirtualNetwork;
+using ImprovedAI.VirtualNetwork;
 
 namespace ImprovedAI.Util
 {
@@ -14,6 +14,8 @@ namespace ImprovedAI.Util
                 return "DRONE_REPORTS";
             case Channel.DRONE_PERFORMANCE:
                 return "DRONE_PERFORMANCE";
+            case Channel.DRONE_TASK_ANNOUNCEMENT:
+                return "DRONE_TASK_ANNOUNCEMENT";
             case Channel.DRONE_TASK_ASSIGNMENT:
                 return "DRONE_TASK_ASSIGNMENT";
             case Channel.LOGISTIC_REGISTRATION:

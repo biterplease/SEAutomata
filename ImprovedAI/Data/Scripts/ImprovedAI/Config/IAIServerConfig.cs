@@ -159,6 +159,14 @@ namespace ImprovedAI.Config
             /// For whatever reason. Default is 5 minutes.
             /// </summary>
             public int ManintenanceIntervalTicks { get; internal set; } = 300; // 30 seconds
+            /// <summary>
+            /// Gameplay frames to collect TaskBid responses after a TaskAnnouncement.
+            /// </summary>
+            public int BidCollectionWindowTicks { get; internal set; } = 90;
+            /// <summary>
+            /// Gameplay frames a bidder stays blacklisted for a task after abort / fulfillment loss.
+            /// </summary>
+            public int BidBlacklistCooldownTicks { get; internal set; } = 3600;
         }
 
         public class LoggingConfig
@@ -241,6 +249,28 @@ namespace ImprovedAI.Config
             }
         }
 
+        private static int ReadIniIntPreferSections(MyIni ini, string primary, string legacy, string key, int defaultValue)
+        {
+            MyIniValue primaryVal = ini.Get(primary, key);
+            if (!string.IsNullOrEmpty(primaryVal.ToString()))
+                return primaryVal.ToInt32(defaultValue);
+            return ini.Get(legacy, key).ToInt32(defaultValue);
+        }
+
+        private static int ReadIniSchedulerStateInterval(
+            MyIni ini,
+            string stateSection,
+            string legacySection,
+            string nestedKey,
+            string legacyLongKey,
+            int defaultValue)
+        {
+            MyIniValue v = ini.Get(stateSection, nestedKey);
+            if (!string.IsNullOrEmpty(v.ToString()))
+                return v.ToInt32(defaultValue);
+            return ini.Get(legacySection, legacyLongKey).ToInt32(defaultValue);
+        }
+
         private void ParseConfig(string configText)
         {
             var ini = new MyIni();
@@ -274,21 +304,25 @@ namespace ImprovedAI.Config
             var maxPathfindingMs = Math.Max(10, ini.Get("Pathfinding", "MaxPathfindingTimeMs").ToInt32(50));
             Pathfinding.maxPathfindingTime = TimeSpan.FromMilliseconds(maxPathfindingMs);
 
-            // Parse Scheduler section
-            SchedulerBounds.MaxTargetLimit = Math.Max(1, ini.Get("Scheduler", "MaxTargetLimit").ToInt32(SchedulerBounds.MaxTargetLimit));
-            SchedulerBounds.PerScanLimit = Math.Max(10, ini.Get("Scheduler", "PerScanLimit").ToInt32(SchedulerBounds.PerScanLimit));
-            SchedulerBounds.MaxTaskAssignmentPerBatch = Math.Max(1, ini.Get("Scheduler", "MaxTaskAssignmentPerBatch").ToInt32(SchedulerBounds.MaxTaskAssignmentPerBatch));
-            SchedulerBounds.ScanDelayTicks = Math.Max(60, ini.Get("Scheduler", "ScanDelayTicks").ToInt32(SchedulerBounds.ScanDelayTicks));
-            SchedulerBounds.ErrorRecoveryIntervalTicks = Math.Max(60, ini.Get("Scheduler", "ErrorRecoveryIntervalTicks").ToInt32(SchedulerBounds.ErrorRecoveryIntervalTicks));
-            SchedulerBounds.MaxConsecutiveErrors = Math.Max(1, ini.Get("Scheduler", "MaxConsecutiveErrors").ToInt32(SchedulerBounds.MaxConsecutiveErrors));
-            SchedulerBounds.ManintenanceIntervalTicks = Math.Max(60, ini.Get("Scheduler", "MaintenanceIntervalTicks").ToInt32(SchedulerBounds.ManintenanceIntervalTicks));
+            // Parse SchedulerBounds (sample ImprovedAI.ini); [Scheduler] kept as legacy alias for same keys.
+            const string schedBounds = "SchedulerBounds";
+            const string schedLegacy = "Scheduler";
+            const string schedState = "SchedulerBounds.StateUpdateIntervalTicks";
+            SchedulerBounds.MaxTargetLimit = Math.Max(1, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "MaxTargetLimit", SchedulerBounds.MaxTargetLimit));
+            SchedulerBounds.PerScanLimit = Math.Max(10, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "PerScanLimit", SchedulerBounds.PerScanLimit));
+            SchedulerBounds.MaxTaskAssignmentPerBatch = Math.Max(1, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "MaxTaskAssignmentPerBatch", SchedulerBounds.MaxTaskAssignmentPerBatch));
+            SchedulerBounds.ScanDelayTicks = Math.Max(60, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "ScanDelayTicks", SchedulerBounds.ScanDelayTicks));
+            SchedulerBounds.ErrorRecoveryIntervalTicks = Math.Max(60, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "ErrorRecoveryIntervalTicks", SchedulerBounds.ErrorRecoveryIntervalTicks));
+            SchedulerBounds.MaxConsecutiveErrors = Math.Max(1, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "MaxConsecutiveErrors", SchedulerBounds.MaxConsecutiveErrors));
+            SchedulerBounds.ManintenanceIntervalTicks = Math.Max(60, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "MaintenanceIntervalTicks", SchedulerBounds.ManintenanceIntervalTicks));
+            SchedulerBounds.BidCollectionWindowTicks = Math.Max(10, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "BidCollectionWindowTicks", SchedulerBounds.BidCollectionWindowTicks));
+            SchedulerBounds.BidBlacklistCooldownTicks = Math.Max(60, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "BidBlacklistCooldownTicks", SchedulerBounds.BidBlacklistCooldownTicks));
 
-            // Parse Scheduler State Update Intervals
-            SchedulerBounds.StateUpdateIntervalTicks.Initializing = Math.Max(60, ini.Get("Scheduler", "InitializingUpdateInterval").ToInt32(SchedulerBounds.StateUpdateIntervalTicks.Initializing));
-            SchedulerBounds.StateUpdateIntervalTicks.Error = Math.Max(60, ini.Get("Scheduler", "ErrorUpdateInterval").ToInt32(SchedulerBounds.StateUpdateIntervalTicks.Error));
-            SchedulerBounds.StateUpdateIntervalTicks.Standby = Math.Max(60, ini.Get("Scheduler", "StandbyUpdateInterval").ToInt32(SchedulerBounds.StateUpdateIntervalTicks.Standby));
-            SchedulerBounds.StateUpdateIntervalTicks.Scanning = Math.Max(10, ini.Get("Scheduler", "ScanningUpdateInterval").ToInt32(SchedulerBounds.StateUpdateIntervalTicks.Scanning));
-            SchedulerBounds.StateUpdateIntervalTicks.Assigning = Math.Max(10, ini.Get("Scheduler", "AssigningUpdateInterval").ToInt32(SchedulerBounds.StateUpdateIntervalTicks.Assigning));
+            SchedulerBounds.StateUpdateIntervalTicks.Initializing = Math.Max(60, ReadIniSchedulerStateInterval(ini, schedState, schedLegacy, "Initializing", "InitializingUpdateInterval", SchedulerBounds.StateUpdateIntervalTicks.Initializing));
+            SchedulerBounds.StateUpdateIntervalTicks.Error = Math.Max(60, ReadIniSchedulerStateInterval(ini, schedState, schedLegacy, "Error", "ErrorUpdateInterval", SchedulerBounds.StateUpdateIntervalTicks.Error));
+            SchedulerBounds.StateUpdateIntervalTicks.Standby = Math.Max(60, ReadIniSchedulerStateInterval(ini, schedState, schedLegacy, "Standby", "StandbyUpdateInterval", SchedulerBounds.StateUpdateIntervalTicks.Standby));
+            SchedulerBounds.StateUpdateIntervalTicks.Scanning = Math.Max(10, ReadIniSchedulerStateInterval(ini, schedState, schedLegacy, "Scanning", "ScanningUpdateInterval", SchedulerBounds.StateUpdateIntervalTicks.Scanning));
+            SchedulerBounds.StateUpdateIntervalTicks.Assigning = Math.Max(10, ReadIniSchedulerStateInterval(ini, schedState, schedLegacy, "Assigning", "AssigningUpdateInterval", SchedulerBounds.StateUpdateIntervalTicks.Assigning));
 
             // Parse Drone section
             Drone.DefaultMonitorHydrogen = ini.Get("Drone", "DefaultMonitorHydrogen").ToBoolean(Drone.DefaultMonitorHydrogen);

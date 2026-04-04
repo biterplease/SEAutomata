@@ -14,7 +14,7 @@ using VRageMath;
 namespace ImprovedAI.VirtualNetwork
 {
         [Flags]
-        public enum PayloadType : byte
+        public enum PayloadType : ushort
         {
             None = 0,
             DroneReport = 1,
@@ -23,6 +23,9 @@ namespace ImprovedAI.VirtualNetwork
             InventoryRequisition = 8,
             RelayMessage = 16,
             TaskAborted = 32,
+            TaskAnnouncement = 64,
+            TaskBid = 128,
+            TaskFulfillmentLost = 256,
         }
     public sealed class MessageQueue
     {
@@ -68,7 +71,13 @@ namespace ImprovedAI.VirtualNetwork
             [ProtoMember(12)]
             public bool RequiresAck;
             [ProtoMember(13)]
-            public PayloadType PayloadType;
+            public ushort PayloadTypeValue;
+
+            public PayloadType PayloadType
+            {
+                get { return (PayloadType)PayloadTypeValue; }
+                set { PayloadTypeValue = (ushort)value; }
+            }
 
             public TimestampedMessage() { }
         }
@@ -422,6 +431,12 @@ namespace ImprovedAI.VirtualNetwork
                 return PayloadType.TaskAssignment;
             if (payload is TaskAborted)
                 return PayloadType.TaskAborted;
+            if (payload is TaskAnnouncement)
+                return PayloadType.TaskAnnouncement;
+            if (payload is TaskBid)
+                return PayloadType.TaskBid;
+            if (payload is TaskFulfillmentLost)
+                return PayloadType.TaskFulfillmentLost;
             return PayloadType.None;
         }
 

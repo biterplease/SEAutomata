@@ -1,0 +1,35 @@
+---
+description: Low-cost Task Bidding and Post-Award Pathfinding logic
+globs: IAIScheduler.cs, Drone.cs, Message.cs, IAILogisticsComputer.cs, IAILogisticsComputerBlock.cs, IAILogisticsComputerSettings.cs, IAILogisticsComputerTerminalControls.cs, MessageQueue.cs
+---
+
+# Task Bidding & Handshake Protocol
+To protect Server SimSpeed, drones must NEVER run pathfinding calculations during the bidding phase.
+
+## 1. The Low-Cost Procurement Flow
+1. **Broadcast (Scheduler)**: Sends `TaskAnnouncement` with `Destination` and `TaskType`.
+2. **The "Lightweight" Bid (Drone)**: Drones perform a zero-latency heuristic check:
+   - **Distance**: Use `Vector3D.DistanceSquared` (faster than `Distance`).
+   - **Suitability**: Check `Capabilities` vs `TaskType`.
+   - **Capacity**: Compare `CurrentCargoVolume` vs `RequiredVolume`.
+   - **Score Calculation**: 
+     $$BidScore = (DistSquared \times 0.5) + (CargoDeficit \times 0.3) + (PowerCost \times 0.2)$$
+3. **The Award (Scheduler)**:
+   - Scheduler collects bids for X ticks and selects the lowest `BidScore`.
+   - Sends `TaskAssignment` to the winner.
+
+## 2. Post-Award Validation (The "Heavy" Lift)
+Only the **Winning Drone** initiates pathfinding once the assignment is received:
+1. **Initial Pathing**: The drone runs `PathfindingManager.CalculatePath`.
+2. **Rejection/Give-Up**: 
+   - If `CalculatePath` returns `Failed` (due to geometry, lack of hardware, or complexity), the drone sends a `TaskDeclined` message.
+   - **Logic**: The Scheduler then re-broadcasts the task, blacklisting the failed drone for that specific Task ID.
+
+## 3. Heuristic Priorities
+- **Primary**: Capability matching (e.g., if the task is "Weld," prioritize drones with more active Welder blocks).
+- **Secondary**: Cargo Capacity (preference for drones that can complete the task in one trip).
+- **Tertiary**: $Distance^2$ to target.
+
+## 4. Performance Guardrails
+- **No Raycasts during Bidding**: Drones must not query the world/voxels to generate a bid.
+- **Async Selection**: The Scheduler handles the Bid Window asynchronously to prevent blocking the main game thread.

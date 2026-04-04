@@ -83,6 +83,7 @@ namespace ImprovedAI
         private Queue<Scheduler.Task> taskQueue = new Queue<Scheduler.Task>();
         private ushort currentTaskId = 0;
         private List<Message<IMessagePayload>> _messageCache = new List<Message<IMessagePayload>>();
+        private readonly List<Message<TaskAnnouncement>> _taskAnnouncementCache = new List<Message<TaskAnnouncement>>();
         #endregion
 
         #region Fields - Update Tracking
@@ -295,6 +296,7 @@ namespace ImprovedAI
                 // Read task assignments
                 if (operationMode == Drone.OperationMode.ManagedByScheduler)
                 {
+                    ReadTaskAnnouncements();
                     ReadTaskAssignments();
                 }
 
@@ -384,6 +386,7 @@ namespace ImprovedAI
             if (operationMode == Drone.OperationMode.ManagedByScheduler)
             {
                 messaging.Subscribe(_entityId, Channel.DRONE_TASK_ASSIGNMENT);
+                messaging.Subscribe(_entityId, Channel.DRONE_TASK_ANNOUNCEMENT);
                 SendDroneRegistration();
             }
 
@@ -1283,6 +1286,87 @@ namespace ImprovedAI
             var errorCode = messaging.SendDirectMessage(primaryAntenna, msg, false);
             HandleErrorCode(errorCode, msg);
             Log.LogDroneNetwork(LogLevel.Verbose, "Drone {0} sent task {1} completion", _entityId, msg.Payload.TaskId);
+        }
+
+        private void ReadTaskAnnouncements()
+        {
+            messaging.ReadMessages(
+                _entityId,
+                primaryAntenna,
+                Channel.DRONE_TASK_ANNOUNCEMENT,
+                _taskAnnouncementCache,
+                maxMessages: 10,
+                clear: true,
+                messageFilters: PayloadType.TaskAnnouncement);
+
+            for (int i = 0; i < _taskAnnouncementCache.Count; i++)
+            {
+                Message<TaskAnnouncement> message = _taskAnnouncementCache[i];
+                TaskAnnouncement ann = message.Payload;
+                if (ann == null || primaryAntenna == null)
+                    continue;
+
+                long schedId = ann.SchedulerEntityId;
+                if (settings.managingScheduler != 0L && schedId != settings.managingScheduler)
+                    continue;
+
+                if (settings.UseTaskTypeFilters && (settings.TaskTypeFilters & ann.Type) == 0)
+                    continue;
+
+                Drone.Capabilities effectiveCaps = capabilities;
+                if (settings.UseCapabilityFilters)
+                    effectiveCaps &= ~settings.CapabilityFilters;
+
+                Drone.Capabilities req = ann.RequiredCapabilities;
+                if (req != Drone.Capabilities.None &&
+                    (effectiveCaps & req) != req)
+                    continue;
+
+                if (req.HasFlag(Drone.Capabilities.HasCameras) && !effectiveCaps.HasFlag(Drone.Capabilities.HasCameras))
+                    continue;
+                if (req.HasFlag(Drone.Capabilities.HasSensors) && !effectiveCaps.HasFlag(Drone.Capabilities.HasSensors))
+                    continue;
+
+                Vector3D dronePos = shipController != null ? shipController.GetPosition() : remoteControl.GetPosition();
+                double distSq = Vector3D.DistanceSquared(dronePos, ann.Destination);
+                float dist = (float)Math.Sqrt(distSq);
+                float speedLimit = Math.Max(1f, settings.SpeedLimit);
+                float estimatedTime = dist / speedLimit;
+                const double scaleSq = 2000000.0;
+                float pathComplexity = (float)Math.Min(1d, distSq / scaleSq);
+
+                float cargoAvailability = 0f;
+                if (effectiveCaps.HasFlag(Drone.Capabilities.HasCargoContainers))
+                    cargoAvailability = Math.Max(0f, 1f - MathHelper.Clamp(currentMass / 500000f, 0f, 1f));
+                else
+                    cargoAvailability = 0.35f;
+
+                TaskBid bid = new TaskBid
+                {
+                    TaskId = ann.TaskId,
+                    EstimatedTime = estimatedTime,
+                    PathComplexity = pathComplexity,
+                    BidderKind = TaskBidderKind.Drone,
+                    CargoAvailability = cargoAvailability,
+                };
+
+                Message<TaskBid> bidMsg = new Message<TaskBid>
+                {
+                    Payload = bid,
+                    MessageId = GenerateId(),
+                    CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
+                    RecipientId = schedId,
+                    SenderId = _entityId,
+                    SenderOwnerId = block.OwnerId,
+                    RequiresAck = false,
+                    RecipientBlockType = MessageQueue.IAIBlockType.Scheduler,
+                    Channel = Channel.DIRECT_MESSAGE,
+                };
+
+                ErrorCode bidSend = messaging.SendDirectMessage(primaryAntenna, bidMsg, false);
+                HandleErrorCode(bidSend, bidMsg);
+                Log.LogDroneNetwork(LogLevel.Verbose, "Drone {0} sent TaskBid for task {1}", _entityId, ann.TaskId);
+            }
         }
 
         private void ReadTaskAssignments()

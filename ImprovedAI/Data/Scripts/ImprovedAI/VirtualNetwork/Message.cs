@@ -56,6 +56,8 @@ namespace ImprovedAI.VirtualNetwork
         [ProtoEnum]
         DRONE_PERFORMANCE,
         [ProtoEnum]
+        DRONE_TASK_ANNOUNCEMENT,
+        [ProtoEnum]
         DRONE_TASK_ASSIGNMENT,
         [ProtoEnum]
         LOGISTIC_REGISTRATION,
@@ -160,6 +162,7 @@ namespace ImprovedAI.VirtualNetwork
         [ProtoMember(6)]
         public DateTime Timestamp;
     }
+    
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class RelayMessage : IMessagePayload
     {
@@ -188,18 +191,46 @@ namespace ImprovedAI.VirtualNetwork
         public MessageQueue.IAIBlockType RecipientBlockType;
     }
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
-    public class TaskAnnouncement : IMessagePayload {
+    public enum TaskBidderKind : byte
+    {
+        [ProtoEnum]
+        Drone = 0,
+        [ProtoEnum]
+        LogisticsComputer = 1,
+    }
+
+    [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
+    public class TaskAnnouncement : IMessagePayload
+    {
         [ProtoMember(1)] public uint TaskId;
         [ProtoMember(2)] public Scheduler.TaskType Type;
         [ProtoMember(3)] public Vector3D Destination;
         [ProtoMember(4)] public Drone.Capabilities RequiredCapabilities;
+        /// <summary>Scheduler IAI block entity id; bidders send TaskBid via DIRECT_MESSAGE to this id.</summary>
+        [ProtoMember(5)] public long SchedulerEntityId;
+        /// <summary>Required items for the task (e.g. weld components), for logistics self-assessment.</summary>
+        [ProtoMember(6)] public Inventory RequiredPayload;
     }
 
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
-    public class TaskBid : IMessagePayload {
+    public class TaskBid : IMessagePayload
+    {
         [ProtoMember(1)] public uint TaskId;
         [ProtoMember(2)] public float EstimatedTime; // Seconds
-        [ProtoMember(3)] public float PathComplexity; // 0.0 to 1.0
+        [ProtoMember(3)] public float PathComplexity; // 0.0 to 1.0 heuristic (no pathfinding during bid)
+        [ProtoMember(4)] public TaskBidderKind BidderKind;
+        /// <summary>Free capacity ratio in [0,1] (e.g. 1 - loaded/max).</summary>
+        [ProtoMember(5)] public float CargoAvailability;
     }
-    
+
+    /// <summary>
+    /// Logistics computer can no longer fulfill an assigned inventory task; scheduler should re-queue and blacklist.
+    /// </summary>
+    [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
+    public class TaskFulfillmentLost : IMessagePayload
+    {
+        [ProtoMember(1)] public uint TaskId;
+        [ProtoMember(2)] public string Reason;
+    }
+
 }

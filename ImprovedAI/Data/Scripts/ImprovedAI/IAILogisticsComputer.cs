@@ -1,4 +1,5 @@
 ﻿using ImprovedAI.VirtualNetwork;
+using ImprovedAI.Util;
 using ImprovedAI.Util.Logging;
 using Sandbox.ModAPI;
 using System;
@@ -46,6 +47,12 @@ namespace ImprovedAI
         private readonly int INVENTORY_SCAN_INTERVAL_TICKS = 180;
         private readonly int PUSH_CHECK_INTERVAL_TICKS = 300; // Check for excess every 5 seconds
 
+        private int _lcMessageCounter = 0;
+        private readonly List<Message<TaskAnnouncement>> _schedulerAnnouncementCache = new List<Message<TaskAnnouncement>>();
+        private readonly List<Message<TaskAssignment>> _schedulerAssignmentCache = new List<Message<TaskAssignment>>();
+        private Scheduler.Task _assignedSchedulerTask;
+        private long _assignedSchedulerEntityId;
+
         public IAILogisticsComputer(IMyEntity entity, MessageQueue messaging,OperationMode operationMode = OperationMode.ProvideForConstruction)
         {
             this.Entity = entity;
@@ -68,6 +75,11 @@ namespace ImprovedAI
                 currentState = State.Error;
                 return;
             }
+
+            IMyCubeBlock cubeBlock = Entity as IMyCubeBlock;
+            bool isStaticGrid = cubeBlock != null && cubeBlock.CubeGrid != null && cubeBlock.CubeGrid.IsStatic;
+            messaging.RegisterAntenna(entityId, MessageQueue.IAIBlockType.LogisticsComputer, primaryAntenna, isStaticGrid);
+            messaging.Subscribe(entityId, Channel.DRONE_TASK_ANNOUNCEMENT);
 
             // All logistics computers register themselves
             // The scheduler needs to know about all of them
@@ -130,6 +142,8 @@ namespace ImprovedAI
                     // This is typically triggered by user action or automation logic
                     // Not automatically handled in Update()
                 }
+
+                ProcessSchedulerBiddingAndAssignments();
             }
             catch (Exception ex)
             {
@@ -215,6 +229,8 @@ namespace ImprovedAI
                 cachedInventory = newInventory;
                 SendUpdateMessage();
             }
+
+            CheckAssignedLogisticsFulfillment();
         }
 
         private bool HasInventoryChanged(Inventory oldInv, Inventory newInv)
@@ -456,6 +472,140 @@ namespace ImprovedAI
         public List<Vector3D> GetConnectorPositions()
         {
             return new List<Vector3D>(cachedConnectorPositions);
+        }
+
+        private void ProcessSchedulerBiddingAndAssignments()
+        {
+            if (primaryAntenna == null || currentState != State.Active)
+                return;
+
+            messaging.ReadMessages(
+                entityId,
+                primaryAntenna,
+                Channel.DRONE_TASK_ANNOUNCEMENT,
+                _schedulerAnnouncementCache,
+                maxMessages: 10,
+                clear: true,
+                messageFilters: PayloadType.TaskAnnouncement);
+
+            for (int i = 0; i < _schedulerAnnouncementCache.Count; i++)
+            {
+                TaskAnnouncement ann = _schedulerAnnouncementCache[i].Payload;
+                if (ann == null)
+                    continue;
+                if (!SchedulerTaskCapabilities.IsLogisticsTaskType(ann.Type))
+                    continue;
+
+                Inventory req = ann.RequiredPayload;
+                if (req != null && !req.IsEmpty() && !cachedInventory.ContainsAtLeast(req))
+                    continue;
+
+                double minDistSq = double.MaxValue;
+                for (int c = 0; c < cachedConnectorPositions.Count; c++)
+                {
+                    double d2 = Vector3D.DistanceSquared(cachedConnectorPositions[c], ann.Destination);
+                    if (d2 < minDistSq)
+                        minDistSq = d2;
+                }
+                if (minDistSq >= double.MaxValue * 0.5 && cachedConnectorPositions.Count == 0)
+                    continue;
+
+                float dist = minDistSq < double.MaxValue * 0.5 ? (float)Math.Sqrt(minDistSq) : 100f;
+                const float assumedSpeed = 10f;
+                float estimatedTime = dist / assumedSpeed;
+                float pathComplexity = (float)Math.Min(1d, minDistSq / 2000000.0);
+                float cargoAvailability = 0.5f;
+
+                TaskBid bid = new TaskBid
+                {
+                    TaskId = ann.TaskId,
+                    EstimatedTime = estimatedTime,
+                    PathComplexity = pathComplexity,
+                    BidderKind = TaskBidderKind.LogisticsComputer,
+                    CargoAvailability = cargoAvailability,
+                };
+
+                Message<TaskBid> bidMsg = new Message<TaskBid>
+                {
+                    Payload = bid,
+                    MessageId = IdGenerator.GenerateId(ref _lcMessageCounter, entityId),
+                    CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
+                    RecipientId = ann.SchedulerEntityId,
+                    SenderId = entityId,
+                    SenderOwnerId = (Entity as IMyCubeBlock) != null ? ((IMyCubeBlock)Entity).OwnerId : 0L,
+                    RequiresAck = false,
+                    RecipientBlockType = MessageQueue.IAIBlockType.Scheduler,
+                    Channel = Channel.DIRECT_MESSAGE,
+                };
+
+                messaging.SendDirectMessage(primaryAntenna, bidMsg, false);
+                Log.Verbose("LogisticsComputer {0} sent TaskBid for task {1}", entityId, ann.TaskId);
+            }
+
+            messaging.ReadMessages(
+                entityId,
+                primaryAntenna,
+                Channel.DIRECT_MESSAGE,
+                _schedulerAssignmentCache,
+                maxMessages: 10,
+                clear: true,
+                messageFilters: PayloadType.TaskAssignment);
+
+            for (int a = 0; a < _schedulerAssignmentCache.Count; a++)
+            {
+                Message<TaskAssignment> msg = _schedulerAssignmentCache[a];
+                if (msg.RecipientId != entityId)
+                    continue;
+                TaskAssignment assignment = msg.Payload;
+                if (assignment == null || assignment.Tasks == null || assignment.Tasks.Count == 0)
+                    continue;
+
+                _assignedSchedulerTask = assignment.Tasks[0];
+                _assignedSchedulerEntityId = msg.SenderId;
+                Log.Info("LogisticsComputer {0} received scheduler task assignment {1}", entityId, _assignedSchedulerTask.TaskId);
+            }
+        }
+
+        private void CheckAssignedLogisticsFulfillment()
+        {
+            if (_assignedSchedulerTask == null || primaryAntenna == null || _assignedSchedulerEntityId == 0L)
+                return;
+
+            Inventory pay = _assignedSchedulerTask.Payload;
+            if (pay == null || pay.IsEmpty())
+                return;
+
+            if (!cachedInventory.ContainsAtLeast(pay))
+                SendTaskFulfillmentLost("Inventory no longer satisfies assigned task payload");
+        }
+
+        private void SendTaskFulfillmentLost(string reason)
+        {
+            if (_assignedSchedulerTask == null || _assignedSchedulerEntityId == 0L || primaryAntenna == null)
+                return;
+
+            Message<TaskFulfillmentLost> msg = new Message<TaskFulfillmentLost>
+            {
+                Payload = new TaskFulfillmentLost
+                {
+                    TaskId = _assignedSchedulerTask.TaskId,
+                    Reason = reason,
+                },
+                MessageId = IdGenerator.GenerateId(ref _lcMessageCounter, entityId),
+                CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
+                RecipientId = _assignedSchedulerEntityId,
+                SenderId = entityId,
+                SenderOwnerId = (Entity as IMyCubeBlock) != null ? ((IMyCubeBlock)Entity).OwnerId : 0L,
+                RequiresAck = false,
+                RecipientBlockType = MessageQueue.IAIBlockType.Scheduler,
+                Channel = Channel.DIRECT_MESSAGE,
+            };
+
+            messaging.SendDirectMessage(primaryAntenna, msg, false);
+            uint lostTaskId = _assignedSchedulerTask.TaskId;
+            Log.Warning("LogisticsComputer {0} notified scheduler of fulfillment loss for task {1}", entityId, lostTaskId);
+            _assignedSchedulerTask = null;
+            _assignedSchedulerEntityId = 0L;
         }
     }
 }
