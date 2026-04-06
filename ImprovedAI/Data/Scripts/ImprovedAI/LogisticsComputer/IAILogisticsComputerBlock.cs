@@ -123,37 +123,37 @@ namespace ImprovedAI
                 }
             }
         }
-        public bool Terminal_OperationModePush
+        public bool Terminal_OperationModePushOnly
         {
             get
             {
-                return settings?.OperationMode.HasFlag(OperationMode.Push) ?? false;
+                return settings?.OperationMode.HasFlag(OperationMode.PushOnly) ?? false;
             }
             set
             {
                 if (settings != null)
                 {
                     if (value)
-                        settings.OperationMode |= OperationMode.Push;
+                        settings.OperationMode |= OperationMode.PushOnly;
                     else
-                        settings.OperationMode &= ~OperationMode.Push;
+                        settings.OperationMode &= ~OperationMode.PushOnly;
                 }
             }
         }
-        public bool Terminal_OperationModeRequest
+        public bool Terminal_OperationModeRequestOnly
         {
             get
             {
-                return settings?.OperationMode.HasFlag(OperationMode.Request) ?? false;
+                return settings?.OperationMode.HasFlag(OperationMode.RequestOnly) ?? false;
             }
             set
             {
                 if (settings != null)
                 {
                     if (value)
-                        settings.OperationMode |= OperationMode.Request;
+                        settings.OperationMode |= OperationMode.RequestOnly;
                     else
-                        settings.OperationMode &= ~OperationMode.Request;
+                        settings.OperationMode &= ~OperationMode.RequestOnly;
                 }
             }
         }

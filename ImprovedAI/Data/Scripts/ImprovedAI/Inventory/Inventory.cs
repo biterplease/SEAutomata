@@ -16,14 +16,7 @@ namespace ImprovedAI
             Push = 1,
             Pull = 2
         }
-        [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
-        public struct KVPair
-        {
-            [ProtoMember(1)]
-            public string Key;
-            [ProtoMember(2)]
-            public int Value;
-        }
+
         [ProtoMember(1)]
         private MyConcurrentList<KVPair> inventory = new MyConcurrentList<KVPair>();
 

@@ -31,7 +31,10 @@ For its operation and , see @ImprovedAI\Data\Scripts\ImprovedAI\LogisticsCompute
     - Cache these networks to avoid expensive connectivity checks every tick.
 
 ## 2. Inventory Quotas & Validation
-- **Scopes**: Quotas can be set per **Specific Container** or per **Conveyor Network**.
+- **Scopes**: Quotas can be set by the player, for either a **Specific Container**, a **Conveyor Network**, or each individually.
+  - The terminal controls in space engineers are rather simplistic, as such, the quotas saved by the logistics computer consist of simple strings such as "Steel Plate:100", that consist of "<item readable name>:amount"
+  - The mod, upon load, builds a dictionary of all item slugs to item readable names.
+  - Logistics computer must satisfy its own quota **first**, before fulfiling requests by its managing Orchestrator.
 - **Validation**: 
     - Sum the `MaxVolume` of all containers within a Conveyor Network.
         - I/O blocks (Connectors and Collectors) should not be summed despite having an inventory, since that volume is needed as a stagin garea in order to move inventory through the I/O block.
@@ -51,3 +54,23 @@ For its operation and , see @ImprovedAI\Data\Scripts\ImprovedAI\LogisticsCompute
 ## 4. Performance Guardrails
 - **Throttled Scanning**: Use events to check when inventory changes if possible. Use a `lastInventoryScanFrame` timer to ensure inventory volumes are only polled only when no update event has been issued, after 1800 ticks (30 seconds).
 - **BFS Optimization**: When mapping networks, start the search from Connectors and move inward to Cargo to prioritize access points for drones.
+
+## 5. Operation modes
+
+### OperationMode Enum
+
+The `OperationMode` (byte) defines how the Logistics Computer interacts with the Logistic Network and handles inventory provisioning.
+
+| Value | Member | Description |
+| :--- | :--- | :--- |
+| `0` | `None` | No inventory operations. |
+| `1` | `ProvideForLogistics` | Supplies items for logistics tasks only. |
+| `2` | `ProvideForConstruction` | Supplies items for construction tasks only. |
+| `4` | `ProvideForConstructionAndLogistics` | Dual-purpose supply for both logistics and construction. |
+| `8` | `PushOnly` | Pushes to the network. Respects quotas. Does NOT provide for tasks. |
+| `16` | `RequestOnly` | Requests from the network. Respects quotas. Does NOT provide for tasks. |
+
+## Usage Rules
+- **Provisioning vs. Transfer**: `Provide` modes (1, 2, 4) are for task fulfillment. `Push`/`Request` modes (8, 16) are for network-level balancing.
+- **Quotas**: Only `PushOnly` and `RequestOnly` explicitly mention respecting item quota settings.
+- **Exclusivity**: When `PushOnly` or `RequestOnly` are active, the entity should not provide items for active tasks.

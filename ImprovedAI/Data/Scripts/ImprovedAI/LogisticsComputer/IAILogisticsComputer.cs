@@ -50,7 +50,7 @@ namespace ImprovedAI
         private int _lcMessageCounter = 0;
         private readonly List<Message<TaskAnnouncement>> _schedulerAnnouncementCache = new List<Message<TaskAnnouncement>>();
         private readonly List<Message<TaskAssignment>> _schedulerAssignmentCache = new List<Message<TaskAssignment>>();
-        private Scheduler.Task _assignedSchedulerTask;
+        private Orchestrator.Task _assignedSchedulerTask;
         private long _assignedSchedulerEntityId;
 
         public IAILogisticsComputer(IMyEntity entity, MessageQueue messaging,OperationMode operationMode = OperationMode.ProvideForConstruction)
@@ -126,7 +126,7 @@ namespace ImprovedAI
                 }
 
                 // Provider-specific: Check for excess inventory to push
-                if (operationMode == OperationMode.Push && autoPushEnabled)
+                if (operationMode == OperationMode.PushOnly && autoPushEnabled)
                 {
                     if (currentFrame - lastPushCheckFrame >= PUSH_CHECK_INTERVAL_TICKS)
                     {
@@ -136,7 +136,7 @@ namespace ImprovedAI
                 }
 
                 // Requester-specific: Periodically check if needs are still unmet
-                if (operationMode == OperationMode.Request)
+                if (operationMode == OperationMode.RequestOnly)
                 {
                     // Requester sends LOGISTIC_REQUEST when it needs items
                     // This is typically triggered by user action or automation logic
@@ -371,7 +371,7 @@ namespace ImprovedAI
         /// </summary>
         public void RequestInventory(IMyShipConnector connector, Inventory requestedInventory)
         {
-            if (operationMode != OperationMode.Request)
+            if (operationMode != OperationMode.RequestOnly)
             {
                 Log.Warning("LogisticsComputer {0} cannot request inventory - not in Requester mode", entityId);
                 return;
@@ -403,7 +403,7 @@ namespace ImprovedAI
         /// </summary>
         public void PushInventory(IMyShipConnector connector ,Inventory inventoryToPush)
         {
-            if (operationMode != OperationMode.Push)
+            if (operationMode != OperationMode.PushOnly)
             {
                 Log.Warning("LogisticsComputer {0} cannot push inventory - not in Provider mode", entityId);
                 return;
@@ -436,7 +436,7 @@ namespace ImprovedAI
         /// </summary>
         public void SetBufferLimit(string itemSubtypeId, int maxAmount)
         {
-            if (operationMode != OperationMode.Push)
+            if (operationMode != OperationMode.PushOnly)
             {
                 Log.Warning("LogisticsComputer {0} cannot set buffer limits - not in Provider mode", entityId);
                 return;

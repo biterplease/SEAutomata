@@ -15,7 +15,9 @@ namespace ImprovedAI
         [ProtoEnum]
         DroneControllerBlock = 2,
         [ProtoEnum]
-        LogisticsComputerBlock = 4
+        LogisticsComputerBlock = 4,
+        [ProtoEnum]
+        ConstructionComputerBlock = 8,
     }
     [ProtoContract(SkipConstructor = true, UseProtoMembersOnly = true)]
     public struct RegisterEntity

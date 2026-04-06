@@ -10,11 +10,11 @@ using VRage.Collections;
 using VRage.Game.ModAPI;
 using VRage.ModAPI;
 using VRageMath;
-using static ImprovedAI.Scheduler;
+using static ImprovedAI.Orchestrator;
 
 namespace ImprovedAI
 {
-    public class IAIScheduler
+    public class IAIOrchestrator
     {
         private sealed class PendingBidRoundState
         {
@@ -25,6 +25,10 @@ namespace ImprovedAI
 
         private MyConcurrentDictionary<long, Drone> registeredDrones = new MyConcurrentDictionary<long, Drone>();
         private MyConcurrentDictionary<long, LogisticsComputer> registeredLogisticsComputers = new MyConcurrentDictionary<long, LogisticsComputer>();
+        /// <summary>
+        /// Queue of discovered, but yet unporsed Jobs.
+        /// </summary>
+        private MyConcurrentQueue<Job> jobQueue = new MyConcurrentQueue<Job>();
         /// <summary>
         /// Queue of discovered, but yet unassigned tasks.
         /// </summary>
@@ -39,6 +43,9 @@ namespace ImprovedAI
         /// </summary>
         private MyConcurrentDictionary<ushort, uint> delegatedTasksNeedingAck = new MyConcurrentDictionary<ushort, uint>();
         public State currentState { get; private set; }
+
+        private IMyGravityProviderSystemDelegate gravityProviderSystemDelegate;
+        private readonly List<Job> _jobAnnouncementCache = new List<Job>();
 
 
         private static Dictionary<long, AntennaInfo> antennaCache = new Dictionary<long, AntennaInfo>();
@@ -57,18 +64,19 @@ namespace ImprovedAI
         private long _lastAntennaCacheUpdateFrame = 0;
 
         // Server settings
-        private readonly int _initializingUpdateIntervalTicks = ServerConfig.Instance.SchedulerBounds.StateUpdateIntervalTicks.Initializing;
-        private readonly int _errorUpdateIntervalTicks = ServerConfig.Instance.SchedulerBounds.StateUpdateIntervalTicks.Error;
-        private readonly int _standbyUpdateIntervalTicks = ServerConfig.Instance.SchedulerBounds.StateUpdateIntervalTicks.Standby;
-        private readonly int _scanningUpdateIntervalTicks = ServerConfig.Instance.SchedulerBounds.StateUpdateIntervalTicks.Scanning;
-        private readonly int _assigningUpdateIntervalTicks = ServerConfig.Instance.SchedulerBounds.StateUpdateIntervalTicks.Assigning;
-        private readonly int _scanRetryIntervalTicks = ServerConfig.Instance.SchedulerBounds.ScanDelayTicks;
-        private readonly int _errorRecoveryIntervalTicks = ServerConfig.Instance.SchedulerBounds.ErrorRecoveryIntervalTicks;
-        private readonly int _maxConsecutiveErrors = ServerConfig.Instance.SchedulerBounds.MaxConsecutiveErrors;
-        private readonly int _maintenanceIntervalTicks = ServerConfig.Instance.SchedulerBounds.ManintenanceIntervalTicks;
+        private readonly int _initializingUpdateIntervalTicks = ServerConfig.Instance.OrchestratorServerSettings.StateUpdateIntervalTicks.Initializing;
+        private readonly int _errorUpdateIntervalTicks = ServerConfig.Instance.OrchestratorServerSettings.StateUpdateIntervalTicks.Error;
+        private readonly int _standbyUpdateIntervalTicks = ServerConfig.Instance.OrchestratorServerSettings.StateUpdateIntervalTicks.Standby;
+        private readonly int _scanningUpdateIntervalTicks = ServerConfig.Instance.OrchestratorServerSettings.StateUpdateIntervalTicks.Scanning;
+        private readonly int _assigningUpdateIntervalTicks = ServerConfig.Instance.OrchestratorServerSettings.StateUpdateIntervalTicks.Assigning;
+        private readonly int _scanRetryIntervalTicks = ServerConfig.Instance.OrchestratorServerSettings.ScanDelayTicks;
+        private readonly int _errorRecoveryIntervalTicks = ServerConfig.Instance.OrchestratorServerSettings.ErrorRecoveryIntervalTicks;
+        private readonly int _maxConsecutiveErrors = ServerConfig.Instance.OrchestratorServerSettings.MaxConsecutiveErrors;
+        private readonly int _maintenanceIntervalTicks = ServerConfig.Instance.OrchestratorServerSettings.ManintenanceIntervalTicks;
         private readonly int _antennaCacheUpdateIntervalTicks = ServerConfig.Instance.MessageQueue.SchedulerAntennaCacheUpdateIntervalTicks();
-        private readonly int _bidCollectionWindowTicks = ServerConfig.Instance.SchedulerBounds.BidCollectionWindowTicks;
-        private readonly int _bidBlacklistCooldownTicks = ServerConfig.Instance.SchedulerBounds.BidBlacklistCooldownTicks;
+        private readonly int _bidCollectionWindowTicks = ServerConfig.Instance.OrchestratorServerSettings.BidCollectionWindowTicks;
+        private readonly int _bidBlacklistCooldownTicks = ServerConfig.Instance.OrchestratorServerSettings.BidBlacklistCooldownTicks;
+
         /// <summary>
         /// Timeout after which drones are removed if we don't hear from them again.
         /// </summary>
@@ -90,9 +98,22 @@ namespace ImprovedAI
         private readonly List<Message<TaskFulfillmentLost>> _taskFulfillmentLostCache = new List<Message<TaskFulfillmentLost>>();
         private readonly object _taskLock = new object();
         private int _taskIdCounter = 0;
+        private int _jobIdCounter = 0;
+        /// <summary>
+        /// Reused in <see cref="ScanForWeldRepairGrindJobs"/> for slim-block orientation → job quaternion conversion.
+        /// </summary>
+        private Quaternion _quaternionCache;
+        private QuaternionD _quaternionDCache;
+        /// <summary>
+        /// Reused in <see cref="ScanForWeldRepairGrindJobs"/>: weld fills via <see cref="IMySlimBlock.GetMissingComponents"/>;
+        /// grind fills via mounted <see cref="IMyComponentStack"/> counts. Caller clears before each use.
+        /// </summary>
+        private readonly Dictionary<string, int> _componentsCache = new Dictionary<string, int>();
         private PendingBidRoundState _pendingBidRound;
         private readonly Dictionary<long, Dictionary<uint, long>> _bidBlacklistUntilFrame = new Dictionary<long, Dictionary<uint, long>>();
         private readonly object _bidBlacklistLock = new object();
+
+        private IAIConstructionComputer constructionComputer;
 
         private static readonly Channel[] DroneManagementChannels = new Channel[]
         {
@@ -123,6 +144,7 @@ namespace ImprovedAI
         private bool _initialized = false;
         private Vector3 weldIgnoreColor;
         private Vector3 grindColor;
+        private IMySessionDelegate sessionDelegate;
 
         //private Dictionary<TaskType, List<Task>> pendingTasks;
 
@@ -135,21 +157,48 @@ namespace ImprovedAI
             public DateTime LastUpdate;
         }
 
-        public IAIScheduler(
+        public IAIOrchestrator(
             IMyEntity entity,
             OperationMode operationMode = OperationMode.Orchestrator,
-            WorkModes workModes = WorkModes.None)
+            WorkModes workModes = WorkModes.None,
+            IMySessionDelegate sessionDelegate = null,
+            IMyGravityProviderSystemDelegate gravityProviderSystem = null)
         {
             this.entityId = entity.EntityId;
             this.Entity = entity;
             this.operationMode = operationMode;
             this.workModes = workModes;
+            this.gravityProviderSystemDelegate = gravityProviderSystem ?? new MyGravityProviderSystemDelegate();
+            this.sessionDelegate = sessionDelegate ?? new MySessionDelegate();
 
-            _maxTasksAssignedPerBatch = MaxTasksAssignedPerBatch > ServerConfig.Instance.SchedulerBounds.MaxTaskAssignmentPerBatch
-                ? ServerConfig.Instance.SchedulerBounds.MaxTaskAssignmentPerBatch
+            this.constructionComputer = new IAIConstructionComputer(
+                entity,
+                ConstructionComputer.OperationMode.BuiltIn,
+                jobQueue,
+                GetConstructionComputerWorkModes(workModes),
+                ownAntenna,
+                gravityProviderSystemDelegate, sessionDelegate, new IAIConstructionComputerSettings
+                {
+                    WeldIgnoreColor = new Vector3Data(0.0f, 1.0f, 0.0f),
+                    GrindColor = new Vector3Data(1.0f, 0.0f, 0.0f),
+                    IgnoreTasksOutsideSpecifiedRangeMeters = 1000.0f,
+                    ScanRetryIntervalSeconds = 600,
+                    PerScanLimits = 100,
+                    WorkModes = GetConstructionComputerWorkModes(workModes),
+                    ShareWith = ShareWith.NoOne,
+                    IgnoreTasksOutsideSpecifiedRange = false,
+                    IgnoreTasksOutsideOfAntenaRange = true,
+                    IsEnabled = true,
+                    OperationMode = ConstructionComputer.OperationMode.BuiltIn,
+                    WeldIgnoreList = new List<ulong>(),
+                    GrindIgnoreList = new List<ulong>(),
+                });
+
+            _maxTasksAssignedPerBatch = MaxTasksAssignedPerBatch > ServerConfig.Instance.OrchestratorServerSettings.MaxTaskAssignmentPerBatch
+                ? ServerConfig.Instance.OrchestratorServerSettings.MaxTaskAssignmentPerBatch
                 : MaxTasksAssignedPerBatch;
 
-            _perScanLimits = PerScanLimits > ServerConfig.Instance.SchedulerBounds.PerScanLimit ? ServerConfig.Instance.SchedulerBounds.PerScanLimit : PerScanLimits;
+            _perScanLimits = PerScanLimits > ServerConfig.Instance.OrchestratorServerSettings.PerScanLimit ? ServerConfig.Instance.OrchestratorServerSettings.PerScanLimit : PerScanLimits;
         }
 
 
@@ -157,7 +206,7 @@ namespace ImprovedAI
         {
             if (!AntennaOK() && currentState != State.Error && _initialized)
             {
-                Log.Warning("Scheduler {0} antenna check failed, transitioning to error state", entityId);
+                Log.Warning("Orhcestrator {0} antenna check failed, transitioning to error state", entityId);
                 currentState = State.Error;
             }
             if (!_initialized && currentState != State.Initializing)
@@ -188,7 +237,7 @@ namespace ImprovedAI
             }
             catch (Exception ex)
             {
-                Log.Error("Scheduler {0} update threw exception: {1}", entityId, ex.Message);
+                Log.Error("Orhcestrator {0} update threw exception: {1}", entityId, ex.Message);
                 currentState = State.Error;
             }
         }
@@ -203,7 +252,7 @@ namespace ImprovedAI
                     return _errorUpdateIntervalTicks;
                 case State.Standby:
                     return _standbyUpdateIntervalTicks;
-                case State.ScanningForTasks:
+                case State.ScanningForJobs:
                     return _scanningUpdateIntervalTicks;
                 case State.AssigningTasks:
                     return _assigningUpdateIntervalTicks;
@@ -216,6 +265,7 @@ namespace ImprovedAI
         {
             messaging = IAISession.GetMessageQueue();
             currentState = State.Initializing;
+            messaging.Subscribe(entityId, Channel.CONSTRUCTION_COMPUTER_JOB_ANNOUNCEMENT);
             messaging.Subscribe(entityId, Channel.DRONE_REGISTRATION);
             messaging.Subscribe(entityId, Channel.DRONE_REPORTS);
             messaging.Subscribe(entityId, Channel.DRONE_PERFORMANCE);
@@ -245,8 +295,8 @@ namespace ImprovedAI
                 case State.Standby:
                     HandleStandby();
                     break;
-                case State.ScanningForTasks:
-                    HandleScanningForTasks();
+                case State.ScanningForJobs:
+                    HandleScanningForJobs();
                     break;
                 case State.AssigningTasks:
                     HandleTaskAssignment();
@@ -260,7 +310,7 @@ namespace ImprovedAI
         {
             if (CheckCapabilities())
             {
-                if (AntennaOK())
+                if (AntennaUtil.AntennaReady(ownAntenna))
                 {
                     UpdateAntennaCache(ownAntenna);
                     currentState = State.Standby;
@@ -284,8 +334,8 @@ namespace ImprovedAI
                 _lastScanFrameAttempt = currentFrame;
                 if (ShouldStartScanning())
                 {
-                    Log.Verbose("Scheduler {0} waking from standby to scan for tasks", entityId);
-                    currentState = State.ScanningForTasks;
+                    Log.Verbose("Orhcestrator {0} waking from standby to scan for tasks", entityId);
+                    currentState = State.ScanningForJobs;
                 }
             }
         }
@@ -293,12 +343,12 @@ namespace ImprovedAI
         private bool ShouldStartScanning()
         {
             var workModeEval = workModes & (
-                WorkModes.Scan |
+                WorkModes.ScanOnly |
                 WorkModes.Grind |
                 WorkModes.FetchCargo |
                 WorkModes.DeliverCargo |
                 WorkModes.WeldUnfinishedBlocks);
-            return isEnabled && AntennaOK() && workModeEval > 0;
+            return isEnabled && AntennaUtil.AntennaReady(ownAntenna) && workModeEval > 0;
         }
         /// <summary>
         /// Scan connected grids for radio antennas. Select only the largest range for broadcasting.
@@ -338,28 +388,19 @@ namespace ImprovedAI
                 ownAntenna.IsWorking;
         }
 
-        private bool AntennaOK()
-        {
-            return ownAntenna != null &&
-                ownAntenna.IsFunctional &&
-                ownAntenna.Enabled &&
-                ownAntenna.EnableBroadcasting &&
-                ownAntenna.IsWorking;
-        }
 
 
-
-        private void HandleScanningForTasks()
+        private void HandleScanningForJobs()
         {
             var totalTasks = 0;
             try
             {
-                totalTasks += ScanForWeldRepairGrindTasks();
-                totalTasks += ScanForLogisticTasks();
+                totalTasks += constructionComputer.ScanForWeldRepairGrindJobs(jobQueue);
+                totalTasks += ScanForLogisticJobs();
             }
             catch (Exception ex)
             {
-                Log.Error("Scheduler {0} Error during task scanning: {1}", entityId, ex.Message);
+                Log.Error("Orhcestrator {0} Error during task scanning: {1}", entityId, ex.Message);
                 currentState = State.Error;
                 return;
             }
@@ -370,7 +411,7 @@ namespace ImprovedAI
                 currentState = State.Standby;
                 return;
             }
-            Log.Verbose("Scheduler {0} found {1} tasks, transitioning to AssigningTasks", entityId, totalTasks);
+            Log.Verbose("Orhcestrator {0} found {1} tasks, transitioning to AssigningTasks", entityId, totalTasks);
             currentState = State.AssigningTasks;
         }
 
@@ -410,7 +451,7 @@ namespace ImprovedAI
                 }
             }
             if (registeredDrones.Count == 0 && !operationMode.HasFlag(OperationMode.DelegateIfNoDrones))
-                Log.Info("Scheduler {0}: No available drones", entityId);
+                Log.Info("Orhcestrator {0}: No available drones", entityId);
         }
 
         private long GetSchedulerOwnerId()
@@ -651,7 +692,7 @@ namespace ImprovedAI
                 return;
             if (GetTotalAssignedTaskCount() > 0)
                 return;
-            Log.Verbose("Scheduler {0}: task queue drained, returning to Standby", entityId);
+            Log.Verbose("Orhcestrator {0}: task queue drained, returning to Standby", entityId);
             currentState = State.Standby;
         }
 
@@ -764,110 +805,6 @@ namespace ImprovedAI
             }
         }
 
-        private bool ShouldWeldOrRepair(IMySlimBlock block)
-        {
-            if (workModes.HasFlag(WorkModes.WeldUnfinishedBlocks) &&
-                    block.BuildLevelRatio < 1.0f &&
-                    !ColorUtil.ColorMatch(block, weldIgnoreColor))
-                return true;
-            if (workModes.HasFlag(WorkModes.RepairDamagedBlocks) &&
-                    block.CurrentDamage > 0.0f &&
-                    !ColorUtil.ColorMatch(block, weldIgnoreColor))
-                return true;
-            return false;
-        }
-        private bool ShouldGrind(IMySlimBlock block)
-        {
-            if (workModes.HasFlag(WorkModes.Grind) &&
-                ColorUtil.ColorMatch(block, grindColor))
-                return true;
-
-            return false;
-        }
-
-        private int ScanForWeldRepairGrindTasks()
-        {
-            var scannedBlocks = 0;
-            var tasksCreated = 0;
-
-            var cubeBlock = Entity as IMyCubeBlock;
-            if (cubeBlock?.CubeGrid == null)
-            {
-                Log.Error("cannot scan: entity {0} is not an IMyCubeBlock", entityId);
-                return tasksCreated;
-            }
-
-            var antennaPosition = ownAntenna.CubeGrid.GridIntegerToWorld(ownAntenna.Position);
-            var antennaRadius = ownAntenna.Radius;
-
-            List<IMyCubeGrid> connectedGrids = new List<IMyCubeGrid>();
-            try
-            {
-                MyAPIGateway.GridGroups.GetGroup(cubeBlock.CubeGrid, GridLinkTypeEnum.Physical, connectedGrids);
-            }
-            catch (Exception ex)
-            {
-                Log.Error("Failed to get connected grids: {0}", ex.Message);
-                return tasksCreated;
-            }
-
-            foreach (var grid in connectedGrids)
-            {
-                var blocks = new List<IMySlimBlock>();
-                grid.GetBlocks(blocks);
-
-                foreach (var block in blocks)
-                {
-                    if (++scannedBlocks > _perScanLimits)
-                    {
-                        Log.Verbose("Scan limit reached ({0} blocks), continuing next update", _perScanLimits);
-                        // Continue scanning next update
-                        return tasksCreated;
-                    }
-                    var shouldWeld = ShouldWeldOrRepair(block);
-                    var shouldGrind = ShouldGrind(block);
-                    if (!shouldWeld && !shouldGrind)
-                        continue;
-
-                    var blockPosition = grid.GridIntegerToWorld(block.Position);
-                    var distance = Vector3D.Distance(antennaPosition, blockPosition);
-                    var isOutOfAntennaRange = distance > antennaRadius;
-                    var isOutOfSpecificRange = distance > ignoreTasksOutsideSpecifiedRangeMeters;
-                    if (isOutOfAntennaRange && ignoreTasksOutsideOfAntenaRange) continue;
-                    if (isOutOfSpecificRange && ignoreTasksOutsideSpecifiedRange) continue;
-
-                    if (shouldWeld)
-                    {
-                        var componentsDict = new Dictionary<string, int>();
-                        block.GetMissingComponents(componentsDict);
-                        taskQueue.Enqueue(new Task
-                        {
-                            TaskId = IdGenerator.GenerateId(ref _taskIdCounter, entityId),
-                            TaskType = TaskType.PreciseWelding,
-                            Payload = new Inventory(componentsDict),
-                            Position = blockPosition,
-                            OutOfSchedulerRange = isOutOfAntennaRange
-                        });
-                        tasksCreated++;
-                    }
-                    if (shouldGrind)
-                    {
-                        taskQueue.Enqueue(new Task
-                        {
-                            TaskId = IdGenerator.GenerateId(ref _taskIdCounter, entityId),
-                            TaskType = TaskType.PreciseGrinding,
-                            Position = blockPosition,
-                            OutOfSchedulerRange = isOutOfAntennaRange
-                        });
-                        tasksCreated++;
-                    }
-                }
-            }
-            if (tasksCreated > 0)
-                Log.Info("Scan complete: {0} blocks scanned, {1} tasks created", scannedBlocks, tasksCreated);
-            return tasksCreated;
-        }
-
         private void ReadDroneRegistrations()
         {
             messaging.ReadMessages(entityId, ownAntenna, Channel.DIRECT_MESSAGE, _messageCache, 50, true, PayloadType.DroneReport);
@@ -896,6 +833,33 @@ namespace ImprovedAI
                 );
                 registeredDrones.Add(droneId, drone);
             }
+        }
+        private void HandleConstructionComputerJobAnnouncements()
+        {
+            messaging.ReadMessages(entityId, ownAntenna, Channel.CONSTRUCTION_COMPUTER_JOB_ANNOUNCEMENT, _messageCache, 50, true, PayloadType.JobAnnouncement);
+            foreach (var message in _messageCache)
+            {
+                var job = message.Payload as Job;
+                if (job == null)
+                    continue;
+                JobTaskAssignment(ref job);
+            }
+        }
+
+        private void JobTaskAssignment(ref Job job)
+        {
+            switch (job.JobType)
+            {
+                case JobType.WeldBlock:
+                    // get inventory
+                    // get mass and volume of inventory
+                    // BidRoundStart:
+                    //      LC responds with "I can fulfill this inventory"
+                    //      drones respond with I can carry this much, I can handle the environment
+                    break;
+            }
+
+
         }
         private void ReadDroneReports(ushort maxMessages)
         {
@@ -1133,7 +1097,7 @@ namespace ImprovedAI
             messaging.ReadMessages(entityId, ownAntenna, Channel.SCHEDULER_FORWARD, _droneReportCache, messageReadLimit, true, PayloadType.None);
         }
 
-        private int ScanForLogisticTasks()
+        private int ScanForLogisticJobs()
         {
             // check logistic requests
             // see which providers can satisfy
@@ -1148,7 +1112,7 @@ namespace ImprovedAI
         /// </summary>
         public void ResetScheduler()
         {
-            Log.Info("Scheduler {0} manual reset requested", entityId);
+            Log.Info("Orhcestrator {0} manual reset requested", entityId);
 
             lock (_taskLock)
             {
@@ -1172,8 +1136,9 @@ namespace ImprovedAI
 
             currentState = State.Initializing;
 
-            Log.Info("Scheduler {0} reset complete", entityId);
+            Log.Info("Orhcestrator {0} reset complete", entityId);
         }
+
         private void HandleError()
         {
             var currentFrame = MyAPIGateway.Session.GameplayFrameCounter;
@@ -1183,7 +1148,7 @@ namespace ImprovedAI
             if (_consecutiveErrors >= _maxConsecutiveErrors)
             {
                 // Critical error state - enter safe mode
-                Log.Error("Scheduler {0} entered critical error state after {1} consecutive errors. Entering safe mode.",
+                Log.Error("Orhcestrator {0} entered critical error state after {1} consecutive errors. Entering safe mode.",
                     entityId, _consecutiveErrors);
 
                 // Disable the scheduler to prevent further issues
@@ -1202,7 +1167,7 @@ namespace ImprovedAI
 
                     if (abandonedTaskCount > 0)
                     {
-                        Log.Warning("Scheduler {0} abandoned {1} queued tasks due to critical errors",
+                        Log.Warning("Orhcestrator {0} abandoned {1} queued tasks due to critical errors",
                             entityId, abandonedTaskCount);
                     }
 
@@ -1215,7 +1180,7 @@ namespace ImprovedAI
 
                     if (totalAssignedTasks > 0)
                     {
-                        Log.Warning("Scheduler {0} has {1} tasks still assigned to drones that may be orphaned",
+                        Log.Warning("Orhcestrator {0} has {1} tasks still assigned to drones that may be orphaned",
                             entityId, totalAssignedTasks);
                     }
                 }
@@ -1240,12 +1205,12 @@ namespace ImprovedAI
             if (currentFrame - _lastErrorRecoveryAttemptFrame < _errorRecoveryIntervalTicks)
             {
                 // Not time to retry yet
-                Log.Verbose("Scheduler {0} in error state (attempt {1}/{2}), waiting for recovery interval",
+                Log.Verbose("Orhcestrator {0} in error state (attempt {1}/{2}), waiting for recovery interval",
                     entityId, _consecutiveErrors, _maxConsecutiveErrors);
                 return;
             }
             _lastErrorRecoveryAttemptFrame = currentFrame;
-            Log.Info("Scheduler {0} attempting recovery from error state (attempt {1}/{2})",
+            Log.Info("Orhcestrator {0} attempting recovery from error state (attempt {1}/{2})",
                 entityId, _consecutiveErrors, _maxConsecutiveErrors);
 
             try
@@ -1255,9 +1220,9 @@ namespace ImprovedAI
                 {
                     // Successfully recovered
                     _consecutiveErrors = 0;
-                    currentState = Scheduler.State.Standby;
+                    currentState = Orchestrator.State.Standby;
 
-                    Log.Info("Scheduler {0} successfully recovered from error state", entityId);
+                    Log.Info("Orhcestrator {0} successfully recovered from error state", entityId);
 
                     // Re-initialize if necessary
                     if (!_initialized)
@@ -1267,34 +1232,34 @@ namespace ImprovedAI
                 }
                 else
                 {
-                    Log.Warning("Scheduler {0} recovery attempt failed - capabilities check failed", entityId);
+                    Log.Warning("Orhcestrator {0} recovery attempt failed - capabilities check failed", entityId);
 
                     // Provide specific error information
                     if (ownAntenna == null)
                     {
-                        Log.Error("Scheduler {0} error: No antenna found", entityId);
+                        Log.Error("Orhcestrator {0} error: No antenna found", entityId);
                     }
                     else if (!ownAntenna.IsFunctional)
                     {
-                        Log.Error("Scheduler {0} error: Antenna is not functional", entityId);
+                        Log.Error("Orhcestrator {0} error: Antenna is not functional", entityId);
                     }
                     else if (!ownAntenna.Enabled)
                     {
-                        Log.Error("Scheduler {0} error: Antenna is not enabled", entityId);
+                        Log.Error("Orhcestrator {0} error: Antenna is not enabled", entityId);
                     }
                     else if (!ownAntenna.EnableBroadcasting)
                     {
-                        Log.Error("Scheduler {0} error: Antenna broadcasting is disabled", entityId);
+                        Log.Error("Orhcestrator {0} error: Antenna broadcasting is disabled", entityId);
                     }
                     else if (!ownAntenna.IsWorking)
                     {
-                        Log.Error("Scheduler {0} error: Antenna is not working (may lack power)", entityId);
+                        Log.Error("Orhcestrator {0} error: Antenna is not working (may lack power)", entityId);
                     }
                 }
             }
             catch (Exception ex)
             {
-                Log.Error("Scheduler {0} recovery attempt threw exception: {1}", entityId, ex.Message);
+                Log.Error("Orhcestrator {0} recovery attempt threw exception: {1}", entityId, ex.Message);
                 // Exception during recovery counts as another error
             }
         }
@@ -1357,6 +1322,15 @@ namespace ImprovedAI
             diagnostics.AppendLine($"  - Stale (>60s): {stale}");
 
             return diagnostics.ToString();
+        }
+
+        public ConstructionComputer.WorkModes GetConstructionComputerWorkModes(Orchestrator.WorkModes workModes)
+        {
+            var workModeEval = workModes & (
+                WorkModes.ScanOnly |
+                WorkModes.Grind |
+                WorkModes.WeldUnfinishedBlocks);
+            return (ConstructionComputer.WorkModes)workModeEval;
         }
     }
 }

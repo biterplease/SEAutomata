@@ -1,4 +1,4 @@
-using static ImprovedAI.Scheduler;
+using static ImprovedAI.Orchestrator;
 
 namespace ImprovedAI.Util
 {

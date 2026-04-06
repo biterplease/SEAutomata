@@ -1,8 +1,10 @@
-﻿using Sandbox.Game.Entities;
+using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
 using System.Collections.Generic;
+using System.Runtime.Remoting.Messaging;
 using VRage.Game.Entity;
 using VRageMath;
+using VRage.Game.ModAPI;
 
 namespace ImprovedAI
 {
@@ -60,6 +62,24 @@ namespace ImprovedAI
         public T SerializeFromXML<T>(string buffer)
         {
             return MyAPIGateway.Utilities.SerializeFromXML<T>(buffer);
+        }
+    }
+
+    public interface IMyGravityProviderSystemDelegate
+    {
+        Vector3 CalculateNaturalGravityInPoint(Vector3D position);
+        Vector3 CalculateNaturalGravityInPoint(Vector3D position, out float naturalGravityMultiplier);
+    }
+
+    public class MyGravityProviderSystemDelegate : IMyGravityProviderSystemDelegate
+    {
+        public Vector3 CalculateNaturalGravityInPoint(Vector3D position)
+        {
+            return MyAPIGateway.GravityProviderSystem.CalculateNaturalGravityInPoint(position);
+        }
+        public Vector3 CalculateNaturalGravityInPoint(Vector3D position, out float naturalGravityMultiplier)
+        {
+            return MyAPIGateway.GravityProviderSystem.CalculateNaturalGravityInPoint(position, out naturalGravityMultiplier);
         }
     }
 }

@@ -10,7 +10,7 @@ using VRage.Game.ModAPI;
 using VRage.ModAPI;
 using VRage.ObjectBuilders;
 
-using static ImprovedAI.Scheduler;
+using static ImprovedAI.Orchestrator;
 
 namespace ImprovedAI
 {
@@ -21,7 +21,7 @@ namespace ImprovedAI
     public class IAISchedulerBlock : MyGameLogicComponent
     {
         // The actual scheduler instance
-        private IAIScheduler scheduler;
+        private IAIOrchestrator scheduler;
         private IMyBroadcastController broadcastController;
         private IMyCubeBlock block;
 
@@ -37,7 +37,7 @@ namespace ImprovedAI
         /// <summary>
         /// Provides access to the internal scheduler for terminal controls and debugging
         /// </summary>
-        public IAIScheduler Scheduler => scheduler;
+        public IAIOrchestrator Scheduler => scheduler;
 
 
         /// <summary>
@@ -65,7 +65,7 @@ namespace ImprovedAI
             base.UpdateOnceBeforeFrame();
             IAISchedulerTerminalControls.DoOnce(ModContext);
             broadcastController = (IMyBroadcastController)Entity;
-            scheduler = new IAIScheduler(Entity, operationMode);
+            scheduler = new IAIOrchestrator(Entity, operationMode);
 
             if (broadcastController.CubeGrid?.Physics == null)
                 return; // ignore ghost/projected grids

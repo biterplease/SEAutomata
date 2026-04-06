@@ -26,6 +26,7 @@ namespace ImprovedAI.VirtualNetwork
             TaskAnnouncement = 64,
             TaskBid = 128,
             TaskFulfillmentLost = 256,
+            JobAnnouncement = 512,
         }
     public sealed class MessageQueue
     {
@@ -82,15 +83,16 @@ namespace ImprovedAI.VirtualNetwork
             public TimestampedMessage() { }
         }
         /// <summary>
-        /// IAIBlockType flags since a single grid could have all 3 blocks.
+        /// IAIBlockType flags since a single grid could have all 4 blocks.
         /// </summary>
         [Flags]
         public enum IAIBlockType : byte
         {
             None = 0,
             Drone = 1,
-            Scheduler = 2,
-            LogisticsComputer = 4
+            Orchestrator = 2,
+            LogisticsComputer = 4,
+            ConstructionComputer = 8,
         }
 
         /// <summary>
@@ -270,32 +272,18 @@ namespace ImprovedAI.VirtualNetwork
         /// Internal channel broadcast: posts payload to all current subscribers of <paramref name="channelOrdinal"/>
         /// without antenna range checks. Used for intra-scheduler routing (e.g. re-queuing a DroneReport).
         /// </summary>
-        public ErrorCode SendMessage<T>(ushort channelOrdinal, T payload, long senderId, bool requiresAck = false)
+        public ErrorCode SendMessage<T>(Channel channel, Message<T> message, long senderId, bool requiresAck = false)
             where T : class, IMessagePayload
         {
             if (_isShuttingDown)
                 return ErrorCode.ShutdownInProgress;
 
-            var channel = (Channel)channelOrdinal;
             MyConcurrentHashSet<long> subscribers;
             if (!_channelSubscribers.TryGetValue(channel, out subscribers) || subscribers.Count == 0)
                 return ErrorCode.NoSubscribers;
 
             var validRecipients = new HashSet<long>(subscribers);
-
-            var msg = new Message<T>
-            {
-                MessageId = (uint)InterlockedDelegate.Increment(ref _messageCounter),
-                Payload = payload,
-                CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
-                SenderId = senderId,
-                SenderOwnerId = 0,
-                Channel = channel,
-                RequiresAck = requiresAck,
-                SerializationMode = serializationMode,
-                RecipientBlockType = IAIBlockType.None,
-            };
-            EnqueueMessage(ref msg, validRecipients);
+            EnqueueMessage(ref message, validRecipients);
             return ErrorCode.None;
         }
 
@@ -437,6 +425,8 @@ namespace ImprovedAI.VirtualNetwork
                 return PayloadType.TaskBid;
             if (payload is TaskFulfillmentLost)
                 return PayloadType.TaskFulfillmentLost;
+            if (payload is JobAnnouncement)
+                return PayloadType.JobAnnouncement;
             return PayloadType.None;
         }
 
@@ -959,7 +949,6 @@ namespace ImprovedAI.VirtualNetwork
             }
 
             dlqMessages = dlqMessages.FindAll(m => !IsMessageExpired(currentTime, m.SentAt, _dlqMessageExpiration));
-
             // Handle DLQ messages
             if (dlqMessages.Count > 0)
             {

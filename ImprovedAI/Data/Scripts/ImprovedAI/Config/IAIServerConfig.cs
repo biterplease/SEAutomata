@@ -23,8 +23,8 @@ namespace ImprovedAI.Config
     }
 
     /// <summary>
-    /// Serialization mode for the pseudo-network message queue.
-    /// This is how drones, schedulers and logistics computers communicate with each other.
+    /// Serialization mode for the virtual-network message queue.
+    /// This is how drones, orchestrators and logistics computers communicate with each other.
     /// </summary>
     public enum MessageSerializationMode : byte
     {
@@ -63,8 +63,9 @@ namespace ImprovedAI.Config
         public DroneControllerBlockConfig Drone { get; private set; }
         public MessageQueueConfig MessageQueue { get; private set; }
         public LoggingConfig Logging { get; private set; }
-        public SchedulerBlockConfig SchedulerBounds { get; private set; }
+        public OrchestratorBlockConfig OrchestratorServerSettings { get; private set; }
         public LogisticsComputerConfig LogisticsComputer { get; private set; }
+        public ConstructionComputerConfig ConstructionComputer { get; private set; }
 
         public ServerConfig()
         {
@@ -73,10 +74,11 @@ namespace ImprovedAI.Config
             BlockLimits = new BlockLimitConfig();
             Pathfinding = new PathfindingConfig();
             Drone = new DroneControllerBlockConfig();
-            SchedulerBounds = new SchedulerBlockConfig();
+            OrchestratorServerSettings = new OrchestratorBlockConfig();
             MessageQueue = new MessageQueueConfig();
             Logging = new LoggingConfig();
             LogisticsComputer = new LogisticsComputerConfig();
+            ConstructionComputer = new ConstructionComputerConfig();
         }
 
         public class SessionConfig
@@ -128,10 +130,30 @@ namespace ImprovedAI.Config
             public int PowerCheckIntervalTicks { get; private set; } = 300;
         }
 
-        public class SchedulerBlockConfig
+        public class ConstructionComputerConfig{
+            /// <summary>
+            /// Max number of block targets when scanning for construction tasks.
+            /// </summary>
+            public byte BlockLimitPerScan { get; internal set; } = 100;
+             /// <summary>
+            /// The Construction Computer will perform a cleanup of orphaned tasks that are no longer in its range.
+            /// For whatever reason. Default is 30 minutes.
+            /// </summary>
+            public int MaintenanceIntervalSeconds { get; internal set; } = 30; // 30 seconds
+            public int MinScanRetryIntervalSeconds { get; internal set; } = 10; // 10 seconds
+            public int MaxScanRetryIntervalSeconds { get; internal set; } = 3600; // 3600 seconds
+
+            public int MaxJobAnnouncementsPerUpdate { get; internal set; } = 10;
+
+        }
+
+        public class OrchestratorBlockConfig
         {
-            public int MaxTargetLimit { get; internal set; } = 100;
-            public int PerScanLimit { get; internal set; } = 100;
+            /// <summary>
+            /// Maximum number of job targets when ran by a drone.
+            /// </summary>
+            public int StandAloneOrchestratorMaxTargetLimit { get; internal set; } = 10;
+            public int OrchestratorMaxTargetLimit { get; internal set; } = 100;
             public int MaxTaskAssignmentPerBatch { get; internal set; } = 10;
 
             /// <summary>
@@ -308,21 +330,21 @@ namespace ImprovedAI.Config
             const string schedBounds = "SchedulerBounds";
             const string schedLegacy = "Scheduler";
             const string schedState = "SchedulerBounds.StateUpdateIntervalTicks";
-            SchedulerBounds.MaxTargetLimit = Math.Max(1, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "MaxTargetLimit", SchedulerBounds.MaxTargetLimit));
-            SchedulerBounds.PerScanLimit = Math.Max(10, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "PerScanLimit", SchedulerBounds.PerScanLimit));
-            SchedulerBounds.MaxTaskAssignmentPerBatch = Math.Max(1, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "MaxTaskAssignmentPerBatch", SchedulerBounds.MaxTaskAssignmentPerBatch));
-            SchedulerBounds.ScanDelayTicks = Math.Max(60, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "ScanDelayTicks", SchedulerBounds.ScanDelayTicks));
-            SchedulerBounds.ErrorRecoveryIntervalTicks = Math.Max(60, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "ErrorRecoveryIntervalTicks", SchedulerBounds.ErrorRecoveryIntervalTicks));
-            SchedulerBounds.MaxConsecutiveErrors = Math.Max(1, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "MaxConsecutiveErrors", SchedulerBounds.MaxConsecutiveErrors));
-            SchedulerBounds.ManintenanceIntervalTicks = Math.Max(60, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "MaintenanceIntervalTicks", SchedulerBounds.ManintenanceIntervalTicks));
-            SchedulerBounds.BidCollectionWindowTicks = Math.Max(10, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "BidCollectionWindowTicks", SchedulerBounds.BidCollectionWindowTicks));
-            SchedulerBounds.BidBlacklistCooldownTicks = Math.Max(60, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "BidBlacklistCooldownTicks", SchedulerBounds.BidBlacklistCooldownTicks));
+            OrchestratorServerSettings.OrchestratorMaxTargetLimit = Math.Max(1, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "MaxTargetLimit", OrchestratorServerSettings.OrchestratorMaxTargetLimit));
+            OrchestratorServerSettings.PerScanLimit = Math.Max(10, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "PerScanLimit", OrchestratorServerSettings.PerScanLimit));
+            OrchestratorServerSettings.MaxTaskAssignmentPerBatch = Math.Max(1, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "MaxTaskAssignmentPerBatch", OrchestratorServerSettings.MaxTaskAssignmentPerBatch));
+            OrchestratorServerSettings.ScanDelayTicks = Math.Max(60, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "ScanDelayTicks", OrchestratorServerSettings.ScanDelayTicks));
+            OrchestratorServerSettings.ErrorRecoveryIntervalTicks = Math.Max(60, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "ErrorRecoveryIntervalTicks", OrchestratorServerSettings.ErrorRecoveryIntervalTicks));
+            OrchestratorServerSettings.MaxConsecutiveErrors = Math.Max(1, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "MaxConsecutiveErrors", OrchestratorServerSettings.MaxConsecutiveErrors));
+            OrchestratorServerSettings.ManintenanceIntervalTicks = Math.Max(60, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "MaintenanceIntervalTicks", OrchestratorServerSettings.ManintenanceIntervalTicks));
+            OrchestratorServerSettings.BidCollectionWindowTicks = Math.Max(10, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "BidCollectionWindowTicks", OrchestratorServerSettings.BidCollectionWindowTicks));
+            OrchestratorServerSettings.BidBlacklistCooldownTicks = Math.Max(60, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "BidBlacklistCooldownTicks", OrchestratorServerSettings.BidBlacklistCooldownTicks));
 
-            SchedulerBounds.StateUpdateIntervalTicks.Initializing = Math.Max(60, ReadIniSchedulerStateInterval(ini, schedState, schedLegacy, "Initializing", "InitializingUpdateInterval", SchedulerBounds.StateUpdateIntervalTicks.Initializing));
-            SchedulerBounds.StateUpdateIntervalTicks.Error = Math.Max(60, ReadIniSchedulerStateInterval(ini, schedState, schedLegacy, "Error", "ErrorUpdateInterval", SchedulerBounds.StateUpdateIntervalTicks.Error));
-            SchedulerBounds.StateUpdateIntervalTicks.Standby = Math.Max(60, ReadIniSchedulerStateInterval(ini, schedState, schedLegacy, "Standby", "StandbyUpdateInterval", SchedulerBounds.StateUpdateIntervalTicks.Standby));
-            SchedulerBounds.StateUpdateIntervalTicks.Scanning = Math.Max(10, ReadIniSchedulerStateInterval(ini, schedState, schedLegacy, "Scanning", "ScanningUpdateInterval", SchedulerBounds.StateUpdateIntervalTicks.Scanning));
-            SchedulerBounds.StateUpdateIntervalTicks.Assigning = Math.Max(10, ReadIniSchedulerStateInterval(ini, schedState, schedLegacy, "Assigning", "AssigningUpdateInterval", SchedulerBounds.StateUpdateIntervalTicks.Assigning));
+            OrchestratorServerSettings.StateUpdateIntervalTicks.Initializing = Math.Max(60, ReadIniSchedulerStateInterval(ini, schedState, schedLegacy, "Initializing", "InitializingUpdateInterval", OrchestratorServerSettings.StateUpdateIntervalTicks.Initializing));
+            OrchestratorServerSettings.StateUpdateIntervalTicks.Error = Math.Max(60, ReadIniSchedulerStateInterval(ini, schedState, schedLegacy, "Error", "ErrorUpdateInterval", OrchestratorServerSettings.StateUpdateIntervalTicks.Error));
+            OrchestratorServerSettings.StateUpdateIntervalTicks.Standby = Math.Max(60, ReadIniSchedulerStateInterval(ini, schedState, schedLegacy, "Standby", "StandbyUpdateInterval", OrchestratorServerSettings.StateUpdateIntervalTicks.Standby));
+            OrchestratorServerSettings.StateUpdateIntervalTicks.Scanning = Math.Max(10, ReadIniSchedulerStateInterval(ini, schedState, schedLegacy, "Scanning", "ScanningUpdateInterval", OrchestratorServerSettings.StateUpdateIntervalTicks.Scanning));
+            OrchestratorServerSettings.StateUpdateIntervalTicks.Assigning = Math.Max(10, ReadIniSchedulerStateInterval(ini, schedState, schedLegacy, "Assigning", "AssigningUpdateInterval", OrchestratorServerSettings.StateUpdateIntervalTicks.Assigning));
 
             // Parse Drone section
             Drone.DefaultMonitorHydrogen = ini.Get("Drone", "DefaultMonitorHydrogen").ToBoolean(Drone.DefaultMonitorHydrogen);

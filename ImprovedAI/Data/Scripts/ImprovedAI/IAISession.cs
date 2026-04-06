@@ -8,9 +8,19 @@ using System.IO;
 using VRage;
 using VRage.Game.Components;
 using VRage.Utils;
+using VRageMath;
+using ImprovedAI.Util;
 
 namespace ImprovedAI
 {
+    public enum ShareWith : byte
+        {
+            NoOne = 0,
+            Friends = 1,
+            Faction = 2,
+            Neutrals = 4,
+            Enemies = 8,
+    }
     [MySessionComponentDescriptor(MyUpdateOrder.BeforeSimulation)]
     public class IAISession : MySessionComponentBase
     {

@@ -2,10 +2,11 @@
 alwaysApply: true
 ---
 # Space Engineers Drone Project
-Automated drones for task completion using a three-tier architecture:
+Automated drones for task completion:
 1. **Drone**: Pathfinding and execution.
-2. **LogisticsComputer**: Inventory analysis.
-3. **Scheduler**: Task coordination.
+2. **Orchestrator**: Task coordination. It itself acts as both a ConstructionComputer and a LogisticsComputer, as well as handling job and task distribution.
+3. **LogisticsComputer**: Inventory analysis.
+4. **ConstructionComputer**: Buildable block analysis.
 
 ## Core Constraints
 - **Language**: C# 6.0 features ONLY (No records, no top-level statements).

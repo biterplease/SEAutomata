@@ -190,12 +190,12 @@ namespace ImprovedAI
                 c.Visible = (b) => CustomVisibleCondition(b) && BlockConfig.AllowLogistics && BlockConfig.AllowNetworkPush;
                 c.Enabled = (b) => BlockConfig.AllowLogistics && BlockConfig.AllowNetworkPush; // to see how the grayed out ones look
 
-                c.Getter = (b) => GetBlock(b)?.Terminal_OperationModePush ?? false;
+                c.Getter = (b) => GetBlock(b)?.Terminal_OperationModePushOnly ?? false;
                 c.Setter = (b, v) =>
                 {
                     var logic = GetBlock(b);
                     if (logic != null)
-                        logic.Terminal_OperationModePush = v;
+                        logic.Terminal_OperationModePushOnly = v;
                 };
 
                 MyAPIGateway.TerminalControls.AddControl<IMyGyro>(c);
@@ -208,12 +208,12 @@ namespace ImprovedAI
                 c.Visible = (b) => CustomVisibleCondition(b) && BlockConfig.AllowLogistics && BlockConfig.AllowNetworkRequests;
                 c.Enabled = (b) => BlockConfig.AllowLogistics && BlockConfig.AllowNetworkRequests; // to see how the grayed out ones look
 
-                c.Getter = (b) => GetBlock(b)?.Terminal_OperationModeRequest ?? false;
+                c.Getter = (b) => GetBlock(b)?.Terminal_OperationModeRequestOnly ?? false;
                 c.Setter = (b, v) =>
                 {
                     var logic = GetBlock(b);
                     if (logic != null)
-                        logic.Terminal_OperationModeRequest = v;
+                        logic.Terminal_OperationModeRequestOnly = v;
                 };
 
                 MyAPIGateway.TerminalControls.AddControl<IMyGyro>(c);
@@ -224,7 +224,7 @@ namespace ImprovedAI
                 c.Tooltip = MyStringId.GetOrCompute("TerminalControl_LogisticsComputer_PushAll_Tooltip");
                 c.SupportsMultipleBlocks = true;
                 c.Visible = (b) => CustomVisibleCondition(b) && BlockConfig.AllowLogistics && BlockConfig.AllowNetworkPush;
-                c.Enabled = (b) => GetBlock(b)?.Terminal_OperationModePush ?? false && BlockConfig.AllowLogistics && BlockConfig.AllowNetworkPush;
+                c.Enabled = (b) => GetBlock(b)?.Terminal_OperationModePushOnly ?? false && BlockConfig.AllowLogistics && BlockConfig.AllowNetworkPush;
 
                 c.OnText = MySpaceTexts.SwitchText_On;
                 c.OffText = MySpaceTexts.SwitchText_Off;
@@ -245,7 +245,7 @@ namespace ImprovedAI
                 c.Tooltip = MyStringId.GetOrCompute("TerminalControl_LogisticsComputer_PushFrequency_Tooltip");
                 c.SupportsMultipleBlocks = true;
                 c.Visible = (b) => CustomVisibleCondition(b) && BlockConfig.AllowLogistics && BlockConfig.AllowNetworkPush;
-                c.Enabled = (b) => GetBlock(b)?.Terminal_OperationModePush ?? false && BlockConfig.AllowLogistics && BlockConfig.AllowNetworkPush;
+                c.Enabled = (b) => GetBlock(b)?.Terminal_OperationModePushOnly ?? false && BlockConfig.AllowLogistics && BlockConfig.AllowNetworkPush;
                 var cfgMin = TimeUtil.TickToSeconds(BlockConfig.MinPushFrequencyTicks);
                 var cfgMax = TimeUtil.TickToSeconds(BlockConfig.MaxPushFrequencyTicks);
 

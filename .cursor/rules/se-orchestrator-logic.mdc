@@ -1,10 +1,10 @@
 ---
-description: Logic for the IAIScheduler (Orchestration vs Standalone)
-globs: IAIScheduler.cs, Scheduler.cs
+description: Logic for the IAIOrchestrator (Orchestration vs Standalone)
+globs: IAIOrchestrator.cs, Orchestrator.cs
 ---
 
 # IAIScheduler Architecture
-The `IAIScheduler` is the central brain for task distribution. It is hosted by either a `Drone` or an `IAISchedulerBlock`.
+The `IAIOrchestrator` is the central brain for task distribution. It is hosted by either a `Drone` or an `IAIOrchestratorBlock`.
 
 ## Tier 1: Standalone Drone (Limited)
 - **Context**: When initialized by a Drone block.
@@ -13,10 +13,10 @@ The `IAIScheduler` is the central brain for task distribution. It is hosted by e
 - **Guardrail**: Do not implement logistics or fleet coordination for Standalone Drones.
 
 ## Tier 2: Orchestrator (Full Capacity)
-- **Context**: When initialized by an `IAISchedulerBlock`.
+- **Context**: When initialized by an `IAIOrchestratorBlock`.
 - **Behavior**: Advanced scheduling, parallel tasking, and fleet coordination.
 - **Logistics**: Interfaces with `LogisticsComputer` to manage virtualized inventories.
 
 ## Task Management
 - Refer to @Scheduler.cs for `TaskType` definitions.
-- New tasks must be added to `Scheduler.cs` as `ProtoContract` members first.
+- New tasks must be added to `Orchestrator.cs` as `ProtoContract` members first.

@@ -4,10 +4,10 @@ globs: IAIScheduler.cs, Drone.cs, MessageQueue.cs
 ---
 
 # Task Procurement & Bidding
-The Scheduler does not "assign" tasks immediately. It facilitates a competitive bidding process.
+The Orchestrator does not "assign" tasks immediately. It facilitates a competitive bidding process.
 
 ## 1. The Handshake Flow
-1. **Broadcast**: Scheduler sends `TaskAvailable` to the `MessageQueue`.
+1. **Broadcast**: Orchestrator sends `TaskAvailable` to the `MessageQueue`.
 2. **Evaluation**: Drones and Logistics Computers receive the message and perform a "Self-Assessment":
    - For Drones:
       - **Hardware Check**: Do I have the sensors/cameras required for this trip distance?
@@ -19,13 +19,13 @@ The Scheduler does not "assign" tasks immediately. It facilitates a competitive 
    - `EstimatedTimeToComplete` (Distance / MaxSpeed).
    - `ComplexityScore` (Calculated via `PathfindingManager.GetNextWaypointComplexity`).
    - `CargoAvailability` (Current vs MaxLoad).
-4. **Award**: Scheduler selects the "Best Fit" (lowest time/complexity or highest capacity) and sends `TaskAssignment`.
+4. **Award**: Orchestrator selects the "Best Fit" (lowest time/complexity or highest capacity) and sends `TaskAssignment`.
 
 ## 2. Give-Up Condition (The "Dead End") for Drone
 - If a Drone accepts a task but the `PathfindingManager` returns `PathfindingResult.Failed` repeatedly (exceeding `maxRepositionAttempts`), the Drone must:
-  - Send a `TaskAborted` message to the Scheduler.
+  - Send a `TaskAborted` message to the Orchestrator.
   - Return to `HomePosition`.
-  - The Scheduler must then blacklist that specific drone for that specific task for a cooldown period.
+  - The Orchestrator must then blacklist that specific drone for that specific task for a cooldown period.
 3. Give-up condition for Logistics Computer
-   - Once a task fulfillment has been accepted, if the inventory changes so that it cannot fulfill the requseted inventory, it should notify its Scheduler.
-   - Scheduler shoud then blacklist that specific LogisticsComputer for a cooldown period.  
+   - Once a task fulfillment has been accepted, if the inventory changes so that it cannot fulfill the requseted inventory, it should notify its Orchestrator.
+   - Orchestrator shoud then blacklist that specific LogisticsComputer for a cooldown period.  

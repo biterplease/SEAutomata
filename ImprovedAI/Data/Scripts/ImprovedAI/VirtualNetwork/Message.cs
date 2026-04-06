@@ -3,6 +3,8 @@ using ProtoBuf;
 using System;
 using System.Collections.Generic;
 using VRageMath;
+using ImprovedAI.Util;
+using ImprovedAI;
 
 namespace ImprovedAI.VirtualNetwork
 {
@@ -50,6 +52,8 @@ namespace ImprovedAI.VirtualNetwork
     public enum Channel : byte
     {
         [ProtoEnum]
+        NONE,
+        [ProtoEnum]
         DRONE_REGISTRATION,
         [ProtoEnum]
         DRONE_REPORTS,
@@ -73,6 +77,10 @@ namespace ImprovedAI.VirtualNetwork
         MAILMAN_FORWARD,
         [ProtoEnum]
         DIRECT_MESSAGE,
+        [ProtoEnum]
+        CONSTRUCTION_COMPUTER_REGISTRATION,
+        [ProtoEnum]
+        CONSTRUCTION_COMPUTER_JOB_ANNOUNCEMENT,
         [ProtoEnum]
         DEAD_LETTER_QUEUE,
     }
@@ -200,10 +208,27 @@ namespace ImprovedAI.VirtualNetwork
     }
 
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
+    public class JobAnnouncement : IMessagePayload
+    {
+        [ProtoMember(1)] public QuaternionDData OrientationData;
+        [ProtoMember(2)] public Vector3DData PositionData;
+        [ProtoMember(3)] public Inventory Inventory;
+        [ProtoMember(4)] public DateTime CreatedTime;
+        /// <summary>
+        /// Normalized natural gravity vector.
+        /// </summary>
+        [ProtoMember(5)] public float NaturalGravity;
+        [ProtoMember(6)] public uint JobId;
+        [ProtoMember(7)] public IAIEntityType EntityType;
+        [ProtoMember(8)] public Orchestrator.JobType Type;
+        [ProtoMember(9)] public bool IsStaticGrid;
+        [ProtoMember(10)] public bool IsInSpace;
+    }
+    [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class TaskAnnouncement : IMessagePayload
     {
         [ProtoMember(1)] public uint TaskId;
-        [ProtoMember(2)] public Scheduler.TaskType Type;
+        [ProtoMember(2)] public Orchestrator.TaskType Type;
         [ProtoMember(3)] public Vector3D Destination;
         [ProtoMember(4)] public Drone.Capabilities RequiredCapabilities;
         /// <summary>Scheduler IAI block entity id; bidders send TaskBid via DIRECT_MESSAGE to this id.</summary>

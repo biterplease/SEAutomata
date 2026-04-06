@@ -3,12 +3,12 @@ using System.Collections.Generic;
 using VRage.Game;
 using VRage.Game.Entity;
 using VRageMath;
-using static ImprovedAI.Scheduler;
+using static ImprovedAI.Orchestrator;
 
 namespace ImprovedAI
 {
     [ProtoContract(SkipConstructor = true, UseProtoMembersOnly = true)]
-    public class IAISchedulerSettings
+    public class IAIOrchestratorSettings
     {
         [ProtoMember(1)]
         public Vector3 WeldIgnoreColor;
