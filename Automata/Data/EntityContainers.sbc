@@ -1,0 +1,50 @@
+﻿<?xml version="1.0"  encoding="utf-8"?>
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+   <EntityContainers>
+      <Container>
+         <Id>
+            <TypeId>RemoteControl</TypeId>
+            <SubtypeId>ImprovedAISmallDroneController</SubtypeId>
+         </Id>
+         <DefaultComponents>
+            <Component BuilderType="MyObjectBuilder_ModStorageComponent" SubtypeId="ImprovedAIMod" ForceCreate="true"/>
+         </DefaultComponents>
+      </Container>
+      <Container>
+         <Id>
+            <TypeId>RemoteControl</TypeId>
+            <SubtypeId>ImprovedAILargeDroneController</SubtypeId>
+         </Id>
+         <DefaultComponents>
+            <Component BuilderType="MyObjectBuilder_ModStorageComponent" SubtypeId="ImprovedAIMod" ForceCreate="true"/>
+         </DefaultComponents>
+      </Container>
+      <!-- <Container>
+         <Id>
+            <TypeId>BroadcastController</TypeId>
+            <SubtypeId>ImprovedAILargeOrchestrator</SubtypeId>
+         </Id>
+         <DefaultComponents>
+            <Component BuilderType="MyObjectBuilder_ModStorageComponent" SubtypeId="ImprovedAIMod" ForceCreate="true"/>
+         </DefaultComponents>
+      </Container>
+      <Container>
+         <Id>
+            <TypeId>MyProgrammableBlock</TypeId>
+            <SubtypeId>ImprovedAILargeLogisticsComputer</SubtypeId>
+         </Id>
+         <DefaultComponents>
+            <Component BuilderType="MyObjectBuilder_ModStorageComponent" SubtypeId="ImprovedAIMod" ForceCreate="true"/>
+         </DefaultComponents>
+      </Container>
+      <Container>
+         <Id>
+            <TypeId>MyProgrammableBlock</TypeId>
+            <SubtypeId>ImprovedAILargeMiningSurveyor</SubtypeId>
+         </Id>
+         <DefaultComponents>
+            <Component BuilderType="MyObjectBuilder_ModStorageComponent" SubtypeId="ImprovedAIMod" ForceCreate="true"/>
+         </DefaultComponents>
+      </Container> -->
+   </EntityContainers>
+</Definitions>

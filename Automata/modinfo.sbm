@@ -1,0 +1,22 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ModInfo xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <SteamPublishedFileId>0</SteamPublishedFileId>
+  <Name>Automata</Name>
+  <Description>Automatons to make your life easier.
+  This mod encourages logistics-driven gameplay by offloading tasks that are commonly performed by players.</Description>
+  <IsDependency>false</IsDependency>
+  <WorkshopId>0</WorkshopId>
+  <Authors>
+    <Author>biter_please</Author>
+  </Authors>
+  <Version>10100</Version>
+  <MinGameVersion>01198025</MinGameVersion>
+  <MaxGameVersion>01999999</MaxGameVersion>
+  <DependsOnMods />
+  <Tags>
+    <Tag>block</Tag>
+    <Tag>ai</Tag>
+    <Tag>automation</Tag>
+    <Tag>construction</Tag>
+  </Tags>
+</ModInfo>

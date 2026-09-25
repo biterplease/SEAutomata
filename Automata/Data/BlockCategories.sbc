@@ -1,0 +1,69 @@
+<?xml version="1.0"  encoding="utf-8"?>
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+   <CategoryClasses>
+      <Category xsi:type="MyObjectBuilder_GuiBlockCategoryDefinition">
+         <Id>
+            <TypeId>GuiBlockCategoryDefinition</TypeId>
+            <SubtypeId/>
+         </Id>
+         <DisplayName>Improved AI</DisplayName>
+         <Name>Improved AI</Name>
+         <ItemIds>
+			<string>RemoteControl/ImprovedAILargeDroneController</string>
+         <string>RemoteControl/ImprovedAISmallDroneController</string>
+			 <!-- <string>BroadcastController/ImprovedAILargeOrchestrator</string>
+			 <string>MyProgrammableBlock/ImprovedAILargeLogisticsComputer</string>
+			 <string>MyProgrammableBlock/ImprovedAILargeMiningSurveyor</string> -->
+		 </ItemIds>
+      </Category>
+      
+      <Category xsi:type="MyObjectBuilder_GuiBlockCategoryDefinition">
+         <Id>
+            <TypeId>GuiBlockCategoryDefinition</TypeId>
+            <SubtypeId/>
+         </Id>
+         <DisplayName>DisplayName_Category_LargeBlocks</DisplayName>
+         <Name>LargeBlocks</Name>
+         <ItemIds>
+            <string>RemoteControl/ImprovedAILargeDroneController</string>
+         </ItemIds>
+      </Category>
+	   
+	   <!-- <Category xsi:type="MyObjectBuilder_GuiBlockCategoryDefinition">
+		   <Id>
+			   <TypeId>GuiBlockCategoryDefinition</TypeId>
+			   <SubtypeId/>
+		   </Id>
+		   <DisplayName>DisplayName_Category_LargeBlocks</DisplayName>
+		   <Name>LargeBlocks</Name>
+		   <ItemIds>
+			   <string>BroadcastController/ImprovedAILargeOrchestrator</string>
+		   </ItemIds>
+	   </Category>
+	   <Category xsi:type="MyObjectBuilder_GuiBlockCategoryDefinition">
+		   <Id>
+			   <TypeId>GuiBlockCategoryDefinition</TypeId>
+			   <SubtypeId/>
+		   </Id>
+		   <DisplayName>DisplayName_Category_LargeBlocks</DisplayName>
+		   <Name>LargeBlocks</Name>
+		   <ItemIds>
+			   <string>MyProgrammableBlock/ImprovedAILargeLogisticsComputer</string>
+		   </ItemIds>
+	   </Category> -->
+      
+      <Category xsi:type="MyObjectBuilder_GuiBlockCategoryDefinition">
+         <Id>
+            <TypeId>GuiBlockCategoryDefinition</TypeId>
+            <SubtypeId/>
+         </Id>
+         <DisplayName>DisplayName_Category_SmallBlocks</DisplayName>
+         <Name>SmallBlocks</Name>
+         <ItemIds>
+            <string>RemoteControl/ImprovedAISmallDroneController</string>
+         </ItemIds>
+      </Category>
+      
+
+   </CategoryClasses>
+</Definitions>
