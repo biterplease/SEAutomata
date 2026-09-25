@@ -24,17 +24,17 @@ namespace Automata.Logistics
         /// Items exceeding these values will be automatically pushed to the Logistics Network.
         /// Requires OperationMode Push
         /// </summary>
-        public Inventory Limits;
+        public DiscreteInventory Limits;
         /// <summary>
         /// Ignore items in this list.
         /// </summary>
-        public Inventory IgnoreList;
+        public DiscreteInventory IgnoreList;
         /// <summary>
         /// The Logistics Computer will make sure these amounts are in storage at all times.
         /// Anything missing will be requested periodically.
         /// Requires operation mode Requester
         /// </summary>
-        public Inventory Requests;
+        public DiscreteInventory Requests;
         public float RequestPeriod;
 
         public int ConveyorNetworkUpdateIntervalSeconds;

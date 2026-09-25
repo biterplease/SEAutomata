@@ -51,8 +51,8 @@ namespace Automata.Construction
         private IMyRadioAntenna ownAntenna;
         private List<IMyCubeGrid> _connectedGridCache = new List<IMyCubeGrid>();
         private readonly Dictionary<string, int> _componentsCache = new Dictionary<string, int>();
-        private readonly Inventory _blockInventoryCache = new Inventory();
-        private readonly Inventory _componentInventoryCache = new Inventory();
+        private readonly DiscreteInventory _blockInventoryCache = new DiscreteInventory();
+        private readonly DiscreteInventory _componentInventoryCache = new DiscreteInventory();
         private readonly List<Orchestrator.Job> _jobCache = new List<Orchestrator.Job>();
 
         private IMyGravityProviderSystemDelegate gravityProviderSystemDelegate;
@@ -382,8 +382,8 @@ namespace Automata.Construction
                         {
                             JobId = IdGenerator.GenerateId(ref _jobIdCounter, entityId),
                             JobType = Orchestrator.JobType.WeldBlock,
-                            ComponentsInventory = new Inventory(_componentsCache),
-                            BlocksInventory = new Inventory(_blockInventoryCache),
+                            ComponentsInventory = new DiscreteInventory(_componentsCache),
+                            BlocksInventory = new DiscreteInventory(_blockInventoryCache),
                             OrientationData = QuaternionDData.FromQuaternionD(_quaternionDCache),
                             PositionData = Vector3DData.FromVector3D(blockPosition),
                             OutOfOrchestratorRange = isOutOfAntennaRange,
@@ -408,8 +408,8 @@ namespace Automata.Construction
                         {
                             JobId = IdGenerator.GenerateId(ref _jobIdCounter, entityId),
                             JobType = Orchestrator.JobType.GrindBlock,
-                             ComponentsInventory = new Inventory(_componentsCache),
-                            BlocksInventory = new Inventory(_blockInventoryCache),
+                             ComponentsInventory = new DiscreteInventory(_componentsCache),
+                            BlocksInventory = new DiscreteInventory(_blockInventoryCache),
                             OrientationData = QuaternionDData.FromQuaternionD(_quaternionDCache),
                             PositionData = Vector3DData.FromVector3D(blockPosition),
                             OutOfOrchestratorRange = isOutOfAntennaRange,
@@ -513,7 +513,7 @@ namespace Automata.Construction
                             SenderId = entityId,
                             SenderOwnerId = block?.OwnerId ?? 0,
                             RequiresAck = false,
-                            RecipientBlockType = MessageQueue.AutomataBlockType.Orchestrator,
+                            RecipientBlockType = MessageQueue.IAIBlockType.Orchestrator,
                             Channel = Channel.CONSTRUCTION_COMPUTER_JOB_ANNOUNCEMENT,
                         };
                         messageQueue.BroadcastMessage<JobAnnouncement>(ownAntenna, msg, true);

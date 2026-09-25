@@ -7,6 +7,7 @@ using VRage.Utils;
 
 using Automata.Config;
 using Automata.Drone;
+using Automata.Logistics;
 using Automata.Inventory;
 
 namespace Automata.VirtualNetwork
@@ -62,10 +63,9 @@ namespace Automata.VirtualNetwork
         RelayMessage = 16,
         TaskAborted = 32,
         TaskAnnouncement = 64,
-        TaskBid = 128,
-        TaskFulfillmentLost = 256,
-        JobAnnouncement = 512,
-        MiningSurveyDataBroadcast = 8192,
+        TaskFulfillmentLost = 128,
+        JobAnnouncement = 256,
+        MiningSurveyDataBroadcast = 512,
         Auction = 1024,
         Bid = 2048,
         AuctionWinnerAnnouncement = 4096,
@@ -141,11 +141,11 @@ namespace Automata.VirtualNetwork
         [ProtoMember(8)]
         public float? H2OperationalThreshold;
         [ProtoMember(10)]
-        public DroneController.UpdateFlags Flags;
+        public Drone.UpdateFlags Flags;
         [ProtoMember(11)]
-        public DroneController.State? DroneState;
+        public Drone.State? DroneState;
         [ProtoMember(12)]
-        public DroneController.Capabilities? Capabilities;
+        public Drone.Capabilities? Capabilities;
         /// <summary>EntityId of the drone that produced this report.</summary>
         [ProtoMember(13)]
         public long DroneEntityId;
@@ -204,15 +204,15 @@ namespace Automata.VirtualNetwork
     {
         [ProtoMember(1)] public QuaternionDData OrientationData;
         [ProtoMember(2)] public Vector3DData PositionData;
-        [ProtoMember(3)] public Inventory ComponentsInventory;
-        [ProtoMember(4)] public Inventory BlocksInventory;
+        [ProtoMember(3)] public DiscreteInventory ComponentsInventory;
+        [ProtoMember(4)] public DiscreteInventory BlocksInventory;
         [ProtoMember(5)] public DateTime CreatedTime;
         /// <summary>
         /// Normalized natural gravity vector.
         /// </summary>
         [ProtoMember(6)] public float NaturalGravity;
         [ProtoMember(7)] public uint JobId;
-        [ProtoMember(8)] public IAIEntityType EntityType;
+        [ProtoMember(8)] public AutomataEntityType EntityType;
         [ProtoMember(9)] public Orchestrator.JobType Type;
         [ProtoMember(10)] public bool IsStaticGrid;
         [ProtoMember(11)] public bool IsInSpace;
@@ -222,8 +222,8 @@ namespace Automata.VirtualNetwork
     {
         [ProtoMember(1)] public QuaternionDData OrientationData;
         [ProtoMember(2)] public Vector3DData PositionData;
-        [ProtoMember(3)] public Inventory ComponentsInventory;
-        [ProtoMember(4)] public Inventory BlocksInventory;
+        [ProtoMember(3)] public DiscreteInventory ComponentsInventory;
+        [ProtoMember(4)] public DiscreteInventory BlocksInventory;
         [ProtoMember(5)] public DateTime CreatedTime;
         [ProtoMember(6)] public DateTime ExpirationTime;
         /// <summary>
@@ -234,7 +234,7 @@ namespace Automata.VirtualNetwork
         [ProtoMember(9)] public MyFixedPoint TotalVolume;
         [ProtoMember(10)] public uint JobId;
         [ProtoMember(11)] public uint AuctionId;
-        [ProtoMember(9)] public IAIEntityType EntityType;
+        [ProtoMember(9)] public AutomataEntityType EntityType;
         [ProtoMember(12)] public Orchestrator.JobType JobType;
         [ProtoMember(13)] public bool IsStaticGrid;
         [ProtoMember(14)] public bool IsInSpace;
@@ -243,7 +243,7 @@ namespace Automata.VirtualNetwork
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class Bid : IMessagePayload
     {
-        [ProtoMember(1)] public Inventory BidInventory;
+        [ProtoMember(1)] public DiscreteInventory BidInventory;
         [ProtoMember(2)] public IOLocationData IOLocationData;
         [ProtoMember(4)] public DateTime CreatedTime;
         /// <summary>
@@ -269,14 +269,14 @@ namespace Automata.VirtualNetwork
         /// Inventory that the logicstics Computter is submitting as part of the bid.
         /// </summary>
         [ProtoMember(12)] public Drone.Capabilities Capabilities;
-        [ProtoMember(13)] public IAIEntityType EntityType;
+        [ProtoMember(13)] public AutomataEntityType EntityType;
         [ProtoMember(14)] public Drone.BehaviourProfile DroneBehaviours;
 
         /// <summary>
         /// This flag controls how the BidInventory field should be interpreted.
         /// When the job demands inventory space, this response should be interpreted as "Has space to take inventory"
         /// </summary>
-        [ProtoMember(13)] public LogisticsComputer.InventoryFulfillment InventoryFulfillmentFlags;
+        [ProtoMember(13)] public Logistics.InventoryFulfillment InventoryFulfillmentFlags;
 
     }
 

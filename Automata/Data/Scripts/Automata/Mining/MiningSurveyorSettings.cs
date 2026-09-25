@@ -7,7 +7,7 @@ using Automata.Inventory;
 namespace Automata.Mining
 {
     [ProtoContract(SkipConstructor = true, UseProtoMembersOnly = true)]
-    public class IAIMiningSurveyorSettings
+    public class MiningSurveyorSettings
     {
         /// <summary>
         /// Ore subtype names (e.g. Iron, Nickel) to ignore completely.
@@ -66,7 +66,7 @@ namespace Automata.Mining
         [ProtoMember(14)]
         public MyFixedPoint NominalMassPerMineOreJob;
 
-        public IAIMiningSurveyorSettings()
+        public MiningSurveyorSettings()
         {
             OreIgnoreList = new List<string>();
             OreRequests = new OreMassInventory();

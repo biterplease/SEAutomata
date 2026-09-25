@@ -19,14 +19,14 @@ namespace Automata.Mining
     /// <summary>
     /// Indexes ore survey samples from drones and publishes <see cref="Orchestrator.JobType.MineOre"/> job announcements.
     /// </summary>
-    public class IAIMiningSurveyor
+    public class MiningSurveyor
     {
         private readonly IMyCubeBlock block;
         private readonly MessageQueue messaging;
         private readonly MyConcurrentQueue<Orchestrator.Job> jobQueue;
         private readonly MyConcurrentQueue<Orchestrator.Job> builtInParentJobQueue;
         private readonly OperationMode operationMode;
-        public IAIMiningSurveyorSettings settings = new IAIMiningSurveyorSettings();
+        public MiningSurveyorSettings settings = new MiningSurveyorSettings();
 
         private IMyRadioAntenna ownAntenna;
         private IMyGravityProviderSystemDelegate gravityProviderSystemDelegate;
@@ -46,12 +46,12 @@ namespace Automata.Mining
 
         private static readonly double DuplicateDetectionRadiusSquared = DuplicateDetectionRadiusMeters * DuplicateDetectionRadiusMeters;
 
-        public IAIMiningSurveyor(
+        public MiningSurveyor(
             IMyEntity entity,
             MessageQueue messaging,
             OperationMode operationMode,
             MyConcurrentQueue<Orchestrator.Job> builtInParentJobQueue,
-            IAIMiningSurveyorSettings settings,
+            MiningSurveyorSettings settings,
             IMyGravityProviderSystemDelegate gravityProviderSystem = null)
         {
             this.block = (IMyCubeBlock)entity;
@@ -310,7 +310,7 @@ namespace Automata.Mining
 
         private Orchestrator.Job CreateMineOreJob(MiningDepositCacheEntry d)
         {
-            Inventory payload = new Inventory();
+            DiscreteInventory payload = new DiscreteInventory();
             int massUnits = SafeMassToInventoryUnits(settings.NominalMassPerMineOreJob);
             payload.AddItem(d.OreSubtype, massUnits);
             Vector3 gravityNorm = naturalGravity;
@@ -327,7 +327,7 @@ namespace Automata.Mining
                 JobId = IdGenerator.GenerateId(ref jobIdCounter, block.EntityId),
                 JobType = Orchestrator.JobType.MineOre,
                 ComponentsInventory = payload,
-                BlocksInventory = new Inventory(),
+                BlocksInventory = new DiscreteInventory(),
                 Tasks = new List<Orchestrator.Task>(),
                 PositionData = Vector3DData.FromVector3D(d.Position),
                 OrientationData = QuaternionDData.FromQuaternionD(orientation),

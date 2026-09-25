@@ -35,7 +35,7 @@ namespace Automata.Logistics
         [ProtoMember(1)]
         public List<IOLocationData> IOBlockPositions;
         [ProtoMember(2)]
-        public Inventory Inventory;
+        public DiscreteInventory Inventory;
         [ProtoMember(3)]
         public uint ConveyorNetworkId; 
         [ProtoMember(4)]
@@ -59,10 +59,10 @@ namespace Automata.Logistics
         ///  Beacon that this conveyor network is relative to
         /// </summary>
         public IMyBeacon RelativeBeacon;
-        private readonly Inventory _inventoryCache = new Inventory();
-        private readonly Inventory currentInventory = new Inventory();
-        private readonly Dictionary<uint, Inventory> pendingInventoryByBidRoundBidId = new Dictionary<uint, Inventory>();
-        private readonly Dictionary<uint, Inventory> reservedInventoryByBidRoundWinningBidId = new Dictionary<uint, Inventory>();
+        private readonly DiscreteInventory _inventoryCache = new DiscreteInventory();
+        private readonly DiscreteInventory currentInventory = new DiscreteInventory();
+        private readonly Dictionary<uint, DiscreteInventory> pendingInventoryByBidRoundBidId = new Dictionary<uint, DiscreteInventory>();
+        private readonly Dictionary<uint, DiscreteInventory> reservedInventoryByBidRoundWinningBidId = new Dictionary<uint, DiscreteInventory>();
         private readonly Dictionary<uint, MyFixedPoint> pendingVolumeByBidRoundBidId = new Dictionary<uint, MyFixedPoint>();
         private readonly Dictionary<uint, MyFixedPoint> reservedVolumeByBidRoundWinningBidId = new Dictionary<uint, MyFixedPoint>();
         private readonly object _inventoryLock = new object();
@@ -74,7 +74,7 @@ namespace Automata.Logistics
         public List<IMyAssembler> assemblers;
         public List<IMyRefinery> refineries;
         public List<IMyReactor> reactors;
-        public Inventory Inventory;
+        public DiscreteInventory Inventory;
 
         // player managed properties, set from the IAILogisticsComputer terminal controls
         public string Nickname { get; set; }
@@ -163,8 +163,8 @@ namespace Automata.Logistics
                     }
                 }
                 // Substract returns a new Inventory and does not mutate this; apply chain then copy into currentInventory.
-                var afterPending = Inventory.Substract(_inventoryCache, GetPendingInventory());
-                var afterReserved = Inventory.Substract(afterPending, GetReservedInventory());
+                var afterPending = DiscreteInventory.Substract(_inventoryCache, GetPendingInventory());
+                var afterReserved = DiscreteInventory.Substract(afterPending, GetReservedInventory());
                 currentInventory.Clear();
                 foreach (KVPair kv in afterReserved.GetAllItems())
                 {
@@ -179,7 +179,7 @@ namespace Automata.Logistics
         /// Returns the current inventory, should reflect the actual count of items.
         /// </summary>
         /// <returns></returns>
-        public Inventory GetCurrentInventory()
+        public DiscreteInventory GetCurrentInventory()
         {
             return currentInventory;
         }
@@ -188,10 +188,10 @@ namespace Automata.Logistics
         /// Reserved inventory represents items that have been proposed as a bid, and the bid has been won.
         /// </summary>
         /// <returns></returns>
-        public Inventory GetReservedInventory()
+        public DiscreteInventory GetReservedInventory()
         {
-            Inventory reservedInventory = new Inventory();
-            foreach (KeyValuePair<uint, Inventory> kv in reservedInventoryByBidRoundWinningBidId)
+            DiscreteInventory reservedInventory = new DiscreteInventory();
+            foreach (KeyValuePair<uint, DiscreteInventory> kv in reservedInventoryByBidRoundWinningBidId)
             {
                 reservedInventory.AddItems(kv.Value);
             }
@@ -202,10 +202,10 @@ namespace Automata.Logistics
         /// Pending inventory represents items that have been proposed as a bid, but not confirmed yet.
         /// </summary>
         /// <returns></returns>
-        public Inventory GetPendingInventory()
+        public DiscreteInventory GetPendingInventory()
         {
-            Inventory pendingInventory = new Inventory();
-            foreach (KeyValuePair<uint, Inventory> kv in pendingInventoryByBidRoundBidId)
+            DiscreteInventory pendingInventory = new DiscreteInventory();
+            foreach (KeyValuePair<uint, DiscreteInventory> kv in pendingInventoryByBidRoundBidId)
             {
                 pendingInventory.AddItems(kv.Value);
             }
@@ -216,14 +216,14 @@ namespace Automata.Logistics
         /// Returns the available inventory, showing current - reserved.
         /// </summary>
         /// <returns></returns>
-        public Inventory AvailableInventory()
+        public DiscreteInventory AvailableInventory()
         {
-            return Inventory.Substract(currentInventory, GetReservedInventory());
+            return DiscreteInventory.Substract(currentInventory, GetReservedInventory());
         }
 
         /// <summary>
         /// Free cargo volume (liters) from game inventory meters, based on cargo containers only.
-        /// Compare to <see cref="Inventory.TotalInventoryVolume"/> for incoming stacks.
+        /// Compare to <see cref="DiscreteInventory.TotalInventoryVolume"/> for incoming stacks.
         /// </summary>
         public MyFixedPoint GetRemainingCargoVolume()
         {
@@ -269,14 +269,14 @@ namespace Automata.Logistics
             return false;
         }
 
-        public InventoryFulfillmentData CanFulfillRequest(Inventory requestedInventory, uint bidRoundBidId)
+        public InventoryFulfillmentData CanFulfillRequest(DiscreteInventory requestedInventory, uint bidRoundBidId)
         {
             lock (_inventoryLock)
             {
                 if (AvailableInventory().ContainsAtLeast(requestedInventory))
                 {
-                    Inventory reservedInventory = new Inventory();
-                    Inventory.MoveItems(currentInventory, reservedInventory, requestedInventory);
+                    DiscreteInventory reservedInventory = new DiscreteInventory();
+                    DiscreteInventory.MoveItems(currentInventory, reservedInventory, requestedInventory);
                     pendingInventoryByBidRoundBidId[bidRoundBidId] = reservedInventory;
                     return new InventoryFulfillmentData
                     {
@@ -286,7 +286,7 @@ namespace Automata.Logistics
                         ConveyorNetworkId = ConveyorNetworkId
                     };
                 }
-                Inventory fulfillablePart;
+                DiscreteInventory fulfillablePart;
                 AvailableInventory().FilterByKeys(requestedInventory, out fulfillablePart);
                 pendingInventoryByBidRoundBidId[bidRoundBidId] = fulfillablePart;
                 return new InventoryFulfillmentData
@@ -298,7 +298,7 @@ namespace Automata.Logistics
                 };
             }
         }
-        public VolumeAcceptanceData CanAcceptRequest(Inventory incomingInventory, uint bidRoundBidId)
+        public VolumeAcceptanceData CanAcceptRequest(DiscreteInventory incomingInventory, uint bidRoundBidId)
         {
             lock (_inventoryLock)
             {
@@ -332,12 +332,12 @@ namespace Automata.Logistics
         {
             lock (_inventoryLock)
             {
-                Inventory pending;
+                DiscreteInventory pending;
                 if (!pendingInventoryByBidRoundBidId.TryGetValue(bidRoundBidId, out pending))
                 {
                     return;
                 }
-                Inventory.MoveItems(pending, currentInventory, pending);
+                DiscreteInventory.MoveItems(pending, currentInventory, pending);
                 pendingInventoryByBidRoundBidId.Remove(bidRoundBidId);
             }
         }
@@ -351,12 +351,12 @@ namespace Automata.Logistics
         {
             lock (_inventoryLock)
             {
-                Inventory reserved;
+                DiscreteInventory reserved;
                 if (!reservedInventoryByBidRoundWinningBidId.TryGetValue(bidRoundBidId, out reserved))
                 {
                     return;
                 }
-                Inventory.MoveItems(reserved, currentInventory, reserved);
+                DiscreteInventory.MoveItems(reserved, currentInventory, reserved);
                 reservedInventoryByBidRoundWinningBidId.Remove(bidRoundBidId);
             }
         }
@@ -402,7 +402,7 @@ namespace Automata.Logistics
         {
             lock (_inventoryLock)
             {
-                Inventory pendingToBeReserved;
+                DiscreteInventory pendingToBeReserved;
                 if (!pendingInventoryByBidRoundBidId.TryGetValue(bidRoundBidId, out pendingToBeReserved))
                 {
                     return;
@@ -436,7 +436,7 @@ namespace Automata.Logistics
         {
             lock (_inventoryLock)
             {
-                Inventory reserved;
+                DiscreteInventory reserved;
                 if (!reservedInventoryByBidRoundWinningBidId.TryGetValue(bidRoundBidId, out reserved))
                 {
                     return;

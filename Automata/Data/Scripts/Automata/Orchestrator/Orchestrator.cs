@@ -35,7 +35,7 @@ namespace Automata.Orchestrator
             public Vector3DData PositionData;
             public QuaternionDData OrientationData;
             public long EntityId;
-            public LogisticsComputer.InventoryFulfillment InventoryFulfillmentFlags;
+            public Logistics.InventoryFulfillment InventoryFulfillmentFlags;
         }
 
         /// <summary>
@@ -167,7 +167,7 @@ namespace Automata.Orchestrator
         private Vector3 grindColor;
         private IMySessionDelegate sessionDelegate;
         private IMyCubeBlock block;
-        private IAIOrchestratorSettings settings = new IAIOrchestratorSettings();
+        private OrchestratorSettings settings = new OrchestratorSettings();
         private readonly TerminalDisplayManager terminalDisplayManager;
         //private Dictionary<TaskType, List<Task>> pendingTasks;
 
@@ -180,7 +180,7 @@ namespace Automata.Orchestrator
             public DateTime LastUpdate;
         }
 
-        public IAIOrchestrator(
+        public Orchestrator(
             IMyEntity entity,
             OperationMode operationMode = OperationMode.Orchestrator,
             WorkModes workModes = WorkModes.None,
@@ -196,13 +196,13 @@ namespace Automata.Orchestrator
             this.sessionDelegate = sessionDelegate ?? new MySessionDelegate();
             this.terminalDisplayManager = new TerminalDisplayManager(block as IMyTerminalBlock, 5);
 
-            this.constructionComputer = new IAIConstructionComputer(
+            this.constructionComputer = new ConstructionComputer(
                 entity,
-                ConstructionComputer.OperationMode.BuiltInToOrchestrator,
+                Construction.OperationMode.BuiltInToOrchestrator,
                 jobQueue,
                 GetConstructionComputerWorkModes(workModes),
                 ownAntenna,
-                gravityProviderSystemDelegate, sessionDelegate, new IAIConstructionComputerSettings
+                gravityProviderSystemDelegate, sessionDelegate, new ConstructionComputerSettings
                 {
                     WeldIgnoreColor = new Vector3Data(0.0f, 1.0f, 0.0f),
                     GrindColor = new Vector3Data(1.0f, 0.0f, 0.0f),
@@ -214,7 +214,7 @@ namespace Automata.Orchestrator
                     IgnoreTasksOutsideSpecifiedRange = false,
                     IgnoreTasksOutsideOfAntenaRange = true,
                     IsEnabled = true,
-                    OperationMode = ConstructionComputer.OperationMode.BuiltInToOrchestrator,
+                    OperationMode = Construction.OperationMode.BuiltInToOrchestrator,
                     WeldIgnoreList = new List<ulong>(),
                     GrindIgnoreList = new List<ulong>(),
                 });
@@ -346,7 +346,7 @@ namespace Automata.Orchestrator
 
         private void Initialize()
         {
-            messaging = IAISession.GetMessageQueue();
+            messaging = AutomataSession.GetMessageQueue();
             currentState = State.Initializing;
             messaging.Subscribe(entityId, Channel.CONSTRUCTION_COMPUTER_JOB_ANNOUNCEMENT);
             messaging.Subscribe(entityId, Channel.DRONE_REGISTRATION);
@@ -359,18 +359,18 @@ namespace Automata.Orchestrator
             messaging.Subscribe(entityId, Channel.SCHEDULER_FORWARD);
             messaging.Subscribe(entityId, Channel.DIRECT_MESSAGE);
 
-            miningSurveyor = new IAIMiningSurveyor(
+            miningSurveyor = new MiningSurveyor(
                 Entity,
                 messaging,
-                MiningSurveyor.OperationMode.BuiltInToOrchestrator,
+                Mining.OperationMode.BuiltInToOrchestrator,
                 jobQueue,
-                new IAIMiningSurveyorSettings
+                new MiningSurveyorSettings
                 {
                     IsEnabled = true,
-                    OperationMode = MiningSurveyor.OperationMode.BuiltInToOrchestrator,
+                    OperationMode = Mining.OperationMode.BuiltInToOrchestrator,
                     WorkModes = workModes.HasFlag(WorkModes.MineOre)
-                        ? MiningSurveyor.WorkModes.ScanAndPublish
-                        : MiningSurveyor.WorkModes.ScanOnly,
+                        ? Mining.WorkModes.ScanAndPublish
+                        : Mining.WorkModes.ScanOnly,
                     ShareWith = ShareWith.NoOne,
                 },
                 gravityProviderSystemDelegate);
@@ -700,8 +700,8 @@ namespace Automata.Orchestrator
             {
                 case JobType.WeldBlock:
                     job.ComponentsInventory.GetAllItems(_componentsCache, clear: true);
-                    totalMass = job.ComponentsInventory.TotalInventoryMass(IAISession.Instance);
-                    totalVolume = job.ComponentsInventory.TotalInventoryVolume(IAISession.Instance);
+                    totalMass = job.ComponentsInventory.TotalInventoryMass(AutomataSession.Instance);
+                    totalVolume = job.ComponentsInventory.TotalInventoryVolume(AutomataSession.Instance);
                     msg = new Message<Auction>
                     {
                         Payload = new Auction
@@ -714,7 +714,7 @@ namespace Automata.Orchestrator
                             OrientationData = job.OrientationData,
                             CreatedTime = job.CreatedTime,
                             ExpirationTime = job.CreatedTime.AddSeconds(settings.MaxBidRoundExpirationSeconds),
-                            EntityType = IAIEntityType.OrchestratorBlock,
+                            EntityType = AutomataEntityType.OrchestratorBlock,
                             NaturalGravity = job.NaturalGravity,
                             IsStaticGrid = job.IsStaticGrid,
                             IsInSpace = job.IsInSpace,
@@ -737,8 +737,8 @@ namespace Automata.Orchestrator
                     break;
                 case JobType.GrindBlock:
                     job.ComponentsInventory.GetAllItems(_componentsCache, clear: true);
-                    totalMass = job.ComponentsInventory.TotalInventoryMass(IAISession.Instance);
-                    totalVolume = job.ComponentsInventory.TotalInventoryVolume(IAISession.Instance);
+                    totalMass = job.ComponentsInventory.TotalInventoryMass(AutomataSession.Instance);
+                    totalVolume = job.ComponentsInventory.TotalInventoryVolume(AutomataSession.Instance);
                     msg = new Message<Auction>
                     {
                         Payload = new Auction
@@ -751,7 +751,7 @@ namespace Automata.Orchestrator
                             OrientationData = job.OrientationData,
                             CreatedTime = job.CreatedTime,
                             ExpirationTime = job.CreatedTime.AddSeconds(settings.MaxBidRoundExpirationSeconds),
-                            EntityType = IAIEntityType.OrchestratorBlock,
+                            EntityType = AutomataEntityType.OrchestratorBlock,
                             NaturalGravity = job.NaturalGravity,
                             IsStaticGrid = job.IsStaticGrid,
                             IsInSpace = job.IsInSpace,
@@ -816,11 +816,11 @@ namespace Automata.Orchestrator
                 Bid bid = message.Payload;
                 if (bid == null)
                     continue;
-                if (MinimialCheckBidAgainstBidRoundStart(bid, bidRound) && bid.EntityType == IAIEntityType.LogisticsComputerBlock)
+                if (MinimialCheckBidAgainstBidRoundStart(bid, bidRound) && bid.EntityType == AutomataEntityType.LogisticsComputerBlock)
                 {
                     potentialWinnerLCs.Add(bid);
                 }
-                if (MinimialCheckBidAgainstBidRoundStart(bid, bidRound) && bid.EntityType == IAIEntityType.DroneControllerBlock)
+                if (MinimialCheckBidAgainstBidRoundStart(bid, bidRound) && bid.EntityType == AutomataEntityType.DroneControllerBlock)
                 {
                     potentialWinnerDrones.Add(bid);
                 }
@@ -1060,7 +1060,7 @@ namespace Automata.Orchestrator
             Dictionary<long, List<Task>> assignments = new Dictionary<long, List<Task>>();
             Dictionary<long, double> remainingLcVolume = BuildRemainingLcVolumeMap(winningLCs);
 
-            Inventory requiredInventory = bidRound.ComponentsInventory ?? new Inventory();
+            DiscreteInventory requiredInventory = bidRound.ComponentsInventory ?? new DiscreteInventory();
             double requiredVolume = (double)bidRound.TotalVolume;
             if (requiredVolume <= 0.0 && !requiredInventory.IsEmpty())
             {
@@ -1116,7 +1116,7 @@ namespace Automata.Orchestrator
                     assignments[drone.EntityId] = droneTasks;
                 }
 
-                Inventory tripPayload = BuildTripPayload(requiredInventory, requiredVolume, tripVolume);
+                DiscreteInventory tripPayload = BuildTripPayload(requiredInventory, requiredVolume, tripVolume);
                 AppendWeldTripTasks(droneTasks, lc, bidRound, jobPosition, jobOrientation, tripPayload);
 
                 remainingVolume -= tripVolume;
@@ -1225,7 +1225,7 @@ namespace Automata.Orchestrator
             return best;
         }
 
-        private static Inventory BuildTripPayload(Inventory requiredInventory, double requiredVolume, double tripVolume)
+        private static DiscreteInventory BuildTripPayload(DiscreteInventory requiredInventory, double requiredVolume, double tripVolume)
         {
             if (requiredInventory == null || requiredInventory.IsEmpty() || requiredVolume <= 0.0 || tripVolume <= 0.0)
             {
@@ -1233,7 +1233,7 @@ namespace Automata.Orchestrator
             }
 
             double ratio = Math.Min(1.0, tripVolume / requiredVolume);
-            Inventory payload = new Inventory();
+            DiscreteInventory payload = new DiscreteInventory();
             List<KVPair> items = requiredInventory.GetAllItems();
             for (int i = 0; i < items.Count; i++)
             {
@@ -1254,7 +1254,7 @@ namespace Automata.Orchestrator
             return payload.IsEmpty() ? null : payload;
         }
 
-        private void AppendWeldTripTasks(List<Task> droneTasks, Bid lc, Auction bidRound, Vector3D jobPosition, QuaternionDData jobOrientation, Inventory tripPayload)
+        private void AppendWeldTripTasks(List<Task> droneTasks, Bid lc, Auction bidRound, Vector3D jobPosition, QuaternionDData jobOrientation, DiscreteInventory tripPayload)
         {
             Vector3D lcPosition = lc.IOLocationData.PositionData.ToVector3D();
             QuaternionDData lcOrientation = lc.IOLocationData.OrientationData;
@@ -1349,14 +1349,14 @@ namespace Automata.Orchestrator
         {
             switch (bid.EntityType)
             {
-                case IAIEntityType.LogisticsComputerBlock:
-                    if (bid.InventoryFulfillmentFlags.HasFlag(LogisticsComputer.InventoryFulfillment.SatisfyFully)
-                        || bid.InventoryFulfillmentFlags.HasFlag(LogisticsComputer.InventoryFulfillment.SatisfyPartial))
+                case AutomataEntityType.LogisticsComputerBlock:
+                    if (bid.InventoryFulfillmentFlags.HasFlag(Logistics.InventoryFulfillment.SatisfyFully)
+                        || bid.InventoryFulfillmentFlags.HasFlag(Logistics.InventoryFulfillment.SatisfyPartial))
                     {
                         return true;
                     }
                     return false;
-                case IAIEntityType.DroneControllerBlock:
+                case AutomataEntityType.DroneControllerBlock:
                     if (!bid.Capabilities.HasFlag(Drone.Capabilities.CanWeld))
                     {
                         return false;
@@ -1429,8 +1429,8 @@ namespace Automata.Orchestrator
             }
 
             // No single full-fulfillment LC exists; aggregate partial bids until requirement is satisfied.
-            Inventory requiredInventory = bidRound.ComponentsInventory != null ? bidRound.ComponentsInventory : new Inventory();
-            Inventory aggregatedInventory = new Inventory();
+            DiscreteInventory requiredInventory = bidRound.ComponentsInventory != null ? bidRound.ComponentsInventory : new DiscreteInventory();
+            DiscreteInventory aggregatedInventory = new DiscreteInventory();
             double requiredVolume = (double)bidRound.TotalVolume;
             double accumulatedVolume = 0.0;
 
@@ -1607,15 +1607,15 @@ namespace Automata.Orchestrator
             return (distanceScore * distanceWeight) + (fulfillmentScore * fulfillmentWeight);
         }
 
-        private static double GetLogisticsFulfillmentScore(LogisticsComputer.InventoryFulfillment flags)
+        private static double GetLogisticsFulfillmentScore(Logistics.InventoryFulfillment flags)
         {
-            if (flags.HasFlag(LogisticsComputer.InventoryFulfillment.SatisfyFully)
-                || flags.HasFlag(LogisticsComputer.InventoryFulfillment.AcceptAll))
+            if (flags.HasFlag(Logistics.InventoryFulfillment.SatisfyFully)
+                || flags.HasFlag(Logistics.InventoryFulfillment.AcceptAll))
             {
                 return 1.0;
             }
-            if (flags.HasFlag(LogisticsComputer.InventoryFulfillment.SatisfyPartial)
-                || flags.HasFlag(LogisticsComputer.InventoryFulfillment.AcceptPartial))
+            if (flags.HasFlag(Logistics.InventoryFulfillment.SatisfyPartial)
+                || flags.HasFlag(Logistics.InventoryFulfillment.AcceptPartial))
             {
                 return 0.55;
             }
@@ -1624,16 +1624,16 @@ namespace Automata.Orchestrator
 
         private static bool IsFullLogisticsFulfillment(Bid bid)
         {
-            LogisticsComputer.InventoryFulfillment flags = bid.InventoryFulfillmentFlags;
-            return flags.HasFlag(LogisticsComputer.InventoryFulfillment.SatisfyFully)
-                || flags.HasFlag(LogisticsComputer.InventoryFulfillment.AcceptAll);
+            Logistics.InventoryFulfillment flags = bid.InventoryFulfillmentFlags;
+            return flags.HasFlag(Logistics.InventoryFulfillment.SatisfyFully)
+                || flags.HasFlag(Logistics.InventoryFulfillment.AcceptAll);
         }
 
         private static bool IsPartialLogisticsFulfillment(Bid bid)
         {
-            LogisticsComputer.InventoryFulfillment flags = bid.InventoryFulfillmentFlags;
-            return flags.HasFlag(LogisticsComputer.InventoryFulfillment.SatisfyPartial)
-                || flags.HasFlag(LogisticsComputer.InventoryFulfillment.AcceptPartial);
+            Logistics.InventoryFulfillment flags = bid.InventoryFulfillmentFlags;
+            return flags.HasFlag(Logistics.InventoryFulfillment.SatisfyPartial)
+                || flags.HasFlag(Logistics.InventoryFulfillment.AcceptPartial);
         }
 
         private static double Clamp01(double value)
@@ -1731,7 +1731,7 @@ namespace Automata.Orchestrator
                 {
                     // Successfully recovered
                     _consecutiveErrors = 0;
-                    currentState = Orchestrator.State.Standby;
+                    currentState = State.Standby;
 
                     Log.Info("Orhcestrator {0} successfully recovered from error state", entityId);
 
@@ -1817,17 +1817,10 @@ namespace Automata.Orchestrator
             diagnostics.AppendLine();
 
             diagnostics.AppendLine("Drone Status:");
-            diagnostics.AppendLine($"  - Registered: {registeredDrones.Count}");
 
             var now = DateTime.UtcNow;
             var outOfRange = 0;
             var stale = 0;
-
-            foreach (var drone in registeredDrones.Values)
-            {
-                if (drone.IsOutOfRange) outOfRange++;
-                if ((now - drone.LastSeenTime).TotalSeconds > 60) stale++;
-            }
 
             diagnostics.AppendLine($"  - Out of Range: {outOfRange}");
             diagnostics.AppendLine($"  - Stale (>60s): {stale}");
@@ -1835,13 +1828,13 @@ namespace Automata.Orchestrator
             return diagnostics.ToString();
         }
 
-        public ConstructionComputer.WorkModes GetConstructionComputerWorkModes(Orchestrator.WorkModes workModes)
+        public Construction.WorkModes GetConstructionComputerWorkModes(WorkModes workModes)
         {
             var workModeEval = workModes & (
                 WorkModes.ScanOnly |
                 WorkModes.Grind |
                 WorkModes.WeldUnfinishedBlocks);
-            return (ConstructionComputer.WorkModes)workModeEval;
+            return (Construction.WorkModes)workModeEval;
         }
 
         public void Echo(string message, params object[] args)

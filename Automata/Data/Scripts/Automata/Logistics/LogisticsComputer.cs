@@ -59,7 +59,7 @@ namespace Automata.Logistics
         private readonly MyConcurrentDictionary<MyStringHash, QuotaSet> quotas = new MyConcurrentDictionary<MyStringHash, QuotaSet>(MyStringHash.Comparer);
 
         // Push configuration (Provider mode)
-        private Inventory excessInventory; // Items to push when buffer is full
+        private DiscreteInventory excessInventory; // Items to push when buffer is full
         private Dictionary<MyStringHash, int> bufferLimits; // Max amounts before pushing
         private bool autoPushEnabled = false;
 
@@ -87,7 +87,7 @@ namespace Automata.Logistics
             this.entityId = entity.EntityId;
             this.messaging = messaging;
             this.operationMode = operationMode;
-            this.excessInventory = new Inventory();
+            this.excessInventory = new DiscreteInventory();
             this.bufferLimits = new Dictionary<MyStringHash, int>(MyStringHash.Comparer);
             this.sessionDelegate = sessionDelegate ?? new MySessionDelegate();
             this._conveyorNetworkUpdateIntervalTicks = TimeUtil.TimeSpanToTick(TimeSpan.FromSeconds(settings.ConveyorNetworkUpdateIntervalSeconds));

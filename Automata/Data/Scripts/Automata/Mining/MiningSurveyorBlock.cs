@@ -11,13 +11,13 @@ using VRage.ObjectBuilders;
 namespace Automata.Mining
 {
     [MyEntityComponentDescriptor(typeof(MyObjectBuilder_ProgrammableBlockDefinition), false, "ImprovedAILargeMiningSurveyor")]
-    public class IAIMiningSurveyorBlock : MyGameLogicComponent
+    public class MiningSurveyorBlock : MyGameLogicComponent
     {
         private IMyCubeBlock block;
         private IMyProgrammableBlock programmableBlock;
-        private IAIMiningSurveyor miningSurveyor;
+        private MiningSurveyor miningSurveyor;
         private bool initialized;
-        public IAIMiningSurveyorSettings settings { get; set; }
+        public MiningSurveyorSettings settings { get; set; }
 
         public override void Init(MyObjectBuilder_EntityBase objectBuilder)
         {
@@ -63,7 +63,7 @@ namespace Automata.Mining
                 }
                 if (settings == null)
                 {
-                    settings = new IAIMiningSurveyorSettings
+                    settings = new MiningSurveyorSettings
                     {
                         IsEnabled = true,
                         OperationMode = OperationMode.MiningSurveyor,
@@ -71,7 +71,7 @@ namespace Automata.Mining
                         ShareWith = ShareWith.NoOne,
                     };
                 }
-                miningSurveyor = new IAIMiningSurveyor(
+                miningSurveyor = new MiningSurveyor(
                     Entity,
                     AutomataSession.Instance.MessageQueue,
                     OperationMode.MiningSurveyor,

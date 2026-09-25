@@ -408,85 +408,7 @@ namespace Automata.Config
             return level;
         }
 
-        public bool CanPlayerCreateDroneController(long playerId)
-        {
-            if (BlockLimits.MaxDroneControllersPerPlayer < 0) return true;
 
-            int playerConstructorCount = 0;
-            if (AutomataSession.Instance?.AIDroneControllers != null)
-            {
-                foreach (var constructor in AutomataSession.Instance.AIDroneControllers.Values)
-                {
-                    var entity = constructor.Entity as IMyCubeBlock;
-                    if (entity != null && entity.OwnerId == playerId)
-                        playerConstructorCount++;
-                }
-            }
-
-            return playerConstructorCount < BlockLimits.MaxDroneControllersPerPlayer;
-        }
-
-        public bool CanPlayerCreateScheduler(long playerId)
-        {
-            if (BlockLimits.MaxSchedulersPerPlayer < 0) return true;
-
-            int playerSchedulerCount = 0;
-            if (AutomataSession.Instance?.AIDroneSchedulers != null)
-            {
-                foreach (var scheduler in AutomataSession.Instance.AIDroneSchedulers.Values)
-                {
-                    var entity = scheduler.Entity as IMyCubeBlock;
-                    if (entity != null && entity.OwnerId == playerId)
-                        playerSchedulerCount++;
-                }
-            }
-
-            return playerSchedulerCount < BlockLimits.MaxSchedulersPerPlayer;
-        }
-
-        public bool CanFactionCreateScheduler(long factionId)
-        {
-            if (BlockLimits.MaxSchedulersPerFaction <= 0) return true;
-
-            int factionSchedulerCount = 0;
-            if (AutomataSession.Instance?.AIDroneSchedulers != null)
-            {
-                foreach (var scheduler in AutomataSession.Instance.AIDroneSchedulers.Values)
-                {
-                    var entity = scheduler.Entity as IMyCubeBlock;
-                    if (entity != null)
-                    {
-                        var faction = MyAPIGateway.Session.Factions.TryGetPlayerFaction(entity.OwnerId);
-                        if (faction?.FactionId == factionId)
-                            factionSchedulerCount++;
-                    }
-                }
-            }
-
-            return factionSchedulerCount < BlockLimits.MaxSchedulersPerFaction;
-        }
-
-        public bool CanFactionCreateDroneController(long factionId)
-        {
-            if (BlockLimits.MaxDroneControllersPerFaction <= 0) return true;
-
-            int factionConstructorCount = 0;
-            if (AutomataSession.Instance?.AIDroneControllers != null)
-            {
-                foreach (var constructor in AutomataSession.Instance.AIDroneControllers.Values)
-                {
-                    var entity = constructor.Entity as IMyCubeBlock;
-                    if (entity != null)
-                    {
-                        var faction = MyAPIGateway.Session.Factions.TryGetPlayerFaction(entity.OwnerId);
-                        if (faction?.FactionId == factionId)
-                            factionConstructorCount++;
-                    }
-                }
-            }
-
-            return factionConstructorCount < BlockLimits.MaxDroneControllersPerFaction;
-        }
 
         public string GetConfigSummary()
         {
@@ -495,8 +417,8 @@ namespace Automata.Config
             summary += $"Schedulers - Max per Faction: {(BlockLimits.MaxSchedulersPerFaction > 0 ? BlockLimits.MaxSchedulersPerFaction.ToString() : "Unlimited")}\n";
             summary += $"Drone Controllers - Max per Player: {(BlockLimits.MaxDroneControllersPerPlayer > 0 ? BlockLimits.MaxDroneControllersPerPlayer.ToString() : "Unlimited")}\n";
             summary += $"Drone Controllers - Max per Faction: {(BlockLimits.MaxDroneControllersPerFaction > 0 ? BlockLimits.MaxDroneControllersPerFaction.ToString() : "Unlimited")}\n";
-            summary += $"Current Schedulers: {AutomataSession.Instance?.AIDroneSchedulers?.Count ?? 0}\n";
-            summary += $"Current Drone Controllers: {AutomataSession.Instance?.AIDroneControllers?.Count ?? 0}\n";
+            // summary += $"Current Schedulers: {AutomataSession.Instance?.AIDroneSchedulers?.Count ?? 0}\n";
+            // summary += $"Current Drone Controllers: {AutomataSession.Instance?.AIDroneControllers?.Count ?? 0}\n";
             summary += $"Logistics: {(LogisticsComputer.AllowLogistics ? "Enabled" : "Disabled")}\n";
             return summary;
         }

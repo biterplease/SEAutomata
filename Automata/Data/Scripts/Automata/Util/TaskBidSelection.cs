@@ -8,7 +8,7 @@ namespace Automata.Util
     public struct CollectedBid
     {
         public long SenderId;
-        public TaskBid Bid;
+        public Bid Bid;
     }
 
     /// <summary>

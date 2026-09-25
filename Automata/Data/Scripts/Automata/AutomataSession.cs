@@ -155,7 +155,7 @@ namespace Automata
 
                 Log.Info("Mod loaded successfully");
                 Log.Info("Update interval: {0} ticks", _updateInterval);
-                IAILogisticsComputerTerminalControls.DoOnce(ModContext);
+                LogisticsComputerTerminalControls.DoOnce(ModContext);
                 DroneControllerTerminalControls.DoOnce(ModContext);
 
                 //LogAllTerminalControlClasses();
@@ -279,17 +279,9 @@ namespace Automata
 
                 _lastUpdateFrame = currentFrame;
 
-                // Periodic cleanup and maintenance
-                CleanupInvalidBlocks();
 
                 // Optional: Log active AI block counts
                 updateCounter++;
-                if (updateCounter % (UPDATE_INTERVAL * 10) == 0) // Every 10 seconds
-                {
-                    Log.Verbose("Active AI Drone Schedulers: {0}", AIDroneSchedulers.Count);
-                    Log.Verbose("Active AI Drone Controllers: {0}", AIDroneControllers.Count);
-                    Log.Verbose("Active AI Logistics Computers: {0}", AILogisticsComputers.Count);
-                }
             }
             catch (Exception ex)
             {
@@ -298,50 +290,6 @@ namespace Automata
             }
         }
 
-        private void CleanupInvalidBlocks()
-        {
-            var schedulersToRemove = new List<long>();
-            foreach (var kvp in AIDroneSchedulers)
-            {
-                if (kvp.Value?.Entity == null || kvp.Value.Entity.MarkedForClose)
-                {
-                    schedulersToRemove.Add(kvp.Key);
-                }
-            }
-
-            foreach (var entityId in schedulersToRemove)
-            {
-                AIDroneSchedulers.Remove(entityId);
-            }
-
-            var controllersToRemove = new List<long>();
-            foreach (var kvp in AIDroneControllers)
-            {
-                if (kvp.Value?.Entity == null || kvp.Value.Entity.MarkedForClose)
-                {
-                    controllersToRemove.Add(kvp.Key);
-                }
-            }
-
-            foreach (var entityId in controllersToRemove)
-            {
-                AIDroneControllers.Remove(entityId);
-            }
-
-            var logisticsToRemove = new List<long>();
-            foreach (var kvp in AILogisticsComputers)
-            {
-                if (kvp.Value?.Entity == null || kvp.Value.Entity.MarkedForClose)
-                {
-                    logisticsToRemove.Add(kvp.Key);
-                }
-            }
-
-            foreach (var entityId in logisticsToRemove)
-            {
-                AILogisticsComputers.Remove(entityId);
-            }
-        }
 
         protected override void UnloadData()
         {
@@ -358,12 +306,6 @@ namespace Automata
                     }
                     _messageQueue.Reset();
                 }
-
-                // Clean shutdown
-                AIDroneControllers.Clear();
-                AIDroneSchedulers.Clear();
-                AILogisticsComputers.Clear();
-
 
                 // Remove localization texts
                 MyAPIGateway.Gui.GuiControlRemoved -= GuiControlRemoved;

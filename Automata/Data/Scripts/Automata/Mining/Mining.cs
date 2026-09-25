@@ -40,21 +40,21 @@ namespace Automata.Mining
     /// <summary>
     /// Serialized footprint for the mining surveyor block (mirrors <see cref="ConstructionComputer"/> pattern).
     /// </summary>
-    [Serializable, ProtoContract(UseProtoMembersOnly = true)]
-    public class MiningSurveyor
-    {
+    // [Serializable, ProtoContract(UseProtoMembersOnly = true)]
+    // public class MiningSurveyor
+    // {
 
-        /// <summary>
-        /// Half of the small-grid ore detector range (50 m): duplicate detections within this radius are discarded.
-        /// </summary>
-        public const double DuplicateDetectionRadiusMeters = 25.0;
+    //     /// <summary>
+    //     /// Half of the small-grid ore detector range (50 m): duplicate detections within this radius are discarded.
+    //     /// </summary>
+    //     public const double DuplicateDetectionRadiusMeters = 25.0;
 
-        public static readonly double DuplicateDetectionRadiusSquared =
-            DuplicateDetectionRadiusMeters * DuplicateDetectionRadiusMeters;
+    //     public static readonly double DuplicateDetectionRadiusSquared =
+    //         DuplicateDetectionRadiusMeters * DuplicateDetectionRadiusMeters;
 
-        [ProtoMember(1)]
-        public long EntityId;
-        [ProtoMember(2)]
-        public OperationMode _OperationMode;
-    }
+    //     [ProtoMember(1)]
+    //     public long EntityId;
+    //     [ProtoMember(2)]
+    //     public OperationMode _OperationMode;
+    // }
 }
