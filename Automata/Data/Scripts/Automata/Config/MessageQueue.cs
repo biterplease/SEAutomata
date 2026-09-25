@@ -14,7 +14,7 @@
 
     }
     /// <summary>
-    /// This section is about the IAI network communication.
+    /// This section is about the Automata network communication.
     /// System implements a pseudo-messaging system between scheduler, drones, and logistic computers.
     /// </summary>
     public class MessageQueueConfig : IMessageQueueConfig

@@ -2,11 +2,11 @@ using Sandbox.ModAPI;
 using System;
 using System.IO;
 
-namespace ImprovedAI
+namespace Automata
 {
-    public class IAISessionCommandHandler
+    public class AutomataSessionCommandHandler
     {
-        public IAISessionCommandHandler() { }
+        public AutomataSessionCommandHandler() { }
 
         private const string CMDROOT = "/iai";
         private const string HELP = "-h";
@@ -29,7 +29,7 @@ namespace ImprovedAI
                     switch (args[0].Trim())
                     {
                         case LIST_TASKS:
-                            MyAPIGateway.Utilities.ShowMessage(IAISession.MOD_NAME, GetTaskList());
+                            MyAPIGateway.Utilities.ShowMessage(AutomataSession.MOD_NAME, GetTaskList());
                             break;
                     }
                 }
@@ -43,8 +43,8 @@ namespace ImprovedAI
         private string GetHelpText()
         {
             return string.Format(
-                "ImprovedAI {0} - Commands: {1} {2}",
-                IAISession.VERSION, LIST_TASKS, TASK_CMD);
+                "Automata {0} - Commands: {1} {2}",
+                AutomataSession.VERSION, LIST_TASKS, TASK_CMD);
         }
     }
 }

@@ -1,0 +1,102 @@
+---
+description: Logic for the Bidding System
+globs: IAIOrchestrator.cs, IAIDroneController.cs, IAILogisticsComputer.cs, IAIMiningSurveyor.cs, IAIConstructionComputer.cs, Message.cs, MessageQueue.cs
+alwaysApply: false
+---
+# Bidding system interactions
+
+## Phase 1: Job Procurement
+
+Jobs are initiated in a specific way, by one of the 3 **IAIConstructionComputer**, **IAILogisticsComputer**, or **IAIMiningSurveyor**.
+- **Construction jobs**: jobs of type **WeldBlock** or **GrindBlock** are considered construction jobs. It's the **IAIConstructionComputer** that scans grids for blocks that are either **unbuilt**, **damaged**, or *projected**.
+- **Mining jobs**: jobs of type **MineOre** are initiated by the **MiningSurveyor**. The **MiningSurveyor** can collect data in 2 ways:
+   - If the grid that the **MiningSurveyor** is has an **OreDetector**, it can readily cache any ore data matched by the ore detector.
+   - From **DroneController**s embed a **MiningSurveyor** class for this exact purpose. If a **DroneController** has the capabilities of **CanScoutOre** which itself comes from having an ore detector, and the setting of **SurveyForMiningData**, should use its internal **MiningSurveyor** class to cache detected ore data, and when in range, broadcast it so a real **MiningSurveyor** (the full **MiningSurveyorBlock** that players build) can parse it and broadcast it as a job.
+- **Logistic jobs**: jobs of type **DeliverMissingInventory** and **CollectInventorySurplus** are considederd logistic jobs. It's the **IAILogisticsComputer** that handles the initiation of these jobs from its own **Conveyor Network**(s)
+
+## Bid rounds and winner assignment
+
+The Orchestrator does not "assign" tasks immediately. It facilitates a competitive bidding process.
+
+## Phase 2: The Handshake Flow
+1. **Broadcast**: Orchestrator broadcasts a `BidRoundStart` message  to the `MessageQueue` `ORCHESTRATOR_BID_ROUND_START` channel.
+2. **Evaluation**: Drones and Logistics Computers receive the message and perform a "Self-Assessment", depending on the **job type**. The bidding evaluation should purposely be kept lightweight, heavy pathfinding calculations, raycasts, and other expensive operations should be avoided.
+   - For Drones, depending on job type, they check their **capabilities**:
+      - **WeldBlock**:
+         - Check **DroneController.Capablities.CanWeld**: Do I have one or more welders?
+         - Check its **ThrustData**: Can I handle the max load **mass**?
+         - Check its **cargo volume**: Can I fit the required components **volume**?
+         - Check **DroneController.Capabilities.CanFlyAtmosphere** and **DroneController.Capabilities.CanFlySpace**, depending on the natural gravity reported by the `BidRoundStart` message.
+      - **GrindBlock**:
+         - Check **DroneController.Capablities.CanGrind**: Do I have one or more grinders?
+         - Check its **ThrustData**: Can I handle the mass of the components?
+         - Check its **cargo volume**: Can I fit the required components **volume**?
+         - Check **DroneController.Capabilities.CanFlyAtmosphere** and **DroneController.Capabilities.CanFlySpace**, depending on the natural gravity reported by the `BidRoundStart` message.
+      - **DeliverMissingInventory**:
+         - Check its **ThrustData**: Can I handle the max load **mass**?
+         - Check its **cargo volume**: Can I fit the required components **volume**?
+         - Check **DroneController.Capabilities.CanFlyAtmosphere** and **DroneController.Capabilities.CanFlySpace**, depending on the natural gravity reported by the `BidRoundStart` message.
+      - **CollectInventorySurplus**:
+         - Check its **ThrustData**: Can I handle the max load **mass**?
+         - Check its **cargo volume**: Can I fit the required components **volume**?
+         - Check **DroneController.Capabilities.CanFlyAtmosphere** and **DroneController.Capabilities.CanFlySpace**, depending on the natural gravity reported by the `BidRoundStart` message.
+      - **MineOre**:
+         - Check **DroneController.Capablities.CanDrill**: Do I have one or more drills?
+         - Check its **ThrustData**: Can I handle the max load **mass**?
+         - Check its **cargo volume**: Can I fit the required components **volume**?
+         - Check **DroneController.Capabilities.CanFlyAtmosphere** and **DroneController.Capabilities.CanFlySpace**, depending on the natural gravity reported by the `BidRoundStart` message.
+   - For Logistics Computers
+      - **WeldBlock**:
+         - **WorkMode check**: Is **ProvideForConstruction** enabled?
+         - Check its **ConveyorNetwork**(s): Does one or more of my conveyor networks have the inventory to weld the job, and either **SatisfyFully** or **SatisfyPartial**?         
+      - **GrindBlock**:
+         - **WorkMode check**: Is **ProvideForConstruction** enabled?
+         - Check its **ConveyorNetwork**(s): Does one or more of my conveyor networks have the volume to fully or partially accept the volume of the parts?
+      - **DeliverMissingInventory**:
+         - **Self check**: Cannot bid if the **LogisticsComputer** that is requesting the items is itself.
+         - **WorkMode check**: Is **ProvideForLogistics** enabled?
+         - Check its **ConveyorNetwork**(s): Does one or more of my conveyor networks have the inventory to weld the job, and either **SatisfyFully** or **SatisfyPartial**?
+      - **CollectInventorySurplus**:
+         - **Self check**: Cannot bid if the **LogisticsComputer** that is requesting the items is itself.
+         - **WorkMode check**: Is **ProvideForLogistics** enabled?
+         - Check its **ConveyorNetwork**(s): Does one or more of my conveyor networks have the volume to fully or partially accept the volume of the inventory?
+      - **MineOre**:
+         - **WorkMode check**: Is **ProvideForLogistics** enabled?
+         - **Refinery check**: Is the grid I'm installed on equipped with the correct refinery that can handle the job's ore?
+         - Check its **ConveyorNetwork**(s): Does one or more of my conveyor networks have the volume to fully or partially accept the volume of the ore.
+
+3. **Bid**: If the checks pass, the **DroneController**s and **LogisticsComputer**s broadcast a `BidRoundBid` message to the `ORCHESTRATOR_BID_ROUND_BIDS` channel.
+4. **Orchestrator evaluates**:
+   - The orchestrator will evaluate bids, and perform 2 actions:
+      - First, a hard filter is of minimum spec required for the job:
+         - Inventory fulfillment, full or partial.
+         - Capabilities against the job check, including MaxLoad and MaxCargo
+      - Second, is a ranking based on heuristics, scoring the winners of the filter round by:
+         - Full job fulfillment > partial job fulfillment
+         - Full job acceptance > partial job acceptance
+         - Shortest distance > longer distance
+   - Once the winner **DroneController**s and **LogisticsComputer**s have been selected and ranked, a `BidRoundWinnerAnnouncement` message is sent on the `ORCHESTRATOR_BID_ROUND_WINNER_ANNOUNCEMENT` channel.
+   - The winning message contains references to the job id, bid round id,  and bid round, and a Dictionary that maps the winning bid id to the task list that is assigned to the bidder that won.
+
+5. **Winner entity notes**
+   - **Drones**: The task list should be ordered in the order that they need to be completed. Drones are expected to fulfill each task in order, and each task should be precursor to the next one.
+   - **Logistics computers** don't really receive task lists when they win, but they need to reserve inventory or volume once they know they are the winner.
+
+## Success reports
+- When **DroneController**s complete tasks, they should broadcast a **TasksCompleted** message.
+   - It's possible that the **DroneController** is out of network range of the **Orchestrator** that issued the tasks, in which case it should cache the completed task ids, until it can successfully broadcast the message to the issuing **Orchestrator**.
+
+## Give-Up Conditions
+
+### Drone controller task failure
+
+If a **DroneController** is the winner of the bid round, but finds it cannot fulfill the task by one of the following conditions:
+- Its `PathfindingManager` returns `PathfindingResult.Failed` repeatedly (exceeding `maxRepositionAttempts`)
+- It finds itself under attack, needs to broadcast an `UnderAttack` message, which should include its current task.
+- Drone is destroyed. A destroyed drone should attempt to broadcast the `TasksAborted` message, but once the drone controller either loses the antenna, or becomes non-functional, it will not be able to do so, in which case, the **Orchestrator** needs to rely on the task expiration mechanism to assume the task has not been completed.
+- The Orchestrator must then blacklist that specific drone for the subset of tasks for that job
+
+### Logistics Computer task failure
+
+Once a task fulfillment has been accepted, if the inventory changes so that it cannot fulfill the requseted inventory, it should notify its Orchestrator.
+   - Orchestrator shoud then blacklist that specific LogisticsComputer for a cooldown period.  

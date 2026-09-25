@@ -14,9 +14,9 @@ using VRage.Game;
 using Automata.Config;
 using Automata.Util.Logging;
 using Automata.VirtualNetwork;
-using Automata.LogisticsComputer;
-using Automata.DroneController;
-using Automata.ConstructionComputer;
+using Automata.Logistics;
+using Automata.Drone;
+using Automata.Construction;
 
 namespace Automata
 {
@@ -62,9 +62,9 @@ namespace Automata
     public class AutomataSession : MySessionComponentBase
     {
         public const string VERSION = "v0.0.1";
-        public const string MOD_NAME = "ImprovedAI";
+        public const string MOD_NAME = "Automata";
         public static readonly Guid MOD_GUID = new Guid("1CFDA990-FD26-4950-A127-7BBC99FF1397");
-        private const string MESSAGE_QUEUE_SNAPSHOT_FILE = "IAIMessageQueueSnapshot.dat";
+        private const string MESSAGE_QUEUE_SNAPSHOT_FILE = "AutomataMessageQueueSnapshot.dat";
         public static AutomataSession Instance;
         private static ServerConfig _serverConfig;
 
@@ -118,11 +118,11 @@ namespace Automata
         {
             try
             {
-                MyLog.Default.WriteLineAndConsole("ImprovedAI: Instance constructor called");
+                MyLog.Default.WriteLineAndConsole("Automata: Instance constructor called");
             }
             catch (Exception ex)
             {
-                MyLog.Default.WriteLineAndConsole($"ImprovedAI: Instance constructor failed: {ex}");
+                MyLog.Default.WriteLineAndConsole($"Automata: Instance constructor failed: {ex}");
             }
         }
 
@@ -130,8 +130,8 @@ namespace Automata
         {
             try
             {
-                Log.Initialize(MOD_NAME, 0, "ImprovedAI.log", typeof(AutomataSession));
-                Log.Info("=== ImprovedAI Initializing ===");
+                Log.Initialize(MOD_NAME, 0, "Automata.log", typeof(AutomataSession));
+                Log.Info("=== Automata Initializing ===");
 
                 _serverConfig = ServerConfig.Instance;
                 _serverConfig.LoadConfig();
@@ -165,7 +165,7 @@ namespace Automata
             }
             catch (Exception ex)
             {
-                MyLog.Default.WriteLine($"ImprovedAI: Init exception: {ex}");
+                MyLog.Default.WriteLine($"Automata: Init exception: {ex}");
             }
         }
 
@@ -255,7 +255,7 @@ namespace Automata
                 {
                     if (MyAPIGateway.Session == null)
                         return;
-                    Log.Info("Initializing IAI Session");
+                    Log.Info("Initializing Automata Session");
                     Init();
                     return;
                 }
@@ -293,8 +293,8 @@ namespace Automata
             }
             catch (Exception ex)
             {
-                MyAPIGateway.Utilities.ShowMessage("ImprovedAI", $"Update error: {ex.Message}");
-                MyLog.Default.WriteLine($"ImprovedAI: UpdateBeforeSimulation exception: {ex}");
+                MyAPIGateway.Utilities.ShowMessage("Automata", $"Update error: {ex.Message}");
+                MyLog.Default.WriteLine($"Automata: UpdateBeforeSimulation exception: {ex}");
             }
         }
 
@@ -378,7 +378,7 @@ namespace Automata
             }
             catch (Exception ex)
             {
-                MyLog.Default.WriteLine($"ImprovedAI: UnloadData exception: {ex}");
+                MyLog.Default.WriteLine($"Automata: UnloadData exception: {ex}");
 
                 var writer = MyAPIGateway.Utilities.WriteFileInLocalStorage("shutdown_error.log", typeof(AutomataSession));
                 if (writer != null)

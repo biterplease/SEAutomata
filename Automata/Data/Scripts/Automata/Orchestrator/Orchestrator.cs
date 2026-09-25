@@ -14,10 +14,10 @@ using VRage.Utils;
 using System.Configuration;
 using VRage;
 
-using Automata.LogisticsComputer;
+using Automata.Logistics;
 using Automata.Inventory;
-using Automata.ConstructionComputer;
-using Automata.MiningSurveyor;
+using Automata.Construction;
+using Automata.Mining;
 
 namespace Automata.Orchestrator
 {

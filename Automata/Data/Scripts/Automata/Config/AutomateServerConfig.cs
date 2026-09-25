@@ -56,7 +56,7 @@ namespace Automata.Config
         }
 
         private static bool _configLoaded = false;
-        private static readonly string CONFIG_FILENAME = "ImprovedAI.ini";
+        private static readonly string CONFIG_FILENAME = "Automata.ini";
 
         public SessionConfig Session { get; private set; }
         public BlockLimitConfig BlockLimits { get; private set; }
@@ -245,7 +245,7 @@ namespace Automata.Config
             try
             {
                 // Get the current mod item
-                var modItem = MyAPIGateway.Session.Mods.FirstOrDefault(m => m.GetPath().Contains("ImprovedAI"));
+                var modItem = MyAPIGateway.Session.Mods.FirstOrDefault(m => m.GetPath().Contains("Automata"));
                 if (modItem.Name != AutomataSession.MOD_NAME)
                 {
                     Log.Warning($"{AutomataSession.MOD_NAME}: Could not find mod item for config loading");
@@ -333,7 +333,7 @@ namespace Automata.Config
             var maxPathfindingMs = Math.Max(10, ini.Get("Pathfinding", "MaxPathfindingTimeMs").ToInt32(50));
             Pathfinding.maxPathfindingTime = TimeSpan.FromMilliseconds(maxPathfindingMs);
 
-            // Parse SchedulerBounds (sample ImprovedAI.ini); [Scheduler] kept as legacy alias for same keys.
+            // Parse SchedulerBounds (sample Automata.ini); [Scheduler] kept as legacy alias for same keys.
             const string schedBounds = "SchedulerBounds";
             const string schedLegacy = "Scheduler";
             const string schedState = "SchedulerBounds.StateUpdateIntervalTicks";
@@ -490,7 +490,7 @@ namespace Automata.Config
 
         public string GetConfigSummary()
         {
-            var summary = "=== ImprovedAI Server Config ===\n";
+            var summary = "=== Automata Server Config ===\n";
             summary += $"Schedulers - Max per Player: {(BlockLimits.MaxSchedulersPerPlayer > 0 ? BlockLimits.MaxSchedulersPerPlayer.ToString() : "Unlimited")}\n";
             summary += $"Schedulers - Max per Faction: {(BlockLimits.MaxSchedulersPerFaction > 0 ? BlockLimits.MaxSchedulersPerFaction.ToString() : "Unlimited")}\n";
             summary += $"Drone Controllers - Max per Player: {(BlockLimits.MaxDroneControllersPerPlayer > 0 ? BlockLimits.MaxDroneControllersPerPlayer.ToString() : "Unlimited")}\n";

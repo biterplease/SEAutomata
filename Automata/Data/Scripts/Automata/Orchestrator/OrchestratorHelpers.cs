@@ -4,7 +4,7 @@ using VRageMath;
 using Automata.Util;
 using System.Collections.Generic;
 
-using InventoryClass = Automata.Inventory.Inventory;
+using InventoryClass = Automata.Inventory.DiscreteInventory;
 
 namespace Automata.Orchestrator
 {

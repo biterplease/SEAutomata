@@ -5,12 +5,12 @@ globs: **/*Tests.cs
 
 # Space Engineers Testing Standards
 
-All tests must integrate with the existing `ImprovedAI.Tests` infrastructure. Focus on high-efficiency execution and strict isolation from the Space Engineers runtime.
+All tests must integrate with the existing `Automata.Tests` infrastructure. Focus on high-efficiency execution and strict isolation from the Space Engineers runtime.
 
 ## 1. Existing Infrastructure Integration
-- **Mock Factory**: Always use `SEMockFactory` (from `ImprovedAI.Tests.TestUtil`) to generate boilerplate mocks for Grids and Controllers. Extend  or modify `SEMockFactory` as needed.
+- **Mock Factory**: Always use `SEMockFactory` (from `Automata.Tests.TestUtil`) to generate boilerplate mocks for Grids and Controllers. Extend  or modify `SEMockFactory` as needed.
 - **Reflection for Private Members**: Use the existing `InvokePrivateMethod` and `GetPrivateField` patterns found in `IAIDroneControllerRotationTests` to test internal logic without breaking encapsulation in the main project.
-- **Framework**: Use `MSTest` (`[TestClass]`, `[TestMethod]`) as defined in `ImprovedAI.Tests.csproj`.
+- **Framework**: Use `MSTest` (`[TestClass]`, `[TestMethod]`) as defined in `Automata.Tests.csproj`.
 
 ## 2. Mocking Guidelines
 - **IMySession**: Always mock `IMySession.GameplayFrameCounter` in `[TestInitialize]` to handle throttled logic (e.g., logic that only runs every 10 or 100 ticks).

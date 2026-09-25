@@ -3,11 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.13.35931.197
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ImprovedAI", "ImprovedAI\ImprovedAI.csproj", "{B00E0545-3323-40E4-9BF3-8F75DCD81A57}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ImprovedAI.Tests", "ImprovedAI.Tests\ImprovedAI.Tests.csproj", "{1C5A167B-B9D5-4FFA-B9DF-2D7D6249C825}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ImprovedAI.Benchmarks", "ImprovedAI.Benchmarks\ImprovedAI.Benchmarks.csproj", "{878F8672-DE39-4DDE-8919-EF447472BDB5}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Automata", "Automata\Automata.csproj", "{B00E0545-3323-40E4-9BF3-8F75DCD81A57}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

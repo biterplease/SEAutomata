@@ -1,4 +1,4 @@
-﻿using ImprovedAI.Pathfinding;
+﻿using Automata.Pathfinding;
 using System.Collections.Generic;
 using VRageMath;
 

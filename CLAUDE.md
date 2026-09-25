@@ -1,0 +1,76 @@
+# Space Engineers Automata Mod: Context & Rulesproject Project
+
+This mod, **Automata**, or **IAI** aims to provide the player with tools to create and automate logistic networks. It features the following elements:
+1. **Construction Computer**: Scans for buildable objects and initiates construction jobs.
+2. **Logistics Computer**: Maintains a virtual inventory, and initiates logistics jobs.
+3. **Mining Surveyor**: Parses mining data and converts it into mining jobs.
+4. **Orchestrator**: Receives job requests and turns it into tasks. Runs bid rounds, distributes tasks to bid round winners.
+5. **Drone Controller**: Performs tasks based on its own capabilities.
+6. **Virtual Network**: Simulates a two-layer communication system that allows the other elements of the mod to communicate with each other. Enforces antenna ranges, and ownership and access checks. See [Automata\Data\Scripts\Automata\VirtualNetwork\CLAUDE.md](Automata\Data\Scripts\Automata\VirtualNetwork\CLAUDE.md)
+
+## Code structure
+
+Each entity is defined in a set of files, as follows:
+- **<Entity>.cs**: Defines enums and classes relevant to the entity.
+- **IAI<Entity>.cs**: Defines the core logic of the entity.
+- **IAI<Entity>Block.cs**: The ModAPI hooks to the game, that implements `MyGameLogicComponent`. It should embed an `IAI<Entity>` class, and call its methods to access mod logic.
+- **IAI<Entity>Settings.cs**: Player-controlled settings for the block/entity. These settings must be displayed in the blocks' terminal.
+- **IAI<Entity>TerminalControls.cs**: Hooks for hiding default controls, and setting up specific controls for each block.
+- **Other files**: there may be other files that don't adapt to this convention, grouped simply because its relevant to the entity in question.
+
+## Core Constraints
+- **Language**: C# 6.0 features ONLY (No records, no top-level statements).
+- **Communication**: Internal-to-the-mod message queue, that simulates antenna communications by checking signal ranges and antenna ownership.
+
+## Space Engineers coordinate system
+- **Up/Down**: +Y / -Y
+- **Right/Left**: +X / -X
+- **Back/Forward**: +Z / -Z
+
+## Gyroscope Control (Relative to IShipController)
+- **Yaw**: Negative = CCW (towards -X); Positive = CW (towards +X).
+- **Pitch**: Negative = Nose Down (-Y); Positive = Nose Up (+Y).
+- **Roll**: Negative = CCW around Z; Positive = CW around Z.
+
+
+## SE Virtual Networking vs Multiplayer Sync
+This mod uses a two-layer communication system. You must distinguish between **Simulation Logic** (Gameplay) and **Multiplayer Syncing** (Technical).
+
+
+## Reference Docs
+
+The [`./docs`](./docs/) directory contains several useful reference repos:
+- **ModAPI**: Keens official Mod API documentation is cloned locally at `docs/SpaceEngineersModAPI/api/`. Each type  as its own HTML file named after its fully-qualified type name (e.g., `VRage.Game.ModAPI.IMyCubeGrid.html`). To look up an API type, read the corresponding HTML file in that folder. Use `xrefmap.yml` in the same directory to find the filename for a given type UID.
+- **SEInventorySorter**: A different mod implemented as a client-only plugin. Cloned locally at `docs/SEInvontorySorter`.
+- **Nanobot-Build-and-Repair-System**: is a wildly successful mod that implements the Space Engineers client/server protocol, and a large amount of features. Cloned locally at `docs/211SE-Nanobot-Build-and-Repair-System`
+- **SE-ModScript-Examples**: A collection of ModScript examples. Cloned locally at `docs/SE-ModScript-Examples`
+
+## Performance-First Development (Server-Side)
+
+Because this mod will be dealing with expensive logic (**pathfinding**) efficiency is the absolute priority. Code must be written to minimize GC pressure, CPU spikes, and main-thread blocking.
+
+### 1. Zero-Allocation & GC Management
+- **Avoid Linq**: Never use `.Where()`, `.Select()`, or `.Any()` in update loops. Use `for` or `foreach` on pooled lists.
+- **No String Interpolation in Loops**: Do not use `$"Value: {x}"` inside `UpdateAfterSimulation`. Use cached `StringBuilder` or pre-defined strings.
+- **Ref Structs & Passing by Ref**: Use `ref` or `in` for large structs like `Vector3D`, `MatrixD`, and `PathfindingContext` to avoid copying data on the stack.
+- **Primitive Collections**: Prefer `MyConcurrentDictionary` or `MyConcurrentQueue` from `VRage.Collections` for thread-safe operations.
+
+### 2. API Specific Optimizations
+- **Square the Distances**: Always use `Vector3D.DistanceSquared` instead of `Vector3D.Distance` for comparisons to avoid unnecessary `Math.Sqrt` calls.
+- **Self Throttling**: The **UpdateAI** method of each entity, should consist of state-machine that decides the next action based on its current state, and should avoid bundling too many actions together.
+- **Caching**: Entity classes should cache and reuse its own locals, to prevent unnecessary allocations.
+
+### 3. Logic Branching & Shortcuts
+- **Early Exits**: Place the cheapest checks (booleans, enums) at the top of a method. If `!IsEnabled`, return immediately before doing any math.
+- **Instruction Counting**: If logic is complex, spread it across multiple frames using a state machine or a counter (`if (tick++ % 10 == 0)`).
+- **Bitwise Enums**: Use `[Flags]` enums for `WorkModes` and `Capabilities` to perform lightning-fast capability checks using `&` operators.
+
+### 4. Serialization
+- **Serialization formats**: all entities should be serializable to both **XML** and **ProtoBuf**: **XML** would be used to debug, but **Protobuf** must be default, to optimize read/writes.
+- **All Entities** should have the proper decorators, in order to be saved/loaded when the game engine requires it, this includes:
+  - Entity state
+  - Entity player configuration
+  - Entity server configuration
+  - Entity's MessageQueue inboxes and outboxes
+- **Non-entities that need to be saved**: The **IAISession** component, **MessageQueue**, and **Config** are implemented as singletons, and need to be serialized and saved/loaded as well.
+- **Pathfinding**: **Pathfinding** is unique to **Drone Controller**s, but pathfinding results of a series of expensive operations, and the results must be cached, and serialized for save/load, in order to avoid recomputing.

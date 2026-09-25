@@ -1,8 +1,14 @@
+---
+description: Logic for the IAIOrchestrator
+globs: *Orchestrator*.cs, IAIMiningSurveyor.cs, IAILogisticsComputer.cs, IAIConstructionComputer.cs, IAIDroneController.cs
+---
+
 # Orchestrator Architecture
+
 The `Orchestrator` is the central brain for task distribution.
 
 ## Operation
-- **Full Solution**: The **Orchestrator** is a  should embed its own **Construction Computer**, **Mining Surveyor**, and **Logistics Computer**, in order to perform all the scanning of different jobs, and managing virtual inventories.
+- **Full Solution**: The **Orchestrator** is should embed its own **Construction Computer**, **Mining Surveyor**, and **Logistics Computer**, in order to perform all the scanning of different jobs, and managing virtual inventories.
 - **Never embedded**: while the **Orchestrator** embeds the logic of other entities, it is never embedded into anything.
 
 ## Core concepts

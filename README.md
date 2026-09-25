@@ -1,4 +1,4 @@
-# ImprovedAI
+# Automata
 
 Logistics and Construction drones for Space Engineers.
 

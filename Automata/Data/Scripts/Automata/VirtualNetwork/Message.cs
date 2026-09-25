@@ -6,8 +6,8 @@ using VRage;
 using VRage.Utils;
 
 using Automata.Config;
-using Automata.DroneController;
-using Automata.VirtualInventory;
+using Automata.Drone;
+using Automata.Inventory;
 
 namespace Automata.VirtualNetwork
 {

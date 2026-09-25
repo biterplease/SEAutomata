@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 namespace Automata
 {
     [ProtoContract]
-    public enum IAIEntityType: byte
+    public enum AutomataEntityType: byte
     {
         [ProtoEnum]
         OrchestratorBlock = 1,
@@ -29,10 +29,10 @@ namespace Automata
         [ProtoMember(2)]
         public long EntityId;
         [ProtoMember(3)]
-        public IAIEntityType EntityType;
+        public AutomataEntityType EntityType;
 
     }
-    public class IAISessionSync
+    public class AutomataSessionSync
     {
     }
 }
