@@ -4,46 +4,46 @@
       <Container>
          <Id>
             <TypeId>RemoteControl</TypeId>
-            <SubtypeId>ImprovedAISmallDroneController</SubtypeId>
+            <SubtypeId>AutomataSmallDroneController</SubtypeId>
          </Id>
          <DefaultComponents>
-            <Component BuilderType="MyObjectBuilder_ModStorageComponent" SubtypeId="ImprovedAIMod" ForceCreate="true"/>
+            <Component BuilderType="MyObjectBuilder_ModStorageComponent" SubtypeId="AutomataMod" ForceCreate="true"/>
          </DefaultComponents>
       </Container>
       <Container>
          <Id>
             <TypeId>RemoteControl</TypeId>
-            <SubtypeId>ImprovedAILargeDroneController</SubtypeId>
+            <SubtypeId>AutomataLargeDroneController</SubtypeId>
          </Id>
          <DefaultComponents>
-            <Component BuilderType="MyObjectBuilder_ModStorageComponent" SubtypeId="ImprovedAIMod" ForceCreate="true"/>
+            <Component BuilderType="MyObjectBuilder_ModStorageComponent" SubtypeId="AutomataMod" ForceCreate="true"/>
          </DefaultComponents>
       </Container>
       <!-- <Container>
          <Id>
             <TypeId>BroadcastController</TypeId>
-            <SubtypeId>ImprovedAILargeOrchestrator</SubtypeId>
+            <SubtypeId>AutomataLargeOrchestrator</SubtypeId>
          </Id>
          <DefaultComponents>
-            <Component BuilderType="MyObjectBuilder_ModStorageComponent" SubtypeId="ImprovedAIMod" ForceCreate="true"/>
+            <Component BuilderType="MyObjectBuilder_ModStorageComponent" SubtypeId="AutomataMod" ForceCreate="true"/>
          </DefaultComponents>
       </Container>
       <Container>
          <Id>
             <TypeId>MyProgrammableBlock</TypeId>
-            <SubtypeId>ImprovedAILargeLogisticsComputer</SubtypeId>
+            <SubtypeId>AutomataLargeLogisticsComputer</SubtypeId>
          </Id>
          <DefaultComponents>
-            <Component BuilderType="MyObjectBuilder_ModStorageComponent" SubtypeId="ImprovedAIMod" ForceCreate="true"/>
+            <Component BuilderType="MyObjectBuilder_ModStorageComponent" SubtypeId="AutomataMod" ForceCreate="true"/>
          </DefaultComponents>
       </Container>
       <Container>
          <Id>
             <TypeId>MyProgrammableBlock</TypeId>
-            <SubtypeId>ImprovedAILargeMiningSurveyor</SubtypeId>
+            <SubtypeId>AutomataLargeMiningSurveyor</SubtypeId>
          </Id>
          <DefaultComponents>
-            <Component BuilderType="MyObjectBuilder_ModStorageComponent" SubtypeId="ImprovedAIMod" ForceCreate="true"/>
+            <Component BuilderType="MyObjectBuilder_ModStorageComponent" SubtypeId="AutomataMod" ForceCreate="true"/>
          </DefaultComponents>
       </Container> -->
    </EntityContainers>

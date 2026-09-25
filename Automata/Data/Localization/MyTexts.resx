@@ -120,16 +120,18 @@
 
 	<!-- BEGIN Automata mod -->
 	<data name="DisplayName_ModCategory" xml:space="preserve">
-		<value>Monorail</value>
+		<value>Automata</value>
 	</data>
 
-	<!-- BEGIN Monorail Straight and S-Bends -->
-	<data name="DisplayName_Block_ImprovedAILargeDroneController" xml:space="preserve">
-		<value>Monorail Straight 2.5m</value>
+	<!-- BEGIN Drone Controller  -->
+	<data name="Automata_DroneController_DisplayName" xml:space="preserve">
+		<value>Drone Controller</value>
 	</data>
-	<data name="Description_Block_ImprovedAILargeDroneController" xml:space="preserve">
-		<value>Straight monorail track segment 2.5 meters (1 block).</value>
+	<data name="Automata_DroneController_Description" xml:space="preserve">
+		<value>Enhanced drone controller that enables the drone for Construction or Logistics.</value>
 	</data>
+  <!-- END Drone Controller -->
+
 	<!-- BEGIN Logistics Computer Terminal Controls -->
 	<data name="Automata_LogisticsComputer_TerminalControl_WorkModes_ProvideForConstruction_Title" xml:space="preserve">
 		<value>Provide for construction</value>

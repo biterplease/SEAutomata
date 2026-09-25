@@ -6,14 +6,14 @@
             <TypeId>GuiBlockCategoryDefinition</TypeId>
             <SubtypeId/>
          </Id>
-         <DisplayName>Improved AI</DisplayName>
-         <Name>Improved AI</Name>
+         <DisplayName>Automata</DisplayName>
+         <Name>Automata</Name>
          <ItemIds>
-			<string>RemoteControl/ImprovedAILargeDroneController</string>
-         <string>RemoteControl/ImprovedAISmallDroneController</string>
-			 <!-- <string>BroadcastController/ImprovedAILargeOrchestrator</string>
-			 <string>MyProgrammableBlock/ImprovedAILargeLogisticsComputer</string>
-			 <string>MyProgrammableBlock/ImprovedAILargeMiningSurveyor</string> -->
+			<string>RemoteControl/AutomataLargeDroneController</string>
+         <string>RemoteControl/AutomataSmallDroneController</string>
+			 <!-- <string>BroadcastController/AutomataLargeOrchestrator</string>
+			 <string>MyProgrammableBlock/AutomataLargeLogisticsComputer</string>
+			 <string>MyProgrammableBlock/AutomataLargeMiningSurveyor</string> -->
 		 </ItemIds>
       </Category>
       
@@ -37,7 +37,7 @@
 		   <DisplayName>DisplayName_Category_LargeBlocks</DisplayName>
 		   <Name>LargeBlocks</Name>
 		   <ItemIds>
-			   <string>BroadcastController/ImprovedAILargeOrchestrator</string>
+			   <string>BroadcastController/AutomataLargeOrchestrator</string>
 		   </ItemIds>
 	   </Category>
 	   <Category xsi:type="MyObjectBuilder_GuiBlockCategoryDefinition">
@@ -48,7 +48,7 @@
 		   <DisplayName>DisplayName_Category_LargeBlocks</DisplayName>
 		   <Name>LargeBlocks</Name>
 		   <ItemIds>
-			   <string>MyProgrammableBlock/ImprovedAILargeLogisticsComputer</string>
+			   <string>MyProgrammableBlock/AutomataLargeLogisticsComputer</string>
 		   </ItemIds>
 	   </Category> -->
       
@@ -60,7 +60,7 @@
          <DisplayName>DisplayName_Category_SmallBlocks</DisplayName>
          <Name>SmallBlocks</Name>
          <ItemIds>
-            <string>RemoteControl/ImprovedAISmallDroneController</string>
+            <string>RemoteControl/AutomataSmallDroneController</string>
          </ItemIds>
       </Category>
       

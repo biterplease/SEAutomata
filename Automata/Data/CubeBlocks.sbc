@@ -5,10 +5,10 @@
 		<Definition xsi:type="MyObjectBuilder_RemoteControlDefinition">
 			<Id>
 				<TypeId>RemoteControl</TypeId>
-				<SubtypeId>ImprovedAISmallDroneController</SubtypeId>
+				<SubtypeId>AutomataSmallDroneController</SubtypeId>
 			</Id>
-			<DisplayName>DisplayName_Block_ImprovedAISmallDroneController</DisplayName>
-			<Description>Description_ImprovedAIDroneController</Description>
+			<DisplayName>Automata_DroneController_DisplayName</DisplayName>
+			<Description>Automata_DroneController_Description</Description>
 			<Icon>Textures\GUI\Icons\Cubes\RemoteControl.dds</Icon>
 			<CubeSize>Small</CubeSize>
 			<BlockTopology>TriangleMesh</BlockTopology>
@@ -44,10 +44,10 @@
 		<Definition xsi:type="MyObjectBuilder_RemoteControlDefinition">
 			<Id>
 				<TypeId>RemoteControl</TypeId>
-				<SubtypeId>ImprovedAILargeDroneController</SubtypeId>
+				<SubtypeId>AutomataLargeDroneController</SubtypeId>
 			</Id>
-			<DisplayName>DisplayName_Block_ImprovedAILargeDroneController</DisplayName>
-			<Description>Description_ImprovedAIDroneController</Description>
+			<DisplayName>Automata_DroneController_DisplayName</DisplayName>
+			<Description>Automata_DroneController_Description</Description>
 			<Icon>Textures\GUI\Icons\Cubes\RemoteControl.dds</Icon>
 			<CubeSize>Large</CubeSize>
 			<BlockTopology>TriangleMesh</BlockTopology>
