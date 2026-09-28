@@ -80,7 +80,7 @@ namespace Automata
         private const int UPDATE_INTERVAL = 60;
 
         // _messageQueue
-        private int messageQueueCleanupIntervalTicks;
+        private int messageQueueCleanupIntervalTicks = 600;
         private int lastMessageQueueCleanupFrame = 0;
 
         /// <summary>
@@ -111,8 +111,8 @@ namespace Automata
         {
             Instance = this;
             // Localization settings
-            LoadLangOverrides();
-            MyAPIGateway.Gui.GuiControlRemoved += GuiControlRemoved;
+            // LoadLangOverrides();
+            // MyAPIGateway.Gui.GuiControlRemoved += GuiControlRemoved;
         }
         public AutomataSession()
         {
@@ -156,7 +156,7 @@ namespace Automata
                 Log.Info("Mod loaded successfully");
                 Log.Info("Update interval: {0} ticks", _updateInterval);
                 LogisticsComputerTerminalControls.DoOnce(ModContext);
-                DroneControllerTerminalControls.DoOnce(ModContext);
+                // DroneControllerTerminalControls.DoOnce(ModContext);
 
                 //LogAllTerminalControlClasses();
 
@@ -268,7 +268,6 @@ namespace Automata
                 var currentFrame = MyAPIGateway.Session.GameplayFrameCounter;
                 if ((currentFrame - lastMessageQueueCleanupFrame) > messageQueueCleanupIntervalTicks)
                 {
-                    Log.Info("performing message queue cleanup");
                     lastMessageQueueCleanupFrame = currentFrame;
                     _messageQueue.TryPerformCleanup();
                 }
@@ -308,7 +307,7 @@ namespace Automata
                 }
 
                 // Remove localization texts
-                MyAPIGateway.Gui.GuiControlRemoved -= GuiControlRemoved;
+                // MyAPIGateway.Gui.GuiControlRemoved -= GuiControlRemoved;
 
                 Instance = null;
 
@@ -379,22 +378,22 @@ namespace Automata
             }
         }
 
-        void LoadLangOverrides()
-        {
-            string folder = Path.Combine(ModContext.ModPathData, "Localization");
-            MyTexts.LoadTexts(folder, cultureName: "override", subcultureName: null);
-        }
+        // void LoadLangOverrides()
+        // {
+        //     string folder = Path.Combine(ModContext.ModPathData, "Localization");
+        //     MyTexts.LoadTexts(folder, cultureName: "override", subcultureName: null);
+        // }
 
-        void GuiControlRemoved(object screen)
-        {
-            if (screen == null)
-                return;
+        // void GuiControlRemoved(object screen)
+        // {
+        //     if (screen == null)
+        //         return;
 
-            // detect when options menu is closed in case player changes language
-            if (screen.ToString().EndsWith("ScreenOptionsSpace"))
-            {
-                LoadLangOverrides();
-            }
-        }
+        //     // detect when options menu is closed in case player changes language
+        //     if (screen.ToString().EndsWith("ScreenOptionsSpace"))
+        //     {
+        //         LoadLangOverrides();
+        //     }
+        // }
     }
 }

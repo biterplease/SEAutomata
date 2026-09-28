@@ -132,7 +132,7 @@ namespace Automata.Config
             /// Minimum number of ticks between drone power checks. Maximum is clamped to min*10.
             /// </summary>
             public uint PowerCheckIntervalMinSeconds { get; private set; } = 5;
-            public uint ComponentCheckIntervalMinSeconds {get; private set;} = 10;
+            public uint ComponentCheckIntervalMinSeconds {get; private set;} = 60;
         }
 
         public class ConstructionComputerConfig{

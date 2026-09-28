@@ -1,21 +1,22 @@
 # Space Engineers Automata Mod: Context & Rulesproject Project
 
 This mod, **Automata**, or **IAI** aims to provide the player with tools to create and automate logistic networks. It features the following elements:
-1. **Construction Computer**: Scans for buildable objects and initiates construction jobs.
-2. **Logistics Computer**: Maintains a virtual inventory, and initiates logistics jobs.
-3. **Mining Surveyor**: Parses mining data and converts it into mining jobs.
+1. **Construction Computer**: Scans for buildable objects and initiates construction jobs. It can be **embedded** within a **DroneControllerBlock**, an **OrchestratorBlock**, or a **ConstructionComputerBlock**.
+2. **Logistics Computer**: Maintains a virtual inventory, and initiates logistics jobs. Can be **embedded** within an **OrchestratorBlock** or a **LogisticsComputerBlock**.
+3. **Mining Surveyor**: Parses mining data and converts it into mining jobs. Can be **embedded** within an **OrchestratorBlock** or a **MiningSurveyorBlock**.
 4. **Orchestrator**: Receives job requests and turns it into tasks. Runs bid rounds, distributes tasks to bid round winners.
-5. **Drone Controller**: Performs tasks based on its own capabilities.
+5. **Drone Controller**: Performs tasks based on its own capabilities. It **embeds** a construction computer for stand-alone operation, allowing it to complete simple construction tasks.
 6. **Virtual Network**: Simulates a two-layer communication system that allows the other elements of the mod to communicate with each other. Enforces antenna ranges, and ownership and access checks. See [Automata\Data\Scripts\Automata\VirtualNetwork\CLAUDE.md](Automata\Data\Scripts\Automata\VirtualNetwork\CLAUDE.md)
 
 ## Code structure
 
 Each entity is defined in a set of files, as follows:
-- **<Entity>.cs**: Defines enums and classes relevant to the entity.
-- **IAI<Entity>.cs**: Defines the core logic of the entity.
-- **IAI<Entity>Block.cs**: The ModAPI hooks to the game, that implements `MyGameLogicComponent`. It should embed an `IAI<Entity>` class, and call its methods to access mod logic.
-- **IAI<Entity>Settings.cs**: Player-controlled settings for the block/entity. These settings must be displayed in the blocks' terminal.
-- **IAI<Entity>TerminalControls.cs**: Hooks for hiding default controls, and setting up specific controls for each block.
+- **<Entity-directory>**: Usually a directory contanining entity files
+  - **<Entity>.cs**: A file with same name as directory`.cs`, defines enums and classes relevant to the entity.
+- **<Entity>.cs**: Defines the core logic of the entity. If the entity is an embeddable entity, i.e. its class will be embedded in a different block type, this file should be present.
+- **<Entity>Block.cs**: The ModAPI hooks to the game, that implements `MyGameLogicComponent`. It should embed an `IAI<Entity>` class, except in the **DroneControllerBlock** and **OrchestratorBlock** cases;  and call its methods to access mod logic.
+- **<Entity>Settings.cs**: Player-controlled settings for the block/entity. These settings must be displayed in the blocks' terminal.
+- **<Entity>TerminalControls.cs**: Hooks for hiding default controls, and setting up specific controls for each block.
 - **Other files**: there may be other files that don't adapt to this convention, grouped simply because its relevant to the entity in question.
 
 ## Core Constraints
@@ -28,9 +29,9 @@ Each entity is defined in a set of files, as follows:
 - **Back/Forward**: +Z / -Z
 
 ## Gyroscope Control (Relative to IShipController)
-- **Yaw**: Negative = CCW (towards -X); Positive = CW (towards +X).
+- **Yaw**: Negative = CounterClockwise (towards -X); Positive = Clockwise (towards +X).
 - **Pitch**: Negative = Nose Down (-Y); Positive = Nose Up (+Y).
-- **Roll**: Negative = CCW around Z; Positive = CW around Z.
+- **Roll**: Negative = CounterClockwise around Z; Positive = Clockwise around Z.
 
 
 ## SE Virtual Networking vs Multiplayer Sync

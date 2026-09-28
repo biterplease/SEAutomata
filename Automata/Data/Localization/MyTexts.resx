@@ -124,10 +124,10 @@
 	</data>
 
 	<!-- BEGIN Drone Controller  -->
-	<data name="Automata_DroneController_DisplayName" xml:space="preserve">
+	<data name="DisplayName_Automata_DroneController" xml:space="preserve">
 		<value>Drone Controller</value>
 	</data>
-	<data name="Automata_DroneController_Description" xml:space="preserve">
+	<data name="Description_Automata_DroneController" xml:space="preserve">
 		<value>Enhanced drone controller that enables the drone for Construction or Logistics.</value>
 	</data>
   <!-- END Drone Controller -->

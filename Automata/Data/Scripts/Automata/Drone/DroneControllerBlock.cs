@@ -10,13 +10,13 @@ using VRage.Game.Components;
 using VRage.ModAPI;
 using VRage.Game.ModAPI;
 using VRage.ObjectBuilders;
-using VRage.Utils;
 using VRageMath;
 
 using Automata.Util.Logging;
 using Automata.Pathfinding;
 using Automata.Util;
 using Automata.VirtualNetwork;
+using Sandbox.Definitions;
 
 namespace Automata.Drone
 {
@@ -25,25 +25,31 @@ namespace Automata.Drone
         "AutomataLargeDroneController")]
     public class DroneControllerBlock : MyGameLogicComponent
     {
+        private struct FlightState
+        {
+            public MatrixD WorldMatrix, WorldMatrixToLocal; // WorldToLocal = transpose; use with TransformNormal only
+            public Vector3D Position, LinearVelocity, AngularVelocity, Gravity, GravityUp;
+            public bool InGravity;
+        }
+        private FlightState flightState;
         private IMyUtilitiesDelegate utilitiesDelegate;
         private IMySessionDelegate sessionDelegate;
 
 
         private long _entityId;
         private int _messageCounter = 0;
-        private int _bidRoundBidCounter = 0;
-        private MessageQueue messaging;
+        private int _bidCounter = 0;
         private IMyEntity entity;
         private IMyCubeBlock block;
         private IMyGamePruningStructureDelegate pruningStructureDelegate;
         private IMyPlanetDelegate planetDelegate;
-        private string _debugFlightGps = string.Empty;
+        private readonly List<IMyCubeGrid> _gridCache = new List<IMyCubeGrid>();
+        private readonly List<IMySlimBlock> _blockCache = new List<IMySlimBlock>();
 
         private TerminalDisplayManager terminalLogger;
 
         
         private DroneControllerSettings settings;
-        private OperationMode operationMode = OperationMode.StandAlone;
         private Capabilities capabilities;
         private BehaviourProfile behaviourProfile;
         private State currentState = State.Initializing;
@@ -57,12 +63,28 @@ namespace Automata.Drone
         private readonly List<IMySensorBlock> sensors = new List<IMySensorBlock>();
         private readonly List<IMyShipConnector> connectors = new List<IMyShipConnector>();
         private readonly List<IMyLandingGear> landingGears = new List<IMyLandingGear>();
-        private readonly Dictionary<Base6Directions.Direction, List<IMyGyro>> gyroscopes = new Dictionary<Base6Directions.Direction, List<IMyGyro>>();
-        private readonly Dictionary<Base6Directions.Direction, List<IMyThrust>> hydrogenThrusters = new Dictionary<Base6Directions.Direction, List<IMyThrust>>();
-        private readonly Dictionary<Base6Directions.Direction, List<IMyThrust>> atmoThrusters = new Dictionary<Base6Directions.Direction, List<IMyThrust>>();
-        private readonly Dictionary<Base6Directions.Direction, List<IMyThrust>> ionThrusters = new Dictionary<Base6Directions.Direction, List<IMyThrust>>();
+        private struct GyroMapping
+        {
+            public IMyGyro Gyro;
+            public int PitchSrc, YawSrc, RollSrc;
+            public int PitchSign, YawSign, RollSign;
+        }
+        private readonly List<GyroMapping> gyroscopes = new List<GyroMapping>();
+        // Controller-local axes, in command order: pitch = Right (+X), yaw = Up (+Y), roll = Backward (+Z)
+        private static readonly Base6Directions.Direction[] ControllerAxes =
+        {
+            Base6Directions.Direction.Right, Base6Directions.Direction.Up, Base6Directions.Direction.Backward
+        };
+        private readonly List<IMyThrust>[] hydrogenThrusters = new List<IMyThrust>[6];
+        private readonly List<IMyThrust>[] atmoThrusters = new List<IMyThrust>[6];
+        private readonly List<IMyThrust>[] ionThrusters = new List<IMyThrust>[6];
         // cache to prevent recalculating every time
-        private readonly Dictionary<Base6Directions.Direction, List<IMyThrust>> allThrusters = new Dictionary<Base6Directions.Direction, List<IMyThrust>>();
+        private readonly List<IMyThrust>[] allThrusters = new List<IMyThrust>[6];
+
+        private ThrustProfile h2ThrustProfile;
+        private ThrustProfile ionThrustProfile;
+        private ThrustProfile atmoThrustProfile;
+        private ThrustProfile combinedThrustProfile;
         private readonly List<IMyGasTank> hydrogenTanks = new List<IMyGasTank>();
         private readonly List<IMyBatteryBlock> batteries = new List<IMyBatteryBlock>();
         private readonly List<IMyCargoContainer> cargoContainers = new List<IMyCargoContainer>();
@@ -75,10 +97,6 @@ namespace Automata.Drone
         private Queue<Orchestrator.Task> taskQueue = new Queue<Orchestrator.Task>();
         private ushort currentTaskId = 0;
 
-        private long _lastComponentCheckFrame = 0;
-        private long _lastStatusReportFrame = 0;
-        private long _lastPowerCheckFrame = 0;
-
         #region Fields - Power Monitoring
         private bool needsHydrogenRefuel = false;
         private bool needsBatteryRecharge = false;
@@ -90,7 +108,8 @@ namespace Automata.Drone
 
         #region Server-Imperative settings
         private int POWER_CHECK_INTERVAL_MIN_TICKS = 300;// 5 second default
-        private int COMPONENT_CHECK_INTERVAL_MIN_TICKS = 600; // 10 second default;
+        private int COMPONENT_CHECK_INTERVAL_MIN_TICKS = 3600; // 60 second default;
+        private int lastComponentCheckFrame = 0;
         #endregion
         
         #region Fields - Navigation
@@ -100,45 +119,87 @@ namespace Automata.Drone
         private Vector3D currentWaypoint;
 
 
-        private float currentHoverThrustPercentage = 0f;
-        private Base6Directions.Direction currentHoverDirection = Base6Directions.Direction.Up;
         private Vector3DData navigationTarget;
+
+        private bool gyroOverrideActive = false;
+        private bool thrustOverridesActive = false;
+        private Vector3D naturalGravity = Vector3D.Zero;
+
+        private const double Kp = 1.0d;
+        private double integralForward = 0.0;
+        private double integralUp = 0.0;
+        private double integralRight = 0.0;
+        private const double INTEGRAL_GAIN = 0.1d;   // Ki — start small, tune up until drift disappears without overshoot
+        private const double INTEGRAL_MAX = 0.5d;     // anti-windup clamp, same units as the *GAIN term it's added to
+
+        #endregion
+        #region Field - rotation
+        private Vector3D lastAngularVelocity;
+        private double rotAlphaEstimate = 0.5;
+        private double lastBoxAlpha = 0;
+        private Vector3D orientationTarget;
+        private Vector3D orientationTargetDebug;
+        private bool orientationTargetSet;
+        private const double ROT_MAX_SPEED    = 1.0;   // rad/s, keep below the gyro/world angular speed cap
+        private const double ROT_BRAKE_FACTOR = 0.2;   // plan the stop using 20% of α, to absorb lag and estimation error
+        private const double ROT_LINEAR_ZONE  = 0.02;  // rad (~1.1°): switch to linear near the target, since √ is too steep near zero
+        private const double ROT_DONE_ANGLE   = 0.01;  // rad (~0.6°)
+        private const double ROT_DONE_SPEED   = 0.02;  // rad/s
+        private const double GYRO_SIGN        = -1.0;   // one global sign, see test 2
         #endregion
 
-        private int _initTicks = 0;
-        private const int INIT_DELAY_TICKS = 180;
-
-        public DroneControllerBlock(
-            DroneControllerSettings settings = null,
-            MessageQueue messaging = null,
-            IMyUtilitiesDelegate utilitiesDelegate = null,
-            IMySessionDelegate sessionDelegate = null,
-            IMyGamePruningStructureDelegate pruningStructure = null,
-            IMyPlanetDelegate planetDelegate = null)
-        {
-            this.settings = settings ?? new DroneControllerSettings();
-            this.messaging = messaging ?? AutomataSession.GetMessageQueue();
-            this.operationMode = settings.OperationMode;
+        public DroneControllerBlock(){
+            this.utilitiesDelegate = new MyUtilitiesDelegate();
+            // this.settings = settings ?? new DroneControllerSettings();
+            // this.operationMode = settings.OperationMode;
             this.utilitiesDelegate = utilitiesDelegate ?? new MyUtilitiesDelegate();
             this.sessionDelegate = sessionDelegate ?? new MySessionDelegate();
-            this.pruningStructureDelegate = pruningStructure ?? new MyGamePruningStructureDelegate();
-            this.planetDelegate = planetDelegate ?? new MyPlanetDelegate();
+            // this.pruningStructureDelegate = new MyGamePruningStructureDelegate();
+            // this.planetDelegate = planetDelegate ?? new MyPlanetDelegate();
 
             foreach (Base6Directions.Direction dir in Enum.GetValues(typeof(Base6Directions.Direction)))
             {
-                gyroscopes[dir] = new List<IMyGyro>();
-                ionThrusters[dir] = new List<IMyThrust>();
-                atmoThrusters[dir] = new List<IMyThrust>();
-                hydrogenThrusters[dir] = new List<IMyThrust>();
-                allThrusters[dir] = new List<IMyThrust>();
-            }
+                ionThrusters[(int)dir] = new List<IMyThrust>();
+                atmoThrusters[(int)dir] = new List<IMyThrust>();
+                hydrogenThrusters[(int)dir] = new List<IMyThrust>();
+                allThrusters[(int)dir] = new List<IMyThrust>();
+            }          
         }
+
+        // public DroneControllerBlock(
+        //     DroneControllerSettings settings = null,
+        //     MessageQueue messaging = null,
+        //     IMyUtilitiesDelegate utilitiesDelegate = null,
+        //     IMySessionDelegate sessionDelegate = null,
+        //     IMyGamePruningStructureDelegate pruningStructure = null,
+        //     IMyPlanetDelegate planetDelegate = null)
+        // {
+        //     this.settings = settings ?? new DroneControllerSettings();
+        //     this.messaging = messaging ?? AutomataSession.GetMessageQueue();
+        //     this.operationMode = settings.OperationMode;
+        //     this.utilitiesDelegate = utilitiesDelegate ?? new MyUtilitiesDelegate();
+        //     this.sessionDelegate = sessionDelegate ?? new MySessionDelegate();
+        //     this.pruningStructureDelegate = pruningStructure ?? new MyGamePruningStructureDelegate();
+        //     this.planetDelegate = planetDelegate ?? new MyPlanetDelegate();
+
+        //     foreach (Base6Directions.Direction dir in Enum.GetValues(typeof(Base6Directions.Direction)))
+        //     {
+        //         gyroscopes[dir] = new List<IMyGyro>();
+        //         ionThrusters[dir] = new List<IMyThrust>();
+        //         atmoThrusters[dir] = new List<IMyThrust>();
+        //         hydrogenThrusters[dir] = new List<IMyThrust>();
+        //         allThrusters[dir] = new List<IMyThrust>();
+        //     }
+        // }
 
         #region Core API Lifecycle
         public override void Init(MyObjectBuilder_EntityBase objectBuilder)
         {
             base.Init(objectBuilder);
-            settings = new DroneControllerSettings();
+            entity = Entity;
+            if (Entity.Storage == null)
+                Entity.Storage = new MyModStorageComponent();
+            block = (IMyCubeBlock)Entity;
             NeedsUpdate |= MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
         }
 
@@ -147,9 +208,8 @@ namespace Automata.Drone
             base.UpdateOnceBeforeFrame();
             DroneControllerTerminalControls.DoOnce(ModContext);
             
-            this.entity = Entity;
-            var remoteControl = Entity as IMyRemoteControl;
-            if (remoteControl?.CubeGrid?.Physics == null) return;
+            if (block?.CubeGrid?.Physics == null)
+                return;
 
             NeedsUpdate |= MyEntityUpdateEnum.EACH_FRAME;
             NeedsUpdate |= MyEntityUpdateEnum.EACH_10TH_FRAME;
@@ -161,10 +221,32 @@ namespace Automata.Drone
             base.UpdateBeforeSimulation();
             try
             {
+                if (!initialized)
+                    return;
+                CaptureFlightState();
                 if (settings != null && settings.EnableInertialDampening)
+                {
                     UpdateInertialDampening();
-                else
+                }
+                else if (thrustOverridesActive)
+                {
                     ClearAllThrustOverrides();
+                }
+                if (orientationTargetSet)
+                {
+                    Vector3D fwd, up;
+                    BuildAimFrame(ref orientationTarget, out fwd, out up);
+                    if (UpdateOrientation(ref fwd, ref up))
+                    {
+                        orientationTargetSet = false;
+                        orientationTarget = Vector3D.Zero;
+                        orientationTargetDebug = Vector3D.Zero;
+                    }
+                }
+                else if (gyroOverrideActive)
+                {
+                    ReleaseGyroscopes();
+                }   
             }
             catch (Exception ex)
             {
@@ -175,56 +257,22 @@ namespace Automata.Drone
         public override void UpdateBeforeSimulation10()
         {
             base.UpdateBeforeSimulation10();
-            // if (_controller == null || !_controller.initialized) return;
-            // try
-            // {
-            //     if (!initialized) return;
-
-            // if (currentFrame - _lastComponentCheckFrame >= COMPONENT_CHECK_INTERVAL_TICKS)
-            // {
-            //     _lastComponentCheckFrame = currentFrame;
-            //     if (!CheckCapabilities())
-            //     {
-            //         currentState = State.Error;
-            //         return;
-            //     }
-            // }
-
-            // if (settings.MonitorHydrogenLevels || settings.MonitorBatteryLevels)
-            // {
-            //     if (currentFrame - _lastPowerCheckFrame >= POWER_CHECK_INTERVAL_TICKS)
-            //     {
-            //         _lastPowerCheckFrame = currentFrame;
-            //         CheckPowerLevels();
-            //     }
-            // }
-
-            // if (operationMode == OperationMode.ManagedByScheduler)
-            // {
-            //     if (currentFrame - _lastStatusReportFrame >= STATUS_REPORT_INTERVAL_TICKS)
-            //     {
-            //         _lastStatusReportFrame = currentFrame;
-            //         BroadcastStatusReport();
-            //     }
-
-            //     if (!_registrationSent && primaryAntenna != null)
-            //     {
-            //         BroadcastDroneRegistration();
-            //         _registrationSent = true;
-            //     }
-
-            //     ReadBidRoundStarts();
-            //     SendBidRoundBids();
-            //     ReadBidRoundWinnerAnnouncements();
-            // }
-
-            // if (settings.IsEnabled)
-            //     UpdateAI();
-            // }
-            // catch (Exception ex)
-            // {
-            //     Log.Error("IAIDroneControllerBlock {0}: UpdateBeforeSimulation10 error: {1}", Entity.EntityId, ex);
-            // }
+            try
+            {
+                if (!initialized)
+                {
+                    Initialize();
+                    return;
+                }
+                if (initialized)
+                {
+                    NeedsUpdate &= ~MyEntityUpdateEnum.EACH_10TH_FRAME;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error("IAIDroneControllerBlock {0}: UpdateBeforeSimulation10 error: {1}", Entity.EntityId, ex);
+            }
         }
 
         public override void UpdateBeforeSimulation100()
@@ -232,7 +280,15 @@ namespace Automata.Drone
             base.UpdateBeforeSimulation100();
             try
             {
-                SaveSettings();
+                if (!initialized)
+                    return;
+                var currentFrame = sessionDelegate.GameplayFrameCounter;
+                if (currentFrame - lastComponentCheckFrame > COMPONENT_CHECK_INTERVAL_MIN_TICKS)
+                {
+                    lastComponentCheckFrame = currentFrame;
+                    CheckCapabilities();
+                }
+                // SaveSettings();
             }
             catch (Exception ex)
             {
@@ -244,8 +300,9 @@ namespace Automata.Drone
         {
             try
             {
-                Shutdown();
                 SaveSettings();
+                Shutdown();
+
             }
             catch (Exception ex)
             {
@@ -267,38 +324,76 @@ namespace Automata.Drone
             }
             catch (Exception ex)
             {
-                Log.Error("IAIDroneControllerBlock {0}: SaveSettings error: {1}", Entity.EntityId, ex);
+                Log.Error("DroneControllerBlock {0}: SaveSettings error: {1}", Entity?.EntityId, ex);
+            }
+        }
+        private void LoadSettings()
+        {
+            try
+            {
+                if (Entity?.Storage == null || utilitiesDelegate == null) 
+                {
+                    terminalLogger.Echo("failed to load settings");
+                    return;
+                }
+
+                string base64Data;
+                if (!Entity.Storage.TryGetValue(AutomataSession.MOD_GUID, out base64Data) || string.IsNullOrEmpty(base64Data))
+                {
+                    settings = new DroneControllerSettings(); 
+                    return;
+                }
+
+                byte[] bytes = Convert.FromBase64String(base64Data);
+
+                settings = utilitiesDelegate.SerializeFromBinary<DroneControllerSettings>(bytes);
+            }
+            catch (Exception ex)
+            {
+                Log.Error("DroneControllerBlock {0}: LoadSettings error: {1}", Entity?.EntityId, ex);
+                // Fallback to safe default settings on deserialization failure to prevent null references
+                settings = new DroneControllerSettings(); 
             }
         }
         #endregion
 
         #region Initialization
-        private void Initialize()
+        public void Initialize()
         {
-            if (initialized) return;
-
+            Log.Debug("initializing drone {0}", entity.EntityId);
+            if (initialized){
+                terminalLogger.Echo("drone {0}: already initialized", _entityId);
+                return;
+            }
             _entityId = entity.EntityId;
-            block = entity as IMyCubeBlock;
+            this.utilitiesDelegate = new MyUtilitiesDelegate();
+            this.sessionDelegate = new MySessionDelegate();
+            if (terminalLogger == null)
+                terminalLogger = new TerminalDisplayManager(block as IMyTerminalBlock, 10);
+            this.pruningStructureDelegate = new MyGamePruningStructureDelegate();
+            this.planetDelegate =  new MyPlanetDelegate();
+            LoadSettings();
+
+
+
+            Log.Debug("Terminal logger assigned");
             currentState = State.Initializing;
 
             // STATUS_REPORT_INTERVAL_TICKS = AutomataSession.GetConfig().MessageQueue.DroneMessageThrottlingTicks();
             POWER_CHECK_INTERVAL_MIN_TICKS = TimeUtil.SecondsToTicks(AutomataSession.GetConfig().Drone.PowerCheckIntervalMinSeconds);
             COMPONENT_CHECK_INTERVAL_MIN_TICKS = TimeUtil.SecondsToTicks(AutomataSession.GetConfig().Drone.ComponentCheckIntervalMinSeconds);
 
-            terminalLogger = new TerminalDisplayManager(block as IMyTerminalBlock, 10);
             shipController = entity as IMyShipController;
             if (shipController == null)
             {
-                terminalLogger.Echo("DroneController {0} entity is not a ship controller", _entityId);
-                Log.Error("DroneController {0} entity is not a ship controller", _entityId);
+                terminalLogger.Echo("ERROR: entity is not a ship controller", _entityId);
                 currentState = State.Error;
                 return;
             }
 
             if (!CheckCapabilities())
             {
-                Log.Error("DroneController {0} failed capability check", _entityId);
-                terminalLogger.Echo("DroneController {0} failed capability check", _entityId);
+                terminalLogger.Echo("ERROR: failed capability check", _entityId);
                 currentState = State.Error;
                 return;
             }
@@ -307,18 +402,19 @@ namespace Automata.Drone
 
             if (primaryAntenna != null)
             {
-                messaging.RegisterAntenna(_entityId, MessageQueue.IAIBlockType.Drone, primaryAntenna, false);
+                AutomataSession.GetMessageQueue().RegisterAntenna(_entityId, MessageQueue.IAIBlockType.Drone, primaryAntenna, false);
             }
 
-            if (operationMode == OperationMode.ManagedByScheduler)
+            if (settings.OperationMode == OperationMode.ManagedByScheduler)
             {
-                messaging.Subscribe(_entityId, Channel.ORCHESTRATOR_AUCTION_START);
-                messaging.Subscribe(_entityId, Channel.ORCHESTRATOR_AUCTION_WINNER_ANNOUNCEMENT);
+                AutomataSession.GetMessageQueue().Subscribe(_entityId, Channel.ORCHESTRATOR_AUCTION_START);
+                AutomataSession.GetMessageQueue().Subscribe(_entityId, Channel.ORCHESTRATOR_AUCTION_WINNER_ANNOUNCEMENT);
             }
 
+            UpdateMass();
             currentState = State.Standby;
             initialized = true;
-            Log.Info("DroneController {0} initialized in mode: {1}", _entityId, operationMode);
+            terminalLogger.Echo("Initialized in mode: {1}", _entityId, settings.OperationMode);
         }
         #endregion
 
@@ -332,15 +428,18 @@ namespace Automata.Drone
             if (shipController?.CubeGrid == null) return false;
 
             UpdateMass();
+            UpdateNaturalGravity();
 
-            foreach (Base6Directions.Direction dir in Enum.GetValues(typeof(Base6Directions.Direction)))
+            for (int i = 0; i < 6; i++) // one for each of Base6Directions.Direction
             {
-                gyroscopes[dir].Clear();
-                hydrogenThrusters[dir].Clear();
-                atmoThrusters[dir].Clear();
-                ionThrusters[dir].Clear();
-                allThrusters[dir].Clear();
+                hydrogenThrusters[i].Clear();
+                atmoThrusters[i].Clear();
+                ionThrusters[i].Clear();
+                allThrusters[i].Clear();
             }
+            gyroscopes.Clear();
+            landingGears.Clear();
+            cargoContainers.Clear();
             sensors.Clear();
             hydrogenTanks.Clear();
             batteries.Clear();
@@ -348,17 +447,19 @@ namespace Automata.Drone
             welder = null;
             grinder = null;
             primaryAntenna = null;
+            lastGyroCmd = new Vector3D(double.NaN, double.NaN, double.NaN);
 
             var controllerMatrix = shipController.Orientation;
-            var connectedGrids = new List<IMyCubeGrid>();
-            cubeBlock.CubeGrid.GetGridGroup(GridLinkTypeEnum.Mechanical).GetGrids(connectedGrids);
+            var controllerWorldMatrix = shipController.WorldMatrix;
+            _gridCache.Clear();
+            cubeBlock.CubeGrid.GetGridGroup(GridLinkTypeEnum.Mechanical).GetGrids(_gridCache);
 
-            foreach (var grid in connectedGrids)
+            foreach (var grid in _gridCache)
             {
-                var blocks = new List<IMySlimBlock>();
-                grid.GetBlocks(blocks);
+                _blockCache.Clear();
+                grid.GetBlocks(_blockCache);
 
-                foreach (var slimBlock in blocks)
+                foreach (var slimBlock in _blockCache)
                 {
                     var fatBlock = slimBlock.FatBlock;
                     if (fatBlock == null || !fatBlock.IsFunctional) continue;
@@ -374,24 +475,20 @@ namespace Automata.Drone
                     else if (fatBlock is IMyGyro)
                     {
                         var gyro = (IMyGyro)fatBlock;
-                        var relDir = GetRelativeDirection(
-                            gyro.Orientation.Forward,
-                            settings.ControllerForwardDirection);
-                        gyroscopes[relDir].Add(gyro);
+                        if (gyro.CubeGrid == shipController.CubeGrid) // block orientation is only comparable within one grid
+                            gyroscopes.Add(BuildGyroMapping(gyro, controllerMatrix));
                     }
                     else if (fatBlock is IMyThrust)
                     {
                         var thruster = (IMyThrust)fatBlock;
-                        var relDir = GetRelativeDirection(
-                            thruster.Orientation.Forward,
-                            settings.ControllerForwardDirection);
+                        var relDir = DetermineThrusterDirection(ref thruster, ref controllerWorldMatrix);
 
                         if (thruster.BlockDefinition.SubtypeName.Contains("Hydrogen"))
-                            hydrogenThrusters[relDir].Add(thruster);
+                            hydrogenThrusters[(int)relDir].Add(thruster);
                         else if (thruster.BlockDefinition.SubtypeName.Contains("Ion"))
-                            ionThrusters[relDir].Add(thruster);
+                            ionThrusters[(int)relDir].Add(thruster);
                         else if (thruster.BlockDefinition.SubtypeName.Contains("Atmospheric"))
-                            atmoThrusters[relDir].Add(thruster);
+                            atmoThrusters[(int)relDir].Add(thruster);
 
                     }
                     else if (fatBlock is IMySensorBlock)
@@ -417,27 +514,29 @@ namespace Automata.Drone
                     }
                 }
             }
-            bool hasMinimum = HasAnyGyros(gyroscopes) && (HasAnyThrusters(hydrogenThrusters) || HasAnyThrusters(ionThrusters) || HasAnyThrusters(atmoThrusters)) && connectors.Count > 0;
+            bool hasMinimum = gyroscopes.Count > 0 &&
+                (
+                    HasAnyDirectionalComponent(hydrogenThrusters) ||
+                    HasAnyDirectionalComponent(ionThrusters) ||
+                    HasAnyDirectionalComponent(atmoThrusters)
+                ) && connectors.Count > 0;
             if (!hasMinimum){
                 return false; // return early if minimum evaluation specs don't exist
             }
 
-            foreach (Base6Directions.Direction dir in Enum.GetValues(typeof(Base6Directions.Direction)))
+            for (int i = 0; i < 6; i++)
             {
-                var thrusters = new List<IMyThrust>();
-                List<IMyThrust> cache;
-                if (ionThrusters.TryGetValue(dir, out cache))
-                    thrusters.AddRange(cache);
-                if (atmoThrusters.TryGetValue(dir, out cache))
-                    thrusters.AddRange(cache);
-                if (hydrogenThrusters.TryGetValue(dir, out cache))
-                    thrusters.AddRange(cache);
-                allThrusters[dir] = thrusters;
+                allThrusters[i].AddRange(ionThrusters[i]);
+                allThrusters[i].AddRange(atmoThrusters[i]);
+                allThrusters[i].AddRange(hydrogenThrusters[i]);
             }
+            for (int i = 0; i < 6; i++)
+                directionalThrustCache[i] = -1.0d;
 
-            var h2ThrustProfile = CalculateThrustProfile(shipController, physicalMass, hydrogenThrusters);
-            var atmoThrustProfile = CalculateThrustProfile(shipController, physicalMass, atmoThrusters);
-            var ionThrustProfile = CalculateThrustProfile(shipController, physicalMass, ionThrusters);
+            h2ThrustProfile = CalculateThrustProfile(shipController, physicalMass, hydrogenThrusters);
+            atmoThrustProfile = CalculateThrustProfile(shipController, physicalMass, atmoThrusters);
+            ionThrustProfile = CalculateThrustProfile(shipController, physicalMass, ionThrusters);
+            combinedThrustProfile = CalculateThrustProfile(shipController, physicalMass, allThrusters);
 
             capabilities = Capabilities.None;
             behaviourProfile = BehaviourProfile.None;
@@ -445,15 +544,17 @@ namespace Automata.Drone
             if (settings.AlwaysRefuelWhenDocked && connectors.Count > 0)
                 behaviourProfile|= BehaviourProfile.RefuelWhenDocked | BehaviourProfile.RechargeWhenDocked;
 
-            var hasAnyAtmoThrusters = HasAnyThrusters(atmoThrusters);
-            var hasAnyHydrogenThrusters = HasAnyThrusters(hydrogenThrusters);
-            var hasAnyIonThrusters = HasAnyThrusters(ionThrusters);
+            var hasAnyAtmoThrusters = HasAnyDirectionalComponent<IMyThrust>(atmoThrusters);
+            var hasAnyHydrogenThrusters = HasAnyDirectionalComponent<IMyThrust>(hydrogenThrusters);
+            var hasAnyIonThrusters = HasAnyDirectionalComponent<IMyThrust>(ionThrusters);
+
+            CalibrateRotationCapabilities();
 
             if (hasAnyAtmoThrusters || hasAnyHydrogenThrusters)
             {
                 var max1GLoad = CalculateMaxLoadInG(
                     atmoThrustProfile, h2ThrustProfile, physicalMass,
-                    GetRelativeDirection(Base6Directions.Direction.Up, settings.ControllerForwardDirection), gravityNormal:9.81f);
+                    Base6Directions.Direction.Up, gravityNormal:9.81f);
                 if (max1GLoad > 1.0f)
                     capabilities |= Capabilities.CanFlyAtmosphere;
             }
@@ -472,6 +573,51 @@ namespace Automata.Drone
 
             return true;
         }
+        private void CalibrateRotationCapabilities()
+        {
+            if (shipController == null) return;
+            double torque = 0;
+            for (int i = 0; i < gyroscopes.Count; i++)
+            {
+                var g = gyroscopes[i].Gyro;
+                if (!g.IsFunctional || !g.Enabled) continue;
+
+                var def = MyDefinitionManager.Static.GetCubeBlockDefinition(g.BlockDefinition) as MyGyroDefinition;
+                if (def != null)
+                    torque += def.ForceMagnitude * g.GyroPower;
+            }
+
+            Vector3D size = shipController.CubeGrid.LocalAABB.Size;
+            double a = Math.Max(size.X, Math.Max(size.Y, size.Z));
+            double c = Math.Min(size.X, Math.Min(size.Y, size.Z));
+            double b = size.X + size.Y + size.Z - a - c;
+            double inertia = physicalMass * (a*a+b*b) / 12.0;
+            if (inertia > 0 && torque > 0)
+            {
+                double boxAlpha = torque / inertia;
+                rotAlphaEstimate = lastBoxAlpha > 0 ? rotAlphaEstimate * (boxAlpha / lastBoxAlpha) : boxAlpha;
+                lastBoxAlpha = boxAlpha;
+            }
+        }
+        private Base6Directions.Direction DetermineThrusterDirection(ref IMyThrust thruster, ref MatrixD controllerWorldMatrix)
+        {
+            Vector3D localPush = Vector3D.TransformNormal(thruster.WorldMatrix.Backward, MatrixD.Transpose(controllerWorldMatrix));
+            return Base6Directions.GetClosestDirection((VRageMath.Vector3)localPush);
+        }
+        private static GyroMapping BuildGyroMapping(IMyGyro gyro, MyBlockOrientation controllerOrientation)
+        {
+            var m = new GyroMapping { Gyro = gyro };
+            for (int k = 0; k < 3; k++)
+            {
+                var gridDir = controllerOrientation.TransformDirection(ControllerAxes[k]);   // controller-local -> grid
+                var gyroDir = gyro.Orientation.TransformDirectionInverse(gridDir);          // grid -> gyro-local
+                Vector3I v  = Base6Directions.GetIntVector(gyroDir);                        // exactly one component is ±1
+                if (v.X != 0)      { m.PitchSrc = k; m.PitchSign = v.X; }
+                else if (v.Y != 0) { m.YawSrc   = k; m.YawSign   = v.Y; }
+                else               { m.RollSrc  = k; m.RollSign  = v.Z; }
+            }
+            return m;
+        }
         #endregion
 
        public void Shutdown()
@@ -482,80 +628,277 @@ namespace Automata.Drone
             if (welder?.Enabled == true) welder.Enabled = false;
             if (grinder?.Enabled == true) grinder.Enabled = false;
             ClearAllThrustOverrides();
+            ResetIntegralTerms();
+            ReleaseGyroscopes();
             // DisableGyroscopeOverride();
             _consecutiveErrors = 0;
             currentState = State.Standby;
         }
 
+        #region Gyro and rotation controls
+        private Vector3D lastGyroCmd = new Vector3D(double.NaN, double.NaN, double.NaN);
+        // cmd: rad/s in the controller's frame — X = pitch, Y = yaw, Z = roll
+        private void ApplyGyroscopesCommand(ref Vector3D cmd)
+        {
+            if (Vector3D.DistanceSquared(cmd, lastGyroCmd) < 1e-6)
+                return;   // < 0.001 rad/s change
+            lastGyroCmd = cmd;
+            for (int i = 0; i < gyroscopes.Count; i++)
+            {
+                var m = gyroscopes[i];
+                if (!m.Gyro.IsWorking) continue;
+                m.Gyro.Pitch = (float)(m.PitchSign * cmd.GetDim(m.PitchSrc));
+                m.Gyro.Yaw   = (float)(m.YawSign   * cmd.GetDim(m.YawSrc));
+                m.Gyro.Roll  = (float)(m.RollSign  * cmd.GetDim(m.RollSrc));
+                if (!m.Gyro.GyroOverride)
+                    m.Gyro.GyroOverride = true;
+            }
+            gyroOverrideActive = true;
+        }
+
+        private void ReleaseGyroscopes()
+        {
+            for (int i = 0; i < gyroscopes.Count; i++)
+            {
+                var g = gyroscopes[i].Gyro;
+                g.Pitch = 0f; g.Yaw = 0f; g.Roll = 0f;
+                g.GyroOverride = false;
+            }
+            gyroOverrideActive = false;
+            lastGyroCmd = new Vector3D(double.NaN, double.NaN, double.NaN);
+        }
+        // gUp = normalized -gravity. fallbackFwd = current forward, used when the request points straight up/down.
+        private void ClampToGravityLimits(ref Vector3D fwd, ref Vector3D up, ref Vector3D gUp, ref Vector3D fallbackFwd)
+        {
+            Vector3D fH = fwd - gUp * Vector3D.Dot(fwd, gUp);
+            if (fH.LengthSquared() < 1e-6)
+                fH = fallbackFwd - gUp * Vector3D.Dot(fallbackFwd, gUp);
+            fH.Normalize();
+            double maxPitch = MathHelperD.ToRadians(settings.PGravityAlignMaxPitchDegrees);
+            double pitch = MathHelperD.Clamp(Math.Asin(MathHelperD.Clamp(Vector3D.Dot(fwd, gUp), -1, 1)), -maxPitch, maxPitch);
+            fwd = fH * Math.Cos(pitch) + gUp * Math.Sin(pitch);
+
+            Vector3D levelUp = Vector3D.Normalize(gUp - fwd * Vector3D.Dot(gUp, fwd));
+            Vector3D levelRight = Vector3D.Cross(fwd, levelUp);
+            double maxRoll = MathHelperD.ToRadians(settings.PGravityAlignMaxRollDegrees);
+            double roll = MathHelperD.Clamp(Math.Atan2(Vector3D.Dot(up, levelRight), Vector3D.Dot(up, levelUp)), -maxRoll, maxRoll);
+            up = levelUp * Math.Cos(roll) + levelRight * Math.Sin(roll);
+        }
+
+        // Aim forward at a world point. In gravity it asks for zero roll (up = gUp); in space it keeps the current roll.
+        private void BuildAimFrame(ref Vector3D targetPos, out Vector3D fwd, out Vector3D up)
+        {
+            MatrixD worldMatrix = flightState.WorldMatrix;
+            Vector3D currentFwd = worldMatrix.Forward;
+            fwd = Vector3D.Normalize(targetPos - flightState.Position);
+            Vector3D g = flightState.Gravity;
+
+            if (settings.AlignToPGravity && g.LengthSquared() > 0.01)
+            {
+                Vector3D gUp = flightState.GravityUp;
+                up = gUp;
+                ClampToGravityLimits(ref fwd, ref up, ref gUp, ref currentFwd);
+                return;
+            }
+            up = worldMatrix.Up - fwd * Vector3D.Dot(worldMatrix.Up, fwd);// CreateFromForwardUp needs perpendicular, normalized vectors
+            if (up.LengthSquared() < 1e-6)
+                up = worldMatrix.Backward;
+            up.Normalize();
+        }
+        // Returns true when settled on the target orientation.
+        private bool UpdateOrientation(ref Vector3D targetFwd, ref Vector3D targetUp)
+        {
+            MatrixD wm = flightState.WorldMatrix;
+            QuaternionD qCur = QuaternionD.CreateFromRotationMatrix(wm);
+            QuaternionD qTgt = QuaternionD.CreateFromForwardUp(targetFwd, targetUp);
+            // Concatenate(a, b) = "a, then b"  →  the world-frame rotation still left to do
+            QuaternionD qErr = QuaternionD.Concatenate(QuaternionD.Inverse(qCur), qTgt);
+            if (qErr.W < 0) qErr = -qErr;                            // take the short way round
+
+            Vector3D axis; double angle;
+            qErr.GetAxisAngle(out axis, out angle);
+            if (angle < 1e-6) axis = Vector3D.Zero;                   // axis is undefined at zero angle
+
+            Vector3D angVel = flightState.AngularVelocity;   // world, rad/s
+
+            if (angle < ROT_DONE_ANGLE && angVel.LengthSquared() < ROT_DONE_SPEED * ROT_DONE_SPEED)
+            {
+                Vector3D hold = Vector3D.Zero;
+                ApplyGyroscopesCommand(ref hold);                     // 0 = hold; gyros only react to disturbances
+                lastAngularVelocity = angVel;
+                return true;
+            }
+
+            // Fastest speed that can still brake to zero within the remaining angle
+            double alpha = rotAlphaEstimate * ROT_BRAKE_FACTOR;
+            double speed = angle > ROT_LINEAR_ZONE
+                ? Math.Sqrt(2 * alpha * angle)
+                : angle * Math.Sqrt(2 * alpha / ROT_LINEAR_ZONE);      // matches the curve at the boundary
+            speed = Math.Min(speed, ROT_MAX_SPEED);
+            Vector3D desiredWorld = axis * speed;
+
+            // Correct α from real behaviour: while the gyros are saturated, measured acceleration ≈ their capability
+            if ((desiredWorld - angVel).LengthSquared() > 0.09)       // more than 0.3 rad/s off target → saturated
+            {
+                double measured = (angVel - lastAngularVelocity).Length() * TimeUtil.TICKS_PER_SECOND;
+                rotAlphaEstimate += (measured - rotAlphaEstimate) * 0.05;
+            }
+            lastAngularVelocity = angVel;
+
+            Vector3D cmd = Vector3D.TransformNormal(desiredWorld, flightState.WorldMatrixToLocal) * GYRO_SIGN;  // X=pitch, Y=yaw, Z=roll
+            ApplyGyroscopesCommand(ref cmd);
+            return false;
+        }
+        #endregion
+
         #region Inertial Dampening
         private void UpdateInertialDampening()
         {
             if (shipController == null) return;
-
-            Vector3D linearVelocity = shipController.GetShipVelocities().LinearVelocity;
-            MatrixD worldMatrix = shipController.WorldMatrix;
+            if (!thrustOverridesActive)
+            {
+                shipController.DampenersOverride = false;
+                ResetIntegralTerms();
+            }
+            Vector3D linearVelocity = flightState.LinearVelocity;
+            MatrixD worldMatrix = flightState.WorldMatrix;
 
             double localForwardSpeed = Vector3D.Dot(linearVelocity, worldMatrix.Forward);   // + = moving forward, - = moving backward
             double localUpSpeed       = Vector3D.Dot(linearVelocity, worldMatrix.Up);       // + = moving up, - = moving down
             double localRightSpeed     = Vector3D.Dot(linearVelocity, worldMatrix.Right);   // + = moving right, - = moving left-
-            const double GAIN = 0.2d;
-            if (localForwardSpeed > 0.0d)
-            {
-                SetDirectionalThrustOverride(Base6Directions.Direction.Forward, 0);
-                SetDirectionalThrustOverride(Base6Directions.Direction.Backward, localForwardSpeed*GAIN);
-            }
-            else
-            {
-                SetDirectionalThrustOverride(Base6Directions.Direction.Backward, 0);
-                SetDirectionalThrustOverride(Base6Directions.Direction.Forward, localForwardSpeed*GAIN);
-            }
 
-            if (localUpSpeed > 0.0d)
-            {
-                SetDirectionalThrustOverride(Base6Directions.Direction.Up, 0);
-                SetDirectionalThrustOverride(Base6Directions.Direction.Down, localUpSpeed*GAIN);
-            }
-            else
-            {
-                SetDirectionalThrustOverride(Base6Directions.Direction.Down, 0);
-                SetDirectionalThrustOverride(Base6Directions.Direction.Up, localUpSpeed*GAIN);
-            }
+            Vector3D gravity = flightState.Gravity;
+            double localGFwd = Vector3D.Dot(gravity, worldMatrix.Forward);   // + = moving forward, - = moving backward
+            double localGUp = Vector3D.Dot(gravity, worldMatrix.Up);       // + = moving up, - = moving down
+            double localGRight = Vector3D.Dot(gravity, worldMatrix.Right);   // + = moving right, - = moving left-
 
-            if (localRightSpeed > 0.0d)
-            {
-                SetDirectionalThrustOverride(Base6Directions.Direction.Right, 0);
-                SetDirectionalThrustOverride(Base6Directions.Direction.Left, localRightSpeed*GAIN);
-            }
-            else
-            {
-                SetDirectionalThrustOverride(Base6Directions.Direction.Left, 0);
-                SetDirectionalThrustOverride(Base6Directions.Direction.Right, localRightSpeed*GAIN);
-            }
+            double accelFwdBack = -localGFwd - Kp*localForwardSpeed - integralForward;
+            double forceFwdBack = accelFwdBack * physicalMass;       
+            double accelUpDown = -localGUp - Kp*localUpSpeed - integralUp;
+            double forceUpDown = accelUpDown * physicalMass;
+            double accelLeftRight = -localGRight - Kp*localRightSpeed - integralRight;
+            double forceLeftRight = accelLeftRight * physicalMass;
+
+            UpdateIntegralTerms(localForwardSpeed, localUpSpeed, localRightSpeed);
+
+            ApplyAxisForce(forceUpDown,    Base6Directions.Direction.Up,      Base6Directions.Direction.Down,
+                combinedThrustProfile.Up.Max,      combinedThrustProfile.Down.Max);
+            ApplyAxisForce(forceLeftRight, Base6Directions.Direction.Right,   Base6Directions.Direction.Left,
+                combinedThrustProfile.Right.Max,   combinedThrustProfile.Left.Max);
+            ApplyAxisForce(forceFwdBack,   Base6Directions.Direction.Forward, Base6Directions.Direction.Backward,
+                combinedThrustProfile.Forward.Max, combinedThrustProfile.Backward.Max);
+            thrustOverridesActive = true;
         }
+        // force: Newtons, signed along the +axis (Up / Right / Forward)
+        private void ApplyAxisForce(double force,
+            Base6Directions.Direction positive, Base6Directions.Direction negative,
+            float positiveMax, float negativeMax)
+        {
+            if (force >= 0)
+            {
+                SetDirectionalThrustOverride(negative, 0);
+                SetDirectionalThrustOverride(positive, positiveMax > 0 ? force / positiveMax : 0);
+            }
+            else
+            {
+                SetDirectionalThrustOverride(positive, 0);
+                SetDirectionalThrustOverride(negative, negativeMax > 0 ? -force / negativeMax : 0);
+            }
+        } 
+        private readonly double[] directionalThrustCache = new double[6] {
+            -1.0,
+            -1.0,
+            -1.0,
+            -1.0,
+            -1.0,
+            -1.0,
+        };
         private void SetDirectionalThrustOverride(Base6Directions.Direction direction, double thrustAmount)
         {
-            var allThrusters = GetAllThrustersInDirection(direction);
-            for (int i = 0; i < allThrusters.Count; i++)
+            float value = MathHelper.Clamp((float)thrustAmount, 0f, 1f);
+            if (Math.Abs(directionalThrustCache[(int)direction] - value) < 0.005)
+                return;
+            directionalThrustCache[(int)direction] = value;
+
+            var thrusters = allThrusters[(int)direction];
+            for (int i = 0; i < thrusters.Count; i++)
             {
-                IMyThrust t = allThrusters[i];
+                IMyThrust t = thrusters[i];
                 if (!t.IsWorking || !t.IsFunctional) continue;
-                t.ThrustOverridePercentage = MathHelper.Clamp((float)Math.Abs(thrustAmount), 0f, 1f);
+                t.ThrustOverridePercentage = value;
             }
         }
         private void ClearAllThrustOverrides()
         {
-            foreach (var direction in Enum.GetValues(typeof(Base6Directions.Direction)))
-                foreach (var thruster in GetAllThrustersInDirection((Base6Directions.Direction)direction))
+            for (int i = 0; i < 6; i++)
+            {
+                foreach(IMyThrust thruster in allThrusters[i])
+                {
                     thruster.ThrustOverridePercentage = 0f;
+                }
+                directionalThrustCache[i] = -1.0d;
+            }
+            thrustOverridesActive = false;
+            if (shipController != null)
+                shipController.DampenersOverride = true;
         }
-        private List<IMyThrust> GetAllThrustersInDirection(Base6Directions.Direction direction)
-        {
-            return allThrusters[direction];
-        }
-        private float CalculateHoverThrust()
-        {
+        // private ThrustProfile CalculateHoverProfile(ref MatrixD worldMatrix)
+        // {
+        //     Vector3D gravity = shipController.GetNaturalGravity();
+        //     double localGFwd = Vector3D.Dot(gravity, worldMatrix.Forward);   // + = moving forward, - = moving backward
+        //     double localGUp = Vector3D.Dot(gravity, worldMatrix.Up);       // + = moving up, - = moving down
+        //     double localGRight = Vector3D.Dot(gravity, worldMatrix.Right);   // + = moving right, - = moving left-
 
-            return 0.0f;   
+        //     double forceFwd = localGFwd*physicalMass;
+        //     double forceUp = localGUp*physicalMass;
+        //     double forceRight = localGRight*physicalMass;
+
+        //     ThrustProfile result = new ThrustProfile();
+        //     if (localGFwd > 0.0d)
+        //         result.Backward.Max = (float)Math.Abs(forceFwd);
+        //     else
+        //         result.Forward.Max = (float)Math.Abs(forceFwd);
+
+        //     if (localGUp > 0.0d)
+        //         result.Up.Max = (float)Math.Abs(forceUp);
+        //     else
+        //         result.Down.Max = (float)Math.Abs(forceUp);
+
+        //     if (localGRight > 0.0d)
+        //         result.Left.Max = (float)Math.Abs(forceRight);
+        //     else
+        //         result.Right.Max = (float)Math.Abs(forceRight);
+        //     // if (localGFwd > 0.0d)
+        //     //     result.Forward.Max = (float)Math.Abs(forceFwd);
+        //     // else
+        //     //     result.Backward.Max = (float)Math.Abs(forceFwd);
+
+        //     // if (localGUp > 0.0d)
+        //     //     result.Down.Max = (float)Math.Abs(forceUp);
+        //     // else
+        //     //     result.Up.Max = (float)Math.Abs(forceUp);
+
+        //     // if (localGRight > 0.0d)
+        //     //     result.Right.Max = (float)Math.Abs(forceRight);
+        //     // else
+        //     //     result.Left.Max = (float)Math.Abs(forceRight);
+        //     result.Valid = true;
+        //     return result;
+        // }
+
+        private void UpdateIntegralTerms(double localForwardSpeed, double localUpSpeed, double localRightSpeed)
+        {
+            double dt = 1.0d / TimeUtil.TICKS_PER_SECOND; // UpdateBeforeSimulation runs at a fixed 60Hz tick
+
+            integralForward = MathHelperD.Clamp(integralForward + localForwardSpeed * INTEGRAL_GAIN * dt, -INTEGRAL_MAX, INTEGRAL_MAX);
+            integralUp      = MathHelperD.Clamp(integralUp      + localUpSpeed      * INTEGRAL_GAIN * dt, -INTEGRAL_MAX, INTEGRAL_MAX);
+            integralRight   = MathHelperD.Clamp(integralRight   + localRightSpeed   * INTEGRAL_GAIN * dt, -INTEGRAL_MAX, INTEGRAL_MAX);
+        }
+        private void ResetIntegralTerms()
+        {
+            integralForward = 0.0;
+            integralUp = 0.0;
+            integralRight = 0.0;
         }
         #endregion
 
@@ -602,9 +945,11 @@ namespace Automata.Drone
 
         private static Vector3D? ParseGPSString(string gpsString)
         {
-            if (string.IsNullOrEmpty(gpsString)) return null;
+            if (string.IsNullOrEmpty(gpsString))
+                return null;
             var parts = gpsString.Split(':');
-            if (parts.Length < 5 || !parts[0].Equals("GPS", StringComparison.OrdinalIgnoreCase)) return null;
+            if (parts.Length < 5 || !parts[0].Equals("GPS", StringComparison.OrdinalIgnoreCase))
+                return null;
             double x, y, z;
             if (double.TryParse(parts[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out x) &&
                 double.TryParse(parts[3], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out y) &&
@@ -623,13 +968,24 @@ namespace Automata.Drone
         public bool Terminal_Enabled
         {
             get { return settings != null && settings.IsEnabled; }
-            set { if (settings != null) { settings.IsEnabled = value; SaveSettings(); } }
+            set
+            {
+                if (settings != null) {
+                    settings.IsEnabled = value;
+                    CheckCapabilities();
+                    SaveSettings();
+                }
+            }
         }
 
         public bool Terminal_EnableInertialDampening
         {
             get { return settings != null && settings.EnableInertialDampening; }
-            set { if (settings != null) { settings.EnableInertialDampening = value; SaveSettings(); } } 
+            set { if (settings != null) {
+                settings.EnableInertialDampening = value;
+                SaveSettings();
+                }
+            } 
         }
 
         public long Terminal_OperationModeValue
@@ -718,13 +1074,13 @@ namespace Automata.Drone
         public float Terminal_MaxPitchDegrees
         {
             get { return settings != null ? settings.PGravityAlignMaxPitchDegrees : 10f; }
-            set { if (settings != null) { settings.PGravityAlignMaxPitchDegrees = MathHelper.Clamp(value, 0f, 45f); SaveSettings(); } }
+            set { if (settings != null) { settings.PGravityAlignMaxPitchDegrees = MathHelper.Clamp(value, 0f, 90f); SaveSettings(); } }
         }
 
         public float Terminal_MaxRollDegrees
         {
             get { return settings != null ? settings.PGravityAlignMaxRollDegrees : 10f; }
-            set { if (settings != null) { settings.PGravityAlignMaxRollDegrees = MathHelper.Clamp(value, 0f, 45f); SaveSettings(); } }
+            set { if (settings != null) { settings.PGravityAlignMaxRollDegrees = MathHelper.Clamp(value, 0f, 90f); SaveSettings(); } }
         }
 
         public StringBuilder Terminal_LCDScreenTag
@@ -780,6 +1136,30 @@ namespace Automata.Drone
             get { return settings != null ? (long)settings.ControllerForwardDirection : (long)Base6Directions.Direction.Forward; }
             set { if (settings != null) { settings.ControllerForwardDirection = (Base6Directions.Direction)value; SaveSettings(); } }
         }
+
+        public StringBuilder Terminal_Debug_SetOrientationTargetInput
+        {
+            get
+            {
+                if (settings == null) return new StringBuilder("");
+                return new StringBuilder(ConvertVectorToGPS("Orientation", orientationTarget));
+            }
+            set
+            {
+                if (settings == null) return;
+                Vector3D? pos = ParseGPSString(value != null ? value.ToString() : null);
+                if (pos.HasValue)
+                {
+                    orientationTargetDebug = pos.Value;
+                }
+            }
+        }
+
+        public void Terminal_Debug_SetOrientationTarget()
+        {
+            orientationTarget = orientationTargetDebug;
+            orientationTargetSet = true;
+        }
         #endregion
         #region State helpers
         private bool AnyLandingGearLocked()
@@ -800,21 +1180,31 @@ namespace Automata.Drone
             physicalMass = massInfo.PhysicalMass;
             baseMass = massInfo.BaseMass;
         }
+        private void UpdateNaturalGravity()
+        {
+            naturalGravity = shipController.GetNaturalGravity();
+        }
+        private void CaptureFlightState()
+        {
+            flightState.WorldMatrix = shipController.WorldMatrix;
+            MatrixD.Transpose(ref flightState.WorldMatrix, out flightState.WorldMatrixToLocal);
+            var v = shipController.GetShipVelocities();
+            flightState.LinearVelocity  = v.LinearVelocity;
+            flightState.AngularVelocity = v.AngularVelocity;
+            flightState.Position = flightState.WorldMatrix.Translation;
+            flightState.Gravity  = shipController.GetNaturalGravity();
+            double g2 = flightState.Gravity.LengthSquared();
+            flightState.InGravity = g2 > 0.01;
+            flightState.GravityUp = flightState.InGravity ? -flightState.Gravity / Math.Sqrt(g2) : Vector3D.Zero;
+        }
         #endregion
 
         #region Static Helpers
-        private static bool HasAnyGyros(Dictionary<Base6Directions.Direction, List<IMyGyro>> gyroscopes)
+        private static bool HasAnyDirectionalComponent<T>(List<T>[] componentArray)
         {
-            foreach (var kvp in gyroscopes)
-                if (kvp.Value.Count > 0) return true;
-            return false;
-        }
-
-        private static bool HasAnyThrusters(Dictionary<Base6Directions.Direction, List<IMyThrust>> thrusters)
-        {
-            if (thrusters.Count == 0) return false;
-            foreach (var kvp in thrusters)
-                if (kvp.Value.Count > 0) return true;
+            if (componentArray == null) return false;
+            for (int i = 0; i < 6; i++)
+                if (componentArray[i].Count > 0) return true;
             return false;
         }
         private static float CalculateMaxLoadInG(
@@ -825,95 +1215,41 @@ namespace Automata.Drone
             float gravityNormal = 9.81f
         )
         {
-            float upAccel;
-            switch (direction)
-            {
-                case Base6Directions.Direction.Up:
-                    upAccel = (baseThrustProfile.Up.Max + h2ThrustProfile.Up.Max) / mass;
-                    break;
-                case Base6Directions.Direction.Down:
-                    upAccel = (baseThrustProfile.Down.Max + h2ThrustProfile.Down.Max) / mass;
-                    break;
-                case Base6Directions.Direction.Left:
-                    upAccel =  (baseThrustProfile.Left.Max + h2ThrustProfile.Left.Max) / mass;
-                    break;
-                case Base6Directions.Direction.Right:
-                    upAccel =  (baseThrustProfile.Right.Max + h2ThrustProfile.Right.Max) / mass;
-                    break;
-                case Base6Directions.Direction.Backward:
-                    upAccel =  (baseThrustProfile.Backward.Max + h2ThrustProfile.Backward.Max) / mass;
-                    break;
-                case Base6Directions.Direction.Forward:
-                    upAccel =  (baseThrustProfile.Forward.Max + h2ThrustProfile.Forward.Max) / mass;
-                    break;
-                default: // up
-                    upAccel =  (baseThrustProfile.Up.Max + h2ThrustProfile.Up.Max) / mass;
-                    break;
-            }
+            float upAccel =  (baseThrustProfile.Up.Max + h2ThrustProfile.Up.Max) / mass;
             if (upAccel <= gravityNormal) return 0f;
             return (upAccel - gravityNormal) * mass / gravityNormal;  
         }
 
-        // Table dimensions: [ControllerForward, BlockForward]
-        private static readonly Base6Directions.Direction[,] RelativeDirectionMatrix = new Base6Directions.Direction[6, 6]
-        {
-            // Controller = Forward
-            { Base6Directions.Direction.Forward, Base6Directions.Direction.Backward, Base6Directions.Direction.Left, Base6Directions.Direction.Right, Base6Directions.Direction.Up, Base6Directions.Direction.Down },
-            // Controller = Backward
-            { Base6Directions.Direction.Backward, Base6Directions.Direction.Forward, Base6Directions.Direction.Right, Base6Directions.Direction.Left, Base6Directions.Direction.Up, Base6Directions.Direction.Down },
-            // Controller = Left
-            { Base6Directions.Direction.Right, Base6Directions.Direction.Left, Base6Directions.Direction.Forward, Base6Directions.Direction.Backward, Base6Directions.Direction.Up, Base6Directions.Direction.Down },
-            // Controller = Right
-            { Base6Directions.Direction.Left, Base6Directions.Direction.Right, Base6Directions.Direction.Backward, Base6Directions.Direction.Forward, Base6Directions.Direction.Up, Base6Directions.Direction.Down },
-            // Controller = Up
-            { Base6Directions.Direction.Down, Base6Directions.Direction.Up, Base6Directions.Direction.Left, Base6Directions.Direction.Right, Base6Directions.Direction.Forward, Base6Directions.Direction.Backward },
-            // Controller = Down
-            { Base6Directions.Direction.Up, Base6Directions.Direction.Down, Base6Directions.Direction.Left, Base6Directions.Direction.Right, Base6Directions.Direction.Backward, Base6Directions.Direction.Forward }
-        };
-
-        private static Base6Directions.Direction GetRelativeDirection(
-            Base6Directions.Direction blockForward,
-            Base6Directions.Direction controllerForward)
-        {
-            return RelativeDirectionMatrix[(int)controllerForward, (int)blockForward];
-        }
-        private static ThrustProfile CalculateThrustProfile(IMyShipController shipController, float currentMass, Dictionary<Base6Directions.Direction, List<IMyThrust>> thrusters)
+        private static ThrustProfile CalculateThrustProfile(IMyShipController shipController, float currentMass, List<IMyThrust>[] thrusters)
         {
             ThrustProfile thrustProfile = new ThrustProfile();
 
             if (shipController == null) return thrustProfile;
             if (currentMass < 0.1f) return thrustProfile;
-            if (thrusters == null || thrusters.Count == 0) return thrustProfile;
+            if (thrusters == null) return thrustProfile;
 
-            foreach (var kvp in thrusters)
+            float dirThrust;
+            for (int i = 0; i < 6; i++)
             {
-                float dirThrust = 0f;
-                for (int i = 0; i < kvp.Value.Count; i++)
+                dirThrust = 0.0f;
+                foreach(IMyThrust thruster in thrusters[i])
                 {
-                    IMyThrust t = kvp.Value[i];
-                    if (t.IsWorking && t.IsFunctional) dirThrust += t.MaxEffectiveThrust;
+                    if (thruster.IsWorking && thruster.IsFunctional)
+                        dirThrust += thruster.MaxEffectiveThrust;
                 }
-                switch (kvp.Key)
-                {
-                    case Base6Directions.Direction.Forward:
-                        thrustProfile.Forward = new DirectionalValue(0.0f, dirThrust, kvp.Key);
-                        break;
-                    case Base6Directions.Direction.Backward:
-                        thrustProfile.Backward = new DirectionalValue(0.0f, dirThrust, kvp.Key);
-                        break;
-                    case Base6Directions.Direction.Up:
-                        thrustProfile.Up = new DirectionalValue(0.0f, dirThrust, kvp.Key);
-                        break;
-                    case Base6Directions.Direction.Down:
-                        thrustProfile.Down = new DirectionalValue(0.0f, dirThrust, kvp.Key);
-                        break;
-                    case Base6Directions.Direction.Left:
-                        thrustProfile.Left = new DirectionalValue(0.0f, dirThrust, kvp.Key);
-                        break;
-                    case Base6Directions.Direction.Right:
-                        thrustProfile.Right = new DirectionalValue(0.0f, dirThrust, kvp.Key);
-                        break;
-                }
+                Base6Directions.Direction direction = (Base6Directions.Direction)i;
+                if(direction == Base6Directions.Direction.Forward)
+                    thrustProfile.Forward = new DirectionalValue(dirThrust, direction);
+                else if(direction == Base6Directions.Direction.Backward)
+                    thrustProfile.Backward = new DirectionalValue(dirThrust, direction);
+                else if(direction == Base6Directions.Direction.Up)
+                    thrustProfile.Up = new DirectionalValue(dirThrust, direction);
+                else if(direction == Base6Directions.Direction.Down)
+                    thrustProfile.Down = new DirectionalValue(dirThrust, direction);
+                else if(direction == Base6Directions.Direction.Left)
+                    thrustProfile.Left = new DirectionalValue(dirThrust, direction);
+                else if(direction == Base6Directions.Direction.Right)
+                    thrustProfile.Right = new DirectionalValue(dirThrust, direction);
             }
             if (currentMass < 0.1f)
             {

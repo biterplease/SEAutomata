@@ -1,6 +1,8 @@
 ﻿using ProtoBuf;
 using System;
 
+using Automata.Util;
+
 namespace Automata.Drone
 {
 
@@ -153,6 +155,30 @@ namespace Automata.Drone
         ReturningIntoRange = 256,
         [ProtoEnum]
         UnderAttack = 512,
+    }
+    [ProtoContract]
+    public enum FlightOrientationMode : byte {
+        [ProtoEnum]
+        FaceTravel = 0,
+        [ProtoEnum]
+        LookAt = 1,
+        [ProtoEnum]
+        Explicit = 2
+    }
+
+    [ProtoContract]
+    public class FlightOrder
+    {
+        [ProtoMember(1)]  public Vector3DData Target;           // where the reference point must end up
+        [ProtoMember(2)]  public Vector3DData ApproachFrom;     // start of the approach line
+        [ProtoMember(3)]  public FlightOrientationMode Orientation;
+        [ProtoMember(4)]  public Vector3DData LookAtPoint;      // LookAt
+        [ProtoMember(5)]  public Vector3DData Forward;          // Explicit (world)
+        [ProtoMember(6)]  public Vector3DData Up;               // Explicit (world)
+        [ProtoMember(7)]  public Vector3DData ReferenceOffset;  // controller-local; zero = the controller itself
+        [ProtoMember(8)]  public float ArrivalTolerance = 1f;   // m
+        [ProtoMember(9)]  public bool Captured;                 // reached the approach line
+        [ProtoMember(10)] public bool Arrived;
     }
     [ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class Drone

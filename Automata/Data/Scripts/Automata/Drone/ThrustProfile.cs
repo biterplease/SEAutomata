@@ -4,13 +4,11 @@ namespace Automata.Drone
     #region ThrustProfile
     public struct DirectionalValue
     {
-        public float Current;
         public float Max;
         public Base6Directions.Direction Direction;
 
-        public DirectionalValue(float currentValue,float maxValue, Base6Directions.Direction direction)
+        public DirectionalValue(float maxValue, Base6Directions.Direction direction)
         {
-            Current = currentValue;
             Max = maxValue;
             Direction = direction;
         }

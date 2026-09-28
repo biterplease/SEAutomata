@@ -25,7 +25,7 @@
          <DisplayName>DisplayName_Category_LargeBlocks</DisplayName>
          <Name>LargeBlocks</Name>
          <ItemIds>
-            <string>RemoteControl/ImprovedAILargeDroneController</string>
+            <string>RemoteControl/AutomataLargeDroneController</string>
          </ItemIds>
       </Category>
 	   

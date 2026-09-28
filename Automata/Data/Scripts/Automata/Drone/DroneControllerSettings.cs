@@ -25,8 +25,8 @@ namespace Automata.Drone
                 public Vector3D HomePosition;
                 public Vector3D HomeForwardDirection = Vector3D.Forward;
                 public bool EnforceHomeOrientation = true;
-                [ProtoMember(24)]
-                public IMyGps HomeIsRelativeTo;
+                // [ProtoMember(24)]
+                // public IMyGps HomeIsRelativeTo;
                 /// <summary>
                         /// Normally drones handle all tasks that they are capable for.
                         /// If enabled, will allow the user to filter specific task types that this drone will be allowed to handle.
