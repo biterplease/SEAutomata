@@ -50,9 +50,9 @@ namespace Automata.Drone
                 [ProtoMember(8)]
                 public float WaypointTolerance = 5.0f;
                 /// <summary>
-                        /// Recommended speed when approaching targets, in m/s. Mostly for weld or grind tasks.
-                        /// Logistics task generally use docking speed for approach
-                        /// </summary>
+                /// Recommended speed when approaching targets, in m/s. Mostly for weld or grind tasks.
+                /// Logistics task generally use docking speed for approach
+                /// </summary>
                 [ProtoMember(9)]
                 public float ApproachSpeed = 5.0f;
                 /// <summary>
@@ -64,7 +64,7 @@ namespace Automata.Drone
                         /// Docking speed in m/s.
                         /// </summary>
                 [ProtoMember(11)]
-                public float DockingSpeed = 2.5f;
+                public float DockingSpeed = 1.0f;
                 [ProtoMember(12)]
                 public bool AlignToPGravity = true;
                 [ProtoMember(13)]
@@ -118,5 +118,19 @@ namespace Automata.Drone
                 public bool SurveyForMiningData = false;
                 [ProtoMember(26)]
                 public bool EnableInertialDampening = false;
+
+                // stand-alone construction function
+                // forward/backward
+                public bool ObservationAreaDraw = false;
+                public float ObservationAreaZ = 25.0f;
+                // left/right
+                public float ObservationAreaX = 25.0f;
+                // up/down
+                public float ObservationAreaY = 25.0f;
+                public int ObservationAreaZOffset = 0;
+                // left/right
+                public int ObservationAreaXOffset = 0;
+                // up/down
+                public int ObservationAreaYOffset = 0;
         }
 }

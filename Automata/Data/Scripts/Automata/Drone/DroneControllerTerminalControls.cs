@@ -941,6 +941,49 @@ namespace Automata.Drone
                 c.SupportsMultipleBlocks = false;
                 MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
             }
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlTextbox, IMyRemoteControl>(IdPrefix + "Textbox_Debug_NavigationTargetGPS");
+                c.Title = MyStringId.GetOrCompute("Navigate to target");
+                c.Tooltip = MyStringId.GetOrCompute("Navigate the drone to target.");
+                c.Visible = CustomVisibleCondition;
+                c.Getter = (b) => GetBlock(b)?.Textbox_Debug_NavigationTargetGPS ?? new StringBuilder("");
+                c.Setter = (b, v) =>
+                {
+                    var logic = GetBlock(b);
+                    if (logic != null) logic.Textbox_Debug_NavigationTargetGPS = v;
+                };
+                c.SupportsMultipleBlocks = false;
+                MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+            }
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlTextbox, IMyRemoteControl>(IdPrefix + "Textbox_Debug_NavigationTargetGPSApproachFrom");
+                c.Title = MyStringId.GetOrCompute("Approach target from:");
+                c.Tooltip = MyStringId.GetOrCompute("Optional position to approach target from");
+                c.Visible = CustomVisibleCondition;
+                c.Getter = (b) => GetBlock(b)?.Textbox_Debug_NavigationTargetGPSApproachFrom ?? new StringBuilder("");
+                c.Setter = (b, v) =>
+                {
+                    var logic = GetBlock(b);
+                    if (logic != null) logic.Textbox_Debug_NavigationTargetGPSApproachFrom = v;
+                };
+                c.SupportsMultipleBlocks = false;
+                MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+            }
+
+                        // // Set Current Position as Home
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlButton, IMyRemoteControl>(IdPrefix + "Button_Debug_NavigationTargetGPSActionTrigger");
+                c.Title = MyStringId.GetOrCompute("Navigate");
+                c.Tooltip = MyStringId.GetOrCompute("");
+                c.Visible = CustomVisibleCondition;
+                c.Action = (b) =>
+                {
+                    var logic = GetBlock(b);
+                    if (logic != null) logic.Terminal_Debug_NavigateToTarget();
+                };
+                c.SupportsMultipleBlocks = false;
+                MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+            }
         }
     }
 }

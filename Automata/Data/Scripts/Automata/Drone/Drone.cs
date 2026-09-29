@@ -50,55 +50,52 @@ namespace Automata.Drone
         [ProtoEnum]
         None = 0,
         [ProtoEnum]
-        CanWeld = 1,
+        CanDock = 1,
         [ProtoEnum]
-        CanGrind = 2,
+        CanWeld = 2,
         [ProtoEnum]
-        CanDrill = 4,
+        CanGrind = 4,
         [ProtoEnum]
-        CanScoutOre = 8,
+        CanDrill = 8,
         [ProtoEnum]
-        HasWheels = 16,
+        CanScoutOre = 16,
         [ProtoEnum]
-        CanFlyAtmosphere = 32,
+        HasWheels = 32,
         [ProtoEnum]
-        CanFlySpace = 64,
+        CanFlyAtmosphere = 64,
         [ProtoEnum]
-        HasDefenseSystems = 128,
+        CanFlySpace = 128,
         [ProtoEnum]
-        HasSensors = 256,
+        HasDefenseSystems = 256,
         [ProtoEnum]
-        HasCameras = 512,
+        HasSensors = 512,
+        [ProtoEnum]
+        HasCameras = 1024,
         /// <summary>
         /// No cargo capacity.
         /// </summary>
         [ProtoEnum]
-        CargoVolumeNil = 1024,
+        CargoVolumeNil = 2048,
         /// <summary>
         /// Cargo volume greater than 0m^3 and less than 10m^3.
         /// </summary>
         [ProtoEnum]
-        CargoVolumeLt10m3 = 2048,
+        CargoVolumeLt10m3 = 4096,
         /// <summary>
         /// Cargo volume greater than 10m^3 and less than 100m^3.
         /// </summary>
         [ProtoEnum]
-        CargoVolumeLt100m3 = 4096,
+        CargoVolumeLt100m3 = 8192,
         /// <summary>
         /// Cargo volume greater than 100m^3 and less than 1000m^3.
         /// </summary>
         [ProtoEnum]
-        CargoVolumeLt1000m3 = 8192,
+        CargoVolumeLt1000m3 = 16384,
         /// <summary>
         /// Cargo volume greater than 1000m^3 and less than 10000m^3.
         /// </summary>
         [ProtoEnum]
-        CargoVolumeLt10000m3 = 16384,
-        /// <summary>
-        /// Drone is equipped for dropping cargo containers with parachutes.
-        /// </summary>
-        [ProtoEnum]
-        CanAirdrop = 32768,
+        CargoVolumeLt10000m3 = 32768,
 
     }
     public enum BehaviourProfile : byte
@@ -165,20 +162,29 @@ namespace Automata.Drone
         [ProtoEnum]
         Explicit = 2
     }
-
+    [ProtoContract]
+    public enum FlightPhase : byte
+    {
+        [ProtoEnum] Approach = 0,   // flying ApproachFrom → Target (direct orders start here)
+        [ProtoEnum] Transit  = 1,   // flying straight to ApproachFrom
+        [ProtoEnum] Align    = 2,   // holding at ApproachFrom, turning to the final orientation
+    }
     [ProtoContract]
     public class FlightOrder
     {
         [ProtoMember(1)]  public Vector3DData Target;           // where the reference point must end up
         [ProtoMember(2)]  public Vector3DData ApproachFrom;     // start of the approach line
-        [ProtoMember(3)]  public FlightOrientationMode Orientation;
-        [ProtoMember(4)]  public Vector3DData LookAtPoint;      // LookAt
-        [ProtoMember(5)]  public Vector3DData Forward;          // Explicit (world)
-        [ProtoMember(6)]  public Vector3DData Up;               // Explicit (world)
-        [ProtoMember(7)]  public Vector3DData ReferenceOffset;  // controller-local; zero = the controller itself
-        [ProtoMember(8)]  public float ArrivalTolerance = 1f;   // m
-        [ProtoMember(9)]  public bool Captured;                 // reached the approach line
-        [ProtoMember(10)] public bool Arrived;
+        [ProtoMember(3)] public Vector3DData TransitStart;
+        [ProtoMember(4)]  public FlightOrientationMode Orientation;
+        [ProtoMember(5)]  public Vector3DData LookAtPoint;      // LookAt
+        [ProtoMember(6)]  public Vector3DData Forward;          // Explicit (world)
+        [ProtoMember(7)]  public Vector3DData Up;               // Explicit (world)
+        [ProtoMember(8)]  public Vector3DData ReferenceOffset;  // controller-local; zero = the controller itself
+        [ProtoMember(9)]  public float ArrivalTolerance = 1f;   // m
+        [ProtoMember(10)] public FlightPhase Phase;
+        [ProtoMember(11)]  public bool Captured;                 // reached the approach line
+        [ProtoMember(12)] public bool Arrived;
+        [ProtoMember(13)] public bool IgnoreGravityLimits;
     }
     [ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class Drone
