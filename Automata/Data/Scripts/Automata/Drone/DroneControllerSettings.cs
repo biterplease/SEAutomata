@@ -1,6 +1,8 @@
-﻿using ProtoBuf;
+﻿using System.Collections.Generic;
+using ProtoBuf;
 using VRageMath;
 using VRage.Game.ModAPI;
+using Automata.Util;
 
 namespace Automata.Drone
 {
@@ -59,17 +61,17 @@ namespace Automata.Drone
                         /// Max speed in m/s.
                         /// </summary>
                 [ProtoMember(10)]
-                public float SpeedLimit = 50.0f;
+                public float MaxSpeed = 50.0f;
                 /// <summary>
                         /// Docking speed in m/s.
                         /// </summary>
                 [ProtoMember(11)]
-                public float DockingSpeed = 1.0f;
-                [ProtoMember(12)]
+                public float SafeSpeed = 0.5f;
+                [ProtoMember(12, IsRequired = true)]   // default true: false would otherwise not be saved
                 public bool AlignToPGravity = true;
-                [ProtoMember(13)]
+                [ProtoMember(13, IsRequired = true)]
                 public float PGravityAlignMaxPitchDegrees = 10.0f;
-                [ProtoMember(14)]
+                [ProtoMember(14, IsRequired = true)]
                 public float PGravityAlignMaxRollDegrees = 10.0f;
                 [ProtoMember(15)]
                 public string LCDScreenTag = "[AutomataDrone]"; // Drone state will be sent to each LCD screen that contains this tag.
@@ -119,18 +121,64 @@ namespace Automata.Drone
                 [ProtoMember(26)]
                 public bool EnableInertialDampening = false;
 
+                /// <summary>
+                /// Home connector entity id (0 = none). Only connectors owned by the drone owner or the owner's
+                /// faction can be selected; ownership is re-checked every time the id is resolved.
+                /// </summary>
+                [ProtoMember(27)]
+                public long HomeConnectorId;
+
                 // stand-alone construction function
-                // forward/backward
+                // Observation area: box centred on the home connector, in the connector's frame.
+                // Size X = width (right), Y = height (up), Z = depth (forward), each 2.5–25 m.
+                // Offset X/Y/Z along the connector's Right/Up/Forward, each ±12.5 m.
+                [ProtoMember(28)]
+                public Vector3DData ObservationAreaSize = new Vector3DData { X = 10, Y = 10, Z = 10 };
+                [ProtoMember(29)]
+                public Vector3DData ObservationAreaOffset;
+                // Runtime only (not serialized): drawing switches itself off after a while.
                 public bool ObservationAreaDraw = false;
-                public float ObservationAreaZ = 25.0f;
-                // left/right
-                public float ObservationAreaX = 25.0f;
-                // up/down
-                public float ObservationAreaY = 25.0f;
-                public int ObservationAreaZOffset = 0;
-                // left/right
-                public int ObservationAreaXOffset = 0;
-                // up/down
-                public int ObservationAreaYOffset = 0;
+
+                // Docking pose for the home connector, in the home connector's frame (Right, Up, Forward):
+                // where the drone controller must be, and how it must be oriented, for its connector to lock.
+                [ProtoMember(30)]
+                public Vector3DData HomeDockOffset;
+                [ProtoMember(31)]
+                public Vector3DData HomeDockForward;
+                [ProtoMember(32)]
+                public Vector3DData HomeDockUp;
+                /// <summary>Drone connector used to dock (entity id).</summary>
+                [ProtoMember(33)]
+                public long HomeDockConnectorId;
+                /// <summary>True when the pose was recorded from an actual connection ("Set current as home").</summary>
+                [ProtoMember(34)]
+                public bool HomeDockRecorded;
+
+                /// <summary>
+                /// Max load, percent of what the thrusters can carry. 100% in gravity = the up thrusters can just hover it;
+                /// in space = the weakest thruster group can still accelerate it at 0.1 g. Clamped 0–200%.
+                /// </summary>
+                [ProtoMember(35, IsRequired = true)]    // non-zero defaults: always written, or 0 would load as the default
+                public float MaxLoadGravity = 80f;
+                [ProtoMember(36, IsRequired = true)]
+                public float MaxLoadSpace = 80f;
+
+                // LCD output ([AutomataDrone] tag, drone's own grid only)
+                [ProtoMember(37)]
+                public uint LcdForeground = 0xFF00FF00;   // RGB(0,255,0)
+                [ProtoMember(38)]
+                public uint LcdBackground = 0xFF202020;   // RGB(32,32,32)
+                [ProtoMember(39)]
+                public float LcdFontSize = 0.6f;
+                [ProtoMember(40, IsRequired = true)]
+                public bool LcdShowHeader = true;
+
+                // Blocks put to sleep / switched to refuel by the docking routine, restored on the next flight
+                [ProtoMember(41)]
+                public List<long> SleepingBlockIds = new List<long>();
+                [ProtoMember(42)]
+                public List<long> RechargingBatteryIds = new List<long>();
+                [ProtoMember(43)]
+                public List<long> StockpilingTankIds = new List<long>();
         }
 }

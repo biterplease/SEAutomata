@@ -119,6 +119,115 @@ namespace Automata.Drone
             // only visible for the blocks having this gamelogic comp
             return b?.GameLogic?.GetAs<DroneControllerBlock>() != null;
         }
+        private static void AddSlider(string id, string title, string tooltip, float min, float max,
+            Func<DroneControllerBlock, float> get, Action<DroneControllerBlock, float> set, Action<DroneControllerBlock, StringBuilder> write)
+        {
+            var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSlider, IMyRemoteControl>(IdPrefix + id);
+            c.Title = MyStringId.GetOrCompute(title);
+            c.Tooltip = MyStringId.GetOrCompute(tooltip);
+            c.Visible = CustomVisibleCondition;
+            c.SetLimits(min, max);
+            c.Getter = (b) => { var l = GetBlock(b); return l != null ? get(l) : min; };
+            c.Setter = (b, v) => { var l = GetBlock(b); if (l != null) set(l, v); };
+            c.Writer = (b, sb) => { var l = GetBlock(b); if (l != null) write(l, sb); };
+            c.SupportsMultipleBlocks = true;
+            MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+        }
+
+        private static void AddCheckbox(string id, string title, string tooltip,
+            Func<DroneControllerBlock, bool> get, Action<DroneControllerBlock, bool> set)
+        {
+            var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlCheckbox, IMyRemoteControl>(IdPrefix + id);
+            c.Title = MyStringId.GetOrCompute(title);
+            c.Tooltip = MyStringId.GetOrCompute(tooltip);
+            c.OnText = MySpaceTexts.SwitchText_On;
+            c.OffText = MySpaceTexts.SwitchText_Off;
+            c.Visible = CustomVisibleCondition;
+            c.Getter = (b) => { var l = GetBlock(b); return l != null && get(l); };
+            c.Setter = (b, v) => { var l = GetBlock(b); if (l != null) set(l, v); };
+            c.SupportsMultipleBlocks = true;
+            MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+        }
+
+        private static void AddColor(string id, string title, string tooltip,
+            Func<DroneControllerBlock, Color> get, Action<DroneControllerBlock, Color> set)
+        {
+            var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlColor, IMyRemoteControl>(IdPrefix + id);
+            c.Title = MyStringId.GetOrCompute(title);
+            c.Tooltip = MyStringId.GetOrCompute(tooltip);
+            c.Visible = CustomVisibleCondition;
+            c.Getter = (b) => { var l = GetBlock(b); return l != null ? get(l) : Color.White; };
+            c.Setter = (b, v) => { var l = GetBlock(b); if (l != null) set(l, v); };
+            c.SupportsMultipleBlocks = true;
+            MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+        }
+
+        private static void AddLabel(string id, string text)
+        {
+            var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlLabel, IMyRemoteControl>(IdPrefix + id);
+            c.Label = MyStringId.GetOrCompute(text);
+            c.SupportsMultipleBlocks = true;
+            c.Visible = CustomVisibleCondition;
+            MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+        }
+
+        private static void AddSeparator(string id)
+        {
+            var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSeparator, IMyRemoteControl>(IdPrefix + id);
+            c.SupportsMultipleBlocks = true;
+            c.Visible = CustomVisibleCondition;
+            MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+        }
+
+        private static void AppendSpeed(StringBuilder sb, float v)
+        {
+            sb.Append(v.ToString(v < 10 ? "F1" : "F0")).Append(" m/s");
+        }
+
+        private static void AppendPercent(StringBuilder sb, float v)
+        {
+            sb.Append(v.ToString("F0")).Append('%');
+        }
+
+        static bool HomeConnectorVisibleCondition(IMyTerminalBlock b)
+        {
+            var logic = GetBlock(b);
+            return logic != null && logic.HasHomeConnector;
+        }
+
+        // size: 2.5–25 m; offset: ±12.5 m (the block clamps again)
+        private static void AddObservationSlider(string id, string title, string tooltip, int axis, bool size)
+        {
+            var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSlider, IMyRemoteControl>(IdPrefix + id);
+            c.Title = MyStringId.GetOrCompute(title);
+            c.Tooltip = MyStringId.GetOrCompute(tooltip);
+            c.Visible = HomeConnectorVisibleCondition;
+            if (size) c.SetLimits(2.5f, 25f);
+            else c.SetLimits(-12.5f, 12.5f);
+            c.Getter = (b) =>
+            {
+                var logic = GetBlock(b);
+                if (logic == null) return size ? 10f : 0f;
+                return size ? logic.Terminal_GetObservationSize(axis) : logic.Terminal_GetObservationOffset(axis);
+            };
+            c.Setter = (b, v) =>
+            {
+                var logic = GetBlock(b);
+                if (logic == null) return;
+                if (size) logic.Terminal_SetObservationSize(axis, v);
+                else logic.Terminal_SetObservationOffset(axis, v);
+            };
+            c.Writer = (b, sb) =>
+            {
+                var logic = GetBlock(b);
+                if (logic == null) return;
+                float v = size ? logic.Terminal_GetObservationSize(axis) : logic.Terminal_GetObservationOffset(axis);
+                sb.Append(v.ToString("F1")).Append(" m");
+            };
+            c.SupportsMultipleBlocks = false;
+            MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+        }
+
         /// <summary>
         /// Hides default controls in the inherited Remote Control.
         /// </summary>
@@ -296,8 +405,8 @@ namespace Automata.Drone
                         // // Set Current Position as Home
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlButton, IMyRemoteControl>(IdPrefix + "Button_SetCurrentAsHome");
-                c.Title = MyStringId.GetOrCompute("Set Current as Home");
-                c.Tooltip = MyStringId.GetOrCompute("Set current drone position as home");
+                c.Title = MyStringId.GetOrCompute("Set current as home");
+                c.Tooltip = MyStringId.GetOrCompute("Dock the drone by hand, then press: that connector becomes home, and this exact position and orientation is used for docking.");
                 c.Visible = CustomVisibleCondition;
                 c.Action = (b) =>
                 {
@@ -905,6 +1014,195 @@ namespace Automata.Drone
             //     c.SupportsMultipleBlocks = true;
             //     MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
             // }
+            // === NAVIGATION SPEEDS ===
+            AddSeparator("Separator_Speeds");
+            AddLabel("Label_Speeds", "Speeds");
+            AddSlider("Slider_MaxSpeed", "Max speed",
+                "Cruise speed limit for any flight, in m/s.",
+                DroneControllerBlock.MAX_SPEED_MIN, DroneControllerBlock.MAX_SPEED_MAX,
+                l => l.Terminal_MaxSpeed, (l, v) => l.Terminal_MaxSpeed = v, (l, sb) => AppendSpeed(sb, l.Terminal_MaxSpeed));
+            AddSlider("Slider_ApproachSpeed", "Approach speed",
+                "Speed over the last 10 m before a target: tool work, waypoints that stop, the start of the final approach. Never above Max speed.",
+                DroneControllerBlock.APPROACH_SPEED_MIN, DroneControllerBlock.APPROACH_SPEED_MAX,
+                l => l.Terminal_ApproachSpeed, (l, v) => l.Terminal_ApproachSpeed = v, (l, sb) => AppendSpeed(sb, l.Terminal_ApproachSpeed));
+            AddSlider("Slider_SafeSpeed", "Safe speed",
+                "Speed for delicate moves: the final docking approach to a connector. Never above Approach speed.",
+                DroneControllerBlock.SAFE_SPEED_MIN, DroneControllerBlock.SAFE_SPEED_MAX,
+                l => l.Terminal_SafeSpeed, (l, v) => l.Terminal_SafeSpeed = v, (l, sb) => AppendSpeed(sb, l.Terminal_SafeSpeed));
+
+            // === LOAD ===
+            AddSeparator("Separator_Load");
+            AddLabel("Label_Load", "Load");
+            AddSlider("Slider_MaxLoadGravity", "Max load (gravity)",
+                "MaxLoadGravity: percent value of max load. Drone will stop collecting when this value is exceeded.\n100% = the heaviest total mass the up thrusters can hover in the current gravity (1 g when in space). The value in brackets is that mass limit.",
+                0f, 200f,
+                l => l.Terminal_MaxLoadGravity, (l, v) => l.Terminal_MaxLoadGravity = v, (l, sb) => l.Terminal_WriteMaxLoad(sb, true));
+            AddSlider("Slider_MaxLoadSpace", "Max load (space)",
+                "MaxLoadSpace: percent value of max load. Drone will stop collecting when this value is exceeded.\n100% = the heaviest total mass the weakest thruster group can still accelerate at 0.1 g. The value in brackets is that mass limit.",
+                0f, 200f,
+                l => l.Terminal_MaxLoadSpace, (l, v) => l.Terminal_MaxLoadSpace = v, (l, sb) => l.Terminal_WriteMaxLoad(sb, false));
+
+            // === POWER ===
+            AddSeparator("Separator_Power");
+            AddLabel("Label_Power", "Power");
+            AddCheckbox("Checkbox_AlwaysRefuel", "Refuel when docked",
+                "When docked, set batteries to Recharge and hydrogen tanks to Stockpile. Restored when the drone takes off. Reactors need no setting.",
+                l => l.Terminal_AlwaysRefuel, (l, v) => l.Terminal_AlwaysRefuel = v);
+            AddCheckbox("Checkbox_MonitorBattery", "Monitor battery",
+                "Return to the home connector when the batteries drop below the recharge threshold.",
+                l => l.Terminal_MonitorBattery, (l, v) => l.Terminal_MonitorBattery = v);
+            AddSlider("Slider_BatteryRefuelThreshold", "Battery: recharge below",
+                "Battery charge that sends the drone home to recharge.", 5f, 50f,
+                l => l.Terminal_BatteryRefuelThreshold, (l, v) => l.Terminal_BatteryRefuelThreshold = v, (l, sb) => AppendPercent(sb, l.Terminal_BatteryRefuelThreshold));
+            AddSlider("Slider_BatteryOperationalThreshold", "Battery: ready above",
+                "Battery charge at which the drone counts as recharged.", 10f, 95f,
+                l => l.Terminal_BatteryOperationalThreshold, (l, v) => l.Terminal_BatteryOperationalThreshold = v, (l, sb) => AppendPercent(sb, l.Terminal_BatteryOperationalThreshold));
+            AddCheckbox("Checkbox_MonitorHydrogen", "Monitor hydrogen",
+                "Return to the home connector when the hydrogen tanks drop below the refuel threshold.",
+                l => l.Terminal_MonitorHydrogen, (l, v) => l.Terminal_MonitorHydrogen = v);
+            AddSlider("Slider_H2RefuelThreshold", "Hydrogen: refuel below",
+                "Hydrogen level that sends the drone home to refuel.", 5f, 50f,
+                l => l.Terminal_H2RefuelThreshold, (l, v) => l.Terminal_H2RefuelThreshold = v, (l, sb) => AppendPercent(sb, l.Terminal_H2RefuelThreshold));
+            AddSlider("Slider_H2OperationalThreshold", "Hydrogen: ready above",
+                "Hydrogen level at which the drone counts as refueled.", 10f, 95f,
+                l => l.Terminal_H2OperationalThreshold, (l, v) => l.Terminal_H2OperationalThreshold = v, (l, sb) => AppendPercent(sb, l.Terminal_H2OperationalThreshold));
+
+            // === LCD OUTPUT ===
+            AddSeparator("Separator_Lcd");
+            AddLabel("Label_Lcd", "LCD output");
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlTextbox, IMyRemoteControl>(IdPrefix + "Textbox_LCDScreenTag");
+                c.Title = MyStringId.GetOrCompute("LCD tag");
+                c.Tooltip = MyStringId.GetOrCompute("LCD panels on the drone's own grid (not subgrids or docked grids) with this tag in their name show the drone's log.");
+                c.Visible = CustomVisibleCondition;
+                c.Getter = (b) => GetBlock(b)?.Terminal_LCDScreenTag ?? new StringBuilder("");
+                c.Setter = (b, v) =>
+                {
+                    var logic = GetBlock(b);
+                    if (logic != null) logic.Terminal_LCDScreenTag = v;
+                };
+                c.SupportsMultipleBlocks = true;
+                MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+            }
+            AddColor("Color_LcdForeground", "Text color", "LCD text color.",
+                l => l.Terminal_LcdForeground, (l, v) => l.Terminal_LcdForeground = v);
+            AddColor("Color_LcdBackground", "Background color", "LCD background color.",
+                l => l.Terminal_LcdBackground, (l, v) => l.Terminal_LcdBackground = v);
+            AddSlider("Slider_LcdFontSize", "Font size",
+                "LCD font size. Only as many log lines as fit are shown.", 0.1f, 2f,
+                l => l.Terminal_LcdFontSize, (l, v) => l.Terminal_LcdFontSize = v, (l, sb) => sb.Append(l.Terminal_LcdFontSize.ToString("F2")));
+            AddCheckbox("Checkbox_LcdShowHeader", "Show header",
+                "First line shows state, battery (POW) and hydrogen (H2) levels.",
+                l => l.Terminal_LcdShowHeader, (l, v) => l.Terminal_LcdShowHeader = v);
+
+            // === HOME CONNECTOR ===
+            AddSeparator("Separator_Home");
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlLabel, IMyRemoteControl>(IdPrefix + "Label_HomeConnector");
+                c.Label = MyStringId.GetOrCompute("Home connector");
+                c.SupportsMultipleBlocks = false;
+                c.Visible = CustomVisibleCondition;
+                MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+            }
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlListbox, IMyRemoteControl>(IdPrefix + "Listbox_HomeConnector");
+                c.Title = MyStringId.GetOrCompute("Home connector");
+                c.Tooltip = MyStringId.GetOrCompute("Your own and your faction's connectors in range. The list refreshes automatically; use Scan to refresh now.");
+                c.Visible = CustomVisibleCondition;
+                c.Multiselect = false;
+                c.VisibleRowsCount = 5;
+                c.ListContent = (b, items, selected) =>
+                {
+                    var logic = GetBlock(b);
+                    if (logic != null) logic.Terminal_HomeConnectorListContent(items, selected);
+                };
+                c.ItemSelected = (b, selected) =>
+                {
+                    var logic = GetBlock(b);
+                    if (logic != null) logic.Terminal_SelectHomeConnector(selected);
+                };
+                c.SupportsMultipleBlocks = false;
+                MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+            }
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlButton, IMyRemoteControl>(IdPrefix + "Button_ScanConnectors");
+                c.Title = MyStringId.GetOrCompute("Scan");
+                c.Tooltip = MyStringId.GetOrCompute("Refresh the connector and beacon lists now (limited by server settings).");
+                c.Visible = CustomVisibleCondition;
+                c.Action = (b) =>
+                {
+                    var logic = GetBlock(b);
+                    if (logic != null) logic.Terminal_ScanAnchors();
+                };
+                c.SupportsMultipleBlocks = false;
+                MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+            }
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlButton, IMyRemoteControl>(IdPrefix + "Button_GoHome");
+                c.Title = MyStringId.GetOrCompute("Go home");
+                c.Tooltip = MyStringId.GetOrCompute("Fly to the home connector, dock at Safe speed and power down (antenna, controller and LCDs stay on).");
+                c.Visible = CustomVisibleCondition;
+                c.Enabled = HomeConnectorVisibleCondition;
+                c.Action = (b) =>
+                {
+                    var logic = GetBlock(b);
+                    if (logic != null) logic.Terminal_GoHome();
+                };
+                c.SupportsMultipleBlocks = true;
+                MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+            }
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlTextbox, IMyRemoteControl>(IdPrefix + "Textbox_ConnectorNameQuery");
+                c.Title = MyStringId.GetOrCompute("Connector name");
+                c.Tooltip = MyStringId.GetOrCompute("Exact name of one of your (or your faction's) connectors further away than the list covers.");
+                c.Visible = CustomVisibleCondition;
+                c.Getter = (b) => GetBlock(b)?.Textbox_ConnectorNameQuery ?? new StringBuilder("");
+                c.Setter = (b, v) =>
+                {
+                    var logic = GetBlock(b);
+                    if (logic != null) logic.Textbox_ConnectorNameQuery = v;
+                };
+                c.SupportsMultipleBlocks = false;
+                MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+            }
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlButton, IMyRemoteControl>(IdPrefix + "Button_AddConnectorByName");
+                c.Title = MyStringId.GetOrCompute("Add to list");
+                c.Tooltip = MyStringId.GetOrCompute("Looks up the connector named above and adds it to the list if it is yours or your faction's.");
+                c.Visible = CustomVisibleCondition;
+                c.Action = (b) =>
+                {
+                    var logic = GetBlock(b);
+                    if (logic != null) logic.Terminal_AddConnectorByName();
+                };
+                c.SupportsMultipleBlocks = false;
+                MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+            }
+
+            // === OBSERVATION AREA (stand-alone construction) - only once a home connector is selected ===
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlOnOffSwitch, IMyRemoteControl>(IdPrefix + "OnOff_ObservationAreaDraw");
+                c.Title = MyStringId.GetOrCompute("Show observation area");
+                c.Tooltip = MyStringId.GetOrCompute("Draws the observation area around the home connector. Switches off after 2 minutes.");
+                c.OnText = MyStringId.GetOrCompute("On");
+                c.OffText = MyStringId.GetOrCompute("Off");
+                c.Visible = HomeConnectorVisibleCondition;
+                c.Getter = (b) => GetBlock(b)?.Terminal_ObservationAreaDraw ?? false;
+                c.Setter = (b, v) =>
+                {
+                    var logic = GetBlock(b);
+                    if (logic != null) logic.Terminal_ObservationAreaDraw = v;
+                };
+                c.SupportsMultipleBlocks = false;
+                MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+            }
+            AddObservationSlider("Slider_ObservationSizeX", "Area width", "Width of the observation area, along the connector's right axis (m)", 0, true);
+            AddObservationSlider("Slider_ObservationSizeY", "Area height", "Height of the observation area, along the connector's up axis (m)", 1, true);
+            AddObservationSlider("Slider_ObservationSizeZ", "Area depth", "Depth of the observation area, along the connector's forward axis (m)", 2, true);
+            AddObservationSlider("Slider_ObservationOffsetX", "Area offset right", "Moves the area along the connector's right axis (m)", 0, false);
+            AddObservationSlider("Slider_ObservationOffsetY", "Area offset up", "Moves the area along the connector's up axis (m)", 1, false);
+            AddObservationSlider("Slider_ObservationOffsetZ", "Area offset forward", "Moves the area along the connector's forward axis (m)", 2, false);
+
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlLabel, IMyRemoteControl>(IdPrefix + "Label_Debug");
                 c.Label = MyStringId.GetOrCompute("Debug");
@@ -980,6 +1278,117 @@ namespace Automata.Drone
                 {
                     var logic = GetBlock(b);
                     if (logic != null) logic.Terminal_Debug_NavigateToTarget();
+                };
+                c.SupportsMultipleBlocks = false;
+                MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+            }
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlButton, IMyRemoteControl>(IdPrefix + "Button_Debug_QueueWaypoint");
+                c.Title = MyStringId.GetOrCompute("Queue waypoint");
+                c.Tooltip = MyStringId.GetOrCompute("Adds the target above as the next leg; the current leg passes its waypoint without stopping.");
+                c.Visible = CustomVisibleCondition;
+                c.Action = (b) =>
+                {
+                    var logic = GetBlock(b);
+                    if (logic != null) logic.Terminal_Debug_QueueWaypoint();
+                };
+                c.SupportsMultipleBlocks = false;
+                MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+            }
+
+            // Place mount (debug)
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlListbox, IMyRemoteControl>(IdPrefix + "Listbox_Debug_Mount");
+                c.Title = MyStringId.GetOrCompute("Mount to place");
+                c.Tooltip = MyStringId.GetOrCompute("Welder / grinder / drill: the target ends up on the edge of the tool's reach. Connector: aligned with the target along gravity.");
+                c.Visible = CustomVisibleCondition;
+                c.Multiselect = false;
+                c.VisibleRowsCount = 4;
+                c.ListContent = (b, items, selected) =>
+                {
+                    var logic = GetBlock(b);
+                    if (logic != null) logic.Terminal_Debug_MountListContent(items, selected);
+                };
+                c.ItemSelected = (b, selected) =>
+                {
+                    var logic = GetBlock(b);
+                    if (logic != null) logic.Terminal_Debug_SelectMount(selected);
+                };
+                c.SupportsMultipleBlocks = false;
+                MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+            }
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlTextbox, IMyRemoteControl>(IdPrefix + "Textbox_Debug_PlaceMountTargetGPS");
+                c.Title = MyStringId.GetOrCompute("Mount target");
+                c.Tooltip = MyStringId.GetOrCompute("GPS of the point the mount should work on / connect at.");
+                c.Visible = CustomVisibleCondition;
+                c.Getter = (b) => GetBlock(b)?.Textbox_Debug_PlaceMountTargetGPS ?? new StringBuilder("");
+                c.Setter = (b, v) =>
+                {
+                    var logic = GetBlock(b);
+                    if (logic != null) logic.Textbox_Debug_PlaceMountTargetGPS = v;
+                };
+                c.SupportsMultipleBlocks = false;
+                MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+            }
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlButton, IMyRemoteControl>(IdPrefix + "Button_Debug_PlaceMount");
+                c.Title = MyStringId.GetOrCompute("Place mount");
+                c.Tooltip = MyStringId.GetOrCompute("");
+                c.Visible = CustomVisibleCondition;
+                c.Action = (b) =>
+                {
+                    var logic = GetBlock(b);
+                    if (logic != null) logic.Terminal_Debug_PlaceMount();
+                };
+                c.SupportsMultipleBlocks = false;
+                MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+            }
+
+            // Relative navigation (debug)
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlListbox, IMyRemoteControl>(IdPrefix + "Listbox_Debug_Anchor");
+                c.Title = MyStringId.GetOrCompute("Relative to");
+                c.Tooltip = MyStringId.GetOrCompute("Home connector or one of your / your faction's beacons in range.");
+                c.Visible = CustomVisibleCondition;
+                c.Multiselect = false;
+                c.VisibleRowsCount = 4;
+                c.ListContent = (b, items, selected) =>
+                {
+                    var logic = GetBlock(b);
+                    if (logic != null) logic.Terminal_Debug_AnchorListContent(items, selected);
+                };
+                c.ItemSelected = (b, selected) =>
+                {
+                    var logic = GetBlock(b);
+                    if (logic != null) logic.Terminal_Debug_SelectAnchor(selected);
+                };
+                c.SupportsMultipleBlocks = false;
+                MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+            }
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlTextbox, IMyRemoteControl>(IdPrefix + "Textbox_Debug_RelativeOffset");
+                c.Title = MyStringId.GetOrCompute("Offset (right, up, forward)");
+                c.Tooltip = MyStringId.GetOrCompute("Metres in the anchor block's frame, e.g. 0, 5, 20");
+                c.Visible = CustomVisibleCondition;
+                c.Getter = (b) => GetBlock(b)?.Textbox_Debug_RelativeOffset ?? new StringBuilder("");
+                c.Setter = (b, v) =>
+                {
+                    var logic = GetBlock(b);
+                    if (logic != null) logic.Textbox_Debug_RelativeOffset = v;
+                };
+                c.SupportsMultipleBlocks = false;
+                MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+            }
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlButton, IMyRemoteControl>(IdPrefix + "Button_Debug_NavigateRelative");
+                c.Title = MyStringId.GetOrCompute("Navigate relative");
+                c.Tooltip = MyStringId.GetOrCompute("Matches the anchor's speed first, then moves to the offset.");
+                c.Visible = CustomVisibleCondition;
+                c.Action = (b) =>
+                {
+                    var logic = GetBlock(b);
+                    if (logic != null) logic.Terminal_Debug_NavigateRelative();
                 };
                 c.SupportsMultipleBlocks = false;
                 MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);

@@ -132,7 +132,39 @@ namespace Automata.Config
             /// Minimum number of ticks between drone power checks. Maximum is clamped to min*10.
             /// </summary>
             public uint PowerCheckIntervalMinSeconds { get; private set; } = 5;
-            public uint ComponentCheckIntervalMinSeconds {get; private set;} = 60;
+            /// <summary>
+            /// Full rescan of the drone's blocks (seconds). Adding / removing blocks triggers a rescan anyway.
+            /// </summary>
+            public uint ComponentCheckIntervalMinSeconds {get; internal set;} = 600;
+            /// <summary>
+            /// How often a drone's connector / beacon list may refresh on its own (seconds). Lists are cached per drone.
+            /// </summary>
+            public int ConnectorScanIntervalSeconds { get; internal set; } = 60;
+            /// <summary>
+            /// Automatic refresh only runs if the drone moved at least this far since the last scan (metres)...
+            /// </summary>
+            public double ConnectorScanMinMoveMeters { get; internal set; } = 250;
+            /// <summary>
+            /// ...or the list is older than this (seconds), to pick up newly built connectors.
+            /// </summary>
+            public int ConnectorScanMaxAgeSeconds { get; internal set; } = 600;
+            /// <summary>
+            /// Minimum time between player-initiated scans ("Scan" button), per drone (seconds).
+            /// </summary>
+            public int ConnectorManualScanIntervalSeconds { get; internal set; } = 60;
+            /// <summary>
+            /// Scan radius around the drone controller for the automatic list (metres). Only the drone owner's and
+            /// the owner's faction's connectors and beacons are ever listed.
+            /// </summary>
+            public double ConnectorScanRadius { get; internal set; } = 1000;
+            /// <summary>
+            /// "Add by name" search radius, and the furthest a selected home connector / anchor may be (metres).
+            /// </summary>
+            public double ConnectorNameSearchRadius { get; internal set; } = 15000;
+            /// <summary>
+            /// Minimum time between "Add by name" searches, per drone (seconds).
+            /// </summary>
+            public int ConnectorNameSearchIntervalSeconds { get; internal set; } = 10;
         }
 
         public class ConstructionComputerConfig{
@@ -361,6 +393,14 @@ namespace Automata.Config
             Drone.DefaultBatteryOperationalThreshold = MathHelper.Clamp(ini.Get("Drone", "DefaultBatteryOperationalThreshold").ToSingle(Drone.DefaultBatteryOperationalThreshold), Drone.DefaultBatteryRefuelThreshold + 5.0f, 95.0f);
             Drone.MinPowerThreshold = MathHelper.Clamp(ini.Get("Drone", "MinPowerThreshold").ToSingle(Drone.MinPowerThreshold), 1.0f, 50.0f);
             Drone.MaxPowerThreshold = MathHelper.Clamp(ini.Get("Drone", "MaxPowerThreshold").ToSingle(Drone.MaxPowerThreshold), 50.0f, 99.0f);
+            Drone.ComponentCheckIntervalMinSeconds = (uint)MathHelper.Clamp(ini.Get("Drone", "ComponentCheckIntervalSeconds").ToInt32((int)Drone.ComponentCheckIntervalMinSeconds), 60, 86400);
+            Drone.ConnectorScanIntervalSeconds = MathHelper.Clamp(ini.Get("Drone", "ConnectorScanIntervalSeconds").ToInt32(Drone.ConnectorScanIntervalSeconds), 10, 86400);
+            Drone.ConnectorScanMinMoveMeters = MathHelper.Clamp(ini.Get("Drone", "ConnectorScanMinMoveMeters").ToDouble(Drone.ConnectorScanMinMoveMeters), 0.0, 10000.0);
+            Drone.ConnectorScanMaxAgeSeconds = MathHelper.Clamp(ini.Get("Drone", "ConnectorScanMaxAgeSeconds").ToInt32(Drone.ConnectorScanMaxAgeSeconds), 60, 86400);
+            Drone.ConnectorManualScanIntervalSeconds = MathHelper.Clamp(ini.Get("Drone", "ConnectorManualScanIntervalSeconds").ToInt32(Drone.ConnectorManualScanIntervalSeconds), 5, 3600);
+            Drone.ConnectorScanRadius = MathHelper.Clamp(ini.Get("Drone", "ConnectorScanRadius").ToDouble(Drone.ConnectorScanRadius), 100.0, 5000.0);
+            Drone.ConnectorNameSearchRadius = MathHelper.Clamp(ini.Get("Drone", "ConnectorNameSearchRadius").ToDouble(Drone.ConnectorNameSearchRadius), Drone.ConnectorScanRadius, 50000.0);
+            Drone.ConnectorNameSearchIntervalSeconds = MathHelper.Clamp(ini.Get("Drone", "ConnectorNameSearchIntervalSeconds").ToInt32(Drone.ConnectorNameSearchIntervalSeconds), 1, 3600);
 
             // Parse DroneNetwork section
             MessageQueue.networkUpdateRate = Math.Max(1.0f, ini.Get("MessageQueue", "NetworkUpdateRate").ToSingle(MessageQueue.networkUpdateRate));

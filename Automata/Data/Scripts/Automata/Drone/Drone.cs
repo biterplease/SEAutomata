@@ -2,6 +2,7 @@
 using System;
 
 using Automata.Util;
+using Automata.Pathfinding;
 
 namespace Automata.Drone
 {
@@ -32,7 +33,11 @@ namespace Automata.Drone
         [ProtoEnum]
         RechargingBattery,
         [ProtoEnum]
-        Error
+        Error,
+        [ProtoEnum]
+        Docked,
+        [ProtoEnum]
+        Preflight,
     }
     [ProtoContract]
     public enum OperationMode : byte
@@ -168,6 +173,7 @@ namespace Automata.Drone
         [ProtoEnum] Approach = 0,   // flying ApproachFrom → Target (direct orders start here)
         [ProtoEnum] Transit  = 1,   // flying straight to ApproachFrom
         [ProtoEnum] Align    = 2,   // holding at ApproachFrom, turning to the final orientation
+        [ProtoEnum] MatchSpeed = 3, // anchored orders: match the anchor grid's velocity before moving relative to it
     }
     [ProtoContract]
     public class FlightOrder
@@ -185,6 +191,19 @@ namespace Automata.Drone
         [ProtoMember(11)]  public bool Captured;                 // reached the approach line
         [ProtoMember(12)] public bool Arrived;
         [ProtoMember(13)] public bool IgnoreGravityLimits;
+        [ProtoMember(14, IsRequired = true)] public WaypointBehavior Behavior = WaypointBehavior.FullStop;   // non-zero default: always written
+        [ProtoMember(15)] public float ExitSpeed;               // m/s when passing Target; used only if a next leg is queued
+        // Relative navigation: when AnchorEntityId != 0 the *Local fields are authoritative, expressed in the
+        // anchor block's frame as (Right, Up, Forward); the world fields above are rebuilt from them every tick.
+        [ProtoMember(16)] public long AnchorEntityId;
+        [ProtoMember(17)] public Vector3DData TargetLocal;
+        [ProtoMember(18)] public Vector3DData ApproachFromLocal;
+        [ProtoMember(19)] public Vector3DData TransitStartLocal;
+        [ProtoMember(20)] public Vector3DData ForwardLocal;      // Explicit orientation, anchor frame
+        [ProtoMember(21)] public Vector3DData UpLocal;
+        [ProtoMember(22)] public bool UseApproachLine;          // phase entered after MatchSpeed: Transit (true) or Approach
+        [ProtoMember(23)] public float FinalSpeed;              // m/s on the final leg; 0 = the drone's ApproachSpeed
+        [ProtoMember(24)] public float LineTolerance;           // m: strict orders (docking) - approach point / line tolerance; 0 = WaypointTolerance
     }
     [ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class Drone

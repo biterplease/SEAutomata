@@ -104,6 +104,44 @@ namespace Automata
         /// </summary>
         public Dictionary<long, string> AllBlocks;
 
+        /// <summary>
+        /// Owner/faction-filtered connector and beacon lists, cached per drone. See <see cref="AnchorDirectory"/>.
+        /// </summary>
+        public readonly AnchorDirectory Anchors = new AnchorDirectory();
+
+        // Drones that asked to draw debug geometry (observation area). Draw() runs on clients only.
+        private readonly HashSet<DroneControllerBlock> drawRequests = new HashSet<DroneControllerBlock>();
+        private readonly List<DroneControllerBlock> drawSnapshot = new List<DroneControllerBlock>();
+
+        public void RequestDraw(DroneControllerBlock drone, bool enabled)
+        {
+            if (drone == null) return;
+            if (enabled) drawRequests.Add(drone);
+            else drawRequests.Remove(drone);
+        }
+
+        public override void Draw()
+        {
+            if (drawRequests.Count == 0 || MyAPIGateway.Utilities.IsDedicated) return;
+            try
+            {
+                drawSnapshot.Clear();
+                drawSnapshot.AddRange(drawRequests);   // a drone may unregister itself while drawing
+                for (int i = 0; i < drawSnapshot.Count; i++)
+                {
+                    if (!drawSnapshot[i].DrawDebug())
+                        drawRequests.Remove(drawSnapshot[i]);
+                }
+            }
+            catch (Exception ex)
+            {
+                MyLog.Default.WriteLine($"Automata: Draw exception: {ex}");
+                foreach (var drone in drawRequests)
+                    drone.StopDebugDraw();
+                drawRequests.Clear();
+            }
+        }
+
         public static ServerConfig GetConfig() => _serverConfig;
         public static MessageQueue GetMessageQueue() => _messageQueue;
 
@@ -305,6 +343,9 @@ namespace Automata
                     }
                     _messageQueue.Reset();
                 }
+
+                Anchors.Clear();
+                drawRequests.Clear();
 
                 // Remove localization texts
                 // MyAPIGateway.Gui.GuiControlRemoved -= GuiControlRemoved;
