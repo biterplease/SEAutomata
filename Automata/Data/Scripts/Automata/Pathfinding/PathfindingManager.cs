@@ -33,6 +33,10 @@ namespace Automata.Pathfinding
         public float AlignmentAngle; // Degrees between prev->current->next
         public bool IsLastWaypoint;
     }
+    // TODO (pathfinding): not wired into the drone yet (DroneControllerBlock uses PlanRoute in
+    // DroneControllerBlock.Jobs.cs). When it is: every approach / align point needs the drone's manoeuvre room,
+    // DroneControllerBlock.ManoeuvreDistance() = longest side of the drone's hull box + 2.5 m, free along the
+    // approach line, and waypoints must keep the hull (DroneRadius) + clearance from obstacles.
     /// <summary>
     /// Manages pathfinding operations with incremental component updates.
     /// Handles context building, caching, and obstacle avoidance.

@@ -18,7 +18,9 @@ namespace Automata.Drone
     // Docking, sleep/wake, pre-flight, power and load monitoring, and player-facing reporting (terminal + LCD).
     public partial class DroneControllerBlock
     {
-        private const double DOCK_APPROACH_DISTANCE = 10.0;   // m: straight final approach along the home connector's axis
+        private const double DOCK_APPROACH_DISTANCE = 10.0;   // m: straight final approach along the home connector's axis (at least)
+        // Long drones: their own length + 2.5 m, so they turn clear of the connector's grid
+        private double DockApproachDistance { get { return Math.Max(DOCK_APPROACH_DISTANCE, ManoeuvreDistance()); } }
         private const int DOCK_TIMEOUT_TICKS = 1800;          // 30 s on top of the final approach time without locking
         private const float DOCK_LINE_TOLERANCE = 0.25f;      // m: approach point and approach line tolerance when docking
         private const int PREFLIGHT_WAKE_TICKS = 30;          // let woken thrusters come online before releasing
@@ -36,6 +38,8 @@ namespace Automata.Drone
         private bool IsGoingHome { get { return dockingHomeId != 0 && settings != null && dockingHomeId == settings.HomeConnectorId; } }
         private long dockingConnectorId;     // drone connector used
         private int dockingWaitTicks;
+        private FlightOrder dockingOrder;    // the final (connector) order; legs before it go around the observation area
+        private readonly List<Vector3D> dockRoutePoints = new List<Vector3D>();
 
         // Parked = connected / gear locked / systems asleep. No flight control while parked and idle.
         private bool isParked;
@@ -187,8 +191,10 @@ namespace Automata.Drone
         /// </summary>
         private bool EnsureDockPose(IMyShipConnector home, bool recompute)
         {
-            if (!recompute && settings.HomeDockConnectorId != 0 && FindConnectorMount(settings.HomeDockConnectorId) >= 0
-                && settings.HomeDockForward.ToVector3D().LengthSquared() > 0.5)
+            // Only a pose the player recorded ("Set current as home") is kept; computed ones are recomputed, so
+            // they follow the current rules (grid-aligned roll) and the drone's current connectors
+            if (!recompute && settings.HomeDockRecorded && settings.HomeDockConnectorId != 0
+                && FindConnectorMount(settings.HomeDockConnectorId) >= 0 && settings.HomeDockForward.ToVector3D().LengthSquared() > 0.5)
                 return true;
             Vector3DData offset, forward, up;
             int mi;
@@ -207,7 +213,8 @@ namespace Automata.Drone
 
         /// <summary>
         /// Dock pose for any connector, in that connector's frame: the drone connector needing the least tilt,
-        /// placed on the target's connection point, facing it.
+        /// placed on the target's connection point, facing it, rolled about the connector axis so the drone lines
+        /// up with the target's grid (<see cref="AlignDockRoll"/>).
         /// </summary>
         private bool ComputeDockPose(IMyShipConnector home, out Vector3DData offset, out Vector3DData forward, out Vector3DData upDir,
                                      out int mountIndex, out double tilt)
@@ -223,6 +230,7 @@ namespace Automata.Drone
             Vector3D gUp = flightState.InGravity ? flightState.GravityUp : flightState.WorldMatrix.Up;
 
             bool homeSmall = IsSmallConnector(home);
+            MatrixD hm = home.WorldMatrix;
             int best = -1;
             double bestTilt = double.MaxValue;
             MatrixD bestFrame = MatrixD.Identity;
@@ -230,7 +238,7 @@ namespace Automata.Drone
             {
                 ToolMount m = connectorMounts[i];
                 if (m.Block == null || !m.Block.IsFunctional || !m.CanConnect || m.SmallConnector != homeSmall) continue;
-                MatrixD frame = MountFrame(ref m, -aH);
+                MatrixD frame = AlignDockRoll(MountFrame(ref m, -aH), aH, ref hm);
                 double t = Math.Acos(MathHelperD.Clamp(Vector3D.Dot(frame.Up, gUp), -1, 1));
                 if (t < bestTilt) { bestTilt = t; best = i; bestFrame = frame; }
             }
@@ -238,13 +246,54 @@ namespace Automata.Drone
 
             ToolMount mount = connectorMounts[best];
             Vector3D controllerPos = pH - Vector3D.TransformNormal(mount.LocalPoint, bestFrame);
-            MatrixD hm = home.WorldMatrix;
             offset = Vector3DData.FromVector3D(WorldToAnchorPoint(ref hm, controllerPos));
             forward = Vector3DData.FromVector3D(WorldToAnchorDir(ref hm, bestFrame.Forward));
             upDir = Vector3DData.FromVector3D(WorldToAnchorDir(ref hm, bestFrame.Up));
             mountIndex = best;
             tilt = bestTilt;
             return true;
+        }
+
+        /// <summary>
+        /// Rolls a dock frame about the connector axis 'axis' (world) in 90° steps so the drone's axes line up
+        /// with the target connector's grid: connectors meet face to face, and the drone sits square to the base
+        /// instead of at whatever heading it had. Of the four, the least tilted in gravity; otherwise (and on ties)
+        /// the smallest roll from 'frame'.
+        /// </summary>
+        private MatrixD AlignDockRoll(MatrixD frame, Vector3D axis, ref MatrixD hm)
+        {
+            Vector3D a = Vector3D.Normalize(axis);
+            // A drone axis lying in the connector plane, and one of the target grid's
+            Vector3D r = MostPerpendicular(frame.Right, frame.Up, frame.Forward, ref a);
+            Vector3D h = MostPerpendicular(hm.Right, hm.Up, hm.Forward, ref a);
+            r -= a * Vector3D.Dot(r, a);
+            h -= a * Vector3D.Dot(h, a);
+            if (r.LengthSquared() < 1e-6 || h.LengthSquared() < 1e-6) return frame;
+            r.Normalize();
+            h.Normalize();
+            Vector3D h90 = Vector3D.Cross(a, h);
+            Vector3D gUp = flightState.GravityUp;
+            MatrixD best = frame;
+            double bestCost = double.MaxValue;
+            for (int k = 0; k < 4; k++)
+            {
+                Vector3D target = k == 0 ? h : k == 1 ? h90 : k == 2 ? -h : -h90;
+                double angle = Math.Atan2(Vector3D.Dot(Vector3D.Cross(r, target), a), Vector3D.Dot(r, target));
+                MatrixD rot = MatrixD.CreateFromAxisAngle(a, angle);
+                if (Vector3D.Dot(Vector3D.TransformNormal(r, rot), target) < 0.99)
+                    rot = MatrixD.CreateFromAxisAngle(a, -angle);                  // other handedness convention
+                Vector3D fwd = Vector3D.TransformNormal(frame.Forward, rot), up = Vector3D.TransformNormal(frame.Up, rot);
+                double cost = Math.Abs(angle) * 0.01;
+                if (flightState.InGravity) cost += Math.Acos(MathHelperD.Clamp(Vector3D.Dot(up, gUp), -1, 1));
+                if (cost < bestCost) { bestCost = cost; best = MatrixD.CreateWorld(Vector3D.Zero, fwd, up); }
+            }
+            return best;
+        }
+
+        private static Vector3D MostPerpendicular(Vector3D x, Vector3D y, Vector3D z, ref Vector3D a)
+        {
+            double dx = Math.Abs(Vector3D.Dot(x, a)), dy = Math.Abs(Vector3D.Dot(y, a)), dz = Math.Abs(Vector3D.Dot(z, a));
+            return dx <= dy && dx <= dz ? x : dy <= dz ? y : z;
         }
 
         /// <summary>
@@ -340,10 +389,36 @@ namespace Automata.Drone
             ToolMount mount = connectorMounts[mi];
             MatrixD dockFrameLocal = MatrixD.CreateWorld(Vector3D.Zero, dockForward.ToVector3D(), dockUp.ToVector3D());
             Vector3D connectorLocal = dockOffset.ToVector3D() + Vector3D.TransformNormal(mount.LocalPoint, dockFrameLocal);
-            Vector3D approachLocal = connectorLocal + WorldToAnchorDir(ref hm, aH) * DOCK_APPROACH_DISTANCE;
+            Vector3D approachLocal = connectorLocal + WorldToAnchorDir(ref hm, aH) * DockApproachDistance;
 
-            var order = OrderGoToRelative(target, connectorLocal, approachLocal);
-            if (order == null) { Report("Dock: order refused"); return false; }
+            // Stand-alone, going home: around the observation area, not through what the drone just built there
+            dockRoutePoints.Clear();
+            if (settings.OperationMode == OperationMode.StandAlone && target.EntityId == settings.HomeConnectorId)
+                PlanObservationAreaDetour(flightState.Position, AnchorToWorldPoint(ref hm, approachLocal), dockRoutePoints, false);
+
+            FlightOrder order;
+            if (dockRoutePoints.Count > 0)
+            {
+                // Legs anchored to the connector (moving bases), flown as the drone is oriented; then the dock order
+                Vector3D fwd = flightState.WorldMatrix.Forward, up = flightState.WorldMatrix.Up;
+                var first = OrderGoToRelative(target, WorldToAnchorPoint(ref hm, dockRoutePoints[0]));
+                if (first == null) { Report("Dock: order refused"); return false; }
+                SetDockLeg(first, ref hm, fwd, up);
+                for (int i = 1; i < dockRoutePoints.Count; i++)
+                    SetDockLeg(QueueGoTo(dockRoutePoints[i], Pathfinding.WaypointBehavior.FullStop, 0), ref hm, fwd, up);
+                order = QueueGoTo(AnchorToWorldPoint(ref hm, connectorLocal), Pathfinding.WaypointBehavior.FullStop, 0);
+                order.TargetLocal = Vector3DData.FromVector3D(connectorLocal);
+                order.ApproachFromLocal = Vector3DData.FromVector3D(approachLocal);
+                order.UseApproachLine = true;
+                order.Phase = FlightPhase.Transit;   // TransitStartLocal: the last leg's point (QueueGoTo)
+                Log.Debug("Drone {0}: going home around the observation area ({1} waypoints)", Entity.EntityId, dockRoutePoints.Count);
+                dockRoutePoints.Clear();
+            }
+            else
+            {
+                order = OrderGoToRelative(target, connectorLocal, approachLocal);
+                if (order == null) { Report("Dock: order refused"); return false; }
+            }
             order.ReferenceOffset = Vector3DData.FromVector3D(mount.LocalPoint);
             order.Orientation = FlightOrientationMode.Explicit;
             order.ForwardLocal = dockForward;
@@ -352,12 +427,15 @@ namespace Automata.Drone
             order.FinalSpeed = SafeSpeed;
             order.LineTolerance = DOCK_LINE_TOLERANCE;   // not WaypointTolerance: connectors need ~0.59 m
             order.ArrivalTolerance = 0.2f;
-            order.TransitStartLocal = Vector3DData.FromVector3D(WorldToAnchorPoint(ref hm, ReferencePoint(order)));
-            RefreshAnchoredOrder(order);
+            if (order == activeFlightOrder)
+            {
+                order.TransitStartLocal = Vector3DData.FromVector3D(WorldToAnchorPoint(ref hm, ReferencePoint(order)));
+                RefreshAnchoredOrder(order);
+            }
+            dockingOrder = order;
 
             if (droneConnector != null)
             {
-                if (!droneConnector.Enabled) droneConnector.Enabled = true;
                 EnsurePowerTransferOverride(droneConnector);
             }
             dockingHomeId = target.EntityId;   // the connector being docked at (home or not)
@@ -365,6 +443,139 @@ namespace Automata.Drone
             dockingWaitTicks = 0;
             return true;
         }
+
+        // A leg before the dock order: translate only (the drone may start inside the area, next to blocks)
+        private void SetDockLeg(FlightOrder leg, ref MatrixD hm, Vector3D fwd, Vector3D up)
+        {
+            leg.ArrivalTolerance = CONSTRUCTION_ROUTE_TOLERANCE;
+            leg.HoldAttitudeInTransit = true;   // first leg: MatchSpeed
+            SetExplicitAttitude(leg, false, ref hm, fwd, up);
+        }
+
+        /// <summary>
+        /// Waypoints (controller, world) that take the drone from 'start' to 'goal' around the observation area
+        /// (inflated by the hull + clearance) instead of through it: out through one face of the box, along that
+        /// face's plane, back in only if the goal is inside. The cheapest face wins; never under the area in
+        /// gravity. Nothing added when the straight line already misses the area.
+        /// Box only, no obstacle search: the pathfinder will do that (see PathfindingManager).
+        /// 'onlyFromOutside': nothing when the start is in the area (moving between blocks inside it).
+        /// Returns true when waypoints were added.
+        /// </summary>
+        private bool PlanObservationAreaDetour(Vector3D start, Vector3D goal, List<Vector3D> points, bool onlyFromOutside)
+        {
+            MatrixD box;
+            Vector3D half;
+            if (!TryGetObservationArea(out box, out half)) return false;
+            Vector3D h = half + new Vector3D(DroneRadius() + CONSTRUCTION_CLEARANCE);
+            Vector3D c = box.Translation;
+            Vector3D s = WorldToAnchorDir(ref box, start - c), g = WorldToAnchorDir(ref box, goal - c);
+            if (!SegmentHitsBox(s, g, h)) return false;
+
+            Vector3D gUp = flightState.InGravity ? WorldToAnchorDir(ref box, flightState.GravityUp) : Vector3D.Zero;
+            bool sInside = InsideBox(s, h), gInside = InsideBox(g, h);
+            if (sInside && onlyFromOutside) return false;
+            double best = double.MaxValue;
+            Vector3D bestS = s, bestG = g;
+            for (int i = 0; i < 6; i++)
+            {
+                Vector3D n = (Vector3D)Base6Directions.GetIntVector((Base6Directions.Direction)i);
+                double upDot = Vector3D.Dot(n, gUp);
+                if (upDot < -0.7) continue;                            // under the area: through the ground / floor
+                // Out onto that face's plane (a little past it); points already beyond it stay
+                double plane = Math.Abs(Vector3D.Dot(h, n)) + 0.5;
+                Vector3D s2 = s + n * Math.Max(0, plane - Vector3D.Dot(s, n));
+                Vector3D g2 = g + n * Math.Max(0, plane - Vector3D.Dot(g, n));
+                // Out of the area (start inside) and back in (goal inside) are the only crossings allowed
+                if (!sInside && SegmentHitsBox(s, s2, h)) continue;
+                if (!gInside && SegmentHitsBox(g2, g, h)) continue;
+                double len = Vector3D.Distance(s, s2) + Vector3D.Distance(s2, g2) + Vector3D.Distance(g2, g);
+                len -= upDot * 2.0;                                    // slight preference for over the top
+                if (len < best) { best = len; bestS = s2; bestG = g2; }
+            }
+            if (best == double.MaxValue) return false;
+            int before = points.Count;
+            if (Vector3D.DistanceSquared(bestS, s) > 0.25) points.Add(c + AnchorToWorldDir(ref box, bestS));
+            if (Vector3D.DistanceSquared(bestG, g) > 0.25 && Vector3D.DistanceSquared(bestG, bestS) > 0.25)
+                points.Add(c + AnchorToWorldDir(ref box, bestG));
+            return points.Count > before;
+        }
+
+        private static bool InsideBox(Vector3D p, Vector3D h)
+        {
+            return Math.Abs(p.X) < h.X && Math.Abs(p.Y) < h.Y && Math.Abs(p.Z) < h.Z;
+        }
+
+        // Segment a-b against the box -h..h (slab test)
+        private static bool SegmentHitsBox(Vector3D a, Vector3D b, Vector3D h)
+        {
+            Vector3D d = b - a;
+            double t0 = 0, t1 = 1;
+            for (int axis = 0; axis < 3; axis++)
+            {
+                double o = axis == 0 ? a.X : axis == 1 ? a.Y : a.Z;
+                double v = axis == 0 ? d.X : axis == 1 ? d.Y : d.Z;
+                double e = axis == 0 ? h.X : axis == 1 ? h.Y : h.Z;
+                if (Math.Abs(v) < 1e-9)
+                {
+                    if (o <= -e || o >= e) return false;
+                    continue;
+                }
+                double ta = (-e - o) / v, tb = (e - o) / v;
+                if (ta > tb) { double t = ta; ta = tb; tb = t; }
+                if (ta > t0) t0 = ta;
+                if (tb < t1) t1 = tb;
+                if (t0 >= t1) return false;
+            }
+            return true;
+        }
+
+        #region Connector power
+        // Connectors the AI switched off (handed back on when the AI is disabled)
+        private readonly HashSet<long> connectorsOffByAI = new HashSet<long>();
+
+        /// <summary>
+        /// UpdateBeforeSimulation10, AI on: drone connectors are off unless docking. An enabled connector's magnet
+        /// grabs any connector it passes close to, and the drone may not have the thrust to pull free. Only the
+        /// connector used for docking comes on, once the dock order is at its approach point (Align / Approach).
+        /// Parked drones and connected connectors are left alone.
+        /// </summary>
+        private void UpdateConnectorPower()
+        {
+            if (isParked || preflightStage == 1) return;
+            var o = activeFlightOrder;
+            bool docking = dockingHomeId != 0 && o != null && o == dockingOrder
+                           && (o.Phase == FlightPhase.Align || o.Phase == FlightPhase.Approach);
+            SetConnectorsPower(docking ? dockingConnectorId : 0);
+        }
+
+        // All connecting connectors off except 'onId' (0 = none); connected ones untouched
+        private void SetConnectorsPower(long onId)
+        {
+            for (int i = 0; i < connectors.Count; i++)
+            {
+                var c = connectors[i];
+                if (c == null || c.Closed || c.IsConnected) continue;
+                if (i < connectorMounts.Count && !connectorMounts[i].CanConnect) continue;   // ejectors
+                bool on = c.EntityId == onId;
+                if (c.Enabled == on) continue;
+                c.Enabled = on;
+                if (on) connectorsOffByAI.Remove(c.EntityId);
+                else connectorsOffByAI.Add(c.EntityId);
+            }
+        }
+
+        // AI off: the player gets the connectors back as they were
+        private void RestoreConnectors()
+        {
+            IMyEntity e;
+            foreach (long id in connectorsOffByAI)
+            {
+                var c = MyAPIGateway.Entities.TryGetEntityById(id, out e) ? e as IMyShipConnector : null;
+                if (c != null && !c.Closed && !c.Enabled) c.Enabled = true;
+            }
+            connectorsOffByAI.Clear();
+        }
+        #endregion
 
         // UpdateBeforeSimulation10: lock as soon as the connector can, then power down.
         private void UpdateDocking()
@@ -377,7 +588,8 @@ namespace Automata.Drone
             var c = mi >= 0 ? connectorMounts[mi].Block as IMyShipConnector : null;
             if (c == null || c.Closed) { Report("Docking aborted: drone connector missing"); dockingHomeId = 0; return; }
 
-            if (o.Phase == FlightPhase.Approach && currentState != State.Docking) SetState(State.Docking);
+            bool final = o == dockingOrder;   // not the legs around the observation area
+            if (final && o.Phase == FlightPhase.Approach && currentState != State.Docking) SetState(State.Docking);
             if (c.IsConnected)
             {
                 if (c.OtherConnector != null && c.OtherConnector.EntityId == dockingHomeId) OnDocked(c);
@@ -389,11 +601,11 @@ namespace Automata.Drone
                 c.Connect();
                 return;
             }
-            if (o.Phase == FlightPhase.Approach)
+            if (final && o.Phase == FlightPhase.Approach)
             {
                 // Time allowed: the final approach at Safe speed, plus the timeout
                 dockingWaitTicks += 10;
-                int limit = (int)(DOCK_APPROACH_DISTANCE / SafeSpeed * 60) + DOCK_TIMEOUT_TICKS;
+                int limit = (int)(DockApproachDistance / SafeSpeed * 60) + DOCK_TIMEOUT_TICKS;
                 if (dockingWaitTicks >= limit)
                 {
                     Report("Docking failed: connector did not lock");
@@ -536,6 +748,7 @@ namespace Automata.Drone
             {
                 for (int i = 0; i < connectors.Count; i++)
                     if (connectors[i].IsConnected) connectors[i].Disconnect();
+                SetConnectorsPower(0);   // released: magnets off before the drone moves
                 for (int i = 0; i < landingGears.Count; i++)
                     if (landingGears[i].IsLocked) landingGears[i].Unlock();
                 preflightStage = 2;

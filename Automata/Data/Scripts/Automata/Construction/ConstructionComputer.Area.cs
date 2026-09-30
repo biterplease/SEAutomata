@@ -39,7 +39,10 @@ namespace Automata.Construction
         private readonly Dictionary<string, int> _missingCache = new Dictionary<string, int>();
         private readonly HashSet<IMySlimBlock> _cellBlocks = new HashSet<IMySlimBlock>();
 
-        /// <summary>m: how far out from a block its approach point lies (the straight-in part of the approach).</summary>
+        /// <summary>
+        /// m: planned approach point distance (the side hint in NavigateToolTo / BackOut). Drones replace it with
+        /// their own length + 2.5 m when they fly the task.
+        /// </summary>
         public const double APPROACH_DISTANCE = 5.0;
 
         // Blocks that only touch the area with a face are not in it
@@ -366,8 +369,10 @@ namespace Automata.Construction
         /// False when no face is free: the block can't be reached right now.
         /// </summary>
         /// <param name="normal">Unit axis of 'grid', pointing out of the face towards the tool.</param>
+        /// <param name="lineMustBeClear">Faces with a built block anywhere on the line out ('clearCells') don't count.</param>
         public static bool ChooseFace(IMyCubeGrid grid, Vector3I min, Vector3I max, Vector3D areaCenter, Vector3D gravityUp,
-                                      int clearCells, Func<Vector3D, double> extraCost, out Vector3I faceCell, out Vector3I normal)
+                                      int clearCells, Func<Vector3D, double> extraCost, out Vector3I faceCell, out Vector3I normal,
+                                      bool lineMustBeClear = false)
         {
             faceCell = min;
             normal = Vector3I.Zero;
@@ -422,21 +427,73 @@ namespace Automata.Construction
                         {
                             if (grid.CubeExists(c + d)) continue;               // covered: not a face
                             double score = sideScore;
-                            for (int k = 1; k <= clearCells; k++)
+                            bool lineBlocked = false;
+                            for (int k = 1; k <= clearCells && !lineBlocked; k++)
                             {
                                 Vector3I p = c + d * k;
-                                if (k > 1 && grid.CubeExists(p)) score -= 3;    // the hull would sit in a block
+                                if (k > 1 && grid.CubeExists(p))
+                                {
+                                    if (lineMustBeClear) { lineBlocked = true; continue; }
+                                    score -= 3;                                 // the hull would sit in a block
+                                }
                                 // Tight spots: blocks around the line (the floor worst: the hull hangs below the tool)
                                 if (grid.CubeExists(p + e1)) score -= e1 == down ? 1 : 0.25;
                                 if (grid.CubeExists(p - e1)) score -= -e1 == down ? 1 : 0.25;
                                 if (grid.CubeExists(p + e2)) score -= e2 == down ? 1 : 0.25;
                                 if (grid.CubeExists(p - e2)) score -= -e2 == down ? 1 : 0.25;
                             }
+                            if (lineBlocked) continue;
                             score += _faceRandom.NextDouble() * 0.1;            // tie-break
                             if (score > bestScore) { bestScore = score; faceCell = c; normal = d; }
                         }
             }
             return normal != Vector3I.Zero;
+        }
+
+        /// <summary>
+        /// Strafing between contiguous blocks: a face of the block min..max on the same side ('normal') and in the
+        /// same plane as the face of 'fromCell', one cell away across the plane (a side neighbour preferred over a
+        /// diagonal one), not covered, with its line out ('clearCells' deep) free. Diagonal moves also need both
+        /// cells beside the path free. False when there is none: the drone backs out instead.
+        /// </summary>
+        public static bool FindAdjacentFace(IMyCubeGrid grid, Vector3I min, Vector3I max, Vector3I fromCell, Vector3I normal,
+                                            int clearCells, out Vector3I faceCell)
+        {
+            faceCell = fromCell;
+            Vector3I lo = min, hi = max;
+            if (normal.X > 0) lo.X = max.X; else if (normal.X < 0) hi.X = min.X;
+            if (normal.Y > 0) lo.Y = max.Y; else if (normal.Y < 0) hi.Y = min.Y;
+            if (normal.Z > 0) lo.Z = max.Z; else if (normal.Z < 0) hi.Z = min.Z;
+            // Same plane: the layer's coordinate along the normal equals the current face's
+            int plane = lo.X * normal.X + lo.Y * normal.Y + lo.Z * normal.Z;
+            if (plane != fromCell.X * normal.X + fromCell.Y * normal.Y + fromCell.Z * normal.Z) return false;
+            int best = int.MaxValue;
+            Vector3I c;
+            for (c.X = lo.X; c.X <= hi.X; c.X++)
+                for (c.Y = lo.Y; c.Y <= hi.Y; c.Y++)
+                    for (c.Z = lo.Z; c.Z <= hi.Z; c.Z++)
+                    {
+                        Vector3I d = c - fromCell;
+                        int ax = Math.Abs(d.X), ay = Math.Abs(d.Y), az = Math.Abs(d.Z);
+                        if (Math.Max(ax, Math.Max(ay, az)) != 1) continue;          // not a neighbour across the plane
+                        int manhattan = ax + ay + az;
+                        if (manhattan >= best) continue;
+                        if (grid.CubeExists(c + normal)) continue;                 // covered: not a face
+                        bool clear = true;
+                        for (int k = 2; k <= clearCells && clear; k++)
+                            if (grid.CubeExists(c + normal * k)) clear = false;    // the drone would sit in a block
+                        if (!clear) continue;
+                        if (manhattan == 2)
+                        {
+                            // Diagonal: the two cells beside the path, in front of the plane, must be free
+                            Vector3I a = new Vector3I(d.X, 0, 0), b = d - a;
+                            if (a == Vector3I.Zero) { a = new Vector3I(0, d.Y, 0); b = d - a; }
+                            if (grid.CubeExists(fromCell + a + normal) || grid.CubeExists(fromCell + b + normal)) continue;
+                        }
+                        best = manhattan;
+                        faceCell = c;
+                    }
+            return best != int.MaxValue;
         }
 
         /// <summary>World centre of the face of 'cell' on side 'normal'; 'worldNormal' is that side as a world unit vector.</summary>
@@ -472,7 +529,7 @@ namespace Automata.Construction
         /// available and the load stays within 'maxMass' (kg) and 'maxVolume' (m³); targets whose components the
         /// network lacks are skipped (reported in 'missing'). One job type per trip (the first target's). Grind
         /// targets need room and lift for what they return.
-        /// Tasks: [load] + (NavigateToolTo a cell face, Weld/Grind) per block + ReturnHome + Unload(everything). Positions are
+        /// Tasks: [load] + (NavigateToolTo a cell face, Weld/Grind, BackOut) per block + ReturnHome + Unload(everything). Positions are
         /// world, or in 'beacon's frame (Right, Up, Forward) when given, so work on a moving base follows it.
         /// Returns null when nothing fits.
         /// </summary>
@@ -545,7 +602,7 @@ namespace Automata.Construction
             };
         }
 
-        // NavigateToolTo + the tool task for one block. 'partial': the drone carries only part of what the block
+        // NavigateToolTo + the tool task + BackOut for one block. 'partial': the drone carries only part of what the block
         // needs (weld: until its cargo has nothing more for the block) or can't take all it returns (grind: until full).
         private static void AddWorkPair(Orchestrator.Job job, ref ConstructionTarget target, IMyEntity beacon, ref MatrixD am,
                                         float naturalGravity, bool partial)
@@ -560,14 +617,21 @@ namespace Automata.Construction
             job.Tasks.Add(beacon != null
                 ? Orchestrator.Task.NavigateToolTo(beacon.EntityId, ToFrame(ref am, point), ToFrame(ref am, approach), naturalGravity)
                 : Orchestrator.Task.NavigateToolTo(0, point, approach, naturalGravity));
+            var backOut = beacon != null ? Orchestrator.Task.BackOut(beacon.EntityId, ToFrame(ref am, approach))
+                                         : Orchestrator.Task.BackOut(0, approach);
             var tool = target.Type == Orchestrator.JobType.Weld
                 ? Orchestrator.Task.Weld(target.GridEntityId, target.Cell, target.IsProjected)
                 : Orchestrator.Task.Grind(target.GridEntityId, target.Cell);
+            // Small grid: the welder's sphere spans several blocks and welds the neighbours too, eating the parts
+            // loaded for this one. Weld until the cargo has nothing more for it, never wait for full integrity.
+            if (target.Type == Orchestrator.JobType.Weld && grid.GridSizeEnum == VRage.Game.MyCubeSize.Small)
+                tool.Completion = Orchestrator.ToolTaskCompletionTrigger.DroneInventoryEmpty;
             if (partial)
                 tool.Completion = target.Type == Orchestrator.JobType.Weld
                     ? Orchestrator.ToolTaskCompletionTrigger.DroneInventoryEmpty
                     : Orchestrator.ToolTaskCompletionTrigger.DroneInventoryFull;
             job.Tasks.Add(tool);
+            job.Tasks.Add(backOut);   // straight back out along the normal before the next block
             job.BlockCount++;
         }
 

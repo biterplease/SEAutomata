@@ -97,7 +97,47 @@ namespace Automata.Drone
             HideDefaultControls();
             HideDefaultActions();
             CreateControls();
+            CreateActions();
         }
+
+        #region Toolbar actions
+        const string ICON_TOGGLE = @"Textures\GUI\Icons\Actions\Toggle.dds";
+        const string ICON_ON = @"Textures\GUI\Icons\Actions\SwitchOn.dds";
+        const string ICON_OFF = @"Textures\GUI\Icons\Actions\SwitchOff.dds";
+        const string ICON_START = @"Textures\GUI\Icons\Actions\Start.dds";
+
+        /// <summary>Toolbar / button panel / PB actions. Same code paths as the terminal controls (synced there).</summary>
+        static void CreateActions()
+        {
+            AddToggleActions("EnableAI", "AI", l => l.Terminal_Enabled, (l, v) => l.Terminal_Enabled = v);
+            AddToggleActions("DrawNavTargets", "Draw navigation targets",
+                l => l.Terminal_DrawNavigationTargets, (l, v) => l.Terminal_DrawNavigationTargets = v);
+            AddToggleActions("DrawObservationArea", "Draw observation area",
+                l => l.Terminal_ObservationAreaDraw, (l, v) => l.Terminal_ObservationAreaDraw = v);
+            AddAction("GoHome", "Go home", ICON_START, l => l.Terminal_GoHome(), null);
+        }
+
+        // 'id' (toggle), 'id'_On, 'id'_Off; the toolbar slot shows On / Off
+        static void AddToggleActions(string id, string name, Func<DroneControllerBlock, bool> get, Action<DroneControllerBlock, bool> set)
+        {
+            Action<DroneControllerBlock, StringBuilder> writer = (l, sb) => sb.Append(get(l) ? "On" : "Off");
+            AddAction(id, name + " On/Off", ICON_TOGGLE, l => { set(l, !get(l)); l.Terminal_Refresh(); }, writer);
+            AddAction(id + "_On", name + " On", ICON_ON, l => { if (!get(l)) { set(l, true); l.Terminal_Refresh(); } }, writer);
+            AddAction(id + "_Off", name + " Off", ICON_OFF, l => { if (get(l)) { set(l, false); l.Terminal_Refresh(); } }, writer);
+        }
+
+        static void AddAction(string id, string name, string icon, Action<DroneControllerBlock> act, Action<DroneControllerBlock, StringBuilder> writer)
+        {
+            var a = MyAPIGateway.TerminalControls.CreateAction<IMyRemoteControl>(IdPrefix + id);
+            a.Name = new StringBuilder(name);
+            a.ValidForGroups = true;
+            a.Icon = icon;
+            a.Action = (b) => { var l = GetBlock(b); if (l != null) act(l); };
+            a.Writer = (b, sb) => { var l = GetBlock(b); if (l != null && writer != null) writer(l, sb); };
+            a.Enabled = CustomVisibleCondition;   // drone controllers only (called per tick while in a toolbar: keep cheap)
+            MyAPIGateway.TerminalControls.AddAction<IMyRemoteControl>(a);
+        }
+        #endregion
 
         /// <summary>
         /// Check an return the GameLogic object
@@ -438,7 +478,7 @@ namespace Automata.Drone
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlOnOffSwitch, IMyRemoteControl>(IdPrefix + "OnOff_ObservationAreaDraw");
                 c.Title = MyStringId.GetOrCompute("Show observation area");
-                c.Tooltip = MyStringId.GetOrCompute("Draws the observation area around the home connector. Switches off after 2 minutes.");
+                c.Tooltip = MyStringId.GetOrCompute("Draws the observation area around the home connector. Switches off after a while (server setting, 10 minutes by default).");
                 c.OnText = MyStringId.GetOrCompute("On");
                 c.OffText = MyStringId.GetOrCompute("Off");
                 c.Visible = HomeConnectorVisibleCondition;
@@ -579,6 +619,20 @@ namespace Automata.Drone
                 c.SupportsMultipleBlocks = true;
                 MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
             }
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSlider, IMyRemoteControl>(IdPrefix + "Slider_TaskTimeout");
+                c.Title = MyStringId.GetOrCompute("Task timeout");
+                c.Tooltip = MyStringId.GetOrCompute("Seconds before a job task gives up and the drone moves on: a tool task that isn't done, "
+                    + "or a flight that stopped getting closer. The server sets the maximum.\n0 = no waiting: a task fails as soon as it stalls.");
+                c.Visible = CustomVisibleCondition;
+                c.Enabled = JobsCondition;
+                c.SetLimits(b => 0f, b => DroneControllerBlock.MaxTaskTimeoutSeconds);
+                c.Getter = (b) => GetBlock(b)?.Terminal_TaskTimeoutSeconds ?? 30f;
+                c.Setter = (b, v) => { var l = GetBlock(b); if (l != null) l.Terminal_TaskTimeoutSeconds = v; };
+                c.Writer = (b, sb) => { var l = GetBlock(b); if (l != null) sb.Append((int)l.Terminal_TaskTimeoutSeconds).Append(" s"); };
+                c.SupportsMultipleBlocks = true;
+                MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+            }
             AddLabel("Label_ExcludedCapabilities", "Excluded capabilities");
             AddListbox("Listbox_Capabilities", "Capabilities",
                 "What this drone can do. Select entries and press 'Exclude selected' to keep it from bidding for jobs that need them.",
@@ -599,7 +653,7 @@ namespace Automata.Drone
                 // Always enabled: a view, not an order (any operation mode, AI on or off)
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlOnOffSwitch, IMyRemoteControl>(IdPrefix + "OnOff_DrawNavigationTargets");
                 c.Title = MyStringId.GetOrCompute("Draw navigation targets");
-                c.Tooltip = MyStringId.GetOrCompute("Red dots on the drone's navigation targets (approach points, waypoints, final target), blue lines between them, starting at the drone. Switches off after 2 minutes.");
+                c.Tooltip = MyStringId.GetOrCompute("Red dots on the drone's navigation targets (approach points, waypoints, final target), blue lines between them, starting at the drone. Switches off after a while (server setting, 10 minutes by default).");
                 c.OnText = MyStringId.GetOrCompute("On");
                 c.OffText = MyStringId.GetOrCompute("Off");
                 c.Visible = CustomVisibleCondition;

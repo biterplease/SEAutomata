@@ -15,13 +15,12 @@ namespace Automata.Drone
     /// <summary>
     /// Debug overlay "Draw navigation targets": red dots on the route's points (approach points, waypoints, final
     /// target), blue lines between them, starting at the point the active order steers. Local to the player who
-    /// switched it on; off again after 2 minutes. The route lives on the server: single player / host draws it
+    /// switched it on; off again after the server's DebugDrawTimeoutSeconds. The route lives on the server: single player / host draws it
     /// directly, multiplayer clients subscribe and get it (only when it changes) from the server.
     /// </summary>
     public partial class DroneControllerBlock
     {
-        private const int NAV_DRAW_TICKS = 120 * 60;                  // switches itself off after 120 s
-        private const int NAV_SUBSCRIPTION_TICKS = NAV_DRAW_TICKS + 10 * 60;   // server side, in case the "off" is lost
+        private const int NAV_SUBSCRIPTION_MARGIN_TICKS = 10 * 60;    // server side, on top of the draw timeout, in case the "off" is lost
         private const double NAV_POINT_EPSILON = 0.1;                 // m: same point / not worth resending
         private static readonly MyStringId NavDotMaterial = MyStringId.GetOrCompute("WhiteDot");
         private static readonly Color NavDotColor = Color.Red;
@@ -50,11 +49,37 @@ namespace Automata.Drone
                 if (navDrawOn == value) return;
                 navDrawOn = value;
                 navDrawStartFrame = MyAPIGateway.Session.GameplayFrameCounter;
+                if (value) RequestClientSettings();
                 if (!value) navDrawPoints.Clear();
                 UpdateDrawRequest();
                 if (!IsServer) RequestAction(new DroneActionPacket { Action = DroneAction.DrawNavigation, Code = value ? 1 : 0 });
             }
         }
+
+        #region Debug draw timeout (server setting)
+        // Clients never load the config: they ask the server once per session, and use the default until then
+        private static bool clientSettingsRequested;
+
+        private static int DebugDrawTimeoutTicks
+        {
+            get { return Automata.Config.ServerConfig.Instance.Drone.DebugDrawTimeoutSeconds * 60; }
+        }
+
+        private static void RequestClientSettings()
+        {
+            if (IsServer || clientSettingsRequested || Net == null) return;
+            clientSettingsRequested = true;
+            Net.SendToServer(new ClientSettingsRequestPacket());
+        }
+
+        public static void ApplyClientSettings(ClientSettingsPacket p)
+        {
+            var drone = Automata.Config.ServerConfig.Instance.Drone;
+            if (drone == null || p == null) return;
+            drone.DebugDrawTimeoutSeconds = MathHelper.Clamp(p.DebugDrawTimeoutSeconds, 10, 3600);
+            if (p.TaskTimeoutSeconds > 0) drone.TaskTimeoutSeconds = MathHelper.Clamp(p.TaskTimeoutSeconds, 10, 600);
+        }
+        #endregion
 
         private void StopNavigationDraw()
         {
@@ -66,7 +91,7 @@ namespace Automata.Drone
         private bool DrawNavigationTargets()
         {
             if (!navDrawOn) return false;
-            if (MyAPIGateway.Session.GameplayFrameCounter - navDrawStartFrame > NAV_DRAW_TICKS)
+            if (MyAPIGateway.Session.GameplayFrameCounter - navDrawStartFrame > DebugDrawTimeoutTicks)
             {
                 Terminal_DrawNavigationTargets = false;   // also tells the server to stop sending
                 RefreshTerminal();
@@ -143,7 +168,7 @@ namespace Automata.Drone
             if (!IsMultiplayer || steamId == MyAPIGateway.Multiplayer.MyId) return;   // local player draws directly
             if (on)
             {
-                navSubscribers[steamId] = MyAPIGateway.Session.GameplayFrameCounter + NAV_SUBSCRIPTION_TICKS;
+                navSubscribers[steamId] = MyAPIGateway.Session.GameplayFrameCounter + DebugDrawTimeoutTicks + NAV_SUBSCRIPTION_MARGIN_TICKS;
                 navForceSend = true;
             }
             else navSubscribers.Remove(steamId);

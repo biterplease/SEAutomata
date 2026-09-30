@@ -208,6 +208,7 @@ namespace Automata.Drone
         [ProtoMember(22)] public bool UseApproachLine;          // phase entered after MatchSpeed: Transit (true) or Approach
         [ProtoMember(23)] public float FinalSpeed;              // m/s on the final leg; 0 = the drone's ApproachSpeed
         [ProtoMember(24)] public float LineTolerance;           // m: strict orders (docking) - approach point / line tolerance; 0 = WaypointTolerance
+        [ProtoMember(25)] public bool HoldAttitudeInTransit;    // MatchSpeed / Transit: keep the current attitude (no turning to the travel direction, no gravity levelling)
     }
     [ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class Drone

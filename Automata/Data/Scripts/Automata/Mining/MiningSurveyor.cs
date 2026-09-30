@@ -327,8 +327,10 @@ namespace Automata.Mining
                 JobType = Orchestrator.JobType.MineOre,
                 CreatedTime = DateTime.UtcNow,
             };
-            job.Tasks.Add(Orchestrator.Task.NavigateToolTo(0, d.Position, d.Position + up * Construction.ConstructionComputer.APPROACH_DISTANCE, g));
+            Vector3D approach = d.Position + up * Construction.ConstructionComputer.APPROACH_DISTANCE;
+            job.Tasks.Add(Orchestrator.Task.NavigateToolTo(0, d.Position, approach, g));
             job.Tasks.Add(Orchestrator.Task.Mine());
+            job.Tasks.Add(Orchestrator.Task.BackOut(0, approach));
             job.Tasks.Add(Orchestrator.Task.ReturnHome());
             job.Tasks.Add(Orchestrator.Task.Unload(payload));
             job.TotalInventory = payload;   // what the trip is expected to bring back

@@ -172,7 +172,6 @@ namespace Automata.Drone
         private IMyShipConnector homeConnector;
         private int homeConnectorCheckedFrame;
         private int observationDrawStartFrame;
-        private const int OBSERVATION_DRAW_TICKS = 120 * 60;          // draw switches itself off after 120 s
         public const double OBSERVATION_UNIT = 2.5;                    // m per observation-area block (large grid cube)
         public const int OBSERVATION_SIZE_MIN = 1;
         public const int OBSERVATION_SIZE_MAX = 10;
@@ -382,10 +381,18 @@ namespace Automata.Drone
                     if (activeFlightOrder != null && preflightStage == 0 && dockingHomeId == 0)
                         for (int i = 0; i < landingGears.Count; i++)
                             if (landingGears[i].IsLocked) landingGears[i].Unlock();
+                    UpdateConnectorPower();
                     UpdateDocking();
                     UpdateConstruction10();
                 }
                 UpdateFrameSubscription();
+                // Stop countdown in the header: once a second
+                int stopLeft = StopRemainingSeconds();
+                if (stopLeft != shownStopSeconds)
+                {
+                    shownStopSeconds = stopLeft;
+                    UpdateAlert();
+                }
                 display.Flush(settings);
             }
             catch (Exception ex)
@@ -1091,6 +1098,13 @@ namespace Automata.Drone
         {
             if (o.Phase == FlightPhase.Transit || o.Phase == FlightPhase.MatchSpeed)
             {
+                if (o.HoldAttitudeInTransit)
+                {
+                    // Translation only: the drone turns at the approach point (Align), where it has room
+                    fwd = flightState.WorldMatrix.Forward;
+                    up = flightState.WorldMatrix.Up;
+                    return;
+                }
                 fwd = o.Phase == FlightPhase.Transit
                     ? o.ApproachFrom.ToVector3D() - o.TransitStart.ToVector3D()
                     : (o.UseApproachLine ? o.ApproachFrom.ToVector3D() : o.Target.ToVector3D()) - flightState.Position;
@@ -1189,9 +1203,15 @@ namespace Automata.Drone
             var level = DisplayAlertLevel.None;
             string text = null;
             string speed = SpeedSettingsProblem();
+            int stop;
             if (currentState == State.Error) { level = DisplayAlertLevel.Error; text = errorReason ?? "Error"; }
             else if (speed != null) { level = DisplayAlertLevel.Error; text = speed; }
             else if (!settings.IsEnabled) { level = DisplayAlertLevel.Warning; text = "AI disabled"; }
+            else if ((stop = StopRemainingSeconds()) > 0)
+            {
+                level = DisplayAlertLevel.Warning;
+                text = string.Format("STOP order active. Resume in {0:00}:{1:00}", stop / 60, stop % 60);
+            }
             else if (thrustObstructedDir >= 0 && activeFlightOrder != null)
             {
                 level = DisplayAlertLevel.Warning;
@@ -2443,6 +2463,7 @@ namespace Automata.Drone
                 bool on = value && GetHomeConnector() != null;
                 settings.ObservationAreaDraw = on;
                 observationDrawStartFrame = MyAPIGateway.Session.GameplayFrameCounter;
+                if (on) RequestClientSettings();
                 UpdateDrawRequest();
             }
         }
@@ -2551,7 +2572,7 @@ namespace Automata.Drone
         private bool DrawObservationArea()
         {
             if (!settings.ObservationAreaDraw) return false;
-            if (MyAPIGateway.Session.GameplayFrameCounter - observationDrawStartFrame > OBSERVATION_DRAW_TICKS)
+            if (MyAPIGateway.Session.GameplayFrameCounter - observationDrawStartFrame > DebugDrawTimeoutTicks)
             {
                 settings.ObservationAreaDraw = false;
                 return false;

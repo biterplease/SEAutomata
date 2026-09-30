@@ -30,6 +30,7 @@ namespace Automata.Drone
             if (settings.SleepingBlockIds.Count > 0 || settings.RechargingBatteryIds.Count > 0 || settings.StockpilingTankIds.Count > 0)
                 WakeSystems();
             isParked = IsParkedNow();
+            RestoreConnectors();
             SetState(isParked ? State.Docked : State.Standby);
             Report("AI disabled");
         }
@@ -122,6 +123,32 @@ namespace Automata.Drone
             SaveSettings();
             SyncSetting(DroneSettingKey.HomeBeacon);
             RefreshTerminal();
+        }
+        #endregion
+
+        #region Task timeout
+        /// <summary>Upper limit of the per-drone task timeout: the server setting (clients: as the server sent it).</summary>
+        public static int MaxTaskTimeoutSeconds
+        {
+            get { return Automata.Config.ServerConfig.Instance.Drone.TaskTimeoutSeconds; }
+        }
+
+        public float Terminal_TaskTimeoutSeconds
+        {
+            get
+            {
+                RequestClientSettings();   // clients: the server's limit, once per session
+                return settings != null ? settings.TaskTimeoutSeconds : 30;
+            }
+            set
+            {
+                if (settings == null) return;
+                int v = VRageMath.MathHelper.Clamp((int)Math.Round(value), 0, MaxTaskTimeoutSeconds);
+                if (v == settings.TaskTimeoutSeconds) return;
+                settings.TaskTimeoutSeconds = v;
+                SaveSettings();
+                SyncSetting(DroneSettingKey.TaskTimeout);
+            }
         }
         #endregion
 

@@ -158,7 +158,9 @@ namespace Automata.Orchestrator
         /// <summary>
         /// Put the tool of the NEXT task (weld / grind / mine) on Position, coming in along ApproachFrom -> Position,
         /// with the tool pointing that way. Blocks: Position is the centre of one of the block's cell faces (never
-        /// its centre, an edge or a vertex) and ApproachFrom lies on that face's normal.
+        /// its centre, an edge or a vertex) and ApproachFrom lies on that face's normal. ApproachFrom is a planning
+        /// hint for the side: the drone puts its approach point its own length + 2.5 m out along that line, so it has
+        /// room to turn there, and writes it back (and into the BackOut that follows the tool task).
         /// </summary>
         [ProtoEnum] NavigateToolTo = 2,
         /// <summary>Connect to the connector TargetEntityId (Position / ApproachFrom: its connection point and axis).</summary>
@@ -180,6 +182,11 @@ namespace Automata.Orchestrator
         /// Used when no antenna comms are available: carries messages between isolated networks.
         /// </summary>
         [ProtoEnum] DeliverMessage = 10,
+        /// <summary>
+        /// After a tool task: move straight back, without turning, until the tool's work point is at Position (the
+        /// approach point the preceding NavigateToolTo used; the drone fills it in when it flies that one).
+        /// </summary>
+        [ProtoEnum] BackOut = 11,
     }
 
     /// <summary>Which fields a task uses; derived from its type (not sent).</summary>
@@ -273,6 +280,7 @@ namespace Automata.Orchestrator
                 case TaskType.NavigateTo:
                 case TaskType.NavigateToolTo:
                 case TaskType.DockAt:
+                case TaskType.BackOut:
                 case TaskType.ReturnHome:      return TaskKind.Navigation;
                 case TaskType.LoadInventory:
                 case TaskType.UnloadInventory: return TaskKind.Inventory;
@@ -299,6 +307,16 @@ namespace Automata.Orchestrator
             {
                 Type = TaskType.NavigateToolTo, RelativeBeaconEntityId = beaconId, NaturalGravity = naturalGravity,
                 Position = Vector3DData.FromVector3D(position), ApproachFrom = Vector3DData.FromVector3D(approachFrom),
+            };
+        }
+
+        /// <summary>Position: planned approach point (the drone replaces it with the one it actually used).</summary>
+        public static Task BackOut(long beaconId, Vector3D position)
+        {
+            return new Task
+            {
+                Type = TaskType.BackOut, RelativeBeaconEntityId = beaconId,
+                Position = Vector3DData.FromVector3D(position), ApproachFrom = Vector3DData.FromVector3D(position),
             };
         }
 

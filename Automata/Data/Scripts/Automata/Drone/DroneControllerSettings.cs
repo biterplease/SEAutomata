@@ -197,5 +197,11 @@ namespace Automata.Drone
                 /// </summary>
                 [ProtoMember(51)]
                 public Capabilities ExcludedCapabilities;
+                /// <summary>
+                /// Seconds before a job task fails (navigation: this long without getting closer). 0 up to the
+                /// server's Drone.TaskTimeoutSeconds, which also caps it when used.
+                /// </summary>
+                [ProtoMember(52)]
+                public int TaskTimeoutSeconds = 30;
         }
 }

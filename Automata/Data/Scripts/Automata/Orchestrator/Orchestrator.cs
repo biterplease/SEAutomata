@@ -1316,7 +1316,7 @@ namespace Automata.Orchestrator
 
         /// <summary>
         /// One trip for one drone: dock at the logistics computer's connector, load, then the job's work tasks
-        /// (NavigateToolTo + WeldBlock pairs, central-out). A trip carrying only part of the job welds until its
+        /// (NavigateToolTo + WeldBlock + BackOut, central-out). A trip carrying only part of the job welds until its
         /// cargo holds nothing the block needs (DroneInventoryEmpty) instead of until the block is complete.
         /// ReturnHome is appended once per drone after its last trip.
         /// </summary>
@@ -1338,6 +1338,11 @@ namespace Automata.Orchestrator
                 droneTasks.Add(job.Tasks[i]);
                 droneTasks.Add(tool);
                 i++;
+                if (i + 1 < job.Tasks.Count && job.Tasks[i + 1].Type == TaskType.BackOut)
+                {
+                    droneTasks.Add(job.Tasks[i + 1]);
+                    i++;
+                }
             }
         }
 

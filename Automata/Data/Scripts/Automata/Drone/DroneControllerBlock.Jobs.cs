@@ -51,7 +51,15 @@ namespace Automata.Drone
         private int bidIdCounter;
         private int jobMessageCounter;
 
-        private static int TaskTimeoutTicks { get { return AutomataSession.GetConfig().Drone.TaskTimeoutSeconds * 60; } }
+        // The drone's own setting, capped by the server's (which may have been lowered since it was set)
+        private int TaskTimeoutTicks
+        {
+            get
+            {
+                int max = AutomataSession.GetConfig().Drone.TaskTimeoutSeconds;
+                return MathHelper.Clamp(settings != null ? settings.TaskTimeoutSeconds : max, 0, max) * 60;
+            }
+        }
 
         #region Job lifecycle
         private void StartJob(Orchestrator.Job job, JobSource source)
@@ -60,6 +68,8 @@ namespace Automata.Drone
             jobSource = source;
             taskIndex = 0;
             taskStarted = false;
+            homeAfterBackOut = false;
+            ResetStrafe();
             cPhase = ConstructionPhase.Running;
             Log.Debug("Drone {0}: job {1} ({2}): {3} x {4}, {5} tasks", Entity.EntityId, job.JobId, source,
                       job.BlockCount, job.JobType, job.Tasks != null ? job.Tasks.Count : 0);
@@ -72,6 +82,7 @@ namespace Automata.Drone
             currentJob = null;
             constructionOrder = null;
             constructionLegs.Clear();
+            ResetStrafe();
             cPhase = ConstructionPhase.Idle;
             jobSource = JobSource.None;
             lastConstructionScanFrame = int.MinValue / 2;   // stand-alone: next trip right away
@@ -101,16 +112,37 @@ namespace Automata.Drone
         {
             if (cPhase != ConstructionPhase.Running || currentJob == null) return;
             ToolsOff();
+            // The tool is in the block: straight back out first, then home
+            var current = taskIndex < currentJob.Tasks.Count ? currentJob.Tasks[taskIndex].Type : Orchestrator.TaskType.None;
+            if (current == Orchestrator.TaskType.BackOut && taskStarted) { homeAfterBackOut = true; return; }
+            if (Orchestrator.Task.KindOf(current) == Orchestrator.TaskKind.Tool && IsBackOutAt(taskIndex + 1))
+            {
+                homeAfterBackOut = true;
+                NextTask(1);
+                RunTasks();
+                return;
+            }
             int home = currentJob.IndexOf(Orchestrator.TaskType.ReturnHome, taskIndex);
             if (home < 0) { FinishJob(); return; }
+            homeAfterBackOut = false;
             taskIndex = home;
             taskStarted = false;
             RunTasks();
         }
 
+        /// <summary>Stand-alone: whole seconds until work resumes after "Stop"; 0 when no Stop pause is running.</summary>
+        private int StopRemainingSeconds()
+        {
+            if (settings == null || settings.OperationMode != OperationMode.StandAlone) return 0;
+            int now = MyAPIGateway.Session.GameplayFrameCounter;
+            if (now >= stopResumeFrame || now >= constructionPausedUntil) return 0;
+            return (constructionPausedUntil - now + 59) / 60;
+        }
+
         public void PauseConstruction(int ticks)
         {
-            constructionPausedUntil = MyAPIGateway.Session.GameplayFrameCounter + ticks;
+            // Never shortens a pause already running (a Stop outlasts a later interruption)
+            constructionPausedUntil = Math.Max(constructionPausedUntil, MyAPIGateway.Session.GameplayFrameCounter + ticks);
         }
         #endregion
 
@@ -138,18 +170,44 @@ namespace Automata.Drone
                     case TaskStatus.Running:
                         return;
                     case TaskStatus.Done:
+                        if (homeAfterBackOut && currentJob.Tasks[taskIndex].Type == Orchestrator.TaskType.BackOut)
+                        {
+                            homeAfterBackOut = false;
+                            if (!JumpToReturnHome()) return;
+                            break;
+                        }
                         NextTask(1);
                         break;
                     case TaskStatus.SkipBlock:
                         ToolsOff();
-                        NextTask(2);
+                        strafeNext = false;
+                        if (onFace && IsBackOutAt(taskIndex + 2))
+                        {
+                            // In a strafe chain the drone is still at a face: back out from here
+                            forceBackOut = true;
+                            NextTask(2);
+                        }
+                        else NextTask(IsBackOutAt(taskIndex + 2) ? 3 : 2);
                         break;
                     case TaskStatus.ToReturnHome:
                         ToolsOff();
-                        int home = currentJob.IndexOf(Orchestrator.TaskType.ReturnHome, taskIndex + 1);
-                        if (home < 0) { FinishJob(); return; }
-                        taskIndex = home;
-                        taskStarted = false;
+                        // Out of the block's way first when the tool was on it
+                        if (currentJob.Tasks[taskIndex].Kind == Orchestrator.TaskKind.Tool && IsBackOutAt(taskIndex + 1))
+                        {
+                            homeAfterBackOut = true;
+                            NextTask(1);
+                            break;
+                        }
+                        // Mid strafe chain (a NavigateToolTo gave up): still at a face, back out first
+                        if (onFace && currentJob.Tasks[taskIndex].Type == Orchestrator.TaskType.NavigateToolTo && IsBackOutAt(taskIndex + 2))
+                        {
+                            homeAfterBackOut = true;
+                            forceBackOut = true;
+                            strafeNext = false;
+                            NextTask(2);
+                            break;
+                        }
+                        if (!JumpToReturnHome()) return;
                         break;
                     case TaskStatus.Failed:
                         ToolsOff();
@@ -168,6 +226,35 @@ namespace Automata.Drone
         }
 
         private Orchestrator.TaskFailure taskFailure;
+        private bool homeAfterBackOut;   // a tool task sent the job home: its BackOut runs first
+
+        // Strafing along contiguous blocks: a BackOut is skipped when the next block has a face next to the current
+        // one, same side, same plane; the next NavigateToolTo then slides sideways onto it, no turning.
+        private bool strafeNext;         // the next NavigateToolTo strafes to strafeCell / strafeNormal
+        private Vector3I strafeCell, strafeNormal;
+        private long strafeGridId;
+        private bool onFace;             // at a work face without having backed out (a strafe chain)
+        private bool forceBackOut;       // a block of the chain was skipped: back out, no strafe planning
+
+        private void ResetStrafe()
+        {
+            strafeNext = onFace = forceBackOut = false;
+        }
+
+        private bool IsBackOutAt(int index)
+        {
+            return index < currentJob.Tasks.Count && currentJob.Tasks[index].Type == Orchestrator.TaskType.BackOut;
+        }
+
+        // Skips ahead to the job's ReturnHome; false when the job ended (no ReturnHome left)
+        private bool JumpToReturnHome()
+        {
+            int home = currentJob.IndexOf(Orchestrator.TaskType.ReturnHome, taskIndex + 1);
+            if (home < 0) { FinishJob(); return false; }
+            taskIndex = home;
+            taskStarted = false;
+            return true;
+        }
 
         private TaskStatus Fail(Orchestrator.TaskFailure failure, TaskStatus then)
         {
@@ -178,8 +265,19 @@ namespace Automata.Drone
         private void ReportTaskFailure()
         {
             var task = currentJob.Tasks[taskIndex];
-            Report("Task {0}/{1} {2} failed: {3}", taskIndex + 1, currentJob.Tasks.Count, task.Type, taskFailure);
+            // Numbers within this job (one trip): the block being worked, and the task in the job's list
+            Report("Block {0}/{1}, task {2}/{3}: {4} failed: {5}", BlockNumber(taskIndex), currentJob.BlockCount,
+                   taskIndex + 1, currentJob.Tasks.Count, task.Type, taskFailure);
             taskFailure = Orchestrator.TaskFailure.None;
+        }
+
+        // 1-based block of the job the task at 'index' belongs to (its NavigateToolTo counted), 0 before the first
+        private int BlockNumber(int index)
+        {
+            int n = 0;
+            for (int i = 0; i <= index && i < currentJob.Tasks.Count; i++)
+                if (currentJob.Tasks[i].Type == Orchestrator.TaskType.NavigateToolTo) n++;
+            return n;
         }
 
         private void NextTask(int count)
@@ -242,6 +340,24 @@ namespace Automata.Drone
                     return WatchProgress() ? TaskStatus.Running : Fail(Orchestrator.TaskFailure.Timeout, TaskStatus.SkipBlock);
                 }
 
+                case Orchestrator.TaskType.BackOut:
+                {
+                    // Best effort: a back-out that can't be flown (or isn't needed) or stalls just moves on; the
+                    // next route starts from wherever the drone is
+                    if (starting)
+                    {
+                        bool force = forceBackOut;
+                        forceBackOut = false;
+                        // Contiguous next block, same side and plane: stay at the face, slide over to it instead
+                        if (!force && !homeAfterBackOut && TryPlanStrafe()) return TaskStatus.Done;
+                        onFace = false;
+                        return DispatchBackOut(ref task) ? TaskStatus.Running : TaskStatus.Done;
+                    }
+                    if (!IsConstructionOrderActive()) return TaskStatus.Interrupted;
+                    if (constructionOrder.Arrived) return TaskStatus.Done;
+                    return WatchProgress() ? TaskStatus.Running : Fail(Orchestrator.TaskFailure.Timeout, TaskStatus.Done);
+                }
+
                 case Orchestrator.TaskType.NavigateTo:
                 {
                     if (starting)
@@ -263,6 +379,15 @@ namespace Automata.Drone
                         var already = ToolTargetState(ref task);
                         if (already != Orchestrator.TaskFailure.None) return Fail(already, TaskStatus.Done);
                         if (!HasTool(task.Type)) return Fail(Orchestrator.TaskFailure.MissingEquipment, TaskStatus.ToReturnHome);
+                        // Small grid welds (any job source): until the cargo has nothing more for the block, since
+                        // the welder's sphere also welds the neighbours with the parts loaded for this one
+                        if (task.Type == Orchestrator.TaskType.WeldBlock
+                            && task.Completion == Orchestrator.ToolTaskCompletionTrigger.BlockFullIntegrity
+                            && IsSmallGridTarget(ref task))
+                        {
+                            task.Completion = Orchestrator.ToolTaskCompletionTrigger.DroneInventoryEmpty;
+                            currentJob.Tasks[taskIndex] = task;
+                        }
                         mineCargoStart = CargoUsedVolume();
                         SetToolEnabled(task.Type, true);
                         return TaskStatus.Running;
@@ -422,7 +547,14 @@ namespace Automata.Drone
             IMyEntity e;
             var grid = tool.Type != Orchestrator.TaskType.Mine && tool.TargetEntityId != 0
                        && MyAPIGateway.Entities.TryGetEntityById(tool.TargetEntityId, out e) ? e as IMyCubeGrid : null;
-            if (grid != null)
+            bool strafe = strafeNext && grid != null && grid.EntityId == strafeGridId;
+            strafeNext = false;
+            if (strafe)
+            {
+                // Contiguous with the block just worked: the face found when skipping its BackOut
+                point = ConstructionComputer.FacePoint(grid, strafeCell, strafeNormal, out dirW);
+            }
+            else if (grid != null)
             {
                 Vector3I faceCell, normal, min, max;
                 if (ConstructionComputer.TryGetBlockExtent(grid, tool.TargetBlock.ToVector3I(), out min, out max))
@@ -433,14 +565,17 @@ namespace Automata.Drone
                     Vector3D half;
                     Vector3D areaCenter = jobSource == JobSource.StandAlone && TryGetObservationArea(out areaMatrix, out half)
                         ? areaMatrix.Translation : grid.WorldVolume.Center;
-                    int clearCells = (int)Math.Ceiling((mount.WorkRadius + 2 * hull) / grid.GridSize);
+                    // The whole approach line must be clear: tool reach + the drone's manoeuvre room
+                    int clearCells = (int)Math.Ceiling((mount.WorkRadius + ManoeuvreDistance()) / grid.GridSize);
                     Vector3D toDrone = flightState.Position - point;
                     if (toDrone.LengthSquared() > 1e-4) toDrone.Normalize();
                     Vector3D planned = dirW;
-                    if (!ConstructionComputer.ChooseFace(grid, min, max, areaCenter,
-                            flightState.InGravity ? flightState.GravityUp : Vector3D.Zero, clearCells,
-                            w => AttitudeCost(ref mount, -w) + 0.25 * (1 - Vector3D.Dot(w, toDrone)) - (Vector3D.Dot(w, planned) > 0.9 ? 0.5 : 0),
-                            out faceCell, out normal))
+                    Vector3D gUp = flightState.InGravity ? flightState.GravityUp : Vector3D.Zero;
+                    Func<Vector3D, double> cost = w => AttitudeCost(ref mount, -w) + 0.25 * (1 - Vector3D.Dot(w, toDrone))
+                                                     - (Vector3D.Dot(w, planned) > 0.9 ? 0.5 : 0);
+                    // A face whose whole approach line is free first; any free face otherwise (the route check decides)
+                    if (!ConstructionComputer.ChooseFace(grid, min, max, areaCenter, gUp, clearCells, cost, out faceCell, out normal, true)
+                        && !ConstructionComputer.ChooseFace(grid, min, max, areaCenter, gUp, clearCells, cost, out faceCell, out normal))
                         return Orchestrator.TaskFailure.Unreachable;   // walled in
                 }
                 else
@@ -460,12 +595,29 @@ namespace Automata.Drone
             double reach = grid != null ? mount.WorkRadius - depth : mount.WorkRadius * TOOL_REACH_FRACTION;
             MatrixD frame = MountFrame(ref mount, -dirW);
             Vector3D sphereCentre = point + dirW * reach;
-            Vector3D approach = sphereCentre + dirW * ConstructionComputer.APPROACH_DISTANCE;
+            // Approach point: the drone's own length + 2.5 m out, so it can turn to the work attitude there
+            // without touching the target, then come straight in (and back out) along the normal
+            Vector3D approach = sphereCentre + dirW * ManoeuvreDistance();
             nav.Position = WorldToTask(anchor, ref am, point);   // the face actually used
-            nav.ApproachFrom = WorldToTask(anchor, ref am, point + dirW * ConstructionComputer.APPROACH_DISTANCE);
+            nav.ApproachFrom = WorldToTask(anchor, ref am, approach);
             currentJob.Tasks[taskIndex] = nav;
+            if (IsBackOutAt(taskIndex + 2))
+            {
+                var back = currentJob.Tasks[taskIndex + 2];
+                back.RelativeBeaconEntityId = nav.RelativeBeaconEntityId;
+                back.Position = back.ApproachFrom = nav.ApproachFrom;
+                currentJob.Tasks[taskIndex + 2] = back;
+            }
 
-            var failure = FlyRoute(anchor, ref am, sphereCentre, approach, hull, mount.LocalPoint, ref frame);
+            if (strafe)
+            {
+                onFace = true;
+                if (!FlyStrafe(anchor, ref am, sphereCentre, ref mount, ref frame)) return Orchestrator.TaskFailure.Unreachable;
+                Log.Debug("Drone {0}: {1} at {2}, strafing to face point {3}", Entity.EntityId, tool.Type, tool.TargetBlock.ToVector3I(), point);
+                return Orchestrator.TaskFailure.None;
+            }
+            onFace = false;
+            var failure = FlyRoute(anchor, ref am, sphereCentre, approach, hull, mount.LocalPoint, ref frame, grid != null);
             if (failure == Orchestrator.TaskFailure.None)
                 Log.Debug("Drone {0}: {1} at {2}, face point {3}, normal {4}", Entity.EntityId, tool.Type, tool.TargetBlock.ToVector3I(), point, dirW);
             return failure;
@@ -487,15 +639,146 @@ namespace Automata.Drone
             heading -= gUp * Vector3D.Dot(heading, gUp);
             if (heading.LengthSquared() < 1e-4) heading = flightState.WorldMatrix.Forward;
             MatrixD frame = MatrixD.CreateWorld(Vector3D.Zero, Vector3D.Normalize(heading), gUp);
-            return FlyRoute(anchor, ref am, target, approach, DroneRadius(), Vector3D.Zero, ref frame);
+            return FlyRoute(anchor, ref am, target, approach, DroneRadius(), Vector3D.Zero, ref frame, false);
         }
 
         /// <summary>
+        /// At a BackOut: can the drone slide straight to the next block instead? Yes when the next pair works the
+        /// same grid with the same tool, that block still needs work, and it has a free face next to the current
+        /// one, on the same side and in the same plane (<see cref="ConstructionComputer.FindAdjacentFace"/>).
+        /// Then the BackOut is skipped and the next NavigateToolTo strafes. Otherwise the drone backs out: the
+        /// next block isn't contiguous, or the job's blocks are done.
+        /// </summary>
+        private bool TryPlanStrafe()
+        {
+            strafeNext = false;
+            int prevNavIndex = taskIndex - 2, prevToolIndex = taskIndex - 1, navIndex = taskIndex + 1, toolIndex = taskIndex + 2;
+            if (prevNavIndex < 0 || toolIndex >= currentJob.Tasks.Count) return false;
+            var prevNav = currentJob.Tasks[prevNavIndex];
+            var prevTool = currentJob.Tasks[prevToolIndex];
+            var nav = currentJob.Tasks[navIndex];
+            var tool = currentJob.Tasks[toolIndex];
+            if (prevNav.Type != Orchestrator.TaskType.NavigateToolTo || nav.Type != Orchestrator.TaskType.NavigateToolTo) return false;
+            if (tool.Kind != Orchestrator.TaskKind.Tool || tool.Type == Orchestrator.TaskType.Mine || tool.Type != prevTool.Type) return false;
+            if (tool.TargetEntityId == 0 || tool.TargetEntityId != prevTool.TargetEntityId) return false;
+            if (nav.RelativeBeaconEntityId != prevNav.RelativeBeaconEntityId) return false;
+            if (ToolTargetState(ref tool) != Orchestrator.TaskFailure.None) return false;   // done meanwhile: skipped anyway
+
+            IMyEntity e;
+            var grid = MyAPIGateway.Entities.TryGetEntityById(tool.TargetEntityId, out e) ? e as IMyCubeGrid : null;
+            if (grid == null) return false;
+            IMyTerminalBlock anchor;
+            MatrixD am;
+            if (!ResolveTaskFrame(prevNav.RelativeBeaconEntityId, out anchor, out am)) return false;
+            // The face the drone is at (its NavigateToolTo holds the face actually used)
+            Vector3D point = TaskToWorld(anchor, ref am, prevNav.Position);
+            Vector3D dir = TaskToWorld(anchor, ref am, prevNav.ApproachFrom) - point;
+            if (dir.LengthSquared() < 1e-4) return false;
+            dir.Normalize();
+            Vector3I fromCell, normal, min, max, next;
+            if (!ConstructionComputer.FaceOf(grid, point, dir, out fromCell, out normal)) return false;
+            if (!ConstructionComputer.TryGetBlockExtent(grid, tool.TargetBlock.ToVector3I(), out min, out max)) return false;
+            ToolMount mount = tool.Type == Orchestrator.TaskType.GrindBlock ? grinderMount : welderMount;
+            int clearCells = (int)Math.Ceiling((mount.WorkRadius + ManoeuvreDistance()) / grid.GridSize);
+            if (!ConstructionComputer.FindAdjacentFace(grid, min, max, fromCell, normal, clearCells, out next)) return false;
+            strafeNext = true;
+            strafeCell = next;
+            strafeNormal = normal;
+            strafeGridId = grid.EntityId;
+            onFace = true;
+            ToolsOff();
+            Log.Debug("Drone {0}: next block contiguous ({1} -> {2}), strafing instead of backing out", Entity.EntityId, fromCell, next);
+            return true;
+        }
+
+        /// <summary>
+        /// Strafe: the tool's work point straight sideways to 'target' (the next block's work point), attitude held
+        /// (same face side, so the same work attitude). Slow: it moves along the surface.
+        /// </summary>
+        private bool FlyStrafe(IMyTerminalBlock anchor, ref MatrixD am, Vector3D target, ref ToolMount mount, ref MatrixD frame)
+        {
+            CaptureFlightState();
+            ToolsOff();
+            bool world = anchor == null;
+            Vector3D here = flightState.Position + Vector3D.TransformNormal(mount.LocalPoint, flightState.WorldMatrix);
+            var order = world ? OrderGoTo(target, here)
+                              : OrderGoToRelative(anchor, WorldToAnchorPoint(ref am, target), WorldToAnchorPoint(ref am, here));
+            if (order == null) return false;
+            if (world) order.TransitStart = order.ApproachFrom;
+            else order.TransitStartLocal = order.ApproachFromLocal;
+            order.HoldAttitudeInTransit = true;
+            order.ReferenceOffset = Vector3DData.FromVector3D(mount.LocalPoint);
+            order.LineTolerance = CONSTRUCTION_LINE_TOLERANCE;
+            order.FinalSpeed = SafeSpeed;
+            order.ArrivalTolerance = 0.3f;
+            SetExplicitAttitude(order, world, ref am, frame.Forward, frame.Up);
+            constructionOrder = order;
+            constructionLegs.Clear();
+            return true;
+        }
+
+        /// <summary>
+        /// BackOut: the tool's work point (preceding tool task's mount) straight back to Position, holding the
+        /// attitude it worked with - the drone reverses out the way it came in. False: nothing to fly.
+        /// </summary>
+        private bool DispatchBackOut(ref Orchestrator.Task task)
+        {
+            IMyTerminalBlock anchor;
+            MatrixD am;
+            if (!ResolveTaskFrame(task.RelativeBeaconEntityId, out anchor, out am)) return false;
+            var toolType = taskIndex > 0 ? currentJob.Tasks[taskIndex - 1].Type : Orchestrator.TaskType.WeldBlock;
+            ToolMount mount = toolType == Orchestrator.TaskType.GrindBlock ? grinderMount
+                            : toolType == Orchestrator.TaskType.Mine ? drillMount : welderMount;
+            CaptureFlightState();
+            ToolsOff();
+            bool world = anchor == null;
+            Vector3D target = TaskToWorld(anchor, ref am, task.Position);
+            Vector3D here = flightState.Position + Vector3D.TransformNormal(mount.LocalPoint, flightState.WorldMatrix);
+            if (Vector3D.DistanceSquared(here, target) < CONSTRUCTION_ROUTE_TOLERANCE * CONSTRUCTION_ROUTE_TOLERANCE) return false;
+            // Approach line from where the tool is now: Transit is zero-length, then straight back
+            var order = world ? OrderGoTo(target, here)
+                              : OrderGoToRelative(anchor, WorldToAnchorPoint(ref am, target), WorldToAnchorPoint(ref am, here));
+            if (order == null) return false;
+            if (world) order.TransitStart = order.ApproachFrom;
+            else order.TransitStartLocal = order.ApproachFromLocal;
+            order.HoldAttitudeInTransit = true;
+            order.ReferenceOffset = Vector3DData.FromVector3D(mount.LocalPoint);
+            order.LineTolerance = CONSTRUCTION_LINE_TOLERANCE;
+            order.FinalSpeed = SafeSpeed;
+            order.ArrivalTolerance = CONSTRUCTION_ROUTE_TOLERANCE;
+            SetExplicitAttitude(order, world, ref am, flightState.WorldMatrix.Forward, flightState.WorldMatrix.Up);
+            constructionOrder = order;
+            constructionLegs.Clear();
+            return true;
+        }
+
+        /// <summary>m: longest side of the drone's hull box (whole mechanical group).</summary>
+        private double DroneLength()
+        {
+            if (localHullBox.Min.X > localHullBox.Max.X) return 2 * DroneRadius();   // not measured yet
+            Vector3D size = localHullBox.Size;
+            return Math.Max(size.X, Math.Max(size.Y, size.Z));
+        }
+
+        /// <summary>
+        /// m: the room the drone needs to turn at an approach point: its length + MANOEUVRE_MARGIN. Approach points
+        /// (tool work, docking) lie at least this far out, so the drone turns clear of what it works on.
+        /// </summary>
+        public double ManoeuvreDistance()
+        {
+            return DroneLength() + MANOEUVRE_MARGIN;
+        }
+
+        private const double MANOEUVRE_MARGIN = 2.5;
+
+        /// <summary>
         /// Orders the flight to 'target' (the point 'referenceOffset' is placed on), in along approach -> target with
-        /// the attitude of 'frame'. Backs out of the dock first, and detours over obstacles (PlanRoute).
+        /// the attitude of 'frame'. Backs out of the dock first, and detours over obstacles (PlanRoute). The way to
+        /// the approach point is flown as the drone is oriented (translation only); it turns to 'frame' only there.
+        /// 'checkApproachLine': the approach -> target line must be clear too (tool work), else Unreachable.
         /// </summary>
         private Orchestrator.TaskFailure FlyRoute(IMyTerminalBlock anchor, ref MatrixD am, Vector3D target, Vector3D approach,
-                                                  double hull, Vector3D referenceOffset, ref MatrixD frame)
+                                                  double hull, Vector3D referenceOffset, ref MatrixD frame, bool checkApproachLine)
         {
             bool world = anchor == null;
             constructionLegs.Clear();
@@ -508,9 +791,29 @@ namespace Automata.Drone
                 start += docked.WorldMatrix.Forward * Math.Max(CONSTRUCTION_BACKOUT_MIN, hull + CONSTRUCTION_CLEARANCE);
                 routePoints.Add(start);
             }
-            Vector3D over1, over2;
-            RouteKind route = PlanRoute(start, approach, hull, out over1, out over2);
+            // Stand-alone, coming from outside the observation area (the dock, elsewhere): around the area and in
+            // only where the work is, not across what has been built there. Inside it, PlanRoute's detours.
+            // TODO (pathfinding): obstacle search on these legs.
+            Vector3D over1 = Vector3D.Zero, over2 = Vector3D.Zero;
+            RouteKind route;
+            if (jobSource == JobSource.StandAlone && PlanObservationAreaDetour(start, approach, routePoints, true))
+            {
+                route = RouteKind.Direct;
+                Log.Debug("Drone {0}: around the observation area ({1} waypoints)", Entity.EntityId, routePoints.Count);
+            }
+            else route = PlanRoute(start, approach, hull, out over1, out over2);
             if (route == RouteKind.Blocked) return Orchestrator.TaskFailure.Unreachable;
+            if (checkApproachLine)
+            {
+                // Straight in along the normal: nothing between the approach point and the work point
+                double top;
+                Vector3D up = flightState.InGravity ? flightState.GravityUp : flightState.WorldMatrix.Up;
+                if (SegmentObstacleTop(approach, target, up, 0, 0, out top))
+                {
+                    Log.Debug("Drone {0}: approach line blocked", Entity.EntityId);
+                    return Orchestrator.TaskFailure.Unreachable;
+                }
+            }
             if (route == RouteKind.Detour)
             {
                 // Up and over whatever is in the way, down onto the approach point, then in along the line
@@ -518,33 +821,58 @@ namespace Automata.Drone
                 routePoints.Add(over2);
                 Log.Debug("Drone {0}: detour, climbing {1:F1} m", Entity.EntityId, Vector3D.Distance(over1, start));
             }
+            // Controller legs (back-out of the dock, detour), then the approach leg (reference point onto the
+            // approach point): all flown as the drone is oriented now. It turns to the work attitude only at the
+            // approach point (Align), where it has its own length + 2.5 m of room.
+            Vector3D refNow = flightState.Position + Vector3D.TransformNormal(referenceOffset, flightState.WorldMatrix);
+            bool approachLeg = routePoints.Count > 0
+                || Vector3D.DistanceSquared(refNow, approach) > CONSTRUCTION_ROUTE_TOLERANCE * CONSTRUCTION_ROUTE_TOLERANCE;
             FlightOrder order;
-            if (routePoints.Count > 0)
+            if (approachLeg)
             {
-                var first = world ? OrderGoTo(routePoints[0]) : OrderGoToRelative(anchor, WorldToAnchorPoint(ref am, routePoints[0]));
+                bool legsFirst = routePoints.Count > 0;
+                Vector3D firstPoint = legsFirst ? routePoints[0] : approach;
+                var first = world ? OrderGoTo(firstPoint) : OrderGoToRelative(anchor, WorldToAnchorPoint(ref am, firstPoint));
                 if (first == null) return Orchestrator.TaskFailure.TargetNotFound;
+                if (!legsFirst)
+                {
+                    // The approach leg itself: its line starts where the reference point is now
+                    first.ReferenceOffset = Vector3DData.FromVector3D(referenceOffset);
+                    if (world) first.ApproachFrom = first.TransitStart = Vector3DData.FromVector3D(refNow);
+                    else first.ApproachFromLocal = first.TransitStartLocal = Vector3DData.FromVector3D(WorldToAnchorPoint(ref am, refNow));
+                }
                 constructionLegs.Add(first);
                 for (int i = 1; i < routePoints.Count; i++)
                     constructionLegs.Add(QueueGoTo(routePoints[i], Pathfinding.WaypointBehavior.FullStop, 0));
+                if (legsFirst)
+                {
+                    var approachOrder = QueueGoTo(approach, Pathfinding.WaypointBehavior.FullStop, 0);
+                    approachOrder.ReferenceOffset = Vector3DData.FromVector3D(referenceOffset);
+                    constructionLegs.Add(approachOrder);
+                }
                 order = QueueGoTo(target, Pathfinding.WaypointBehavior.FullStop, 0);
                 order.UseApproachLine = true;
                 order.Phase = FlightPhase.Transit;
+                order.HoldAttitudeInTransit = true;
                 if (world) order.ApproachFrom = Vector3DData.FromVector3D(approach);
                 else order.ApproachFromLocal = Vector3DData.FromVector3D(WorldToAnchorPoint(ref am, approach));
                 routePoints.Clear();
-                // Route legs: no turning on the way - the drone translates with its current attitude
+                // Legs: no turning on the way - the drone translates with its current attitude
                 for (int i = 0; i < constructionLegs.Count; i++)
                 {
                     var leg = constructionLegs[i];
                     leg.ArrivalTolerance = CONSTRUCTION_ROUTE_TOLERANCE;
+                    leg.HoldAttitudeInTransit = true;   // anchored first leg: MatchSpeed
                     SetExplicitAttitude(leg, world, ref am, flightState.WorldMatrix.Forward, flightState.WorldMatrix.Up);
                 }
             }
             else
             {
+                // Already at the approach point: settle on it without turning, turn there, then in
                 order = world ? OrderGoTo(target, approach)
                               : OrderGoToRelative(anchor, WorldToAnchorPoint(ref am, target), WorldToAnchorPoint(ref am, approach));
                 if (order == null) return Orchestrator.TaskFailure.TargetNotFound;
+                order.HoldAttitudeInTransit = true;
             }
             ToolsOff();   // after the order: waking from the dock restores blocks, tools included
             constructionOrder = order;
@@ -554,9 +882,9 @@ namespace Automata.Drone
             order.ArrivalTolerance = 0.3f;
             if (constructionLegs.Count == 0)
             {
-                Vector3D here = ReferencePoint(order);
-                if (world) order.TransitStart = Vector3DData.FromVector3D(here);
-                else order.TransitStartLocal = Vector3DData.FromVector3D(WorldToAnchorPoint(ref am, here));
+                // Zero-length transit onto the approach point (the drone is within route tolerance of it)
+                if (world) order.TransitStart = Vector3DData.FromVector3D(approach);
+                else order.TransitStartLocal = Vector3DData.FromVector3D(WorldToAnchorPoint(ref am, approach));
             }
             SetExplicitAttitude(order, world, ref am, frame.Forward, frame.Up);
             return Orchestrator.TaskFailure.None;
@@ -803,14 +1131,23 @@ namespace Automata.Drone
         private readonly Dictionary<string, int> missingBuffer = new Dictionary<string, int>();
 
         // Does the drone's cargo hold any component the block still misses?
+        private static bool IsSmallGridTarget(ref Orchestrator.Task task)
+        {
+            IMyEntity e;
+            var grid = task.TargetEntityId != 0 && MyAPIGateway.Entities.TryGetEntityById(task.TargetEntityId, out e) ? e as IMyCubeGrid : null;
+            return grid != null && grid.GridSizeEnum == MyCubeSize.Small;
+        }
+
+        // Cargo containers and the welder's own inventory (it pulls parts in before using them)
         private bool CargoHasAnyOf(IMySlimBlock slim)
         {
             missingBuffer.Clear();
             slim.GetMissingComponents(missingBuffer);
             if (missingBuffer.Count == 0) return false;
-            for (int c = 0; c < cargoContainers.Count; c++)
+            for (int c = 0; c <= cargoContainers.Count; c++)
             {
-                var inv = cargoContainers[c].GetInventory(0);
+                var inv = c < cargoContainers.Count ? cargoContainers[c].GetInventory(0)
+                        : welder != null ? welder.GetInventory(0) : null;
                 if (inv == null) continue;
                 itemBuffer.Clear();
                 inv.GetItems(itemBuffer);

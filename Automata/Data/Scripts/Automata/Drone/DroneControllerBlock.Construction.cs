@@ -39,7 +39,7 @@ namespace Automata.Drone
         {
             Running,
             Done,
-            SkipBlock,        // this NavigateToolTo and its tool task
+            SkipBlock,        // this NavigateToolTo, its tool task and its BackOut
             ToReturnHome,     // skip ahead to the job's ReturnHome
             Failed,           // end the job here
             Interrupted,      // someone else took the controls
@@ -52,7 +52,7 @@ namespace Automata.Drone
         private const int CONSTRUCTION_DETOUR_RAISES = 8;            // height raises tried before giving up on a block
         private const float CONSTRUCTION_ROUTE_TOLERANCE = 1.5f;     // m: arrival at detour / back-out points
         private const double CONSTRUCTION_BACKOUT_MIN = 5.0;         // m: back-out from the dock, at least
-        public const int CONSTRUCTION_STOP_PAUSE_TICKS = 120 * 60;   // "Stop" pauses stand-alone work for 5 min
+        public const int CONSTRUCTION_STOP_PAUSE_TICKS = 120 * 60;   // "Stop" pauses stand-alone work for 2 min
 
         private ConstructionComputer constructionComputer;           // embedded, BuiltInToDrone
         private readonly ConveyorNetwork homeNetwork = new ConveyorNetwork();
@@ -78,6 +78,8 @@ namespace Automata.Drone
         private readonly List<IHitInfo> rayHits = new List<IHitInfo>();
         private readonly List<Vector3D> routePoints = new List<Vector3D>();
         private int constructionPausedUntil = int.MinValue / 2;
+        private int stopResumeFrame = int.MinValue / 2;       // "Stop" pressed: its pause ends here (header countdown)
+        private int shownStopSeconds = -1;
         private string lastConstructionProblem;          // reported once until it changes
 
         private static readonly string COMPONENT_TYPE = "MyObjectBuilder_Component";

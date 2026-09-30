@@ -468,9 +468,14 @@ namespace Automata.Construction
             var inventory = new DiscreteInventory(components);
             if (type == Orchestrator.JobType.Weld) job.Tasks.Add(Orchestrator.Task.Load(inventory));
             job.Tasks.Add(Orchestrator.Task.NavigateToolTo(0, point, approach, g));
-            job.Tasks.Add(type == Orchestrator.JobType.Weld
+            var tool = type == Orchestrator.JobType.Weld
                 ? Orchestrator.Task.Weld(grid.EntityId, b.Position, false)
-                : Orchestrator.Task.Grind(grid.EntityId, b.Position));
+                : Orchestrator.Task.Grind(grid.EntityId, b.Position);
+            // Small grid: neighbours get welded too; weld until the cargo has nothing more for this block
+            if (type == Orchestrator.JobType.Weld && grid.GridSizeEnum == VRage.Game.MyCubeSize.Small)
+                tool.Completion = Orchestrator.ToolTaskCompletionTrigger.DroneInventoryEmpty;
+            job.Tasks.Add(tool);
+            job.Tasks.Add(Orchestrator.Task.BackOut(0, approach));
             job.Tasks.Add(Orchestrator.Task.ReturnHome());
             if (type == Orchestrator.JobType.Grind) job.Tasks.Add(Orchestrator.Task.Unload(inventory));
             job.CalculateTotalInventory();

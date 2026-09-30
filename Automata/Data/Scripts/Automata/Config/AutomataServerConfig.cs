@@ -145,6 +145,11 @@ namespace Automata.Config
             /// </summary>
             public int TaskTimeoutSeconds { get; internal set; } = 30;
             /// <summary>
+            /// Debug overlays (observation area, navigation targets) switch themselves off after this many seconds.
+            /// Sent to clients (they draw); they use the default until the server has answered.
+            /// </summary>
+            public int DebugDrawTimeoutSeconds { get; internal set; } = 600;
+            /// <summary>
             /// Automatic refresh only runs if the drone moved at least this far since the last scan (metres)...
             /// </summary>
             public double ConnectorScanMinMoveMeters { get; internal set; } = 250;
@@ -406,6 +411,7 @@ namespace Automata.Config
             Drone.MaxPowerThreshold = MathHelper.Clamp(ini.Get("Drone", "MaxPowerThreshold").ToSingle(Drone.MaxPowerThreshold), 50.0f, 99.0f);
             Drone.ComponentCheckIntervalMinSeconds = (uint)MathHelper.Clamp(ini.Get("Drone", "ComponentCheckIntervalSeconds").ToInt32((int)Drone.ComponentCheckIntervalMinSeconds), 60, 86400);
             Drone.TaskTimeoutSeconds = MathHelper.Clamp(ini.Get("Drone", "TaskTimeoutSeconds").ToInt32(Drone.TaskTimeoutSeconds), 10, 600);
+            Drone.DebugDrawTimeoutSeconds = MathHelper.Clamp(ini.Get("Drone", "DebugDrawTimeoutSeconds").ToInt32(Drone.DebugDrawTimeoutSeconds), 10, 3600);
             Drone.ConnectorScanIntervalSeconds = MathHelper.Clamp(ini.Get("Drone", "ConnectorScanIntervalSeconds").ToInt32(Drone.ConnectorScanIntervalSeconds), 10, 86400);
             Drone.ConnectorScanMinMoveMeters = MathHelper.Clamp(ini.Get("Drone", "ConnectorScanMinMoveMeters").ToDouble(Drone.ConnectorScanMinMoveMeters), 0.0, 10000.0);
             Drone.ConnectorScanMaxAgeSeconds = MathHelper.Clamp(ini.Get("Drone", "ConnectorScanMaxAgeSeconds").ToInt32(Drone.ConnectorScanMaxAgeSeconds), 60, 86400);

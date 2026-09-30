@@ -50,6 +50,7 @@ namespace Automata.Drone
         HomeNotStation,
         HomeBeacon,               // server -> clients only (selection is an action, validated on the server)
         BehaviourProfile,
+        TaskTimeout,
     }
 
     /// <summary>Things a player can order the drone to do from the terminal.</summary>
@@ -69,7 +70,7 @@ namespace Automata.Drone
         RequestAnchorList,
         StopOrders,
         SelectHomeBeacon,         // Id (0 = none)
-        DrawNavigation,           // Code 1 = send me the route for 2 minutes, 0 = stop
+        DrawNavigation,           // Code 1 = send me the route (debug draw timeout), 0 = stop
     }
 
     /// <summary>
@@ -180,6 +181,7 @@ namespace Automata.Drone
                 case DroneSettingKey.HomeNotStation:              p.Number = s.HomeNotStation ? 1 : 0; break;
                 case DroneSettingKey.HomeBeacon:                  p.Id = s.HomeBeaconId; break;
                 case DroneSettingKey.BehaviourProfile:            p.Number = (double)s.BehaviourProfile; break;
+                case DroneSettingKey.TaskTimeout:                 p.Number = s.TaskTimeoutSeconds; break;
             }
         }
 
@@ -268,6 +270,7 @@ namespace Automata.Drone
                     RefreshTerminal();
                     break;
                 case DroneSettingKey.BehaviourProfile:            Terminal_BehaviourProfileValue = (long)p.Number; break;
+                case DroneSettingKey.TaskTimeout:                 Terminal_TaskTimeoutSeconds = f; break;
             }
         }
         #endregion
@@ -387,7 +390,9 @@ namespace Automata.Drone
                     ClearFlightOrder();
                     orientationTargetSet = false;
                     StopJob();
+                    constructionPausedUntil = int.MinValue / 2;   // a new Stop restarts the countdown
                     PauseConstruction(CONSTRUCTION_STOP_PAUSE_TICKS);
+                    stopResumeFrame = constructionPausedUntil;
                     Report("Orders cleared");
                     break;
             }

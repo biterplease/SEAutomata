@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 
 using ProtoBuf;
+using Sandbox.ModAPI;
 
 using Automata.Drone;
 using Automata.Util;
@@ -15,6 +16,8 @@ namespace Digi.NetworkLib
     [ProtoInclude(12, typeof(Automata.Network.DroneLogPacket))]
     [ProtoInclude(13, typeof(Automata.Network.DroneAnchorListPacket))]
     [ProtoInclude(14, typeof(Automata.Network.DroneNavRoutePacket))]
+    [ProtoInclude(15, typeof(Automata.Network.ClientSettingsRequestPacket))]
+    [ProtoInclude(16, typeof(Automata.Network.ClientSettingsPacket))]
     public abstract partial class PacketBase
     {
     }
@@ -126,6 +129,41 @@ namespace Automata.Network
         {
             var drone = DroneControllerBlock.Find(EntityId);
             if (drone != null) drone.ReceiveNavRoute(Points, ReferenceOffset);
+        }
+    }
+
+    /// <summary>Client -> server, once per session: send me the server settings clients need.</summary>
+    [ProtoContract]
+    public class ClientSettingsRequestPacket : PacketBase
+    {
+        public ClientSettingsRequestPacket() { }
+
+        public override void Received(ref PacketInfo packetInfo, ulong senderSteamId)
+        {
+            if (!MyAPIGateway.Multiplayer.IsServer) return;
+            var drone = Automata.Config.ServerConfig.Instance.Drone;
+            if (drone == null) return;
+            AutomataSession.Instance?.Net?.SendToPlayer(new ClientSettingsPacket
+            {
+                DebugDrawTimeoutSeconds = drone.DebugDrawTimeoutSeconds,
+                TaskTimeoutSeconds = drone.TaskTimeoutSeconds,
+            }, senderSteamId);
+        }
+    }
+
+    /// <summary>Server -> one client: the server settings clients use (their own config is never loaded).</summary>
+    [ProtoContract]
+    public class ClientSettingsPacket : PacketBase
+    {
+        public ClientSettingsPacket() { }
+
+        [ProtoMember(1)] public int DebugDrawTimeoutSeconds;
+        [ProtoMember(2)] public int TaskTimeoutSeconds;          // upper limit of the per-drone task timeout
+
+        public override void Received(ref PacketInfo packetInfo, ulong senderSteamId)
+        {
+            if (MyAPIGateway.Multiplayer.IsServer) return;
+            DroneControllerBlock.ApplyClientSettings(this);
         }
     }
 }
