@@ -17,7 +17,7 @@ using Automata.VirtualNetwork;
 
 namespace Automata.Construction
 {
-    public class ConstructionComputer
+    public partial class ConstructionComputer
     {
         /// Queue of discovered, but yet unporsed Jobs.
         /// </summary>
@@ -370,54 +370,25 @@ namespace Automata.Construction
 
                     if (shouldWeld)
                     {
-                        _blockInventoryCache.Clear();
-                        _blockInventoryCache.AddItem(MyStringHash.GetOrCompute(block.BlockDefinition.Id.SubtypeName), 1);
+                        _componentsCache.Clear();
                         block.GetMissingComponents(_componentsCache);
-                        block.Orientation.GetQuaternion(out _quaternionCache);
-                        _quaternionDCache.X = _quaternionCache.X;
-                        _quaternionDCache.Y = _quaternionCache.Y;
-                        _quaternionDCache.Z = _quaternionCache.Z;
-                        _quaternionDCache.W = _quaternionCache.W;
-                        _jobCache.Add(new Orchestrator.Job
+                        var jobWeld = CreateSingleBlockJob(block, Orchestrator.JobType.Weld, _componentsCache);
+                        if (jobWeld != null)
                         {
-                            JobId = IdGenerator.GenerateId(ref _jobIdCounter, entityId),
-                            JobType = Orchestrator.JobType.WeldBlock,
-                            ComponentsInventory = new DiscreteInventory(_componentsCache),
-                            BlocksInventory = new DiscreteInventory(_blockInventoryCache),
-                            OrientationData = QuaternionDData.FromQuaternionD(_quaternionDCache),
-                            PositionData = Vector3DData.FromVector3D(blockPosition),
-                            OutOfOrchestratorRange = isOutOfAntennaRange,
-                            NaturalGravity = this.naturalGravity.Normalize(),
-                            IsStaticGrid = cubeBlock.CubeGrid.IsStatic,
-                            IsInSpace = this.naturalGravity.Normalize() < 0.2f,
-                        });
-                        jobsCreated++;
+                            _jobCache.Add(jobWeld);
+                            jobsCreated++;
+                        }
                     }
                     if (shouldGrind)
                     {
                         _componentsCache.Clear();
-                        _blockInventoryCache.Clear();
-                        _blockInventoryCache.AddItem(MyStringHash.GetOrCompute(block.BlockDefinition.Id.SubtypeName), 1);
                         AddMountedComponentsForGrind(block, _componentsCache);
-                        block.Orientation.GetQuaternion(out _quaternionCache);
-                        _quaternionDCache.X = _quaternionCache.X;
-                        _quaternionDCache.Y = _quaternionCache.Y;
-                        _quaternionDCache.Z = _quaternionCache.Z;
-                        _quaternionDCache.W = _quaternionCache.W;
-                        _jobCache.Add(new Orchestrator.Job
+                        var jobGrind = CreateSingleBlockJob(block, Orchestrator.JobType.Grind, _componentsCache);
+                        if (jobGrind != null)
                         {
-                            JobId = IdGenerator.GenerateId(ref _jobIdCounter, entityId),
-                            JobType = Orchestrator.JobType.GrindBlock,
-                             ComponentsInventory = new DiscreteInventory(_componentsCache),
-                            BlocksInventory = new DiscreteInventory(_blockInventoryCache),
-                            OrientationData = QuaternionDData.FromQuaternionD(_quaternionDCache),
-                            PositionData = Vector3DData.FromVector3D(blockPosition),
-                            OutOfOrchestratorRange = isOutOfAntennaRange,
-                             NaturalGravity = this.naturalGravity.Normalize(),
-                            IsStaticGrid = cubeBlock.CubeGrid.IsStatic,
-                            IsInSpace = this.naturalGravity.Normalize() < 0.2f,
-                        });
-                        jobsCreated++;
+                            _jobCache.Add(jobGrind);
+                            jobsCreated++;
+                        }
                     }
                 }
                 foreach (var job in _jobCache)
@@ -469,6 +440,44 @@ namespace Automata.Construction
             }
         }
 
+        /// <summary>
+        /// One block, one trip, world positions (announced jobs: the orchestrator adds where to load / dock).
+        /// Weld: load the missing components, put the welder on the block, weld it, go home.
+        /// Grind: put the grinder on the block, grind it, go home, unload what it gave.
+        /// Null when no face of the block is free (can't be reached right now).
+        /// </summary>
+        private Orchestrator.Job CreateSingleBlockJob(IMySlimBlock b, Orchestrator.JobType type, Dictionary<string, int> components)
+        {
+            var grid = b.CubeGrid;
+            float g = this.naturalGravity.Length();
+            Vector3D up = g > 0.01f ? -Vector3D.Normalize(this.naturalGravity) : Vector3D.Zero;
+            // The tool works on one of the block's cell faces, in along its normal
+            Vector3I faceCell, normal;
+            if (!ChooseFace(grid, b.Min, b.Max, grid.WorldVolume.Center, up, 1, null, out faceCell, out normal)) return null;
+            Vector3D n;
+            Vector3D point = FacePoint(grid, faceCell, normal, out n);
+            Vector3D approach = point + n * APPROACH_DISTANCE;
+
+            var job = new Orchestrator.Job
+            {
+                JobId = IdGenerator.GenerateId(ref _jobIdCounter, entityId),
+                JobType = type,
+                CreatedTime = DateTime.UtcNow,
+                BlockCount = 1,
+            };
+            var inventory = new DiscreteInventory(components);
+            if (type == Orchestrator.JobType.Weld) job.Tasks.Add(Orchestrator.Task.Load(inventory));
+            job.Tasks.Add(Orchestrator.Task.NavigateToolTo(0, point, approach, g));
+            job.Tasks.Add(type == Orchestrator.JobType.Weld
+                ? Orchestrator.Task.Weld(grid.EntityId, b.Position, false)
+                : Orchestrator.Task.Grind(grid.EntityId, b.Position));
+            job.Tasks.Add(Orchestrator.Task.ReturnHome());
+            if (type == Orchestrator.JobType.Grind) job.Tasks.Add(Orchestrator.Task.Unload(inventory));
+            job.CalculateTotalInventory();
+            if (type == Orchestrator.JobType.Grind) job.TotalInventory = inventory;   // what the trip brings back
+            return job;
+        }
+
         private void SetGravity(IMyCubeBlock cubeBlock)
         {
             var blockPosition = cubeBlock.CubeGrid.GridIntegerToWorld(cubeBlock.Position);
@@ -492,22 +501,11 @@ namespace Automata.Construction
                     Orchestrator.Job job;
                     if (jobQueue.TryDequeue(out job))
                     {
+                        var cube = Entity as IMyCubeBlock;
                         var msg = new Message<JobAnnouncement>
                         {
-                            Payload = new JobAnnouncement
-                            {
-                                JobId = job.JobId,
-                                Type = job.JobType,
-                                ComponentsInventory = job.ComponentsInventory,
-                                BlocksInventory = job.BlocksInventory,
-                                PositionData = job.PositionData,
-                                OrientationData = job.OrientationData,
-                                CreatedTime = job.CreatedTime,
-                                EntityType = AutomataEntityType.ConstructionComputerBlock,
-                                NaturalGravity = job.NaturalGravity,
-                                IsStaticGrid = job.IsStaticGrid,
-                                IsInSpace = job.IsInSpace,
-                            },
+                            Payload = JobAnnouncement.FromJob(job, AutomataEntityType.ConstructionComputerBlock,
+                                                              cube != null && cube.CubeGrid != null && cube.CubeGrid.IsStatic),
                             MessageId = IdGenerator.GenerateId(ref _messageCounter, entityId),
                             CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
                             SenderId = entityId,

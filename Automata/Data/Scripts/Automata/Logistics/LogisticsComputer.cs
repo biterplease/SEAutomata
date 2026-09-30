@@ -329,6 +329,12 @@ namespace Automata.Logistics
                 if (cn.IsUpdating) continue;
                 cn.UpdateInventories();
             }
+            // TODO (orchestrator workflow): quotas and limits, set by the player on this block. After each scan,
+            // compare every network's inventory with them: below a quota -> announce a DeliverMissingInventory job
+            // ("keep 100 steel plates here": push into this network); above a limit -> announce a
+            // CollectInventorySurplus job (pull out of it). Announced like the construction computer's jobs
+            // (JobAnnouncement, CONSTRUCTION_COMPUTER_JOB_ANNOUNCEMENT); the orchestrator turns them into task
+            // lists. Don't re-announce while a job for the same items is still open.
         }
 
 
@@ -392,7 +398,7 @@ namespace Automata.Logistics
                 bidOutbox.Clear();
                 switch (auction.JobType)
                 {
-                    case Orchestrator.JobType.WeldBlock:
+                    case Orchestrator.JobType.Weld:
                         uint bidId = IdGenerator.GenerateId(ref _bidRoundBidCounter, entityId);
                         // check each conveyor network, if one can fully fulfill the request,
                         // send bid immediately
@@ -403,8 +409,14 @@ namespace Automata.Logistics
                             if (cn.IsUpdating) continue;
 
                             var fulfillmentData = cn.CanFulfillRequest(auction.ComponentsInventory, auction.AuctionId);
-                            if (fulfillmentData.Fulfillment.HasFlag(InventoryFulfillment.SatisfyFully) ||
-                                fulfillmentData.Fulfillment.HasFlag(InventoryFulfillment.SatisfyPartial))
+                            // Drones dock at a free ship connector (collectors can't be docked at)
+                            IOLocationData dock = null;
+                            if (fulfillmentData.IOBlockPositions != null)
+                                for (int io = 0; io < fulfillmentData.IOBlockPositions.Count && dock == null; io++)
+                                    if (fulfillmentData.IOBlockPositions[io] != null && fulfillmentData.IOBlockPositions[io].BlockType == IOBlockType.ShipConnector)
+                                        dock = fulfillmentData.IOBlockPositions[io];
+                            if (dock != null && (fulfillmentData.Fulfillment.HasFlag(InventoryFulfillment.SatisfyFully) ||
+                                fulfillmentData.Fulfillment.HasFlag(InventoryFulfillment.SatisfyPartial)))
                             {
                                 // enqueue partial or total fulfillment
                                 bidOutbox.Enqueue(new Message<Bid>
@@ -418,7 +430,7 @@ namespace Automata.Logistics
                                         BidId = bidId,
                                         InventoryFulfillmentFlags = fulfillmentData.Fulfillment,
                                         BidInventory = fulfillmentData.Inventory,
-                                        IOLocationData = fulfillmentData.IOBlockPositions[0],
+                                        IOLocationData = dock,
                                     },
                                     MessageId = IdGenerator.GenerateId(ref _messageCounter, entityId),
                                     CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
@@ -440,6 +452,11 @@ namespace Automata.Logistics
                     // case Orchestrator.JobType.Logistics:
                     //     inventoryFulfillment = InventoryFulfillment.SatisfyFully;
                     //     break;
+                    // TODO (orchestrator workflow): bid on taking inventory in, not only on supplying it:
+                    //  - Grind: free volume for the components grinding returns (InventoryFulfillment = can take).
+                    //  - MineOre: refineries that process the ore, and room for it.
+                    //  - DeliverMissingInventory: can supply (part of) the missing items (not the requesting LC).
+                    //  - CollectInventorySurplus: room for (part of) the surplus.
                     default:
                         break;
                 }

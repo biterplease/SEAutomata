@@ -319,25 +319,20 @@ namespace Automata.Mining
             {
                 gravityNorm /= g;
             }
-            float naturalG = g;
-            bool isInSpace = naturalG < 0.2f;
-            QuaternionD orientation = QuaternionD.Identity;
-            return new Orchestrator.Job
+            // Drill from above in gravity (the deposit is under the surface); straight in otherwise
+            Vector3D up = g > 1e-6f ? -(Vector3D)gravityNorm : Vector3D.Zero;
+            var job = new Orchestrator.Job
             {
                 JobId = IdGenerator.GenerateId(ref jobIdCounter, block.EntityId),
                 JobType = Orchestrator.JobType.MineOre,
-                ComponentsInventory = payload,
-                BlocksInventory = new DiscreteInventory(),
-                Tasks = new List<Orchestrator.Task>(),
-                PositionData = Vector3DData.FromVector3D(d.Position),
-                OrientationData = QuaternionDData.FromQuaternionD(orientation),
                 CreatedTime = DateTime.UtcNow,
-                NaturalGravity = naturalG,
-                IsStaticGrid = block.CubeGrid != null && block.CubeGrid.IsStatic,
-                IsInSpace = isInSpace,
-                IsInAtmosphere = !isInSpace && naturalG > 0.2f,
-                OutOfOrchestratorRange = false,
             };
+            job.Tasks.Add(Orchestrator.Task.NavigateToolTo(0, d.Position, d.Position + up * Construction.ConstructionComputer.APPROACH_DISTANCE, g));
+            job.Tasks.Add(Orchestrator.Task.Mine());
+            job.Tasks.Add(Orchestrator.Task.ReturnHome());
+            job.Tasks.Add(Orchestrator.Task.Unload(payload));
+            job.TotalInventory = payload;   // what the trip is expected to bring back
+            return job;
         }
 
         /// <summary>
@@ -381,21 +376,8 @@ namespace Automata.Mining
                 }
                 Message<JobAnnouncement> msg = new Message<JobAnnouncement>
                 {
-                    Payload = new JobAnnouncement
-                    {
-                        JobId = job.JobId,
-                        Type = job.JobType,
-                        ComponentsInventory = job.ComponentsInventory,
-                        BlocksInventory = job.BlocksInventory,
-                        PositionData = job.PositionData,
-                        OrientationData = job.OrientationData,
-                        CreatedTime = job.CreatedTime,
-                        EntityType = AutomataEntityType.MiningSurveyorBlock,
-                        NaturalGravity = job.NaturalGravity,
-                        IsStaticGrid = job.IsStaticGrid,
-                        IsInSpace = job.IsInSpace,
-                        IsInAtmosphere = job.IsInAtmosphere,
-                    },
+                    Payload = JobAnnouncement.FromJob(job, AutomataEntityType.MiningSurveyorBlock,
+                                                      block.CubeGrid != null && block.CubeGrid.IsStatic),
                     MessageId = IdGenerator.GenerateId(ref messageCounter, block.EntityId),
                     CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
                     SenderId = block.EntityId,

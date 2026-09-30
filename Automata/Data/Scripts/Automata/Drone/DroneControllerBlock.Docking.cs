@@ -30,7 +30,10 @@ namespace Automata.Drone
         private readonly DroneStatusDisplay display = new DroneStatusDisplay();
 
         // Docking
-        private long dockingHomeId;          // home connector being docked to (0 = not docking)
+        private long dockingHomeId;          // connector being docked to, home or not (0 = not docking)
+
+        /// <summary>Docking at the home connector right now (not at some other connector for a job).</summary>
+        private bool IsGoingHome { get { return dockingHomeId != 0 && settings != null && dockingHomeId == settings.HomeConnectorId; } }
         private long dockingConnectorId;     // drone connector used
         private int dockingWaitTicks;
 
@@ -54,9 +57,19 @@ namespace Automata.Drone
         /// </summary>
         private void Report(string format, params object[] args)
         {
+            if (!IsServer) return;   // simulation runs on the server; clients get these lines relayed
             string text = args != null && args.Length > 0 ? string.Format(format, args) : format;
             terminalLogger?.Echo(text);
             display.Add(text);
+            Log.Debug("Drone {0}: {1}", Entity?.EntityId ?? 0, text);
+            RelayLog(text);
+        }
+
+        // Local UI feedback (input validation before a request is sent). Never relayed.
+        private void Feedback(string format, params object[] args)
+        {
+            string text = args != null && args.Length > 0 ? string.Format(format, args) : format;
+            terminalLogger?.Echo(text);
         }
 
         private void SetState(State state)
@@ -177,6 +190,31 @@ namespace Automata.Drone
             if (!recompute && settings.HomeDockConnectorId != 0 && FindConnectorMount(settings.HomeDockConnectorId) >= 0
                 && settings.HomeDockForward.ToVector3D().LengthSquared() > 0.5)
                 return true;
+            Vector3DData offset, forward, up;
+            int mi;
+            double tilt;
+            if (!ComputeDockPose(home, out offset, out forward, out up, out mi, out tilt)) return false;
+            settings.HomeDockOffset = offset;
+            settings.HomeDockForward = forward;
+            settings.HomeDockUp = up;
+            settings.HomeDockConnectorId = connectorMounts[mi].Block.EntityId;
+            settings.HomeDockRecorded = false;
+            SaveSettings();
+            if (flightState.InGravity && MathHelperD.ToDegrees(tilt) > 30)
+                Report("Warning: docking tilts the drone {0:F0}°", MathHelperD.ToDegrees(tilt));
+            return true;
+        }
+
+        /// <summary>
+        /// Dock pose for any connector, in that connector's frame: the drone connector needing the least tilt,
+        /// placed on the target's connection point, facing it.
+        /// </summary>
+        private bool ComputeDockPose(IMyShipConnector home, out Vector3DData offset, out Vector3DData forward, out Vector3DData upDir,
+                                     out int mountIndex, out double tilt)
+        {
+            offset = forward = upDir = default(Vector3DData);
+            mountIndex = -1;
+            tilt = 0;
             if (connectorMounts.Count == 0) return false;
             CaptureFlightState();
 
@@ -193,22 +231,19 @@ namespace Automata.Drone
                 ToolMount m = connectorMounts[i];
                 if (m.Block == null || !m.Block.IsFunctional || !m.CanConnect || m.SmallConnector != homeSmall) continue;
                 MatrixD frame = MountFrame(ref m, -aH);
-                double tilt = Math.Acos(MathHelperD.Clamp(Vector3D.Dot(frame.Up, gUp), -1, 1));
-                if (tilt < bestTilt) { bestTilt = tilt; best = i; bestFrame = frame; }
+                double t = Math.Acos(MathHelperD.Clamp(Vector3D.Dot(frame.Up, gUp), -1, 1));
+                if (t < bestTilt) { bestTilt = t; best = i; bestFrame = frame; }
             }
             if (best < 0) return false;
 
             ToolMount mount = connectorMounts[best];
             Vector3D controllerPos = pH - Vector3D.TransformNormal(mount.LocalPoint, bestFrame);
             MatrixD hm = home.WorldMatrix;
-            settings.HomeDockOffset = Vector3DData.FromVector3D(WorldToAnchorPoint(ref hm, controllerPos));
-            settings.HomeDockForward = Vector3DData.FromVector3D(WorldToAnchorDir(ref hm, bestFrame.Forward));
-            settings.HomeDockUp = Vector3DData.FromVector3D(WorldToAnchorDir(ref hm, bestFrame.Up));
-            settings.HomeDockConnectorId = mount.Block.EntityId;
-            settings.HomeDockRecorded = false;
-            SaveSettings();
-            if (flightState.InGravity && MathHelperD.ToDegrees(bestTilt) > 30)
-                Report("Warning: docking tilts the drone {0:F0}°", MathHelperD.ToDegrees(bestTilt));
+            offset = Vector3DData.FromVector3D(WorldToAnchorPoint(ref hm, controllerPos));
+            forward = Vector3DData.FromVector3D(WorldToAnchorDir(ref hm, bestFrame.Forward));
+            upDir = Vector3DData.FromVector3D(WorldToAnchorDir(ref hm, bestFrame.Up));
+            mountIndex = best;
+            tilt = bestTilt;
             return true;
         }
 
@@ -216,7 +251,7 @@ namespace Automata.Drone
         /// Records the current pose as the home dock pose, when one of the drone's connectors is locked to an
         /// allowed connector (owner / faction). That connector becomes the home connector.
         /// </summary>
-        private bool RecordDockPoseFromConnection()
+        private bool RecordDockPoseFromConnection(long identity)
         {
             CaptureFlightState();
             for (int i = 0; i < connectors.Count; i++)
@@ -224,7 +259,7 @@ namespace Automata.Drone
                 var c = connectors[i];
                 if (!c.IsConnected || c.OtherConnector == null) continue;
                 var other = c.OtherConnector;
-                if (AnchorDirectory.Resolve(block, other.EntityId) == null || !AnchorDirectory.ViewerAllowed(other.OwnerId)) continue;
+                if (AnchorDirectory.Resolve(block, other.EntityId) == null || !AnchorDirectory.IsAllowed(identity, other.OwnerId)) continue;
                 MatrixD hm = other.WorldMatrix;
                 settings.HomeConnectorId = other.EntityId;
                 settings.HomeDockOffset = Vector3DData.FromVector3D(WorldToAnchorPoint(ref hm, flightState.Position));
@@ -260,24 +295,59 @@ namespace Automata.Drone
             }
             if (!EnsureDockPose(home, false)) { Report("Home: no usable drone connector"); return false; }
             int mi = FindConnectorMount(settings.HomeDockConnectorId);
+            if (!StartDocking(home, mi, settings.HomeDockOffset, settings.HomeDockForward, settings.HomeDockUp)) return false;
+            if (preflightStage == 0) SetState(State.ReturningToBase);
+            Report("Going home: {0} ({1:F0} m)", home.CustomName, Vector3D.Distance(flightState.Position, home.GetPosition()));
+            return true;
+        }
+
+        /// <summary>
+        /// Docks at any allowed connector (drone owner / faction, resolved by the caller), e.g. a logistics
+        /// computer's connector for a job's load step. The pose is computed, not stored.
+        /// </summary>
+        public bool DockAtConnector(IMyShipConnector target)
+        {
+            if (!initialized || settings == null || target == null) return false;
+            CaptureFlightState();
+            if (!target.IsWorking) { Report("Dock: {0} is not working", target.CustomName); return false; }
+            if (target.IsConnected)
+            {
+                var other = target.OtherConnector;
+                if (other != null && FindConnectorMount(other.EntityId) >= 0) return true;   // already there
+                Report("Dock: {0} is occupied", target.CustomName);
+                return false;
+            }
+            Vector3DData offset, forward, up;
+            int mi;
+            double tilt;
+            if (!ComputeDockPose(target, out offset, out forward, out up, out mi, out tilt)) { Report("Dock: no usable drone connector"); return false; }
+            if (!StartDocking(target, mi, offset, forward, up)) return false;
+            Report("Docking at {0} ({1:F0} m)", target.CustomName, Vector3D.Distance(flightState.Position, target.GetPosition()));
+            return true;
+        }
+
+        // Anchored to the target connector (moving targets work): transit, align, final approach at Safe speed
+        private bool StartDocking(IMyShipConnector target, int mi, Vector3DData dockOffset, Vector3DData dockForward, Vector3DData dockUp)
+        {
+            if (mi < 0) return false;
             var droneConnector = connectorMounts[mi].Block as IMyShipConnector;
 
             Vector3D pH, aH;
-            ConnectorGeometry(home, out pH, out aH);
-            MatrixD hm = home.WorldMatrix;
+            ConnectorGeometry(target, out pH, out aH);
+            MatrixD hm = target.WorldMatrix;
             // Position the drone's connection point, not the controller: orientation errors then don't move
             // the connector off the line (the lever arm to the connector can be several metres).
             ToolMount mount = connectorMounts[mi];
-            MatrixD dockFrameLocal = MatrixD.CreateWorld(Vector3D.Zero, settings.HomeDockForward.ToVector3D(), settings.HomeDockUp.ToVector3D());
-            Vector3D connectorLocal = settings.HomeDockOffset.ToVector3D() + Vector3D.TransformNormal(mount.LocalPoint, dockFrameLocal);
+            MatrixD dockFrameLocal = MatrixD.CreateWorld(Vector3D.Zero, dockForward.ToVector3D(), dockUp.ToVector3D());
+            Vector3D connectorLocal = dockOffset.ToVector3D() + Vector3D.TransformNormal(mount.LocalPoint, dockFrameLocal);
             Vector3D approachLocal = connectorLocal + WorldToAnchorDir(ref hm, aH) * DOCK_APPROACH_DISTANCE;
 
-            var order = OrderGoToRelative(home, connectorLocal, approachLocal);
-            if (order == null) { Report("Home: order refused"); return false; }
+            var order = OrderGoToRelative(target, connectorLocal, approachLocal);
+            if (order == null) { Report("Dock: order refused"); return false; }
             order.ReferenceOffset = Vector3DData.FromVector3D(mount.LocalPoint);
             order.Orientation = FlightOrientationMode.Explicit;
-            order.ForwardLocal = settings.HomeDockForward;
-            order.UpLocal = settings.HomeDockUp;
+            order.ForwardLocal = dockForward;
+            order.UpLocal = dockUp;
             order.IgnoreGravityLimits = true;
             order.FinalSpeed = SafeSpeed;
             order.LineTolerance = DOCK_LINE_TOLERANCE;   // not WaypointTolerance: connectors need ~0.59 m
@@ -290,11 +360,9 @@ namespace Automata.Drone
                 if (!droneConnector.Enabled) droneConnector.Enabled = true;
                 EnsurePowerTransferOverride(droneConnector);
             }
-            dockingHomeId = home.EntityId;
+            dockingHomeId = target.EntityId;   // the connector being docked at (home or not)
             dockingConnectorId = droneConnector != null ? droneConnector.EntityId : 0;
             dockingWaitTicks = 0;
-            if (preflightStage == 0) SetState(State.ReturningToBase);
-            Report("Going home: {0} ({1:F0} m)", home.CustomName, Vector3D.Distance(flightState.Position, pH));
             return true;
         }
 
@@ -354,6 +422,7 @@ namespace Automata.Drone
 
         private static void EnsurePowerTransferOverride(IMyShipConnector c)
         {
+            if (!IsServer) return;
             try
             {
                 if (!c.GetValueBool("PowerTransferOverride")) c.SetValueBool("PowerTransferOverride", true);
@@ -483,6 +552,7 @@ namespace Automata.Drone
             combinedThrustProfile = CalculateThrustProfile(shipController, physicalMass, allThrusters);
             commandedVelocity = flightState.LinearVelocity;
             ResetIntegralTerms();
+            ResetThrustGains();
             double pct = LoadPercent();
             Report("Pre-flight: {0:N0} kg, load {1:F0}%", physicalMass, pct);
             CheckLoad();
@@ -519,6 +589,7 @@ namespace Automata.Drone
             }
             h2Percent = capacity > 0 ? (int)Math.Round(gas / capacity * 100) : -1;
             display.SetHeader(StateLabel(currentState), batteryPercent, h2Percent);
+            if (!settings.IsEnabled) return;   // AI off: levels for the header only
 
             bool docked = currentState == State.Docked;
             if (settings.MonitorBatteryLevels && batteryPercent >= 0)
@@ -549,7 +620,8 @@ namespace Automata.Drone
             }
 
             // Level-triggered: keep trying to get home (refused, replaced by another order...) with a back-off
-            if ((needsBatteryRecharge || needsHydrogenRefuel) && !docked && dockingHomeId == 0 && preflightStage == 0
+            // (docked somewhere else, e.g. at a job's connector, still counts as "not home")
+            if ((needsBatteryRecharge || needsHydrogenRefuel) && !IsDockedAtHome() && !IsGoingHome && preflightStage == 0
                 && HasHomeConnector && now - lastAutoHomeFrame >= AUTO_HOME_RETRY_TICKS)
             {
                 lastAutoHomeFrame = now;
@@ -601,7 +673,9 @@ namespace Automata.Drone
                 if (level == 2)
                 {
                     Report("Max load exceeded ({0:F0}% > {1:F0}%), offloading", pct, limit);
-                    if (dockingHomeId == 0 && HasHomeConnector) GoHome();
+                    // Construction batches are planned to the limit: only abort one that is still collecting (grinding)
+                    if (cPhase == ConstructionPhase.Running) AbortJobToHome();
+                    else if (!IsGoingHome && HasHomeConnector && cPhase == ConstructionPhase.Idle) GoHome();
                 }
                 else Report("Max load reached ({0:F0}% of {1:F0}%)", pct, limit);
             }

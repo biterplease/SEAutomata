@@ -4,7 +4,7 @@ using VRageMath;
 using Automata.Util;
 using System.Collections.Generic;
 
-using InventoryClass = Automata.Inventory.DiscreteInventory;
+using Automata.Inventory;
 
 namespace Automata.Orchestrator
 {
@@ -113,21 +113,23 @@ namespace Automata.Orchestrator
         [ProtoEnum]
         DelegateIfNoDrones = 8,
     }
-    [Flags, ProtoContract]
+    [ProtoContract]
     public enum JobType : byte
     {
+        [ProtoEnum]
+        None = 0,
         /// <summary>
-        /// Weld a block with needed components.
+        /// Weld blocks with needed components.
         /// </summary>
         [ProtoEnum]
-        WeldBlock = 1,
+        Weld = 1,
         /// <summary>
-        /// Grind a block down until desired capacity.
+        /// Grind blocks down.
         /// </summary>
         [ProtoEnum]
-        GrindBlock = 2,
+        Grind = 2,
         /// <summary>
-        /// When a logistics Computer is missing an inventory qutoa, collect it somewhere and deliver it to satisfy the quota.
+        /// When a logistics Computer is missing an inventory quota, collect it somewhere and deliver it to satisfy the quota.
         /// </summary>
         [ProtoEnum]
         DeliverMissingInventory = 3,
@@ -142,223 +144,272 @@ namespace Automata.Orchestrator
         [ProtoEnum]
         MineOre = 5,
     }
+
     /// <summary>
-    /// Task types are the specific steps needed to complete a job.
-    /// They are simple, one-step actions by nature, and should compose to larger scale jobs.
-    /// Tasks always include a location, and optionally a payload, and a "thing to do", like welding, grinding, drillinc, etc.
+    /// One single-action step of a job. Tasks are simple by nature and compose into jobs; the drone runs them in
+    /// order. The type decides which fields of <see cref="Task"/> are used (see <see cref="Task.Kind"/>).
     /// </summary>
-    [Flags, ProtoContract]
-    public enum TaskType : ushort
+    [ProtoContract]
+    public enum TaskType : byte
+    {
+        [ProtoEnum] None = 0,
+        /// <summary>Move the drone (controller) to Position, coming in along ApproachFrom -> Position.</summary>
+        [ProtoEnum] NavigateTo = 1,
+        /// <summary>
+        /// Put the tool of the NEXT task (weld / grind / mine) on Position, coming in along ApproachFrom -> Position,
+        /// with the tool pointing that way. Blocks: Position is the centre of one of the block's cell faces (never
+        /// its centre, an edge or a vertex) and ApproachFrom lies on that face's normal.
+        /// </summary>
+        [ProtoEnum] NavigateToolTo = 2,
+        /// <summary>Connect to the connector TargetEntityId (Position / ApproachFrom: its connection point and axis).</summary>
+        [ProtoEnum] DockAt = 3,
+        /// <summary>Fly home and dock at the drone's home connector (the drone knows where that is).</summary>
+        [ProtoEnum] ReturnHome = 4,
+        /// <summary>While docked: pull Inventory from the conveyor network on the other side of the connector.</summary>
+        [ProtoEnum] LoadInventory = 5,
+        /// <summary>While docked: push the Inventory item types into that network. Null / empty = everything the job dealt in (construction: components).</summary>
+        [ProtoEnum] UnloadInventory = 6,
+        /// <summary>Weld the block TargetBlock of grid TargetEntityId until Completion.</summary>
+        [ProtoEnum] WeldBlock = 7,
+        /// <summary>Grind the block TargetBlock of grid TargetEntityId until Completion.</summary>
+        [ProtoEnum] GrindBlock = 8,
+        /// <summary>Drill where the tool was put until Completion (usually DroneInventoryFull).</summary>
+        [ProtoEnum] Mine = 9,
+        /// <summary>
+        /// Messenger pigeon protocol. Deliver a message payload to a friendly Automata block (TargetEntityId).
+        /// Used when no antenna comms are available: carries messages between isolated networks.
+        /// </summary>
+        [ProtoEnum] DeliverMessage = 10,
+    }
+
+    /// <summary>Which fields a task uses; derived from its type (not sent).</summary>
+    public enum TaskKind : byte
+    {
+        None,
+        Navigation,   // Position, ApproachFrom, RelativeBeaconEntityId, NaturalGravity (+ TargetEntityId for DockAt)
+        Inventory,    // Inventory
+        Tool,         // TargetEntityId, TargetBlock, IsProjected, Completion, CompletionValue
+        Message,      // TargetEntityId
+    }
+
+    /// <summary>
+    /// When a tool task is done. Named as the game names block states (IMySlimBlock): IsFullIntegrity (welded
+    /// to full), IsFullyDismounted (ground down and removed). IsDestroyed is damage, which is not what a tool does.
+    /// </summary>
+    [ProtoContract]
+    public enum ToolTaskCompletionTrigger : byte
+    {
+        /// <summary>Weld: IsFullIntegrity (and no deformation).</summary>
+        [ProtoEnum] BlockFullIntegrity = 0,
+        /// <summary>Grind: IsFullyDismounted, i.e. the block is gone from its grid.</summary>
+        [ProtoEnum] BlockFullyDismounted = 1,
+        /// <summary>CompletionValue = integrity percent (0-100).</summary>
+        [ProtoEnum] BlockIntegrityPercent = 2,
+        [ProtoEnum] DroneInventoryFull = 3,
+        [ProtoEnum] DroneInventoryEmpty = 4,
+        /// <summary>CompletionValue = seconds.</summary>
+        [ProtoEnum] Timespan = 5,
+    }
+
+    /// <summary>Why a task could not be carried out. Reported by the drone; the job goes on or ends by task type.</summary>
+    public enum TaskFailure : byte
     {
         None = 0,
-        /// <summary>
-        /// Fetch inventory at location and orientation.
-        /// </summary>
-        [ProtoEnum]
-        CollectInventory = 1,
-        /// <summary>
-        /// Deliver inventory at location and orientation.
-        /// </summary>
-        [ProtoEnum]
-        DeliverInventory = 2,
-        /// <summary>
-        /// Go to a specific location, usually in preparation for the next task.
-        /// </summary>
-        [ProtoEnum]
-        ApproachLocation = 4,
-        /// <summary>
-        /// Weld block at location and orientation, assumed to have partial or total inventory for welding in cargo.
-        /// </summary>
-        [ProtoEnum]
-        WeldBlock = 8,
-        /// <summary>
-        /// Grind block at location and orientation, assumed to have space in cargo for partial or total components
-        /// </summary>
-        [ProtoEnum]
-        GrindBlock = 16,
-        /// <summary>
-        /// Mine a specific ore, detected via Ore Detector.
-        /// </summary>
-        [ProtoEnum]
-        MineOre = 32,
-        /// <summary>
-        /// When at location, search for friendly Logistics Computers, and start handshake to get directions
-        /// for specific connector with required inventory..
-        /// </summary>
-        [ProtoEnum]
-        ScanCollectInventory = 64,
-        /// <summary>
-        /// When at location, search for friendly Logistics Computers, and start handshake to get directions
-        /// for specific connector where inventory will be delivered.
-        /// </summary>
-        [ProtoEnum]
-        ScanDeliverInventory = 128,
-        /// <summary>
-        /// Order drone to return home after current task set is complete. This should be sent when a drone is
-        /// expected to leave the orchestrator range.
-        /// </summary>
-        [ProtoEnum]
-        ReturnHome = 256, // 2^8
-        /// <summary>
-        /// This signals the drone that, once the current task set is complete, it will decouple from the issuing Orchestrator,
-        /// allowing it to be adopted by a different Orchestrator.
-        /// </summary>
-        [ProtoEnum]
-        BecomeOrphan = 512, // 2^9
-        /// <summary>
-        /// Deliver a message payload to a friendy IAI block. This is used when no antenna comms are available, and would still
-        /// allow async networking by carrying messages between isolated networks.
-        /// </summary>
-        [ProtoEnum]
-        MessengerPigeon = 1024, // 2^10
+        /// <summary>Weld: the block is already at full integrity (someone else got there first).</summary>
+        AlreadyFullIntegrity,
+        /// <summary>Grind: the block is already dismounted / gone. Weld: a built block is gone.</summary>
+        TargetRemoved,
+        /// <summary>Mine: drilling yields nothing at the location.</summary>
+        NoOre,
+        /// <summary>Load: the conveyor network doesn't have (all of) the items.</summary>
+        InsufficientMaterials,
+        /// <summary>Unload: the conveyor network has no room for (all of) the items.</summary>
+        NoCargoSpace,
+        /// <summary>The task took longer than the task timeout (navigation: no progress for that long).</summary>
+        Timeout,
+        /// <summary>No clear way to the position.</summary>
+        Unreachable,
+        /// <summary>The drone lacks the tool / connector the task needs.</summary>
+        MissingEquipment,
+        /// <summary>Beacon / connector / grid not found, or not the drone owner's or their faction's.</summary>
+        TargetNotFound,
     }
+
+    /// <summary>
+    /// A task: one struct for every kind, discriminated by <see cref="Type"/>. Protobuf only writes fields that
+    /// differ from their default, so the fields a type doesn't use cost nothing on the wire (unlike a
+    /// polymorphic list, which needs a sub-type wrapper per item, and can't hold structs at all).
+    /// Fields are ordered largest first for packing (96 bytes).
+    /// Positions are world (absolute), or, when RelativeBeaconEntityId != 0, in that beacon's frame (Right, Up,
+    /// Forward from its centre) so work on a moving grid follows it. Never relative to a drone's home connector:
+    /// jobs are shared with orchestrators, which know nothing about a bidding drone's home.
+    /// </summary>
+    [Serializable, ProtoContract(UseProtoMembersOnly = true)]
+    public struct Task
+    {
+        [ProtoMember(3)] public Vector3DData Position;
+        [ProtoMember(4)] public Vector3DData ApproachFrom;
+        [ProtoMember(10)] public DiscreteInventory Inventory;
+        /// <summary>Frame for Position / ApproachFrom: a beacon of the drone owner / their faction; 0 = world.</summary>
+        [ProtoMember(2)] public long RelativeBeaconEntityId;
+        /// <summary>Tool tasks: the grid (projections: the grid the block will be built on). DockAt: the connector.</summary>
+        [ProtoMember(6)] public long TargetEntityId;
+        /// <summary>Tool tasks: the block's cell in that grid (projections: the cell it will occupy).</summary>
+        [ProtoMember(7)] public Vector3IData TargetBlock;
+        /// <summary>Magnitude of natural gravity at Position (m/s²), for planning.</summary>
+        [ProtoMember(5)] public float NaturalGravity;
+        /// <summary>Tool tasks: percent or seconds, depending on Completion.</summary>
+        [ProtoMember(9)] public float CompletionValue;
+        [ProtoMember(1)] public TaskType Type;
+        [ProtoMember(8)] public ToolTaskCompletionTrigger Completion;
+        [ProtoMember(11)] public bool IsProjected;
+
+        public TaskKind Kind { get { return KindOf(Type); } }
+
+        public static TaskKind KindOf(TaskType type)
+        {
+            switch (type)
+            {
+                case TaskType.NavigateTo:
+                case TaskType.NavigateToolTo:
+                case TaskType.DockAt:
+                case TaskType.ReturnHome:      return TaskKind.Navigation;
+                case TaskType.LoadInventory:
+                case TaskType.UnloadInventory: return TaskKind.Inventory;
+                case TaskType.WeldBlock:
+                case TaskType.GrindBlock:
+                case TaskType.Mine:            return TaskKind.Tool;
+                case TaskType.DeliverMessage:  return TaskKind.Message;
+                default:                       return TaskKind.None;
+            }
+        }
+
+        public static Task NavigateTo(long beaconId, Vector3D position, Vector3D approachFrom, float naturalGravity = 0)
+        {
+            return new Task
+            {
+                Type = TaskType.NavigateTo, RelativeBeaconEntityId = beaconId, NaturalGravity = naturalGravity,
+                Position = Vector3DData.FromVector3D(position), ApproachFrom = Vector3DData.FromVector3D(approachFrom),
+            };
+        }
+
+        public static Task NavigateToolTo(long beaconId, Vector3D position, Vector3D approachFrom, float naturalGravity = 0)
+        {
+            return new Task
+            {
+                Type = TaskType.NavigateToolTo, RelativeBeaconEntityId = beaconId, NaturalGravity = naturalGravity,
+                Position = Vector3DData.FromVector3D(position), ApproachFrom = Vector3DData.FromVector3D(approachFrom),
+            };
+        }
+
+        /// <summary>Position: the connector's connection point; ApproachFrom: out along its axis.</summary>
+        public static Task DockAt(long connectorId, Vector3D position, Vector3D approachFrom, long beaconId = 0)
+        {
+            return new Task
+            {
+                Type = TaskType.DockAt, TargetEntityId = connectorId, RelativeBeaconEntityId = beaconId,
+                Position = Vector3DData.FromVector3D(position), ApproachFrom = Vector3DData.FromVector3D(approachFrom),
+            };
+        }
+
+        public static Task ReturnHome()
+        {
+            return new Task { Type = TaskType.ReturnHome };
+        }
+
+        public static Task Load(DiscreteInventory inventory)
+        {
+            return new Task { Type = TaskType.LoadInventory, Inventory = inventory };
+        }
+
+        /// <summary>Null = everything the job dealt in.</summary>
+        public static Task Unload(DiscreteInventory inventory = null)
+        {
+            return new Task { Type = TaskType.UnloadInventory, Inventory = inventory };
+        }
+
+        public static Task Weld(long gridId, Vector3I cell, bool projected)
+        {
+            return new Task
+            {
+                Type = TaskType.WeldBlock, TargetEntityId = gridId, TargetBlock = Vector3IData.FromVector3I(cell),
+                IsProjected = projected, Completion = ToolTaskCompletionTrigger.BlockFullIntegrity,
+            };
+        }
+
+        public static Task Grind(long gridId, Vector3I cell)
+        {
+            return new Task
+            {
+                Type = TaskType.GrindBlock, TargetEntityId = gridId, TargetBlock = Vector3IData.FromVector3I(cell),
+                Completion = ToolTaskCompletionTrigger.BlockFullyDismounted,
+            };
+        }
+
+        public static Task Mine(ToolTaskCompletionTrigger completion = ToolTaskCompletionTrigger.DroneInventoryFull, float value = 0)
+        {
+            return new Task { Type = TaskType.Mine, Completion = completion, CompletionValue = value };
+        }
+    }
+
+    /// <summary>
+    /// What one drone does in one trip: an ordered task list (load, go to each block, work it, go home, unload),
+    /// plus a summary for auctions and planning. A class, not a struct: jobs are long-lived, shared between
+    /// queues and dictionaries and updated in place (AssignedTime, task progress); a struct copy would silently
+    /// drop those updates. Tasks are small values inside it.
+    /// </summary>
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class Job
     {
         /// <summary>
-        /// Payload required for the task, if any.
+        /// Sum of the LoadInventory tasks: what the drone must pick up. Makes it simple, when auctioning, to know
+        /// which conveyor networks can fulfil the job's inventory in its totality.
         /// </summary>
-        [ProtoMember(1)]
-        public InventoryClass ComponentsInventory { get; set; }
-        [ProtoMember(2)]
-        public InventoryClass BlocksInventory { get; set; }
-        // [ProtoIgnore]
-        // public Vector3D Position { get; set; }
-        [ProtoMember(3)]
-        public List<Task> Tasks { get; set; }
-        /// <summary>
-        /// Original job position data.
-        /// </summary>
-        [ProtoMember(4)]
-        public Vector3DData PositionData { get; set; }
-        // [ProtoIgnore]
-        // public QuaternionD Orientation { get; set; }
-        [ProtoMember(5)]
-        /// <summary>
-        /// Original job orientation data.
-        /// </summary>
-        public QuaternionDData OrientationData { get; set; }
-        [ProtoMember(6)]
-        public DateTime CreatedTime { get; set; }
-        [ProtoMember(7)]
-        public float NaturalGravity { get; set; }
-        [ProtoMember(8)]
-        public JobType JobType { get; set; }
-        [ProtoMember(9)]
-        public uint JobId { get; set; }
-        /// <summary>
-        /// Amount of individual blocks that are part of this job.
-        /// </summary>
-        [ProtoMember(10)]
-        public ushort BlockCount { get; set; }
-        /// <summary>
-        /// Is this job part of a static grid.
-        /// </summary>
-        [ProtoMember(11)]
-        public bool IsStaticGrid { get; set; }
-        [ProtoMember(12)]
-        public bool IsInSpace { get; set; }
-        [ProtoMember(13)]
-        public bool IsInAtmosphere { get; set; }
-        [ProtoMember(14)]
-        public bool OutOfOrchestratorRange { get; set; }
-
+        [ProtoMember(1)] public DiscreteInventory TotalInventory;
+        /// <summary>Ordered list of tasks to execute.</summary>
+        [ProtoMember(2)] public List<Task> Tasks = new List<Task>();
+        /// <summary>For expiring stale jobs.</summary>
+        [ProtoMember(3)] public DateTime CreatedTime;
+        [ProtoMember(4)] public DateTime AssignedTime;
+        [ProtoMember(6)] public uint JobId;
+        /// <summary>Amount of individual blocks that are part of this job.</summary>
+        [ProtoMember(7)] public ushort BlockCount;
+        [ProtoMember(5)] public JobType JobType;
 
         public Job() { }
-        // public Job(
-        //     uint jobId,
-        //     JobType jobType,
-        //     Inventory payload,
-        //     Vector3D position,
-        //     QuaternionD orientation,
-        //     bool outOfOrchestratorRange,
-        //     float naturalGravity,
-        //     bool isStaticGrid,
-        //     bool isInSpace,
-        //     List<Task> tasks = null)
-        // {
-        //     JobId = jobId;
-        //     JobType = jobType;
-        //     Inventory = payload;
-        //     // Position = position;
-        //     PositionData = Vector3DData.FromVector3D(position);
-        //     // Orientation = orientation;
-        //     OrientationData = QuaternionDData.FromQuaternion(orientation);
-        //     CreatedTime = DateTime.UtcNow;
-        //     Tasks = tasks;
-        //     NaturalGravity = naturalGravity;
-        //     OutOfOrchestratorRange = outOfOrchestratorRange;
-        //     IsStaticGrid = isStaticGrid;
-        //     IsInSpace = isInSpace;
-        // }
-        /// <summary>
-        /// Copies runtime fields (e.g. <see cref="Task.Position"/>) into proto members before serialization.
-        /// </summary>
-        public void PrepareForSave()
+
+        public void CalculateTotalInventory()
         {
-            // if (Tasks == null)
-            // {
-            //     return;
-            // }
-            // for (int i = 0; i < Tasks.Count; i++)
-            // {
-            //     Task task = Tasks[i];
-            //     if (task != null)
-            //     {
-            //         task.PrepareForSave();
-            //     }
-            // }
-            // PositionData = Vector3DData.FromVector3D(Position);
-            // OrientationData = QuaternionDData.FromQuaternion(Orientation);
+            TotalInventory = new DiscreteInventory();
+            if (Tasks == null) return;
+            for (int i = 0; i < Tasks.Count; i++)
+                if (Tasks[i].Type == TaskType.LoadInventory && Tasks[i].Inventory != null)
+                    TotalInventory.AddItems(Tasks[i].Inventory);
         }
-    }
-    [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
-    public class Task
-    {
-        /// <summary>
-        /// Payload required for the task, if any.
-        /// </summary>
-        [ProtoMember(1)]
-        public InventoryClass Payload { get; set; }
-        [ProtoMember(2)]
-        public Vector3DData PositionData { get; set; }
-        [ProtoMember(3)]
-        public QuaternionDData OrientationData { get; set; }
-        /// <summary>
-        /// Orchestrator that assigned the task.
-        /// </summary>
-        [ProtoMember(4)] public long AssignedBy;
-        [ProtoMember(5)] public DateTime AssignedTime { get; set; }
-        [ProtoMember(6)] public DateTime CreatedTime { get; set; }
 
-        [ProtoMember(7)] public uint JobId { get; set; }
-        [ProtoMember(8)] public uint TaskId { get; set; }
-        [ProtoMember(9)] public TaskType TaskType { get; set; }
-        /// <summary>
-        /// Is this task out of Orchestrator antenna range.
-        /// </summary>
-        [ProtoMember(10)] public bool OutOfOrchestratorRange { get; set; }
-        public Task() { }
-
-        public Task(
-            ushort taskId,
-            InventoryClass payload,
-            Vector3D position,
-            QuaternionD orientation,
-            long assignedBy,
-            DateTime assignedTime,
-            TaskType taskType,
-            bool outOfOrchestratorRange)
+        /// <summary>The first place the drone works at (first NavigateToolTo / NavigateTo), e.g. for auction distances.</summary>
+        public bool TryGetSite(out Task site)
         {
-            TaskId = taskId;
-            Payload = payload;
-            PositionData = Vector3DData.FromVector3D(position);
-            OrientationData = QuaternionDData.FromQuaternionD(orientation);
-            AssignedBy = assignedBy;
-            AssignedTime = assignedTime;
-            CreatedTime = DateTime.UtcNow;
-            TaskType = taskType;
-            OutOfOrchestratorRange = outOfOrchestratorRange;
+            site = default(Task);
+            if (Tasks == null) return false;
+            for (int i = 0; i < Tasks.Count; i++)
+            {
+                if (Tasks[i].Type == TaskType.NavigateToolTo || Tasks[i].Type == TaskType.NavigateTo)
+                {
+                    site = Tasks[i];
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>Index of the first task of 'type' at or after 'from', or -1.</summary>
+        public int IndexOf(TaskType type, int from = 0)
+        {
+            if (Tasks == null) return -1;
+            for (int i = Math.Max(0, from); i < Tasks.Count; i++)
+                if (Tasks[i].Type == type) return i;
+            return -1;
         }
     }
 }

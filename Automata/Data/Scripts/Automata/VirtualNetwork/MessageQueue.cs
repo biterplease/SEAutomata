@@ -343,6 +343,12 @@ namespace Automata.VirtualNetwork
                 return PayloadType.JobAnnouncement;
             if (payload is MiningSurveyDataBroadcast)
                 return PayloadType.MiningSurveyDataBroadcast;
+            if (payload is Auction)
+                return PayloadType.Auction;
+            if (payload is Bid)
+                return PayloadType.Bid;
+            if (payload is AuctionWinnerAnnouncement)
+                return PayloadType.AuctionWinnerAnnouncement;
             return PayloadType.None;
         }
 
@@ -720,6 +726,13 @@ namespace Automata.VirtualNetwork
             var subscribers = _channelSubscribers.GetOrAdd(channel, _ => new MyConcurrentHashSet<long>());
             subscribers.Add(subscriberId);
             _readThrottleIntervals.TryAdd(subscriberId, TimeSpan.FromMilliseconds(100));
+        }
+
+        public void Unsubscribe(long subscriberId, Channel channel)
+        {
+            MyConcurrentHashSet<long> subscribers;
+            if (_channelSubscribers.TryGetValue(channel, out subscribers))
+                subscribers.Remove(subscriberId);
         }
 
         private bool AckMessage(long senderId, uint messageId)

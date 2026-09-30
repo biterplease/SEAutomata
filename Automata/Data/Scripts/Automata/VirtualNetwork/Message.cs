@@ -217,7 +217,50 @@ namespace Automata.VirtualNetwork
         [ProtoMember(10)] public bool IsStaticGrid;
         [ProtoMember(11)] public bool IsInSpace;
         [ProtoMember(12)] public bool IsInAtmosphere;
+        /// <summary>The job's ordered tasks (world positions: announced jobs have no anchor).</summary>
+        [ProtoMember(13)] public List<Orchestrator.Task> Tasks;
+        [ProtoMember(14)] public ushort BlockCount;
+
+        /// <summary>Summary fields from the job's first work site and total inventory.</summary>
+        public static JobAnnouncement FromJob(Orchestrator.Job job, AutomataEntityType entityType, bool isStaticGrid)
+        {
+            Orchestrator.Task site;
+            job.TryGetSite(out site);
+            if (job.TotalInventory == null) job.CalculateTotalInventory();
+            return new JobAnnouncement
+            {
+                JobId = job.JobId,
+                Type = job.JobType,
+                EntityType = entityType,
+                CreatedTime = job.CreatedTime,
+                ComponentsInventory = job.TotalInventory,
+                PositionData = site.Position,
+                NaturalGravity = site.NaturalGravity,
+                IsStaticGrid = isStaticGrid,
+                IsInSpace = site.NaturalGravity < SPACE_GRAVITY,
+                IsInAtmosphere = site.NaturalGravity >= SPACE_GRAVITY,
+                Tasks = job.Tasks,
+                BlockCount = job.BlockCount,
+            };
+        }
+
+        /// <summary>m/s²: below this a site counts as "in space".</summary>
+        public const float SPACE_GRAVITY = 0.2f;
+
+        public Orchestrator.Job ToJob()
+        {
+            return new Orchestrator.Job
+            {
+                JobId = JobId,
+                JobType = Type,
+                CreatedTime = CreatedTime,
+                TotalInventory = ComponentsInventory,
+                Tasks = Tasks ?? new List<Orchestrator.Task>(),
+                BlockCount = BlockCount,
+            };
+        }
     }
+    [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class Auction : IMessagePayload
     {
         [ProtoMember(1)] public QuaternionDData OrientationData;
@@ -234,7 +277,7 @@ namespace Automata.VirtualNetwork
         [ProtoMember(9)] public MyFixedPoint TotalVolume;
         [ProtoMember(10)] public uint JobId;
         [ProtoMember(11)] public uint AuctionId;
-        [ProtoMember(9)] public AutomataEntityType EntityType;
+        [ProtoMember(16)] public AutomataEntityType EntityType;   // was a duplicate tag 9 (TotalVolume)
         [ProtoMember(12)] public Orchestrator.JobType JobType;
         [ProtoMember(13)] public bool IsStaticGrid;
         [ProtoMember(14)] public bool IsInSpace;
@@ -276,10 +319,11 @@ namespace Automata.VirtualNetwork
         /// This flag controls how the BidInventory field should be interpreted.
         /// When the job demands inventory space, this response should be interpreted as "Has space to take inventory"
         /// </summary>
-        [ProtoMember(13)] public Logistics.InventoryFulfillment InventoryFulfillmentFlags;
+        [ProtoMember(15)] public Logistics.InventoryFulfillment InventoryFulfillmentFlags;   // was a duplicate tag 13 (EntityType)
 
     }
 
+    [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class AuctionWinnerAnnouncement : IMessagePayload
     {
         /// <summary>

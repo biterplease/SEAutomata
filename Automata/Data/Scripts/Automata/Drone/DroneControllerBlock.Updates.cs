@@ -20,7 +20,7 @@ namespace Automata.Drone
         // Something needs flight control right now: subscribe immediately (UpdateFrameSubscription drops it later)
         private void WakeFrameUpdates()
         {
-            if (frameUpdatesOn) return;
+            if (frameUpdatesOn || !IsServer) return;   // clients never run flight control
             frameUpdatesOn = true;
             NeedsUpdate |= MyEntityUpdateEnum.EACH_FRAME;
         }
@@ -31,7 +31,6 @@ namespace Automata.Drone
             bool need = activeFlightOrder != null
                 || orientationTargetSet
                 || preflightStage != 0
-                || (settings != null && settings.EnableInertialDampening && !isParked)
                 || thrustOverridesActive
                 || gyroOverrideActive;
             if (need == frameUpdatesOn) return;

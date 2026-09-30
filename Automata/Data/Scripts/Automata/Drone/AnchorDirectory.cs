@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 
+using ProtoBuf;
 using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
 using VRage.Game.Entity;
@@ -16,13 +17,14 @@ namespace Automata.Drone
         Beacon = 1,
     }
 
+    [ProtoContract]
     public struct AnchorEntry
     {
-        public long EntityId;
-        public string Name;
-        public double Distance;     // from the drone at scan time
-        public AnchorKind Kind;
-        public long OwnerId;        // block owner at scan time
+        [ProtoMember(1)] public long EntityId;
+        [ProtoMember(2)] public string Name;
+        [ProtoMember(3)] public double Distance;     // from the drone at scan time
+        [ProtoMember(4)] public AnchorKind Kind;
+        [ProtoMember(5)] public long OwnerId;        // block owner at scan time
     }
 
     /// <summary>
@@ -70,6 +72,8 @@ namespace Automata.Drone
         {
             var cfg = DroneConfig();
             ScanCache cache = GetCache(drone);
+            // Multiplayer clients never scan: they show what the server last sent (SetRemoteEntries)
+            if (!MyAPIGateway.Multiplayer.IsServer) return cache.Entries;
             int now = MyAPIGateway.Session.GameplayFrameCounter;
             if (!cache.HasScanned || cache.DroneOwnerId != drone.OwnerId)
             {
@@ -120,11 +124,11 @@ namespace Automata.Drone
         /// Finds a connector by its exact name (case-insensitive) within ConnectorNameSearchRadius and pins it to
         /// the drone's list. Only the owner's / owner's faction's connectors match. There is no name index in the
         /// game, so this walks the connectors of every grid in range - hence the throttle.
-        /// Returns: 1 added (or already listed), 0 not found, -1 throttled (secondsLeft set).
+        /// Returns: number of matching connectors added (0 = none found), -1 throttled (secondsLeft set).
+        /// Only connectors the requesting player may see are counted (viewerIdentity, 0 = no viewer check).
         /// </summary>
-        public int TryAddByName(IMyCubeBlock drone, string name, out AnchorEntry entry, out int secondsLeft)
+        public int TryAddByName(IMyCubeBlock drone, string name, long viewerIdentity, out int secondsLeft)
         {
-            entry = default(AnchorEntry);
             secondsLeft = 0;
             if (drone == null || string.IsNullOrWhiteSpace(name) || drone.OwnerId == 0) return 0;
             ScanCache cache = GetCache(drone);
@@ -139,8 +143,7 @@ namespace Automata.Drone
             double radius = DroneConfig().ConnectorNameSearchRadius;
             QueryGrids(drone, center, radius);
 
-            IMyShipConnector best = null;
-            double bestD2 = double.MaxValue;
+            int added = 0;
             for (int i = 0; i < found.Count; i++)
             {
                 var grid = found[i] as IMyCubeGrid;
@@ -149,27 +152,61 @@ namespace Automata.Drone
                 {
                     if (!c.IsFunctional || !string.Equals(c.CustomName, name, StringComparison.OrdinalIgnoreCase)) continue;
                     if (!IsAllowed(owner, ownerFaction, c.OwnerId)) continue;
+                    if (viewerIdentity != 0 && !IsAllowed(viewerIdentity, c.OwnerId)) continue;
                     double d2 = Vector3D.DistanceSquared(center, c.WorldMatrix.Translation);
-                    if (d2 <= radius * radius && d2 < bestD2) { best = c; bestD2 = d2; }   // same name twice: nearest
+                    if (d2 > radius * radius) continue;
+                    added++;
+                    if (!cache.Pinned.Contains(c.EntityId)) cache.Pinned.Add(c.EntityId);
+                    bool listed = false;
+                    for (int k = 0; k < cache.Entries.Count; k++)
+                        if (cache.Entries[k].EntityId == c.EntityId) { listed = true; break; }
+                    if (!listed)
+                        cache.Entries.Add(new AnchorEntry
+                        {
+                            EntityId = c.EntityId,
+                            Name = c.CustomName,
+                            Distance = Math.Sqrt(d2),
+                            Kind = AnchorKind.Connector,
+                            OwnerId = c.OwnerId,
+                        });
                 }
             }
             found.Clear();
-            if (best == null) return 0;
+            if (added > 0) SortByDistance(cache.Entries);
+            return added;
+        }
 
-            entry = new AnchorEntry
-            {
-                EntityId = best.EntityId,
-                Name = best.CustomName,
-                Distance = Math.Sqrt(bestD2),
-                Kind = AnchorKind.Connector,
-                OwnerId = best.OwnerId,
-            };
-            if (!cache.Pinned.Contains(best.EntityId)) cache.Pinned.Add(best.EntityId);
-            bool listed = false;
-            for (int i = 0; i < cache.Entries.Count; i++)
-                if (cache.Entries[i].EntityId == best.EntityId) { listed = true; break; }
-            if (!listed) cache.Entries.Add(entry);
-            return 1;
+        /// <summary>
+        /// Server: the entries a given player may see (owner / faction of that player too). Fills 'result'.
+        /// </summary>
+        public void GetForViewer(IMyCubeBlock drone, long viewerIdentity, List<AnchorEntry> result)
+        {
+            result.Clear();
+            var entries = Get(drone);
+            for (int i = 0; i < entries.Count; i++)
+                if (viewerIdentity == 0 || IsAllowed(viewerIdentity, entries[i].OwnerId))
+                    result.Add(entries[i]);
+        }
+
+        /// <summary>
+        /// Client: replaces the cached list with what the server sent.
+        /// </summary>
+        public void SetRemoteEntries(IMyCubeBlock drone, List<AnchorEntry> entries)
+        {
+            ScanCache cache = GetCache(drone);
+            cache.Entries.Clear();
+            if (entries != null) cache.Entries.AddRange(entries);
+            cache.HasScanned = true;
+            cache.LastScanFrame = MyAPIGateway.Session.GameplayFrameCounter;
+        }
+
+        /// <summary>
+        /// Client: frame of the last list received, to throttle refresh requests.
+        /// </summary>
+        public int LastReceivedFrame(IMyCubeBlock drone)
+        {
+            ScanCache cache = GetCache(drone);
+            return cache.HasScanned ? cache.LastScanFrame : int.MinValue / 2;
         }
 
         /// <summary>

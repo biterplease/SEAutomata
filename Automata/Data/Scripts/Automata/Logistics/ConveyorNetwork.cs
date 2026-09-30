@@ -28,6 +28,9 @@ namespace Automata.Logistics
         public QuaternionDData OrientationData;
         [ProtoMember(4)]
         public IOBlockType BlockType;
+        /// <summary>The connector / collector itself (a drone resolves it, ownership-checked, to dock).</summary>
+        [ProtoMember(5)]
+        public long EntityId;
     }
 
     public class InventoryFulfillmentData
@@ -102,6 +105,15 @@ namespace Automata.Logistics
             refineries = new List<IMyRefinery>();
             reactors = new List<IMyReactor>();
             _sessionDelegate = sessionDelegate ?? new MySessionDelegate();
+        }
+        public void Clear()
+        {
+            connectors.Clear();
+            collectors.Clear();
+            cargoContainers.Clear();
+            assemblers.Clear();
+            refineries.Clear();
+            reactors.Clear();
         }
 
         public void UpdateInventories()
@@ -467,15 +479,16 @@ namespace Automata.Logistics
             ioLocationData.Clear();
             foreach (var connector in connectors)
             {
-                if (connector.IsFunctional && connector.IsWorking)
+                // Free connectors only: a drone has to be able to dock there
+                if (connector.IsFunctional && connector.IsWorking && !connector.IsConnected)
                 {
-                    Quaternion q;
-                    connector.Orientation.GetQuaternion(out q);
                     ioLocationData.Add(new IOLocationData()
                     {
                         PositionData = Vector3DData.FromVector3D(connector.GetPosition()),
-                        OrientationData = QuaternionDData.FromQuaternion(q),
-                        BlockType = IOBlockType.ShipConnector
+                        // world orientation (Orientation.GetQuaternion is grid-local)
+                        OrientationData = QuaternionDData.FromQuaternionD(QuaternionD.CreateFromRotationMatrix(connector.WorldMatrix)),
+                        BlockType = IOBlockType.ShipConnector,
+                        EntityId = connector.EntityId,
                     });
                 }
             }
@@ -483,13 +496,12 @@ namespace Automata.Logistics
             {
                 if (collector.IsFunctional && collector.IsWorking)
                 {
-                    Quaternion q;
-                    collector.Orientation.GetQuaternion(out q);
                     ioLocationData.Add(new IOLocationData()
                     {
                         PositionData = Vector3DData.FromVector3D(collector.GetPosition()),
-                        OrientationData = QuaternionDData.FromQuaternion(q),
-                        BlockType = IOBlockType.Collector
+                        OrientationData = QuaternionDData.FromQuaternionD(QuaternionD.CreateFromRotationMatrix(collector.WorldMatrix)),
+                        BlockType = IOBlockType.Collector,
+                        EntityId = collector.EntityId,
                     });
                 }
             }

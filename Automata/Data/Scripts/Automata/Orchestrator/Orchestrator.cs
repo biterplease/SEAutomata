@@ -112,6 +112,14 @@ namespace Automata.Orchestrator
         private IMyRadioAntenna ownAntenna;
         private List<Message<IMessagePayload>> _messageCache = new List<Message<IMessagePayload>>();
         private Dictionary<uint, Auction> _activeBidRounds = new Dictionary<uint, Auction>();
+        /// <summary>The job behind each running auction: its work tasks go to the winners.</summary>
+        private readonly Dictionary<uint, Job> _auctionJobs = new Dictionary<uint, Job>();
+        /// <summary>Valid bids collected per auction until its bid window closes.</summary>
+        private readonly Dictionary<uint, List<Bid>> _auctionBids = new Dictionary<uint, List<Bid>>();
+        private readonly Dictionary<uint, long> _auctionStartFrame = new Dictionary<uint, long>();
+        private readonly List<uint> _auctionsToClose = new List<uint>();
+        /// <summary>Bids are collected this long before winners are picked (nearest drone, not the first one).</summary>
+        private const int AUCTION_BID_WINDOW_TICKS = 5 * 60;
         private List<Message<Bid>> bidCache = new List<Message<Bid>>();
         private readonly List<Message<TaskAborted>> _taskAbortCache = new List<Message<TaskAborted>>();
         private readonly List<Message<DroneReport>> _droneRegistrationCache = new List<Message<DroneReport>>();
@@ -349,6 +357,7 @@ namespace Automata.Orchestrator
             messaging = AutomataSession.GetMessageQueue();
             currentState = State.Initializing;
             messaging.Subscribe(entityId, Channel.CONSTRUCTION_COMPUTER_JOB_ANNOUNCEMENT);
+            messaging.Subscribe(entityId, Channel.ORCHESTRATOR_AUCTION_BIDS);
             messaging.Subscribe(entityId, Channel.DRONE_REGISTRATION);
             messaging.Subscribe(entityId, Channel.DRONE_REPORTS);
             messaging.Subscribe(entityId, Channel.DRONE_PERFORMANCE);
@@ -651,10 +660,10 @@ namespace Automata.Orchestrator
             _jobCache.Clear();
             foreach (var message in _messageCache)
             {
-                var job = message.Payload as Job;
-                if (job == null)
+                var announcement = message.Payload as JobAnnouncement;
+                if (announcement == null)
                     continue;
-                _jobCache.Add(job);
+                _jobCache.Add(announcement.ToJob());
             }
             if (_jobCache.Count > 0)
             {
@@ -695,30 +704,30 @@ namespace Automata.Orchestrator
             MyFixedPoint totalVolume = 0;
             Message<Auction> msg = null;
             int messagesQueued = 0;
+            if (job.TotalInventory == null) job.CalculateTotalInventory();
+            Task site;
+            job.TryGetSite(out site);
 
             switch (job.JobType)
             {
-                case JobType.WeldBlock:
-                    job.ComponentsInventory.GetAllItems(_componentsCache, clear: true);
-                    totalMass = job.ComponentsInventory.TotalInventoryMass(AutomataSession.Instance);
-                    totalVolume = job.ComponentsInventory.TotalInventoryVolume(AutomataSession.Instance);
+                case JobType.Weld:
+                    job.TotalInventory.GetAllItems(_componentsCache, clear: true);
+                    totalMass = job.TotalInventory.TotalInventoryMass(AutomataSession.Instance);
+                    totalVolume = job.TotalInventory.TotalInventoryVolume(AutomataSession.Instance);
                     msg = new Message<Auction>
                     {
                         Payload = new Auction
                         {
                             JobId = job.JobId,
                             JobType = job.JobType,
-                            ComponentsInventory = job.ComponentsInventory,
-                            BlocksInventory = job.BlocksInventory,
-                            PositionData = job.PositionData,
-                            OrientationData = job.OrientationData,
+                            ComponentsInventory = job.TotalInventory,
+                            PositionData = site.Position,
                             CreatedTime = job.CreatedTime,
                             ExpirationTime = job.CreatedTime.AddSeconds(settings.MaxBidRoundExpirationSeconds),
                             EntityType = AutomataEntityType.OrchestratorBlock,
-                            NaturalGravity = job.NaturalGravity,
-                            IsStaticGrid = job.IsStaticGrid,
-                            IsInSpace = job.IsInSpace,
-                            IsInAtmosphere = job.IsInAtmosphere,
+                            NaturalGravity = site.NaturalGravity,
+                            IsInSpace = site.NaturalGravity < JobAnnouncement.SPACE_GRAVITY,
+                            IsInAtmosphere = site.NaturalGravity >= JobAnnouncement.SPACE_GRAVITY,
                             TotalMass = totalMass,
                             TotalVolume = totalVolume,
                             AuctionId = IdGenerator.GenerateId(ref _bidRoundIdCounter, entityId),
@@ -728,34 +737,32 @@ namespace Automata.Orchestrator
                         SenderId = entityId,
                         SenderOwnerId = block?.OwnerId ?? 0,
                         RequiresAck = false,
-                        RecipientBlockType = MessageQueue.IAIBlockType.Orchestrator,
-                        Channel = Channel.CONSTRUCTION_COMPUTER_JOB_ANNOUNCEMENT,
+                        // Auctions go to the bidders (was sent to orchestrators on the job-announcement channel)
+                        RecipientBlockType = MessageQueue.IAIBlockType.Drone | MessageQueue.IAIBlockType.LogisticsComputer,
+                        Channel = Channel.ORCHESTRATOR_AUCTION_START,
                     };
 
                     auctionOutbox.Add(msg);
                     messagesQueued++;
                     break;
-                case JobType.GrindBlock:
-                    job.ComponentsInventory.GetAllItems(_componentsCache, clear: true);
-                    totalMass = job.ComponentsInventory.TotalInventoryMass(AutomataSession.Instance);
-                    totalVolume = job.ComponentsInventory.TotalInventoryVolume(AutomataSession.Instance);
+                case JobType.Grind:
+                    job.TotalInventory.GetAllItems(_componentsCache, clear: true);
+                    totalMass = job.TotalInventory.TotalInventoryMass(AutomataSession.Instance);
+                    totalVolume = job.TotalInventory.TotalInventoryVolume(AutomataSession.Instance);
                     msg = new Message<Auction>
                     {
                         Payload = new Auction
                         {
                             JobId = job.JobId,
                             JobType = job.JobType,
-                            ComponentsInventory = job.ComponentsInventory,
-                            BlocksInventory = job.BlocksInventory,
-                            PositionData = job.PositionData,
-                            OrientationData = job.OrientationData,
+                            ComponentsInventory = job.TotalInventory,
+                            PositionData = site.Position,
                             CreatedTime = job.CreatedTime,
                             ExpirationTime = job.CreatedTime.AddSeconds(settings.MaxBidRoundExpirationSeconds),
                             EntityType = AutomataEntityType.OrchestratorBlock,
-                            NaturalGravity = job.NaturalGravity,
-                            IsStaticGrid = job.IsStaticGrid,
-                            IsInSpace = job.IsInSpace,
-                            IsInAtmosphere = job.IsInAtmosphere,
+                            NaturalGravity = site.NaturalGravity,
+                            IsInSpace = site.NaturalGravity < JobAnnouncement.SPACE_GRAVITY,
+                            IsInAtmosphere = site.NaturalGravity >= JobAnnouncement.SPACE_GRAVITY,
                             TotalMass = totalMass,
                             TotalVolume = totalVolume,
                             AuctionId = IdGenerator.GenerateId(ref _bidRoundIdCounter, entityId),
@@ -765,8 +772,9 @@ namespace Automata.Orchestrator
                         SenderId = entityId,
                         SenderOwnerId = block?.OwnerId ?? 0,
                         RequiresAck = false,
-                        RecipientBlockType = MessageQueue.IAIBlockType.Orchestrator,
-                        Channel = Channel.CONSTRUCTION_COMPUTER_JOB_ANNOUNCEMENT,
+                        // Auctions go to the bidders (was sent to orchestrators on the job-announcement channel)
+                        RecipientBlockType = MessageQueue.IAIBlockType.Drone | MessageQueue.IAIBlockType.LogisticsComputer,
+                        Channel = Channel.ORCHESTRATOR_AUCTION_START,
                     };
 
                     auctionOutbox.Add(msg);
@@ -782,12 +790,15 @@ namespace Automata.Orchestrator
             {
                 Log.Verbose("AI scheduler {0}: {1} bid rounds started for job {2}", entityId, messagesQueued, job.JobId);
             }
-            foreach (var message in auctionOutbox)
+            for (int i = 0; i < auctionOutbox.Count; i++)   // (removing inside a foreach threw)
             {
+                var message = auctionOutbox[i];
                 _activeBidRounds[message.Payload.AuctionId] = message.Payload;
+                _auctionJobs[message.Payload.AuctionId] = job;
+                _auctionStartFrame[message.Payload.AuctionId] = sessionDelegate.GameplayFrameCounter;
                 messaging.BroadcastMessage<Auction>(ownAntenna, message, true);
-                auctionOutbox.Remove(message);
             }
+            auctionOutbox.Clear();
             if (auctionOutbox.Count > 0)
             {
                 Log.Verbose("AI scheduler {0}: {1} bid rounds remaining for job {2}", entityId, auctionOutbox.Count, job.JobId);
@@ -800,48 +811,84 @@ namespace Automata.Orchestrator
             Echo("AI scheduler {0}: read {1} bid round bid messages", entityId, bidCache.Count);
         }
 
+        /// <summary>
+        /// Collects valid bids per auction (LC bids and drone bids arrive separately), and once an auction's bid
+        /// window has closed picks the winners from everything collected. Expired auctions are dropped.
+        /// </summary>
         private void ProcessBidRoundBidMessages()
         {
             foreach (var message in bidCache)
             {
-                List<Bid> potentialWinnerLCs = new List<Bid>();
-                List<Bid> potentialWinnerDrones = new List<Bid>();
-                Auction bidRound;
-                if (!_activeBidRounds.TryGetValue(message.Payload.AuctionId, out bidRound))
-                {
-                    Echo("WARN: Auction {0} not found for bid {1}", message.Payload.AuctionId, message.Payload.AuctionId);
-                    Log.Warning("AI scheduler {0}: Auction {1} not found", entityId, message.Payload.AuctionId);
-                    continue;
-                }
                 Bid bid = message.Payload;
                 if (bid == null)
                     continue;
-                if (MinimialCheckBidAgainstBidRoundStart(bid, bidRound) && bid.EntityType == AutomataEntityType.LogisticsComputerBlock)
+                Auction bidRound;
+                if (!_activeBidRounds.TryGetValue(bid.AuctionId, out bidRound))
                 {
-                    potentialWinnerLCs.Add(bid);
-                }
-                if (MinimialCheckBidAgainstBidRoundStart(bid, bidRound) && bid.EntityType == AutomataEntityType.DroneControllerBlock)
-                {
-                    potentialWinnerDrones.Add(bid);
-                }
-                if (potentialWinnerLCs.Count == 0 || potentialWinnerDrones.Count == 0)
-                {
-                    if (potentialWinnerLCs.Count == 0)
-                    {
-                        Echo("WARN: no LC bid for job {0}", bidRound.JobId);
-                    }
-                    if (potentialWinnerDrones.Count == 0)
-                    {
-                        Echo("WARN: no drone bid for job {0}", bidRound.JobId);
-                    }
+                    Log.Warning("AI scheduler {0}: Auction {1} not found", entityId, bid.AuctionId);
                     continue;
+                }
+                if (!MinimialCheckBidAgainstBidRoundStart(bid, bidRound))
+                    continue;
+                List<Bid> bids;
+                if (!_auctionBids.TryGetValue(bid.AuctionId, out bids))
+                {
+                    bids = new List<Bid>();
+                    _auctionBids[bid.AuctionId] = bids;
+                }
+                bool duplicate = false;
+                for (int i = 0; i < bids.Count; i++)
+                    if (bids[i].EntityId == bid.EntityId && bids[i].BidId == bid.BidId) { duplicate = true; break; }
+                if (!duplicate) bids.Add(bid);
+            }
+            bidCache.Clear();
+
+            long now = sessionDelegate.GameplayFrameCounter;
+            _auctionsToClose.Clear();
+            foreach (var kv in _activeBidRounds)
+            {
+                long started;
+                if (!_auctionStartFrame.TryGetValue(kv.Key, out started) || now - started < AUCTION_BID_WINDOW_TICKS)
+                    continue;
+                _auctionsToClose.Add(kv.Key);
+            }
+            for (int i = 0; i < _auctionsToClose.Count; i++)
+            {
+                uint auctionId = _auctionsToClose[i];
+                Auction bidRound = _activeBidRounds[auctionId];
+                List<Bid> bids;
+                _auctionBids.TryGetValue(auctionId, out bids);
+                List<Bid> potentialWinnerLCs = new List<Bid>();
+                List<Bid> potentialWinnerDrones = new List<Bid>();
+                if (bids != null)
+                {
+                    for (int k = 0; k < bids.Count; k++)
+                    {
+                        if (bids[k].EntityType == AutomataEntityType.LogisticsComputerBlock) potentialWinnerLCs.Add(bids[k]);
+                        else if (bids[k].EntityType == AutomataEntityType.DroneControllerBlock) potentialWinnerDrones.Add(bids[k]);
+                    }
+                }
+                bool lcNeeded = bidRound.JobType == JobType.Weld;
+                if (potentialWinnerDrones.Count == 0 || (lcNeeded && potentialWinnerLCs.Count == 0))
+                {
+                    if (bidRound.ExpirationTime < DateTime.UtcNow) CloseAuction(auctionId);   // nobody came: drop it
+                    continue;   // keep collecting until it expires
                 }
                 List<Bid> winningLCs = SelectWinningLcsForJob(potentialWinnerLCs, bidRound);
                 List<Bid> winningDrones = SelectWinningDronesForJob(potentialWinnerDrones, bidRound);
                 EnqueueBidRoundWinnerAnnouncementFromWinners(winningDrones, winningLCs, bidRound);
+                _auctionBids.Remove(auctionId);
+                _auctionStartFrame.Remove(auctionId);   // announced: no second evaluation
             }
+            _auctionsToClose.Clear();
+        }
 
-            bidCache.Clear();
+        private void CloseAuction(uint auctionId)
+        {
+            _activeBidRounds.Remove(auctionId);
+            _auctionJobs.Remove(auctionId);
+            _auctionBids.Remove(auctionId);
+            _auctionStartFrame.Remove(auctionId);
         }
 
         /// <summary>
@@ -873,7 +920,7 @@ namespace Automata.Orchestrator
             }
 
             uint bidRoundId = msg.Payload.AuctionId;
-            _activeBidRounds.Remove(bidRoundId);
+            CloseAuction(bidRoundId);
             auctionWinnerAnnouncementOutbox.RemoveAt(0);
             int assigneeCount = msg.Payload.TaskAssignments != null ? msg.Payload.TaskAssignments.Count : 0;
             Log.Info("AI scheduler {0}: broadcast AuctionWinnerAnnouncement for job {1} ({2} assignees)", entityId, msg.Payload.JobId, assigneeCount);
@@ -888,10 +935,10 @@ namespace Automata.Orchestrator
 
             switch (bidRound.JobType)
             {
-                case JobType.WeldBlock:
+                case JobType.Weld:
                     TryBuildAndEnqueueWeldBidRoundWinnerAnnouncement(winningDrones, winningLCs, bidRound);
                     break;
-                case JobType.GrindBlock:
+                case JobType.Grind:
                     TryBuildAndEnqueueGrindBidRoundWinnerAnnouncement(winningDrones, winningLCs, bidRound);
                     break;
                 case JobType.DeliverMissingInventory:
@@ -949,21 +996,25 @@ namespace Automata.Orchestrator
 
         private static void TryBuildAndEnqueueGrindBidRoundWinnerAnnouncement(List<Bid> winningDrones, List<Bid> winningLCs, Auction bidRound)
         {
+            // TODO (orchestrator workflow): per drone trip: NavigateToolTo + GrindBlock (until dismounted or DroneInventoryFull), DockAt the winning LC, Unload, ReturnHome.
             // Placeholder: grind job winner announcement and task decomposition not implemented yet.
         }
 
         private static void TryBuildAndEnqueueDeliverMissingInventoryBidRoundWinnerAnnouncement(List<Bid> winningDrones, List<Bid> winningLCs, Auction bidRound)
         {
+            // TODO (orchestrator workflow): per trip: DockAt supplier LC, Load, DockAt requesting LC, Unload, ReturnHome.
             // Placeholder.
         }
 
         private static void TryBuildAndEnqueueCollectInventorySurplusBidRoundWinnerAnnouncement(List<Bid> winningDrones, List<Bid> winningLCs, Auction bidRound)
         {
+            // TODO (orchestrator workflow): per trip: DockAt the surplus LC, Load, DockAt receiving LC, Unload, ReturnHome.
             // Placeholder.
         }
 
         private static void TryBuildAndEnqueueMineOreBidRoundWinnerAnnouncement(List<Bid> winningDrones, List<Bid> winningLCs, Auction bidRound)
         {
+            // TODO (orchestrator workflow): per trip: NavigateToolTo the deposit, Mine (DroneInventoryFull), DockAt the refinery LC, Unload, ReturnHome.
             // Placeholder.
         }
 
@@ -976,9 +1027,9 @@ namespace Automata.Orchestrator
 
             switch (bidRound.JobType)
             {
-                case JobType.WeldBlock:
+                case JobType.Weld:
                     return SelectWinningLCs(potentialWinnerLCs, bidRound);
-                case JobType.GrindBlock:
+                case JobType.Grind:
                     return SelectWinningLCsForGrindBlock(potentialWinnerLCs, bidRound);
                 case JobType.DeliverMissingInventory:
                     return SelectWinningLCsForDeliverMissingInventory(potentialWinnerLCs, bidRound);
@@ -1000,9 +1051,9 @@ namespace Automata.Orchestrator
 
             switch (bidRound.JobType)
             {
-                case JobType.WeldBlock:
+                case JobType.Weld:
                     return SelectWinningDrones(potentialWinnerDrones, bidRound);
-                case JobType.GrindBlock:
+                case JobType.Grind:
                     return SelectWinningDronesForGrindBlock(potentialWinnerDrones, bidRound);
                 case JobType.DeliverMissingInventory:
                     return SelectWinningDronesForDeliverMissingInventory(potentialWinnerDrones, bidRound);
@@ -1017,68 +1068,80 @@ namespace Automata.Orchestrator
 
         private static List<Bid> SelectWinningLCsForGrindBlock(List<Bid> potentialWinnerLCs, Auction bidRound)
         {
+            // TODO (orchestrator workflow): LCs with free volume for what grinding returns, nearest to the job first.
             return new List<Bid>();
         }
 
         private static List<Bid> SelectWinningLCsForDeliverMissingInventory(List<Bid> potentialWinnerLCs, Auction bidRound)
         {
+            // TODO (orchestrator workflow): LCs that can supply the missing items (the requesting LC excluded).
             return new List<Bid>();
         }
 
         private static List<Bid> SelectWinningLCsForCollectInventorySurplus(List<Bid> potentialWinnerLCs, Auction bidRound)
         {
+            // TODO (orchestrator workflow): LCs with room (and a use) for the surplus items.
             return new List<Bid>();
         }
 
         private static List<Bid> SelectWinningLCsForMineOre(List<Bid> potentialWinnerLCs, Auction bidRound)
         {
+            // TODO (orchestrator workflow): LCs with refineries (and room) for the ore.
             return new List<Bid>();
         }
 
         private static List<Bid> SelectWinningDronesForGrindBlock(List<Bid> potentialWinnerDrones, Auction bidRound)
         {
+            // TODO (orchestrator workflow): rank like weld (distance, volume, lift); split by what grinding returns.
             return new List<Bid>();
         }
 
         private static List<Bid> SelectWinningDronesForDeliverMissingInventory(List<Bid> potentialWinnerDrones, Auction bidRound)
         {
+            // TODO (orchestrator workflow): cargo drones, split by volume and lift like weld jobs.
             return new List<Bid>();
         }
 
         private static List<Bid> SelectWinningDronesForCollectInventorySurplus(List<Bid> potentialWinnerDrones, Auction bidRound)
         {
+            // TODO (orchestrator workflow): cargo drones, split by volume and lift like weld jobs.
             return new List<Bid>();
         }
 
         private static List<Bid> SelectWinningDronesForMineOre(List<Bid> potentialWinnerDrones, Auction bidRound)
         {
+            // TODO (orchestrator workflow): CanDrill (+ CanScoutOre helps), nearest first; each trip mines until full.
             return new List<Bid>();
         }
 
+        /// <summary>
+        /// Splits the job into trips that fit each drone, by volume (what fits in its cargo) AND mass (what it can
+        /// lift, within its player-set max load): e.g. 1000 kg for three 350 kg drones = 3 trips of a third, the
+        /// best-ranked drone taking the extra trip; a refinery's bill of materials shared by several drones.
+        /// Every trip carries a slice of the whole bill of materials and gets all of the job's blocks: a drone
+        /// welds block after block with what it carries (completion "inventory empty" when it carries only part of
+        /// the job), skipping blocks already finished by another trip.
+        /// </summary>
         private Dictionary<long, List<Task>> BuildWeldTaskAssignments(List<Bid> winningDrones, List<Bid> winningLCs, Auction bidRound)
         {
             Dictionary<long, List<Task>> assignments = new Dictionary<long, List<Task>>();
             Dictionary<long, double> remainingLcVolume = BuildRemainingLcVolumeMap(winningLCs);
 
             DiscreteInventory requiredInventory = bidRound.ComponentsInventory ?? new DiscreteInventory();
-            double requiredVolume = (double)bidRound.TotalVolume;
-            if (requiredVolume <= 0.0 && !requiredInventory.IsEmpty())
-            {
-                requiredVolume = (double)requiredInventory.TotalInventoryVolume();
-            }
-
-            if (requiredVolume <= 0.0)
+            if (requiredInventory.IsEmpty() || winningDrones.Count == 0)
             {
                 return assignments;
             }
+            double requiredVolume = (double)bidRound.TotalVolume;
+            if (requiredVolume <= 0.0) requiredVolume = (double)requiredInventory.TotalInventoryVolume();
+            double requiredMass = (double)bidRound.TotalMass;
+            if (requiredMass <= 0.0) requiredMass = (double)requiredInventory.TotalInventoryMass(AutomataSession.Instance);
 
-            Vector3D jobPosition = bidRound.PositionData.ToVector3D();
-            QuaternionDData jobOrientation = bidRound.OrientationData;
-            double remainingVolume = requiredVolume;
+            double remaining = 1.0;   // share of the job not assigned yet
             int droneIndex = 0;
-            int maxIterations = winningDrones.Count * 8;
+            int maxIterations = winningDrones.Count * 16;
 
-            while (remainingVolume > 0.001 && maxIterations > 0)
+            while (remaining > 0.0005 && maxIterations > 0)
             {
                 Bid drone = winningDrones[droneIndex];
                 droneIndex = (droneIndex + 1) % winningDrones.Count;
@@ -1089,8 +1152,8 @@ namespace Automata.Orchestrator
                     continue;
                 }
 
-                double droneTripCapacity = GetDronePreferredTripVolume(drone);
-                if (droneTripCapacity <= 0.0)
+                double droneShare = DroneTripShare(drone, requiredVolume, requiredMass);
+                if (droneShare <= 0.0)
                 {
                     continue;
                 }
@@ -1102,8 +1165,9 @@ namespace Automata.Orchestrator
                 }
 
                 double lcRemaining = remainingLcVolume[lc.EntityId];
-                double tripVolume = Math.Min(remainingVolume, Math.Min(droneTripCapacity, lcRemaining));
-                if (tripVolume <= 0.0)
+                double lcShare = requiredVolume > 0.0 ? lcRemaining / requiredVolume : 1.0;
+                double trip = Math.Min(remaining, Math.Min(droneShare, lcShare));
+                if (trip <= 0.0)
                 {
                     remainingLcVolume[lc.EntityId] = 0.0;
                     continue;
@@ -1116,11 +1180,11 @@ namespace Automata.Orchestrator
                     assignments[drone.EntityId] = droneTasks;
                 }
 
-                DiscreteInventory tripPayload = BuildTripPayload(requiredInventory, requiredVolume, tripVolume);
-                AppendWeldTripTasks(droneTasks, lc, bidRound, jobPosition, jobOrientation, tripPayload);
+                DiscreteInventory tripPayload = BuildTripPayload(requiredInventory, trip);
+                AppendWeldTripTasks(droneTasks, lc, bidRound, tripPayload, trip < 0.999);
 
-                remainingVolume -= tripVolume;
-                remainingLcVolume[lc.EntityId] = Math.Max(0.0, lcRemaining - tripVolume);
+                remaining -= trip;
+                remainingLcVolume[lc.EntityId] = Math.Max(0.0, lcRemaining - trip * requiredVolume);
             }
 
             foreach (KeyValuePair<long, List<Task>> kv in assignments)
@@ -1130,23 +1194,21 @@ namespace Automata.Orchestrator
                 {
                     continue;
                 }
-                Task returnHomeTask = new Task
-                {
-                    TaskId = IdGenerator.GenerateId(ref _taskIdCounter, entityId),
-                    JobId = bidRound.JobId,
-                    TaskType = TaskType.ReturnHome,
-                    CreatedTime = DateTime.UtcNow,
-                    AssignedBy = entityId,
-                    AssignedTime = DateTime.UtcNow,
-                    PositionData = bidRound.PositionData,
-                    OrientationData = bidRound.OrientationData,
-                    Payload = null,
-                    OutOfOrchestratorRange = false,
-                };
-                droneTasks.Add(returnHomeTask);
+                droneTasks.Add(Task.ReturnHome());
             }
 
             return assignments;
+        }
+
+        /// <summary>Share (0-1) of the job one trip of this drone can take: the tighter of cargo volume and lift.</summary>
+        private static double DroneTripShare(Bid drone, double requiredVolume, double requiredMass)
+        {
+            double share = 1.0;
+            double volume = Math.Max((double)drone.MaxCargoVolume, 0.0);
+            if (requiredVolume > 0.0) share = Math.Min(share, volume / requiredVolume);
+            double lift = (double)drone.OptimalLoadIn1G > 0.0 ? (double)drone.OptimalLoadIn1G : (double)drone.MaxLoadIn1G;
+            if (requiredMass > 0.0) share = Math.Min(share, Math.Max(lift, 0.0) / requiredMass);
+            return share;
         }
 
         private Dictionary<long, double> BuildRemainingLcVolumeMap(List<Bid> winningLCs)
@@ -1225,14 +1287,14 @@ namespace Automata.Orchestrator
             return best;
         }
 
-        private static DiscreteInventory BuildTripPayload(DiscreteInventory requiredInventory, double requiredVolume, double tripVolume)
+        private static DiscreteInventory BuildTripPayload(DiscreteInventory requiredInventory, double share)
         {
-            if (requiredInventory == null || requiredInventory.IsEmpty() || requiredVolume <= 0.0 || tripVolume <= 0.0)
+            if (requiredInventory == null || requiredInventory.IsEmpty() || share <= 0.0)
             {
                 return null;
             }
 
-            double ratio = Math.Min(1.0, tripVolume / requiredVolume);
+            double ratio = Math.Min(1.0, share);
             DiscreteInventory payload = new DiscreteInventory();
             List<KVPair> items = requiredInventory.GetAllItems();
             for (int i = 0; i < items.Count; i++)
@@ -1243,77 +1305,40 @@ namespace Automata.Orchestrator
                 {
                     continue;
                 }
-                int scaledAmount = (int)Math.Ceiling(amount * ratio);
-                if (scaledAmount <= 0)
-                {
-                    continue;
-                }
+                // Whole items only: rounding down keeps the trip within the drone's limits (the last trip rounds up)
+                int scaledAmount = ratio >= 0.999 ? amount : (int)Math.Floor(amount * ratio);
+                if (scaledAmount <= 0 && ratio > 0.0) scaledAmount = 1;
                 payload.AddItem(item.Key, scaledAmount);
             }
 
             return payload.IsEmpty() ? null : payload;
         }
 
-        private void AppendWeldTripTasks(List<Task> droneTasks, Bid lc, Auction bidRound, Vector3D jobPosition, QuaternionDData jobOrientation, DiscreteInventory tripPayload)
+        /// <summary>
+        /// One trip for one drone: dock at the logistics computer's connector, load, then the job's work tasks
+        /// (NavigateToolTo + WeldBlock pairs, central-out). A trip carrying only part of the job welds until its
+        /// cargo holds nothing the block needs (DroneInventoryEmpty) instead of until the block is complete.
+        /// ReturnHome is appended once per drone after its last trip.
+        /// </summary>
+        private void AppendWeldTripTasks(List<Task> droneTasks, Bid lc, Auction bidRound, DiscreteInventory tripPayload, bool partial)
         {
             Vector3D lcPosition = lc.IOLocationData.PositionData.ToVector3D();
-            QuaternionDData lcOrientation = lc.IOLocationData.OrientationData;
+            Vector3D axis = Vector3D.Transform(Vector3D.Forward, lc.IOLocationData.OrientationData.ToQuaternionD());
+            if (axis.LengthSquared() < 0.5) axis = Vector3D.Forward;
+            droneTasks.Add(Task.DockAt(lc.IOLocationData.EntityId, lcPosition, lcPosition + axis * Construction.ConstructionComputer.APPROACH_DISTANCE));
+            droneTasks.Add(Task.Load(tripPayload));
 
-            droneTasks.Add(new Task
+            Job job;
+            if (!_auctionJobs.TryGetValue(bidRound.AuctionId, out job) || job.Tasks == null) return;
+            for (int i = 0; i + 1 < job.Tasks.Count; i++)
             {
-                TaskId = IdGenerator.GenerateId(ref _taskIdCounter, entityId),
-                JobId = bidRound.JobId,
-                TaskType = TaskType.ApproachLocation,
-                CreatedTime = DateTime.UtcNow,
-                AssignedBy = entityId,
-                AssignedTime = DateTime.UtcNow,
-                PositionData = Vector3DData.FromVector3D(lcPosition),
-                OrientationData = lcOrientation,
-                Payload = null,
-                OutOfOrchestratorRange = false,
-            });
-
-            droneTasks.Add(new Task
-            {
-                TaskId = IdGenerator.GenerateId(ref _taskIdCounter, entityId),
-                JobId = bidRound.JobId,
-                TaskType = TaskType.CollectInventory,
-                CreatedTime = DateTime.UtcNow,
-                AssignedBy = entityId,
-                AssignedTime = DateTime.UtcNow,
-                PositionData = Vector3DData.FromVector3D(lcPosition),
-                OrientationData = lcOrientation,
-                Payload = tripPayload,
-                OutOfOrchestratorRange = false,
-            });
-
-            droneTasks.Add(new Task
-            {
-                TaskId = IdGenerator.GenerateId(ref _taskIdCounter, entityId),
-                JobId = bidRound.JobId,
-                TaskType = TaskType.ApproachLocation,
-                CreatedTime = DateTime.UtcNow,
-                AssignedBy = entityId,
-                AssignedTime = DateTime.UtcNow,
-                PositionData = Vector3DData.FromVector3D(jobPosition),
-                OrientationData = jobOrientation,
-                Payload = null,
-                OutOfOrchestratorRange = false,
-            });
-
-            droneTasks.Add(new Task
-            {
-                TaskId = IdGenerator.GenerateId(ref _taskIdCounter, entityId),
-                JobId = bidRound.JobId,
-                TaskType = TaskType.WeldBlock,
-                CreatedTime = DateTime.UtcNow,
-                AssignedBy = entityId,
-                AssignedTime = DateTime.UtcNow,
-                PositionData = Vector3DData.FromVector3D(jobPosition),
-                OrientationData = jobOrientation,
-                Payload = tripPayload,
-                OutOfOrchestratorRange = false,
-            });
+                if (job.Tasks[i].Type != TaskType.NavigateToolTo || job.Tasks[i + 1].Kind != TaskKind.Tool) continue;
+                Task tool = job.Tasks[i + 1];
+                if (partial && tool.Type == TaskType.WeldBlock) tool.Completion = ToolTaskCompletionTrigger.DroneInventoryEmpty;
+                droneTasks.Add(job.Tasks[i]);
+                droneTasks.Add(tool);
+                i++;
+            }
         }
 
         /// <summary>
@@ -1330,9 +1355,9 @@ namespace Automata.Orchestrator
 
             switch (bidRound.JobType)
             {
-                case JobType.WeldBlock:
+                case JobType.Weld:
                     return MinimialCheckWeldBlockBidAgainstBidRoundStart(bid, bidRound);
-                case JobType.GrindBlock:
+                case JobType.Grind:
                     return MinimialCheckGrindBlockBidAgainstBidRoundStart(bid, bidRound);
                 case JobType.DeliverMissingInventory:
                     return MinimialCheckDeliverMissingInventoryBidAgainstBidRoundStart(bid, bidRound);
@@ -1369,11 +1394,13 @@ namespace Automata.Orchestrator
                     {
                         return false;
                     }
-                    if (bidRound.TotalMass > bid.MaxLoadIn1G)
+                    // A drone smaller than the job still qualifies: the job is split into trips that fit
+                    // (BuildWeldTaskAssignments). It only needs some cargo room and some lift (capability classes).
+                    if ((bid.Capabilities & (Drone.Capabilities.CargoVolumeNil | Drone.Capabilities.LiftNil)) != 0)
                     {
                         return false;
                     }
-                    if (bidRound.TotalVolume > bid.MaxCargoVolume)
+                    if (bid.MaxCargoVolume <= 0 || bid.MaxLoadIn1G <= 0)
                     {
                         return false;
                     }
@@ -1385,21 +1412,26 @@ namespace Automata.Orchestrator
 
         private static bool MinimialCheckGrindBlockBidAgainstBidRoundStart(Bid bid, Auction bidRound)
         {
+            // TODO (orchestrator workflow): drones: CanGrind + cargo volume / lift for (a share of) what grinding
+            // returns. Logistics computers: bid with the free volume they can take the returned components into.
             return false;
         }
 
         private static bool MinimialCheckDeliverMissingInventoryBidAgainstBidRoundStart(Bid bid, Auction bidRound)
         {
+            // TODO (orchestrator workflow): drones: any cargo + lift. LCs: can supply (part of) the missing inventory.
             return false;
         }
 
         private static bool MinimialCheckCollectInventorySurplusBidAgainstBidRoundStart(Bid bid, Auction bidRound)
         {
+            // TODO (orchestrator workflow): drones: any cargo + lift. LCs: have room for (part of) the surplus.
             return false;
         }
 
         private static bool MinimialCheckMineOreBidAgainstBidRoundStart(Bid bid, Auction bidRound)
         {
+            // TODO (orchestrator workflow): drones: CanDrill, environment. LCs: refineries that take the ore, and room.
             return false;
         }
 

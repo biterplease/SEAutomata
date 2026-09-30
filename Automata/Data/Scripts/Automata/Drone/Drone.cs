@@ -50,7 +50,7 @@ namespace Automata.Drone
         ManagedByPlayer,
     }
     [Flags, ProtoContract]
-    public enum Capabilities : ushort
+    public enum Capabilities : uint
     {
         [ProtoEnum]
         None = 0,
@@ -84,33 +84,37 @@ namespace Automata.Drone
         /// <summary>
         /// Cargo volume greater than 0m^3 and less than 10m^3.
         /// </summary>
-        [ProtoEnum]
-        CargoVolumeLt10m3 = 4096,
+        [ProtoEnum] CargoVolumeLt10m3 = 4096,
         /// <summary>
         /// Cargo volume greater than 10m^3 and less than 100m^3.
         /// </summary>
-        [ProtoEnum]
-        CargoVolumeLt100m3 = 8192,
+        [ProtoEnum] CargoVolumeLt100m3 = 8192,
         /// <summary>
         /// Cargo volume greater than 100m^3 and less than 1000m^3.
         /// </summary>
-        [ProtoEnum]
-        CargoVolumeLt1000m3 = 16384,
+        [ProtoEnum] CargoVolumeLt1000m3 = 16384,
         /// <summary>
-        /// Cargo volume greater than 1000m^3 and less than 10000m^3.
+        /// Cargo volume of 1000m^3 or more (the top class).
         /// </summary>
-        [ProtoEnum]
-        CargoVolumeLt10000m3 = 32768,
+        [ProtoEnum] CargoVolumeLt10000m3 = 32768,
+        // Lift classes: payload (kg) the drone can carry in 1 g within its max-load setting, beyond its own mass.
+        // Exactly one is set. Cargo volume says what fits in the drone, lift says what it can take off with.
+        /// <summary>No payload at all (can barely lift itself, or not at all).</summary>
+        [ProtoEnum] LiftNil = 65536,
+        /// <summary>Payload below 1 t.</summary>
+        [ProtoEnum] LiftLt1t = 131072,
+        /// <summary>Payload of 1 t to 10 t.</summary>
+        [ProtoEnum] LiftLt10t = 262144,
+        /// <summary>Payload of 10 t to 100 t.</summary>
+        [ProtoEnum] LiftLt100t = 524288,
+        /// <summary>Payload of 100 t or more (the top class).</summary>
+        [ProtoEnum] LiftLt1000t = 1048576,
 
     }
     public enum BehaviourProfile : byte
     {
         [ProtoEnum]
         None = 0,
-        [ProtoEnum]
-        RefuelWhenDocked = 1,
-        [ProtoEnum]
-        RechargeWhenDocked = 2,
         /// <summary>
         /// Cargo drones can carry large amounts of cargo, for smaller construction drones to use
         /// as a mobile cargo container. Player should not assign this flag to drones that are expected

@@ -16,6 +16,7 @@ using Automata.Util.Logging;
 using Automata.Pathfinding;
 using Automata.Util;
 using Automata.VirtualNetwork;
+using Automata.Network;
 using Sandbox.Definitions;
 using Sandbox.ModAPI.Interfaces.Terminal;
 using VRage.Game;
@@ -25,7 +26,9 @@ using BlendTypeEnum = VRageRender.MyBillboard.BlendTypeEnum;
 
 namespace Automata.Drone
 {
-    [MyComponentType(typeof(DroneControllerBlock))]   // needed for Serialize/Deserialize (MyObjectBuilder_ModCustomComponent)
+    // No [MyComponentType]: the saved component is keyed "MyGameLogicComponent" and must resolve to the entity's GameLogic
+    // slot on load. Mapping it to this type made MyComponentContainer.Deserialize look for a component that doesn't
+    // exist, create a null one and crash the world load.
     [MyEntityComponentDescriptor(typeof(MyObjectBuilder_RemoteControl), false,
         "AutomataSmallDroneController",
         "AutomataLargeDroneController")]
@@ -73,6 +76,8 @@ namespace Automata.Drone
         
         private DroneControllerSettings settings;
         private Capabilities capabilities;
+        private string errorReason;                        // why the drone is in State.Error (LCD alert line)
+        private readonly StringBuilder sb = new StringBuilder(64);
         private BehaviourProfile behaviourProfile;
         private State currentState = State.Initializing;
         private bool initialized = false;
@@ -168,7 +173,10 @@ namespace Automata.Drone
         private int homeConnectorCheckedFrame;
         private int observationDrawStartFrame;
         private const int OBSERVATION_DRAW_TICKS = 120 * 60;          // draw switches itself off after 120 s
-        private const float OBSERVATION_SIZE_MIN = 2.5f, OBSERVATION_SIZE_MAX = 25f, OBSERVATION_OFFSET_MAX = 12.5f;
+        public const double OBSERVATION_UNIT = 2.5;                    // m per observation-area block (large grid cube)
+        public const int OBSERVATION_SIZE_MIN = 1;
+        public const int OBSERVATION_SIZE_MAX = 10;
+        public const int OBSERVATION_OFFSET_MAX = 10;   // blocks
         private const float OBSERVATION_GRID_CELL = 2.5f;              // m, grid spacing drawn on the area faces
         private static readonly MyStringId DrawMaterial = MyStringId.GetOrCompute("Square");
 
@@ -232,32 +240,6 @@ namespace Automata.Drone
             }          
         }
 
-        // public DroneControllerBlock(
-        //     DroneControllerSettings settings = null,
-        //     MessageQueue messaging = null,
-        //     IMyUtilitiesDelegate utilitiesDelegate = null,
-        //     IMySessionDelegate sessionDelegate = null,
-        //     IMyGamePruningStructureDelegate pruningStructure = null,
-        //     IMyPlanetDelegate planetDelegate = null)
-        // {
-        //     this.settings = settings ?? new DroneControllerSettings();
-        //     this.messaging = messaging ?? AutomataSession.GetMessageQueue();
-        //     this.operationMode = settings.OperationMode;
-        //     this.utilitiesDelegate = utilitiesDelegate ?? new MyUtilitiesDelegate();
-        //     this.sessionDelegate = sessionDelegate ?? new MySessionDelegate();
-        //     this.pruningStructureDelegate = pruningStructure ?? new MyGamePruningStructureDelegate();
-        //     this.planetDelegate = planetDelegate ?? new MyPlanetDelegate();
-
-        //     foreach (Base6Directions.Direction dir in Enum.GetValues(typeof(Base6Directions.Direction)))
-        //     {
-        //         gyroscopes[dir] = new List<IMyGyro>();
-        //         ionThrusters[dir] = new List<IMyThrust>();
-        //         atmoThrusters[dir] = new List<IMyThrust>();
-        //         hydrogenThrusters[dir] = new List<IMyThrust>();
-        //         allThrusters[dir] = new List<IMyThrust>();
-        //     }
-        // }
-
         #region Core API Lifecycle
         public override void Init(MyObjectBuilder_EntityBase objectBuilder)
         {
@@ -287,8 +269,15 @@ namespace Automata.Drone
             base.UpdateBeforeSimulation();
             try
             {
-                if (!initialized)
+                if (!initialized || !IsServer)     // flight control is server-side only
                     return;
+                if (!settings.IsEnabled)
+                {
+                    // AI off: hands off; the game's own dampeners hold the drone where it is
+                    if (thrustOverridesActive) ClearAllThrustOverrides();
+                    if (gyroOverrideActive) ReleaseGyroscopes();
+                    return;
+                }
                 CaptureFlightState();
                 if (activeFlightOrder != null && !RefreshAnchoredOrder(activeFlightOrder))
                 {
@@ -354,11 +343,6 @@ namespace Automata.Drone
                     }
                     UpdateLegChaining(o);
                 }
-                else if (settings.EnableInertialDampening)
-                {
-                    Vector3D zero = Vector3D.Zero;
-                    UpdateTranslation(ref zero);
-                }
                 else if (thrustOverridesActive)
                 {
                     ClearAllThrustOverrides();
@@ -378,17 +362,29 @@ namespace Automata.Drone
                 if (!initialized)
                 {
                     Initialize();
+                    if (!initialized && IsServer && settings != null) display.Flush(settings);   // show why (header alert)
+                    return;
+                }
+                FlushSettingSync();
+                if (IsServer) SendNavigationRoutes();
+                if (!IsServer)
+                {
+                    CaptureFlightState();   // clients: UI only (load writer, draw)
                     return;
                 }
                 if (preflightStage == 0)
                     isParked = IsParkedNow();
-                // Landing gear with auto-lock can grab again right after take-off: keep it released while flying
-                if (activeFlightOrder != null && preflightStage == 0 && dockingHomeId == 0)
-                    for (int i = 0; i < landingGears.Count; i++)
-                        if (landingGears[i].IsLocked) landingGears[i].Unlock();
                 if (!frameUpdatesOn)
                     CaptureFlightState();          // keep a recent snapshot for UI / monitoring while idle
-                UpdateDocking();
+                if (settings.IsEnabled)
+                {
+                    // Landing gear with auto-lock can grab again right after take-off: keep it released while flying
+                    if (activeFlightOrder != null && preflightStage == 0 && dockingHomeId == 0)
+                        for (int i = 0; i < landingGears.Count; i++)
+                            if (landingGears[i].IsLocked) landingGears[i].Unlock();
+                    UpdateDocking();
+                    UpdateConstruction10();
+                }
                 UpdateFrameSubscription();
                 display.Flush(settings);
             }
@@ -406,21 +402,39 @@ namespace Automata.Drone
                 if (!initialized)
                     return;
                 UpdateGravity();
+                if (!IsServer)
+                {
+                    // clients: keep the block lists (terminal) and thrust figures (load labels) current, nothing else
+                    combinedThrustProfile = CalculateThrustProfile(shipController, physicalMass, allThrusters);
+                    if (capabilitiesDirty || sessionDelegate.GameplayFrameCounter - lastComponentCheckFrame > COMPONENT_CHECK_INTERVAL_MIN_TICKS)
+                    {
+                        lastComponentCheckFrame = sessionDelegate.GameplayFrameCounter;
+                        capabilitiesDirty = false;
+                        CheckCapabilities();
+                    }
+                    return;
+                }
                 bool flying = frameUpdatesOn && !isParked && preflightStage == 0;
                 if (flying)
                     UpdateMass();                   // cargo can change while working; idle / docked drones are re-measured at pre-flight
                 if (!isParked)
                     combinedThrustProfile = CalculateThrustProfile(shipController, physicalMass, allThrusters);
-                ReportThrustGains();
-                MonitorPower();
-                CheckLoad();
-                // Ownership / range can change mid-flight: re-validate the anchor at a low rate
-                if (anchorBlock != null && activeFlightOrder != null && activeFlightOrder.AnchorEntityId != 0
-                    && AnchorDirectory.Resolve(block, activeFlightOrder.AnchorEntityId) == null)
+                MonitorPower();                     // levels for the header always; acts only with the AI on
+                if (settings.IsEnabled)
                 {
-                    Report("Nav: anchor no longer available, order cancelled");
-                    ClearFlightOrder();
+                    ReportThrustGains();
+                    CheckLoad();
+                    UpdateConstruction100();
+                    UpdateOrchestratorJobs();
+                    // Ownership / range can change mid-flight: re-validate the anchor at a low rate
+                    if (anchorBlock != null && activeFlightOrder != null && activeFlightOrder.AnchorEntityId != 0
+                        && AnchorDirectory.Resolve(block, activeFlightOrder.AnchorEntityId) == null)
+                    {
+                        Report("Nav: anchor no longer available, order cancelled");
+                        ClearFlightOrder();
+                    }
                 }
+                UpdateAlert();
                 // Full block rescan: when blocks were added / removed (event-driven), else every ComponentCheckInterval
                 var currentFrame = sessionDelegate.GameplayFrameCounter;
                 if (capabilitiesDirty || currentFrame - lastComponentCheckFrame > COMPONENT_CHECK_INTERVAL_MIN_TICKS)
@@ -441,7 +455,7 @@ namespace Automata.Drone
         {
             try
             {
-                Shutdown();
+                if (IsServer) Shutdown();
                 UnsubscribeGridEvents();
                 if (AutomataSession.Instance != null)
                 {
@@ -493,7 +507,9 @@ namespace Automata.Drone
             {
                 Log.Error("DroneControllerBlock {0}: IsSerialized error: {1}", Entity?.EntityId, ex);
             }
-            return true;
+            // Only when this is the block's sole gamelogic: a composite (another mod's gamelogic on the same block)
+            // cannot be matched back on load. Entity.Storage carries the settings then.
+            return Entity != null && Entity.GameLogic == this;
         }
 
         public override MyObjectBuilder_ComponentBase Serialize(bool copy = false)
@@ -565,7 +581,7 @@ namespace Automata.Drone
                 terminalLogger = new TerminalDisplayManager(block as IMyTerminalBlock, 10);
             this.pruningStructureDelegate = new MyGamePruningStructureDelegate();
             this.planetDelegate =  new MyPlanetDelegate();
-            LoadSettings();
+            if (settings == null) LoadSettings();   // Initialize retries every 10 ticks: keep what was loaded / received
 
 
 
@@ -580,25 +596,28 @@ namespace Automata.Drone
             if (shipController == null)
             {
                 if (currentState != State.Error) Report("ERROR: entity is not a ship controller");
+                errorReason = "Not a ship controller";
                 SetState(State.Error);
+                UpdateAlert();
                 return;
             }
 
             if (!CheckCapabilities())
             {
-                if (currentState != State.Error) Report("ERROR: failed capability check");
+                if (currentState != State.Error) Report("ERROR: failed capability check ({0})", errorReason);
                 SetState(State.Error);
+                UpdateAlert();
                 return;
             }
 
             // pathfindingManager = new PathfindingManager(AutomataSession.GetConfig().Pathfinding, pruningStructureDelegate, planetDelegate);
 
-            if (primaryAntenna != null)
+            if (primaryAntenna != null && IsServer)   // the virtual network is simulated on the server only
             {
                 AutomataSession.GetMessageQueue().RegisterAntenna(_entityId, MessageQueue.IAIBlockType.Drone, primaryAntenna, false);
             }
 
-            if (settings.OperationMode == OperationMode.ManagedByScheduler)
+            if (settings.OperationMode == OperationMode.ManagedByScheduler && IsServer)
             {
                 AutomataSession.GetMessageQueue().Subscribe(_entityId, Channel.ORCHESTRATOR_AUCTION_START);
                 AutomataSession.GetMessageQueue().Subscribe(_entityId, Channel.ORCHESTRATOR_AUCTION_WINNER_ANNOUNCEMENT);
@@ -651,6 +670,7 @@ namespace Automata.Drone
 
             CaptureFlightState();
             var controllerMatrix = shipController.Orientation;
+            int oreDetectors = 0, cameras = 0, wheels = 0;
             _gridCache.Clear();
             var gridGroup = cubeBlock.CubeGrid.GetGridGroup(GridLinkTypeEnum.Mechanical);
             gridGroup.GetGrids(_gridCache);
@@ -730,6 +750,12 @@ namespace Automata.Drone
                         batteries.Add((IMyBatteryBlock)fatBlock);
                     else if (fatBlock is IMyCargoContainer)
                         cargoContainers.Add((IMyCargoContainer)fatBlock);
+                    else if (fatBlock is IMyOreDetector)
+                        oreDetectors++;
+                    else if (fatBlock is IMyCameraBlock)
+                        cameras++;
+                    else if (fatBlock is IMyMotorSuspension)
+                        wheels++;
                     else if (fatBlock is IMyRadioAntenna)
                     {
                         var antenna = (IMyRadioAntenna)fatBlock;
@@ -760,6 +786,18 @@ namespace Automata.Drone
             }
             for (int i = 0; i < 6; i++)
                 directionalThrustCache[i] = -1.0d;
+            if (hasMinimum) errorReason = null;
+            else
+            {
+                capabilities = Capabilities.None;   // nothing to offer; don't keep what a removed block gave
+                sb.Clear();
+                sb.Append("Missing:");
+                if (gyroscopes.Count == 0) sb.Append(" gyroscope");
+                if (!HasAnyDirectionalComponent(hydrogenThrusters) && !HasAnyDirectionalComponent(ionThrusters)
+                    && !HasAnyDirectionalComponent(atmoThrusters)) sb.Append(" thrusters");
+                if (connectors.Count == 0) sb.Append(" connector");
+                errorReason = sb.ToString();
+            }
             if (!hasMinimum){
                 ClearAllThrustOverrides();   // lists are rebuilt already, so this reaches every current thruster
                 ReleaseGyroscopes();         // and hands the drone back to the game's own dampeners
@@ -775,9 +813,16 @@ namespace Automata.Drone
 
             capabilities = Capabilities.None;
             behaviourProfile = BehaviourProfile.None;
-            if (sensors.Count > 0) capabilities|= Capabilities.HasSensors;
-            if (settings.AlwaysRefuelWhenDocked && connectors.Count > 0)
-                behaviourProfile|= BehaviourProfile.RefuelWhenDocked | BehaviourProfile.RechargeWhenDocked;
+            if (connectors.Count > 0) capabilities |= Capabilities.CanDock;
+            if (welder != null) capabilities |= Capabilities.CanWeld;
+            if (grinder != null) capabilities |= Capabilities.CanGrind;
+            if (drill != null) capabilities |= Capabilities.CanDrill;
+            if (oreDetectors > 0) capabilities |= Capabilities.CanScoutOre;
+            if (sensors.Count > 0) capabilities |= Capabilities.HasSensors;
+            if (cameras > 0) capabilities |= Capabilities.HasCameras;
+            if (wheels > 0) capabilities |= Capabilities.HasWheels;
+            capabilities |= CargoVolumeCapability(TotalCargoVolume());
+            capabilities |= LiftCapability(PayloadIn1G());
 
             var hasAnyAtmoThrusters = HasAnyDirectionalComponent<IMyThrust>(atmoThrusters);
             var hasAnyHydrogenThrusters = HasAnyDirectionalComponent<IMyThrust>(hydrogenThrusters);
@@ -808,6 +853,58 @@ namespace Automata.Drone
 
             return true;
         }
+        // m³ of all cargo containers (not tools, connectors or tanks)
+        private double TotalCargoVolume()
+        {
+            double volume = 0;
+            for (int i = 0; i < cargoContainers.Count; i++)
+            {
+                var inv = cargoContainers[i].GetInventory(0);
+                if (inv != null) volume += (double)inv.MaxVolume;
+            }
+            return volume;
+        }
+
+        /// <summary>Exactly one size class, for quick job pre-filtering (anything from 1000 m³ up is the top class).</summary>
+        public static Capabilities CargoVolumeCapability(double volume)
+        {
+            if (volume <= 0) return Capabilities.CargoVolumeNil;
+            if (volume < 10) return Capabilities.CargoVolumeLt10m3;
+            if (volume < 100) return Capabilities.CargoVolumeLt100m3;
+            if (volume < 1000) return Capabilities.CargoVolumeLt1000m3;
+            return Capabilities.CargoVolumeLt10000m3;
+        }
+
+        /// <summary>
+        /// kg the drone can carry in 1 g beyond its own mass, within its max-load (gravity) setting. Rated thrust:
+        /// counts thrusters switched off by docking.
+        /// </summary>
+        public double PayloadIn1G()
+        {
+            double limitPct = settings != null ? settings.MaxLoadGravity : 100.0;
+            return Math.Max(0, RatedThrust(Base6Directions.Direction.Up) / 9.81 * limitPct / 100.0 - DroneOwnMass());
+        }
+
+        /// <summary>Exactly one lift class, for quick job pre-filtering (100 t and up is the top class).</summary>
+        public static Capabilities LiftCapability(double payloadKg)
+        {
+            if (payloadKg <= 1) return Capabilities.LiftNil;
+            if (payloadKg < 1000) return Capabilities.LiftLt1t;
+            if (payloadKg < 10000) return Capabilities.LiftLt10t;
+            if (payloadKg < 100000) return Capabilities.LiftLt100t;
+            return Capabilities.LiftLt1000t;
+        }
+
+        /// <summary>Upper bound of a lift class in kg (for planning from capabilities alone).</summary>
+        public static double LiftClassMaxKg(Capabilities caps)
+        {
+            if ((caps & Capabilities.LiftLt1000t) != 0) return double.MaxValue;
+            if ((caps & Capabilities.LiftLt100t) != 0) return 100000;
+            if ((caps & Capabilities.LiftLt10t) != 0) return 10000;
+            if ((caps & Capabilities.LiftLt1t) != 0) return 1000;
+            return 0;
+        }
+
         private void CalibrateRotationCapabilities()
         {
             if (shipController == null) return;
@@ -896,6 +993,7 @@ namespace Automata.Drone
 
         private void ReleaseGyroscopes()
         {
+            if (!IsServer) return;   // block properties are synced from the server
             for (int i = 0; i < gyroscopes.Count; i++)
             {
                 var g = gyroscopes[i].Gyro;
@@ -1075,9 +1173,47 @@ namespace Automata.Drone
         }
 
         // Effective speeds: Safe <= Approach <= Max
-        private float MaxSpeed { get { return MathHelper.Clamp(settings.MaxSpeed, 1f, 100f); } }
-        private float ApproachSpeed { get { return Math.Min(Math.Max(settings.ApproachSpeed, 0.1f), MaxSpeed); } }
-        private float SafeSpeed { get { return Math.Min(Math.Max(settings.SafeSpeed, 0.1f), ApproachSpeed); } }
+        // Not clamped to each other (see SpeedSettingsProblem); the floor only keeps the maths finite
+        private const float MIN_FLIGHT_SPEED = 0.05f;
+        private float MaxSpeed { get { return MathHelper.Clamp(settings.MaxSpeed, MIN_FLIGHT_SPEED, MAX_SPEED_MAX); } }
+        private float ApproachSpeed { get { return MathHelper.Clamp(settings.ApproachSpeed, MIN_FLIGHT_SPEED, APPROACH_SPEED_MAX); } }
+        private float SafeSpeed { get { return MathHelper.Clamp(settings.SafeSpeed, MIN_FLIGHT_SPEED, SAFE_SPEED_MAX); } }
+
+        /// <summary>
+        /// The LCD header's alert line: the most important current problem. Errors (red) stop the drone or make
+        /// its settings unusable; warnings (yellow) are conditions it is handling or waiting on.
+        /// </summary>
+        private void UpdateAlert()
+        {
+            if (settings == null) return;
+            var level = DisplayAlertLevel.None;
+            string text = null;
+            string speed = SpeedSettingsProblem();
+            if (currentState == State.Error) { level = DisplayAlertLevel.Error; text = errorReason ?? "Error"; }
+            else if (speed != null) { level = DisplayAlertLevel.Error; text = speed; }
+            else if (!settings.IsEnabled) { level = DisplayAlertLevel.Warning; text = "AI disabled"; }
+            else if (thrustObstructedDir >= 0 && activeFlightOrder != null)
+            {
+                level = DisplayAlertLevel.Warning;
+                text = "Stuck: " + (Base6Directions.Direction)thrustObstructedDir + " thrust has no effect";
+            }
+            else if (loadLevel == 2) { level = DisplayAlertLevel.Warning; text = "Max load exceeded"; }
+            else if (needsBatteryRecharge) { level = DisplayAlertLevel.Warning; text = "Battery low"; }
+            else if (needsHydrogenRefuel) { level = DisplayAlertLevel.Warning; text = "Hydrogen low"; }
+            else if (lastConstructionProblem != null) { level = DisplayAlertLevel.Warning; text = lastConstructionProblem; }
+            display.SetAlert(level, text);
+        }
+
+        /// <summary>Speed settings that make no sense together, or null.</summary>
+        private string SpeedSettingsProblem()
+        {
+            if (settings.MaxSpeed <= 0) return "Max speed is 0";
+            if (settings.ApproachSpeed <= 0) return "Approach speed is 0";
+            if (settings.SafeSpeed <= 0) return "Safe speed is 0";
+            if (settings.ApproachSpeed > settings.MaxSpeed) return "Approach speed > max speed";
+            if (settings.SafeSpeed > settings.ApproachSpeed) return "Safe speed > approach speed";
+            return null;
+        }
         private double FinalSpeedFor(FlightOrder o)
         {
             // FinalSpeed is for the final approach only; the transit to the approach point ends at ApproachSpeed
@@ -1386,6 +1522,27 @@ namespace Automata.Drone
 
         // Asks for the next leg before braking has to start; hands over when the waypoint is passed
         // (RunThrough / SlowApproach) or reached (FullStop).
+        /// <summary>
+        /// Hands over to the next queued leg now, e.g. when a leg can't settle within its tolerance (stalled close
+        /// to its waypoint). False when there is no next leg.
+        /// </summary>
+        private bool ForceLegHandover()
+        {
+            FlightOrder next = nextLeg;
+            if (next == null && queuedLegs.Count > 0)
+            {
+                next = queuedLegs.Dequeue();
+                if (queuedLegs.Count == 0) lastQueuedLeg = null;
+            }
+            if (next == null) return false;
+            nextLeg = null;
+            nextLegRequested = false;
+            legPassed = false;
+            if (activeFlightOrder != null && next.AnchorEntityId != activeFlightOrder.AnchorEntityId) anchorBlock = null;
+            activeFlightOrder = next;
+            return true;
+        }
+
         private void UpdateLegChaining(FlightOrder o)
         {
             if (o.Phase != FlightPhase.Approach) return;
@@ -1610,6 +1767,11 @@ namespace Automata.Drone
         // Real acceleration per unit of estimated thrust, per thruster group (index = Base6Directions.Direction).
         // Corrects errors in MaxEffectiveThrust / mass so the braking plan and the throttle match reality.
         private const double GAIN_LEARN_RATE = 0.02;
+        private const double GAIN_MIN = 0.5, GAIN_MAX = 1.5;
+        private const double GAIN_OBSTRUCTED_RATIO = 0.25;   // below this share of the expected push: obstructed, not learned
+        private const int GAIN_OBSTRUCTED_TICKS = 180;       // 3 s of that: flag it (LCD warning)
+        private readonly int[] obstructedTicks = new int[6];
+        private int thrustObstructedDir = -1;
         private readonly double[] thrustGain         = { 1, 1, 1, 1, 1, 1 };
         private readonly double[] reportedThrustGain = { 1, 1, 1, 1, 1, 1 };
         private readonly double[] groupThrottle      = new double[6];   // throttle applied last tick
@@ -1650,14 +1812,49 @@ namespace Automata.Drone
             if (physicalMass <= 0) return;
             int p = (int)pos, n = (int)neg;
             int active = groupThrottle[p] > 0 ? p : (groupThrottle[n] > 0 ? n : -1);   // ApplyAxisForce drives one side only
-            if (active < 0 || groupThrottle[active] < 0.1) return;
-            if (Math.Abs(groupThrottle[active] - groupThrottleAvg[active]) > 0.02) return;   // not steady yet
+            // The obstruction flag needs consecutive samples of the group actually pushing
+            if (active != p) ClearObstructed(p);
+            if (active != n) ClearObstructed(n);
+            if (active < 0) return;
+            if (groupThrottle[active] < 0.1 || Math.Abs(groupThrottle[active] - groupThrottleAvg[active]) > 0.02)
+            {
+                ClearObstructed(active);   // not pushing hard / not steady yet
+                return;
+            }
 
             double expected = groupThrottle[active] * ProfileMax(active) / physicalMass;    // nominal, before correction
             if (expected < 0.5) return;
             double measured = Vector3D.Dot(thrustAccel, axis) * (active == p ? 1 : -1);
-            double ratio = MathHelperD.Clamp(measured / expected, 0.2, 1.5);
+            double ratio = measured / expected;
+            if (ratio < GAIN_OBSTRUCTED_RATIO)
+            {
+                // Next to no effect: something is in the way (or pushing back), not a weak thruster group.
+                // Learning from this would cripple the drone for the rest of the flight.
+                if (++obstructedTicks[active] > GAIN_OBSTRUCTED_TICKS) thrustObstructedDir = active;
+                return;
+            }
+            obstructedTicks[active] = 0;
+            if (thrustObstructedDir == active) thrustObstructedDir = -1;
+            ratio = MathHelperD.Clamp(ratio, GAIN_MIN, GAIN_MAX);
             thrustGain[active] += (ratio - thrustGain[active]) * GAIN_LEARN_RATE;
+        }
+
+        private void ClearObstructed(int dir)
+        {
+            obstructedTicks[dir] = 0;
+            if (thrustObstructedDir == dir) thrustObstructedDir = -1;
+        }
+
+        // Each take-off starts from the thrusters' own figures: gains learned on another load / in another place
+        // (or while pushing against something) don't carry over
+        private void ResetThrustGains()
+        {
+            for (int i = 0; i < 6; i++)
+            {
+                thrustGain[i] = 1;
+                obstructedTicks[i] = 0;
+            }
+            thrustObstructedDir = -1;
         }
         // Debug aid: echo the learned factors to the block's custom info when any moved by more than 0.05
         private void ReportThrustGains()
@@ -1699,6 +1896,7 @@ namespace Automata.Drone
         }
         private void ClearAllThrustOverrides()
         {
+            if (!IsServer) return;
             for (int i = 0; i < 6; i++)
             {
                 foreach(IMyThrust thruster in allThrusters[i])
@@ -1765,32 +1963,38 @@ namespace Automata.Drone
             set
             {
                 if (settings != null) {
+                    if (settings.IsEnabled == value) return;
                     settings.IsEnabled = value;
-                    if (settings.IsEnabled){
-                        CheckCapabilities();
-                    } else {
-                        Shutdown();
+                    if (IsServer && initialized)   // clients only mirror the flag; the server acts on it
+                    {
+                        if (settings.IsEnabled)
+                        {
+                            CheckCapabilities();
+                            ApplyOperationMode();
+                            Report("AI enabled ({0})", settings.OperationMode);
+                        }
+                        else DisableAI();
                     }
                     SaveSettings();
+                    SyncSetting(DroneSettingKey.Enabled);
+                    RefreshTerminal();   // controls that depend on the AI being off (operation mode)
                 }
             }
         }
 
-        public bool Terminal_EnableInertialDampening
-        {
-            get { return settings != null && settings.EnableInertialDampening; }
-            set { if (settings != null) {
-                settings.EnableInertialDampening = value;
-                WakeFrameUpdates();
-                SaveSettings();
-                }
-            } 
-        }
-
+        // Changed only with the AI off (terminal); the server re-applies the mode's side effects when the AI goes on
         public long Terminal_OperationModeValue
         {
             get { return settings != null ? (long)settings.OperationMode : 0L; }
-            set { if (settings != null) { settings.OperationMode = (OperationMode)value; SaveSettings(); } }
+            set
+            {
+                if (settings == null || value < 0 || value > (long)OperationMode.ManagedByPlayer) return;
+                if ((long)settings.OperationMode == value) return;
+                settings.OperationMode = (OperationMode)value;
+                SaveSettings();
+                SyncSetting(DroneSettingKey.OperationModeValue);
+                RefreshTerminal();   // job / debug controls enable by mode
+            }
         }
         public StringBuilder Terminal_HomePositionGPS
         {
@@ -1809,77 +2013,57 @@ namespace Automata.Drone
 
         public void Terminal_SetCurrentAsHome()
         {
-            if (settings == null || !initialized) return;
             // Docked to one of our / our faction's connectors: that connector becomes home, with this exact pose
-            if (!RecordDockPoseFromConnection())
-                Report("Home: dock the drone to a connector first");
-            else
-                RefreshTerminal();
+            RequestAction(DroneAction.SetCurrentAsHome);
         }
 
-        public bool Terminal_UseTaskTypeFilters
-        {
-            get { return settings != null && settings.UseTaskTypeFilters; }
-            set { if (settings != null) { settings.UseTaskTypeFilters = value; SaveSettings(); } }
-        }
 
-        public Orchestrator.TaskType Terminal_TaskTypeFilters
-        {
-            get { return settings != null ? settings.TaskTypeFilters : 0; }
-            set { if (settings != null) { settings.TaskTypeFilters = value; SaveSettings(); } }
-        }
-
-        public bool Terminal_UseCapabilityFilters
-        {
-            get { return settings != null && settings.UseCapabilityFilters; }
-            set { if (settings != null) { settings.UseCapabilityFilters = value; SaveSettings(); } }
-        }
-
-        public Capabilities Terminal_CapabilityFilters
-        {
-            get { return settings != null ? settings.CapabilityFilters : Capabilities.None; }
-            set { if (settings != null) { settings.CapabilityFilters = value; SaveSettings(); } }
-        }
-
+        public const float WAYPOINT_TOLERANCE_MIN = 1f, WAYPOINT_TOLERANCE_MAX = 50f;
         public float Terminal_WaypointTolerance
         {
             get { return settings != null ? settings.WaypointTolerance : 5f; }
-            set { if (settings != null) { settings.WaypointTolerance = MathHelper.Clamp(value, 1f, 50f); SaveSettings(); } }
+            set
+            {
+                if (settings == null) return;
+                settings.WaypointTolerance = MathHelper.Clamp(value, WAYPOINT_TOLERANCE_MIN, WAYPOINT_TOLERANCE_MAX);
+                SaveSettings();
+                SyncSetting(DroneSettingKey.WaypointTolerance);
+            }
         }
 
-        // Speed limits. Flight uses Safe <= Approach <= Max even if the sliders say otherwise.
-        public const float MAX_SPEED_MIN = 1f, MAX_SPEED_MAX = 100f;
-        public const float APPROACH_SPEED_MIN = 0.5f, APPROACH_SPEED_MAX = 50f;
-        public const float SAFE_SPEED_MIN = 0.1f, SAFE_SPEED_MAX = 10f;
+        // Each clamped on its own; odd combinations (approach > max...) are flagged in the LCD header, not corrected
+        public const float MAX_SPEED_MIN = 0f, MAX_SPEED_MAX = 1000f;
+        public const float APPROACH_SPEED_MIN = 0f, APPROACH_SPEED_MAX = 100f;
+        public const float SAFE_SPEED_MIN = 0f, SAFE_SPEED_MAX = 50f;
 
         public float Terminal_MaxSpeed
         {
             get { return settings != null ? settings.MaxSpeed : 50f; }
-            set { if (settings != null) { settings.MaxSpeed = MathHelper.Clamp(value, MAX_SPEED_MIN, MAX_SPEED_MAX); SaveSettings(); } }
+            set { if (settings != null) { settings.MaxSpeed = MathHelper.Clamp(value, MAX_SPEED_MIN, MAX_SPEED_MAX); SaveSettings(); SyncSetting(DroneSettingKey.MaxSpeed); } }
         }
 
         public float Terminal_ApproachSpeed
         {
             get { return settings != null ? settings.ApproachSpeed : 5f; }
-            set { if (settings != null) { settings.ApproachSpeed = MathHelper.Clamp(value, APPROACH_SPEED_MIN, APPROACH_SPEED_MAX); SaveSettings(); } }
+            set { if (settings != null) { settings.ApproachSpeed = MathHelper.Clamp(value, APPROACH_SPEED_MIN, APPROACH_SPEED_MAX); SaveSettings(); SyncSetting(DroneSettingKey.ApproachSpeed); } }
         }
 
         public float Terminal_SafeSpeed
         {
             get { return settings != null ? settings.SafeSpeed : 0.5f; }
-            set { if (settings != null) { settings.SafeSpeed = MathHelper.Clamp(value, SAFE_SPEED_MIN, SAFE_SPEED_MAX); SaveSettings(); } }
+            set { if (settings != null) { settings.SafeSpeed = MathHelper.Clamp(value, SAFE_SPEED_MIN, SAFE_SPEED_MAX); SaveSettings(); SyncSetting(DroneSettingKey.SafeSpeed); } }
         }
 
         // Max load, percent (0–200). Writer text shows the resulting mass limit.
         public float Terminal_MaxLoadGravity
         {
             get { return settings != null ? settings.MaxLoadGravity : 80f; }
-            set { if (settings != null) { settings.MaxLoadGravity = MathHelper.Clamp(value, 0f, 200f); loadLevel = 0; SaveSettings(); } }
+            set { if (settings != null) { settings.MaxLoadGravity = MathHelper.Clamp(value, 0f, 200f); loadLevel = 0; SaveSettings(); SyncSetting(DroneSettingKey.MaxLoadGravity); } }
         }
         public float Terminal_MaxLoadSpace
         {
             get { return settings != null ? settings.MaxLoadSpace : 80f; }
-            set { if (settings != null) { settings.MaxLoadSpace = MathHelper.Clamp(value, 0f, 200f); loadLevel = 0; SaveSettings(); } }
+            set { if (settings != null) { settings.MaxLoadSpace = MathHelper.Clamp(value, 0f, 200f); loadLevel = 0; SaveSettings(); SyncSetting(DroneSettingKey.MaxLoadSpace); } }
         }
         public void Terminal_WriteMaxLoad(StringBuilder sb, bool gravity)
         {
@@ -1895,46 +2079,50 @@ namespace Automata.Drone
         public Color Terminal_LcdForeground
         {
             get { return settings != null ? new Color(settings.LcdForeground) : new Color(0, 255, 0); }
-            set { if (settings != null) { settings.LcdForeground = value.PackedValue; display.MarkStyleDirty(); SaveSettings(); } }
+            set { if (settings != null) { settings.LcdForeground = value.PackedValue; display.MarkStyleDirty(); SaveSettings(); SyncSetting(DroneSettingKey.LcdForeground); } }
         }
         public Color Terminal_LcdBackground
         {
             get { return settings != null ? new Color(settings.LcdBackground) : new Color(32, 32, 32); }
-            set { if (settings != null) { settings.LcdBackground = value.PackedValue; display.MarkStyleDirty(); SaveSettings(); } }
+            set { if (settings != null) { settings.LcdBackground = value.PackedValue; display.MarkStyleDirty(); SaveSettings(); SyncSetting(DroneSettingKey.LcdBackground); } }
         }
         public float Terminal_LcdFontSize
         {
             get { return settings != null ? settings.LcdFontSize : 0.6f; }
-            set { if (settings != null) { settings.LcdFontSize = MathHelper.Clamp(value, 0.1f, 2f); display.MarkStyleDirty(); SaveSettings(); } }
+            set { if (settings != null) { settings.LcdFontSize = MathHelper.Clamp(value, 0.1f, 2f); display.MarkStyleDirty(); SaveSettings(); SyncSetting(DroneSettingKey.LcdFontSize); } }
         }
         public bool Terminal_LcdShowHeader
         {
             get { return settings != null && settings.LcdShowHeader; }
-            set { if (settings != null) { settings.LcdShowHeader = value; display.MarkStyleDirty(); SaveSettings(); } }
+            set { if (settings != null) { settings.LcdShowHeader = value; display.MarkStyleDirty(); SaveSettings(); SyncSetting(DroneSettingKey.LcdShowHeader); } }
         }
 
         public void Terminal_GoHome()
         {
-            if (!initialized || settings == null) return;
-            GoHome();
+            RequestAction(DroneAction.GoHome);
+        }
+
+        public void Terminal_StopOrders()
+        {
+            RequestAction(DroneAction.StopOrders);
         }
 
         public bool Terminal_AlignToPGravity
         {
             get { return settings != null && settings.AlignToPGravity; }
-            set { if (settings != null) { settings.AlignToPGravity = value; SaveSettings(); } }
+            set { if (settings != null) { settings.AlignToPGravity = value; SaveSettings(); SyncSetting(DroneSettingKey.AlignToPGravity); } }
         }
 
         public float Terminal_MaxPitchDegrees
         {
             get { return settings != null ? settings.PGravityAlignMaxPitchDegrees : 10f; }
-            set { if (settings != null) { settings.PGravityAlignMaxPitchDegrees = MathHelper.Clamp(value, 0f, 90f); SaveSettings(); } }
+            set { if (settings != null) { settings.PGravityAlignMaxPitchDegrees = MathHelper.Clamp(value, 0f, 90f); SaveSettings(); SyncSetting(DroneSettingKey.MaxPitchDegrees); } }
         }
 
         public float Terminal_MaxRollDegrees
         {
             get { return settings != null ? settings.PGravityAlignMaxRollDegrees : 10f; }
-            set { if (settings != null) { settings.PGravityAlignMaxRollDegrees = MathHelper.Clamp(value, 0f, 90f); SaveSettings(); } }
+            set { if (settings != null) { settings.PGravityAlignMaxRollDegrees = MathHelper.Clamp(value, 0f, 90f); SaveSettings(); SyncSetting(DroneSettingKey.MaxRollDegrees); } }
         }
 
         public StringBuilder Terminal_LCDScreenTag
@@ -1946,50 +2134,50 @@ namespace Automata.Drone
                 string tag = value != null ? value.ToString().Trim() : "";
                 settings.LCDScreenTag = tag.Length > 0 ? tag : "[AutomataDrone]";
                 if (shipController != null) display.FindPanels(shipController.CubeGrid, settings.LCDScreenTag);
-                SaveSettings();
+                SaveSettings(); SyncSetting(DroneSettingKey.LCDScreenTag);
             }
         }
 
         public bool Terminal_MonitorHydrogen
         {
             get { return settings != null && settings.MonitorHydrogenLevels; }
-            set { if (settings != null) { settings.MonitorHydrogenLevels = value; SaveSettings(); } }
+            set { if (settings != null) { settings.MonitorHydrogenLevels = value; SaveSettings(); SyncSetting(DroneSettingKey.MonitorHydrogen); } }
         }
 
         public float Terminal_H2RefuelThreshold
         {
             get { return settings != null ? settings.HydrogenRefuelThreshold : 25f; }
-            set { if (settings != null) { settings.HydrogenRefuelThreshold = MathHelper.Clamp(value, 5f, 50f); SaveSettings(); } }
+            set { if (settings != null) { settings.HydrogenRefuelThreshold = MathHelper.Clamp(value, 5f, 50f); SaveSettings(); SyncSetting(DroneSettingKey.H2RefuelThreshold); } }
         }
 
         public float Terminal_H2OperationalThreshold
         {
             get { return settings != null ? settings.HydrogenOperationalThreshold : 50f; }
-            set { if (settings != null) { settings.HydrogenOperationalThreshold = MathHelper.Clamp(value, 10f, 95f); SaveSettings(); } }
+            set { if (settings != null) { settings.HydrogenOperationalThreshold = MathHelper.Clamp(value, 10f, 95f); SaveSettings(); SyncSetting(DroneSettingKey.H2OperationalThreshold); } }
         }
 
         public bool Terminal_AlwaysRefuel
         {
             get { return settings != null && settings.AlwaysRefuelWhenDocked; }
-            set { if (settings != null) { settings.AlwaysRefuelWhenDocked = value; SaveSettings(); } }
+            set { if (settings != null) { settings.AlwaysRefuelWhenDocked = value; SaveSettings(); SyncSetting(DroneSettingKey.AlwaysRefuel); } }
         }
 
         public bool Terminal_MonitorBattery
         {
             get { return settings != null && settings.MonitorBatteryLevels; }
-            set { if (settings != null) { settings.MonitorBatteryLevels = value; SaveSettings(); } }
+            set { if (settings != null) { settings.MonitorBatteryLevels = value; SaveSettings(); SyncSetting(DroneSettingKey.MonitorBattery); } }
         }
 
         public float Terminal_BatteryRefuelThreshold
         {
             get { return settings != null ? settings.BatteryRefuelThreshold : 20f; }
-            set { if (settings != null) { settings.BatteryRefuelThreshold = MathHelper.Clamp(value, 5f, 50f); SaveSettings(); } }
+            set { if (settings != null) { settings.BatteryRefuelThreshold = MathHelper.Clamp(value, 5f, 50f); SaveSettings(); SyncSetting(DroneSettingKey.BatteryRefuelThreshold); } }
         }
 
         public float Terminal_BatteryOperationalThreshold
         {
             get { return settings != null ? settings.BatteryOperationalThreshold : 80f; }
-            set { if (settings != null) { settings.BatteryOperationalThreshold = MathHelper.Clamp(value, 10f, 95f); SaveSettings(); } }
+            set { if (settings != null) { settings.BatteryOperationalThreshold = MathHelper.Clamp(value, 10f, 95f); SaveSettings(); SyncSetting(DroneSettingKey.BatteryOperationalThreshold); } }
         }
 
         public long Terminal_ControllerForwardDirectionValue
@@ -2018,9 +2206,7 @@ namespace Automata.Drone
 
         public void Terminal_Debug_SetOrientationTarget()
         {
-            orientationTarget = orientationTargetDebug;
-            orientationTargetSet = true;
-            WakeFrameUpdates();
+            RequestAction(new DroneActionPacket { Action = DroneAction.Orient, VectorA = Vector3DData.FromVector3D(orientationTargetDebug), HasVectorA = true });
         }
        public StringBuilder Textbox_Debug_NavigationTargetGPS
         {
@@ -2046,24 +2232,26 @@ namespace Automata.Drone
 
         public void Terminal_Debug_NavigateToTarget()
         {
-            if (!initialized || settings == null) return;
-            if (!navDebugTarget.HasValue) {
-                Report("Nav: invalid target GPS");
-                return;
+            if (!navDebugTarget.HasValue) { Feedback("Nav: invalid target GPS"); return; }
+            var p = new DroneActionPacket { Action = DroneAction.NavigateTo, VectorA = Vector3DData.FromVector3D(navDebugTarget.Value), HasVectorA = true };
+            if (navDebugTargetApproachFrom.HasValue)
+            {
+                p.VectorB = Vector3DData.FromVector3D(navDebugTargetApproachFrom.Value);
+                p.HasVectorB = true;
             }
-            OrderGoTo(navDebugTarget.Value, navDebugTargetApproachFrom);
+            RequestAction(p);
         }
 
         public void Terminal_Debug_QueueWaypoint()
         {
-            if (!initialized || settings == null) return;
-            if (!navDebugTarget.HasValue)
-            {
-                Report("Nav: invalid target GPS");
-                return;
-            }
+            if (!navDebugTarget.HasValue) { Feedback("Nav: invalid target GPS"); return; }
+            RequestAction(new DroneActionPacket { Action = DroneAction.QueueWaypoint, VectorA = Vector3DData.FromVector3D(navDebugTarget.Value), HasVectorA = true });
+        }
+
+        private void ExecuteQueueWaypoint(Vector3D target)
+        {
             bool chained = activeFlightOrder != null;
-            QueueGoTo(navDebugTarget.Value, WaypointBehavior.RunThrough, ApproachSpeed * 2f);
+            QueueGoTo(target, WaypointBehavior.RunThrough, ApproachSpeed * 2f);
             if (chained) Report("Nav: waypoint queued (run-through at {0:F0} m/s)", ApproachSpeed * 2f);
         }
 
@@ -2095,12 +2283,17 @@ namespace Automata.Drone
         }
         public void Terminal_Debug_PlaceMount()
         {
-            if (!initialized || settings == null) return;
-            if (!debugMountTarget.HasValue) { Report("Mount: invalid target GPS"); return; }
-            Vector3D target = debugMountTarget.Value;
+            if (!debugMountTarget.HasValue) { Feedback("Mount: invalid target GPS"); return; }
+            if (debugMountSelection == MOUNT_NONE) { Feedback("Mount: select a mount first"); return; }
+            RequestAction(new DroneActionPacket { Action = DroneAction.PlaceMount, Code = debugMountSelection,
+                VectorA = Vector3DData.FromVector3D(debugMountTarget.Value), HasVectorA = true });
+        }
+
+        private void ExecutePlaceMount(int code, Vector3D target)
+        {
             FlightOrder order = null;
             string name;
-            switch (debugMountSelection)
+            switch (code)
             {
                 case MOUNT_WELDER:  name = "welder";  order = OrderWorkAt(ref welderMount, target);  break;
                 case MOUNT_GRINDER: name = "grinder"; order = OrderWorkAt(ref grinderMount, target); break;
@@ -2135,6 +2328,7 @@ namespace Automata.Drone
             var none = new MyTerminalControlListBoxItem(MyStringId.GetOrCompute("(none)"), MyStringId.NullOrEmpty, 0L);
             items.Add(none);
             if (settings == null || AutomataSession.Instance == null) return;
+            RequestAnchorListIfStale();
             bool found = false;
             var entries = AutomataSession.Instance.Anchors.Get(block);
             for (int i = 0; i < entries.Count; i++)
@@ -2151,8 +2345,14 @@ namespace Automata.Drone
         {
             if (settings == null || selected == null || selected.Count == 0 || !(selected[0].UserData is long)) return;
             long id = (long)selected[0].UserData;
-            // Only ids from this drone's filtered list (or none) are accepted
-            if (id != 0 && !IsListedAnchor(id, AnchorKind.Connector)) return;
+            if (id == settings.HomeConnectorId) return;
+            RequestAction(new DroneActionPacket { Action = DroneAction.SelectHomeConnector, Id = id });
+        }
+
+        // Server: only ids from this drone's filtered list (drone owner AND requesting player), or none
+        private void ExecuteSelectHomeConnector(long id, long identity)
+        {
+            if (id != 0 && !IsListedAnchor(id, AnchorKind.Connector, identity)) return;
             if (id == settings.HomeConnectorId) return;
             settings.HomeConnectorId = id;
             settings.HomeDockConnectorId = 0;
@@ -2166,10 +2366,16 @@ namespace Automata.Drone
                 else Report("Home set: {0} (no drone connector can dock)", home.CustomName);
             }
             SaveSettings();
-            RefreshTerminal();   // observation-area controls depend on the selection
+            SyncSetting(DroneSettingKey.HomeConnector);   // clients: selection + observation-area controls
+            RefreshTerminal();
         }
 
         public void Terminal_ScanAnchors()
+        {
+            RequestAction(DroneAction.ScanAnchors);
+        }
+
+        private void ExecuteScanAnchors(ulong steamId, long identity)
         {
             if (AutomataSession.Instance == null) return;
             int wait;
@@ -2179,7 +2385,7 @@ namespace Automata.Drone
                 return;
             }
             Report("Scan: {0} connectors/beacons in range", AutomataSession.Instance.Anchors.Get(block).Count);
-            RefreshTerminal();
+            SendAnchorList(steamId, identity);
         }
 
         // "Add by name": exact connector name, searched within the server's name-search radius
@@ -2192,22 +2398,32 @@ namespace Automata.Drone
 
         public void Terminal_AddConnectorByName()
         {
-            if (AutomataSession.Instance == null || block == null || string.IsNullOrWhiteSpace(connectorNameQuery)) return;
-            AnchorEntry entry;
-            int wait;
-            int result = AutomataSession.Instance.Anchors.TryAddByName(block, connectorNameQuery, out entry, out wait);
-            if (result < 0) { Report("Add: wait {0} s", wait); return; }
-            if (result == 0 || !AnchorDirectory.ViewerAllowed(entry.OwnerId)) return;   // no match: nothing happens
-            Report("Added: {0}", FormatAnchor(entry));
-            RefreshTerminal();
+            if (string.IsNullOrWhiteSpace(connectorNameQuery)) { Feedback("Add: enter a connector name"); return; }
+            RequestAction(new DroneActionPacket { Action = DroneAction.AddConnectorByName, Text = connectorNameQuery.Trim() });
         }
 
-        private bool IsListedAnchor(long id, AnchorKind kind)
+        private void ExecuteAddConnectorByName(string name, ulong steamId, long identity)
+        {
+            if (AutomataSession.Instance == null || block == null || string.IsNullOrWhiteSpace(name)) return;
+            int wait;
+            int added = AutomataSession.Instance.Anchors.TryAddByName(block, name, identity, out wait);
+            if (added < 0) { Report("Add: wait {0} s", wait); return; }
+            if (added == 0) { Report("Add: connector \"{0}\" not found", name); return; }
+            Report(added == 1 ? "Added {0} matching connector" : "Added {0} matching connectors", added);
+            SendAnchorList(steamId, identity);
+        }
+
+        // viewerIdentity: the player asking (server side); 0 = the local player (UI)
+        private bool IsListedAnchor(long id, AnchorKind kind, long viewerIdentity = 0)
         {
             if (AutomataSession.Instance == null) return false;
             var entries = AutomataSession.Instance.Anchors.Get(block);
             for (int i = 0; i < entries.Count; i++)
-                if (entries[i].EntityId == id && entries[i].Kind == kind) return AnchorDirectory.ViewerAllowed(entries[i].OwnerId);
+            {
+                if (entries[i].EntityId != id || entries[i].Kind != kind) continue;
+                return viewerIdentity != 0 ? AnchorDirectory.IsAllowed(viewerIdentity, entries[i].OwnerId)
+                                           : AnchorDirectory.ViewerAllowed(entries[i].OwnerId);
+            }
             return false;
         }
 
@@ -2227,34 +2443,59 @@ namespace Automata.Drone
                 bool on = value && GetHomeConnector() != null;
                 settings.ObservationAreaDraw = on;
                 observationDrawStartFrame = MyAPIGateway.Session.GameplayFrameCounter;
-                if (AutomataSession.Instance != null) AutomataSession.Instance.RequestDraw(this, on);
+                UpdateDrawRequest();
             }
         }
 
         // axis: 0 = X (width, right), 1 = Y (height, up), 2 = Z (depth, forward)
-        public float Terminal_GetObservationSize(int axis)
+        // axis: 0 = X, 1 = Y, 2 = Z (Vector3I.AxisValue uses Base6Directions.Axis, where 0 is Z)
+        private static int GetAxis(Vector3I v, int axis)
         {
-            return settings != null ? (float)settings.ObservationAreaSize.ToVector3D().GetDim(axis) : 10f;
+            return axis == 0 ? v.X : axis == 1 ? v.Y : v.Z;
+        }
+
+        // Whole observation area at once (received from the network): clamped like the sliders
+        private void SetObservationArea(Vector3I size, Vector3I offset)
+        {
+            if (settings == null) return;
+            settings.ObservationAreaSizeBlocks = Vector3IData.FromVector3I(Vector3I.Clamp(size, new Vector3I(OBSERVATION_SIZE_MIN), new Vector3I(OBSERVATION_SIZE_MAX)));
+            settings.ObservationAreaOffsetBlocks = Vector3IData.FromVector3I(Vector3I.Clamp(offset, new Vector3I(-OBSERVATION_OFFSET_MAX), new Vector3I(OBSERVATION_OFFSET_MAX)));
+            SaveSettings();
+            SyncSetting(DroneSettingKey.ObservationArea);
+        }
+
+        private static Vector3I WithAxis(Vector3I v, int axis, int value)
+        {
+            if (axis == 0) v.X = value; else if (axis == 1) v.Y = value; else v.Z = value;
+            return v;
+        }
+
+        // in blocks (1 block = OBSERVATION_UNIT metres)
+        public int Terminal_GetObservationSize(int axis)
+        {
+            return settings != null ? GetAxis(settings.ObservationAreaSizeBlocks.ToVector3I(), axis) : 5;
         }
         public void Terminal_SetObservationSize(int axis, float value)
         {
             if (settings == null) return;
-            Vector3D v = settings.ObservationAreaSize.ToVector3D();
-            v.SetDim(axis, MathHelper.Clamp(value, OBSERVATION_SIZE_MIN, OBSERVATION_SIZE_MAX));
-            settings.ObservationAreaSize = Vector3DData.FromVector3D(v);
+            Vector3I v = settings.ObservationAreaSizeBlocks.ToVector3I();
+            v = WithAxis(v, axis, MathHelper.Clamp((int)Math.Round(value), OBSERVATION_SIZE_MIN, OBSERVATION_SIZE_MAX));
+            settings.ObservationAreaSizeBlocks = Vector3IData.FromVector3I(v);
             SaveSettings();
+            SyncSetting(DroneSettingKey.ObservationArea);
         }
-        public float Terminal_GetObservationOffset(int axis)
+        public int Terminal_GetObservationOffset(int axis)
         {
-            return settings != null ? (float)settings.ObservationAreaOffset.ToVector3D().GetDim(axis) : 0f;
+            return settings != null ? GetAxis(settings.ObservationAreaOffsetBlocks.ToVector3I(), axis) : 0;
         }
         public void Terminal_SetObservationOffset(int axis, float value)
         {
             if (settings == null) return;
-            Vector3D v = settings.ObservationAreaOffset.ToVector3D();
-            v.SetDim(axis, MathHelper.Clamp(value, -OBSERVATION_OFFSET_MAX, OBSERVATION_OFFSET_MAX));
-            settings.ObservationAreaOffset = Vector3DData.FromVector3D(v);
+            Vector3I v = settings.ObservationAreaOffsetBlocks.ToVector3I();
+            v = WithAxis(v, axis, MathHelper.Clamp((int)Math.Round(value), -OBSERVATION_OFFSET_MAX, OBSERVATION_OFFSET_MAX));
+            settings.ObservationAreaOffsetBlocks = Vector3IData.FromVector3I(v);
             SaveSettings();
+            SyncSetting(DroneSettingKey.ObservationArea);
         }
 
         /// <summary>
@@ -2267,13 +2508,18 @@ namespace Automata.Drone
             var home = GetHomeConnector();
             if (home == null || settings == null) return false;
             MatrixD m = home.WorldMatrix;
-            Vector3D size = settings.ObservationAreaSize.ToVector3D();
-            size = Vector3D.Clamp(size, new Vector3D(OBSERVATION_SIZE_MIN), new Vector3D(OBSERVATION_SIZE_MAX));
-            Vector3D offset = Vector3D.Clamp(settings.ObservationAreaOffset.ToVector3D(),
-                new Vector3D(-OBSERVATION_OFFSET_MAX), new Vector3D(OBSERVATION_OFFSET_MAX));
+            Vector3I size = Vector3I.Clamp(settings.ObservationAreaSizeBlocks.ToVector3I(),
+                new Vector3I(OBSERVATION_SIZE_MIN), new Vector3I(OBSERVATION_SIZE_MAX));
+            Vector3I offset = Vector3I.Clamp(settings.ObservationAreaOffsetBlocks.ToVector3I(),
+                new Vector3I(-OBSERVATION_OFFSET_MAX), new Vector3I(OBSERVATION_OFFSET_MAX));
+            // Even sizes: shift half a block so the faces land on block boundaries around the connector's cell
+            Vector3D centerBlocks = new Vector3D(
+                offset.X + ((size.X & 1) == 0 ? 0.5 : 0),
+                offset.Y + ((size.Y & 1) == 0 ? 0.5 : 0),
+                offset.Z + ((size.Z & 1) == 0 ? 0.5 : 0));
             boxMatrix = m;
-            boxMatrix.Translation = AnchorToWorldPoint(ref m, offset);
-            halfExtents = size * 0.5;   // box is symmetric, so the Forward/Backward sign of Z does not matter
+            boxMatrix.Translation = AnchorToWorldPoint(ref m, centerBlocks * OBSERVATION_UNIT);
+            halfExtents = new Vector3D(size.X, size.Y, size.Z) * (OBSERVATION_UNIT * 0.5);   // symmetric: Z sign irrelevant
             return true;
         }
 
@@ -2283,12 +2529,28 @@ namespace Automata.Drone
         public void StopDebugDraw()
         {
             if (settings != null) settings.ObservationAreaDraw = false;
+            StopNavigationDraw();
         }
 
         public bool DrawDebug()
         {
-            if (settings == null || !settings.ObservationAreaDraw || Entity == null || Entity.MarkedForClose)
+            if (settings == null || Entity == null || Entity.MarkedForClose)
                 return false;
+            bool area = DrawObservationArea();
+            bool nav = DrawNavigationTargets();
+            return area || nav;
+        }
+
+        // Keeps the session drawing this drone while any overlay is on
+        private void UpdateDrawRequest()
+        {
+            if (AutomataSession.Instance != null)
+                AutomataSession.Instance.RequestDraw(this, (settings != null && settings.ObservationAreaDraw) || navDrawOn);
+        }
+
+        private bool DrawObservationArea()
+        {
+            if (!settings.ObservationAreaDraw) return false;
             if (MyAPIGateway.Session.GameplayFrameCounter - observationDrawStartFrame > OBSERVATION_DRAW_TICKS)
             {
                 settings.ObservationAreaDraw = false;
@@ -2322,6 +2584,7 @@ namespace Automata.Drone
         public void Terminal_Debug_AnchorListContent(List<MyTerminalControlListBoxItem> items, List<MyTerminalControlListBoxItem> selected)
         {
             if (settings == null || AutomataSession.Instance == null) return;
+            RequestAnchorListIfStale();
             var home = GetHomeConnector();
             if (home != null && AnchorDirectory.ViewerAllowed(home.OwnerId))
             {
@@ -2355,15 +2618,19 @@ namespace Automata.Drone
         }
         public void Terminal_Debug_NavigateRelative()
         {
-            if (!initialized || settings == null) return;
-            if (!debugRelativeOffset.HasValue) { Report("Rel: offset must be \"right, up, forward\""); return; }
-            if (debugAnchorId == 0) { Report("Rel: select an anchor"); return; }
-            IMyTerminalBlock anchor = AnchorDirectory.Resolve(block, debugAnchorId);
-            if (anchor == null || !AnchorDirectory.ViewerAllowed(anchor.OwnerId)) { Report("Rel: anchor not available"); return; }
-            var order = OrderGoToRelative(anchor, debugRelativeOffset.Value);
+            if (!debugRelativeOffset.HasValue) { Feedback("Rel: offset must be \"right, up, forward\""); return; }
+            if (debugAnchorId == 0) { Feedback("Rel: select an anchor"); return; }
+            RequestAction(new DroneActionPacket { Action = DroneAction.NavigateRelative, Id = debugAnchorId,
+                VectorA = Vector3DData.FromVector3D(debugRelativeOffset.Value), HasVectorA = true });
+        }
+
+        private void ExecuteNavigateRelative(long anchorId, Vector3D offset, long identity)
+        {
+            IMyTerminalBlock anchor = AnchorDirectory.Resolve(block, anchorId);
+            if (anchor == null || !AnchorDirectory.IsAllowed(identity, anchor.OwnerId)) { Report("Rel: anchor not available"); return; }
+            var order = OrderGoToRelative(anchor, offset);
             if (order == null) { Report("Rel: order refused"); return; }
-            Report("Rel: {0} + ({1:F0}, {2:F0}, {3:F0})", anchor.CustomName,
-                debugRelativeOffset.Value.X, debugRelativeOffset.Value.Y, debugRelativeOffset.Value.Z);
+            Report("Rel: {0} + ({1:F0}, {2:F0}, {3:F0})", anchor.CustomName, offset.X, offset.Y, offset.Z);
         }
         #endregion
 

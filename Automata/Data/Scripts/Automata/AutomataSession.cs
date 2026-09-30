@@ -142,12 +142,19 @@ namespace Automata
             }
         }
 
+        /// <summary>
+        /// Multiplayer packets (Digi's NetworkLib). Channel id must be unique among all mods in a world.
+        /// </summary>
+        public const ushort NETWORK_CHANNEL = 21843;
+        public Digi.NetworkLib.Network Net { get; private set; }
+
         public static ServerConfig GetConfig() => _serverConfig;
         public static MessageQueue GetMessageQueue() => _messageQueue;
 
         public override void LoadData()
         {
             Instance = this;
+            Net = new Digi.NetworkLib.Network(NETWORK_CHANNEL, MOD_NAME);
             // Localization settings
             // LoadLangOverrides();
             // MyAPIGateway.Gui.GuiControlRemoved += GuiControlRemoved;
@@ -346,6 +353,8 @@ namespace Automata
 
                 Anchors.Clear();
                 drawRequests.Clear();
+                Net?.Dispose();
+                Net = null;
 
                 // Remove localization texts
                 // MyAPIGateway.Gui.GuiControlRemoved -= GuiControlRemoved;

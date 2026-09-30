@@ -29,23 +29,13 @@ namespace Automata.Drone
                 public bool EnforceHomeOrientation = true;
                 // [ProtoMember(24)]
                 // public IMyGps HomeIsRelativeTo;
-                /// <summary>
-                        /// Normally drones handle all tasks that they are capable for.
-                        /// If enabled, will allow the user to filter specific task types that this drone will be allowed to handle.
-                        /// </summary>
-                [ProtoMember(4)]
-                public bool UseTaskTypeFilters;
-                [ProtoMember(5)]
-                public Orchestrator.TaskType TaskTypeFilters;
+                // ProtoMembers 4/5 were UseTaskTypeFilters / TaskTypeFilters (retired: TaskType is no longer a flags enum)
                 /// <summary>
                         /// Normally, drones report all their capabilities to the Scheduler class
                         /// If enabled, it will filter out certain capabilities when reporting to its scheduler.
                         /// StandAlone
                         /// </summary>
-                [ProtoMember(6)]
-                public bool UseCapabilityFilters;
-                [ProtoMember(7)]
-                public Capabilities CapabilityFilters;
+                // ProtoMembers 6/7 were UseCapabilityFilters / CapabilityFilters (retired: see ExcludedCapabilities)
                 /// <summary>
                         /// How close to the waypoint does the drone need to be, in meters.
                         /// </summary>
@@ -118,8 +108,7 @@ namespace Automata.Drone
                 /// </summary>
                 [ProtoMember(25)]
                 public bool SurveyForMiningData = false;
-                [ProtoMember(26)]
-                public bool EnableInertialDampening = false;
+                // ProtoMember 26 was EnableInertialDampening (retired: the drone always holds itself)
 
                 /// <summary>
                 /// Home connector entity id (0 = none). Only connectors owned by the drone owner or the owner's
@@ -129,13 +118,15 @@ namespace Automata.Drone
                 public long HomeConnectorId;
 
                 // stand-alone construction function
-                // Observation area: box centred on the home connector, in the connector's frame.
-                // Size X = width (right), Y = height (up), Z = depth (forward), each 2.5–25 m.
-                // Offset X/Y/Z along the connector's Right/Up/Forward, each ±12.5 m.
-                [ProtoMember(28)]
-                public Vector3DData ObservationAreaSize = new Vector3DData { X = 10, Y = 10, Z = 10 };
-                [ProtoMember(29)]
-                public Vector3DData ObservationAreaOffset;
+                // Observation area: box around the home connector, in the connector's frame, in BLOCKS (1 = 2.5 m):
+                // Size X = width (right), Y = height (up), Z = depth (forward), 1–10 blocks each.
+                // Offset X/Y/Z along the connector's Right/Up/Forward, ±5 blocks. Even sizes are shifted half a block
+                // towards +X/+Y/+Z so the box edges stay on the large-grid lattice.
+                // (ProtoMembers 28/29 were the old metre-based Vector3DData size/offset - retired.)
+                [ProtoMember(44, IsRequired = true)]
+                public Vector3IData ObservationAreaSizeBlocks = new Vector3IData(5, 5, 5);
+                [ProtoMember(45)]
+                public Vector3IData ObservationAreaOffsetBlocks;
                 // Runtime only (not serialized): drawing switches itself off after a while.
                 public bool ObservationAreaDraw = false;
 
@@ -180,5 +171,31 @@ namespace Automata.Drone
                 public List<long> RechargingBatteryIds = new List<long>();
                 [ProtoMember(43)]
                 public List<long> StockpilingTankIds = new List<long>();
+
+                // Stand-alone construction (embedded construction computer). Only used in OperationMode.StandAlone.
+                [ProtoMember(46, IsRequired = true)]
+                public Construction.WorkModes ConstructionWorkModes =
+                        Construction.WorkModes.WeldUnfinishedBlocks | Construction.WorkModes.RepairDamagedBlocks | Construction.WorkModes.WeldProjectedBlocks;
+                /// <summary>Blocks painted this colour are ground down (Grind work mode). Packed RGB.</summary>
+                [ProtoMember(47)]
+                public uint GrindColor = 0xFF0000FF;   // RGB(255,0,0)
+
+                /// <summary>
+                /// The home connector is on something that moves (ship, carrier): the drone finds its way home through
+                /// HomeBeaconId. Beacons are selectable only when owned by the drone owner / their faction.
+                /// </summary>
+                [ProtoMember(48)]
+                public bool HomeNotStation;
+                [ProtoMember(49)]
+                public long HomeBeaconId;
+                /// <summary>Player-designated special behaviour (not in use yet).</summary>
+                [ProtoMember(50)]
+                public BehaviourProfile BehaviourProfile;
+                /// <summary>
+                /// Capabilities the player doesn't want this drone to bid with ("no space jobs for this one").
+                /// Applied at bid time only; detection (CheckCapabilities) is unaffected.
+                /// </summary>
+                [ProtoMember(51)]
+                public Capabilities ExcludedCapabilities;
         }
 }

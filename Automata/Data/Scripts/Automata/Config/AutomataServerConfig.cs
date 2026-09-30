@@ -141,6 +141,10 @@ namespace Automata.Config
             /// </summary>
             public int ConnectorScanIntervalSeconds { get; internal set; } = 60;
             /// <summary>
+            /// A job task fails after this many seconds (navigation: this long without getting closer). Any mode.
+            /// </summary>
+            public int TaskTimeoutSeconds { get; internal set; } = 30;
+            /// <summary>
             /// Automatic refresh only runs if the drone moved at least this far since the last scan (metres)...
             /// </summary>
             public double ConnectorScanMinMoveMeters { get; internal set; } = 250;
@@ -181,6 +185,12 @@ namespace Automata.Config
             public int MaxScanRetryIntervalSeconds { get; internal set; } = 3600; // 3600 seconds
 
             public int MaxJobAnnouncementsPerUpdate { get; internal set; } = 10;
+            /// <summary>
+            /// Stand-alone drones: construction jobs taken per scan of the observation area (5x5x5 = 125).
+            /// </summary>
+            public int DroneMaxJobsPerScan { get; internal set; } = 125;
+            /// <summary>Stand-alone drones: seconds between observation-area scans while idle.</summary>
+            public int DroneScanIntervalSeconds { get; internal set; } = 30;
 
         }
 
@@ -232,7 +242,8 @@ namespace Automata.Config
 
         public class LoggingConfig
         {
-            public LogLevel LogLevel { get; internal set; } = LogLevel.Info|LogLevel.Warning|LogLevel.Error;
+            // Server log (Automata.log). Debug on by default while the network layer is being tested.
+            public LogLevel LogLevel { get; internal set; } = LogLevel.Info|LogLevel.Debug|LogLevel.Warning|LogLevel.Error;
             public bool LogPathfinding { get; internal set; } = false;
             public bool LogDroneNetwork { get; internal set; } = true;
             public bool LogDroneOrders { get; internal set; } = true;
@@ -394,6 +405,7 @@ namespace Automata.Config
             Drone.MinPowerThreshold = MathHelper.Clamp(ini.Get("Drone", "MinPowerThreshold").ToSingle(Drone.MinPowerThreshold), 1.0f, 50.0f);
             Drone.MaxPowerThreshold = MathHelper.Clamp(ini.Get("Drone", "MaxPowerThreshold").ToSingle(Drone.MaxPowerThreshold), 50.0f, 99.0f);
             Drone.ComponentCheckIntervalMinSeconds = (uint)MathHelper.Clamp(ini.Get("Drone", "ComponentCheckIntervalSeconds").ToInt32((int)Drone.ComponentCheckIntervalMinSeconds), 60, 86400);
+            Drone.TaskTimeoutSeconds = MathHelper.Clamp(ini.Get("Drone", "TaskTimeoutSeconds").ToInt32(Drone.TaskTimeoutSeconds), 10, 600);
             Drone.ConnectorScanIntervalSeconds = MathHelper.Clamp(ini.Get("Drone", "ConnectorScanIntervalSeconds").ToInt32(Drone.ConnectorScanIntervalSeconds), 10, 86400);
             Drone.ConnectorScanMinMoveMeters = MathHelper.Clamp(ini.Get("Drone", "ConnectorScanMinMoveMeters").ToDouble(Drone.ConnectorScanMinMoveMeters), 0.0, 10000.0);
             Drone.ConnectorScanMaxAgeSeconds = MathHelper.Clamp(ini.Get("Drone", "ConnectorScanMaxAgeSeconds").ToInt32(Drone.ConnectorScanMaxAgeSeconds), 60, 86400);
@@ -401,6 +413,10 @@ namespace Automata.Config
             Drone.ConnectorScanRadius = MathHelper.Clamp(ini.Get("Drone", "ConnectorScanRadius").ToDouble(Drone.ConnectorScanRadius), 100.0, 5000.0);
             Drone.ConnectorNameSearchRadius = MathHelper.Clamp(ini.Get("Drone", "ConnectorNameSearchRadius").ToDouble(Drone.ConnectorNameSearchRadius), Drone.ConnectorScanRadius, 50000.0);
             Drone.ConnectorNameSearchIntervalSeconds = MathHelper.Clamp(ini.Get("Drone", "ConnectorNameSearchIntervalSeconds").ToInt32(Drone.ConnectorNameSearchIntervalSeconds), 1, 3600);
+
+            // Parse ConstructionComputer section (stand-alone drone construction)
+            ConstructionComputer.DroneMaxJobsPerScan = MathHelper.Clamp(ini.Get("ConstructionComputer", "DroneMaxJobsPerScan").ToInt32(ConstructionComputer.DroneMaxJobsPerScan), 1, 1000);
+            ConstructionComputer.DroneScanIntervalSeconds = MathHelper.Clamp(ini.Get("ConstructionComputer", "DroneScanIntervalSeconds").ToInt32(ConstructionComputer.DroneScanIntervalSeconds), 5, 3600);
 
             // Parse DroneNetwork section
             MessageQueue.networkUpdateRate = Math.Max(1.0f, ini.Get("MessageQueue", "NetworkUpdateRate").ToSingle(MessageQueue.networkUpdateRate));
@@ -426,7 +442,7 @@ namespace Automata.Config
             LogisticsComputer.MaxPushFrequencyTicks = Math.Max(LogisticsComputer.MinPushFrequencyTicks, ini.Get("LogisticsComputer", "MaxPushFrequencyTicks").ToInt32(LogisticsComputer.MaxPushFrequencyTicks));
 
             // Parse Logging section
-            Logging.LogLevel = ParseLogLevel(ini.Get("Logging", "LogLevel").ToString("Info|Warning|Error"));
+            Logging.LogLevel = ParseLogLevel(ini.Get("Logging", "LogLevel").ToString("Info|Debug|Warning|Error"));
             Logging.LogPathfinding = ini.Get("Logging", "LogPathfinding").ToBoolean(Logging.LogPathfinding);
             Logging.LogDroneNetwork = ini.Get("Logging", "LogDroneNetwork").ToBoolean(Logging.LogDroneNetwork);
             Logging.LogDroneOrders = ini.Get("Logging", "LogDroneOrders").ToBoolean(Logging.LogDroneOrders);
@@ -441,6 +457,8 @@ namespace Automata.Config
                 level |= LogLevel.Verbose;
             if (logLevelStr.ToLower().Contains("info"))
                 level |= LogLevel.Info;
+            if (logLevelStr.ToLower().Contains("debug"))
+                level |= LogLevel.Debug;
             if (logLevelStr.ToLower().Contains("warning"))
                 level |= LogLevel.Warning;
             if (logLevelStr.ToLower().Contains("error"))
