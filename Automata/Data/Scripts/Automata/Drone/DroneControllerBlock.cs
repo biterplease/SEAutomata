@@ -89,6 +89,7 @@ namespace Automata.Drone
         private IMyShipDrill drill;
         public IMyRadioAntenna primaryAntenna;
         private readonly List<IMySensorBlock> sensors = new List<IMySensorBlock>();
+        private readonly List<IMyCameraBlock> cameraBlocks = new List<IMyCameraBlock>();   // pathfinding "eyes" (simulated)
         private readonly List<IMyShipConnector> connectors = new List<IMyShipConnector>();
         private readonly List<IMyLandingGear> landingGears = new List<IMyLandingGear>();
         private struct GyroMapping
@@ -382,6 +383,7 @@ namespace Automata.Drone
                         for (int i = 0; i < landingGears.Count; i++)
                             if (landingGears[i].IsLocked) landingGears[i].Unlock();
                     UpdateConnectorPower();
+                    UpdateRouteWatch();
                     UpdateDocking();
                     UpdateConstruction10();
                 }
@@ -442,6 +444,7 @@ namespace Automata.Drone
                     }
                 }
                 UpdateAlert();
+                if (IsServer) FlushSettingsStorage();
                 // Full block rescan: when blocks were added / removed (event-driven), else every ComponentCheckInterval
                 var currentFrame = sessionDelegate.GameplayFrameCounter;
                 if (capabilitiesDirty || currentFrame - lastComponentCheckFrame > COMPONENT_CHECK_INTERVAL_MIN_TICKS)
@@ -490,6 +493,26 @@ namespace Automata.Drone
             settingsDirty = true;
         }
 
+        /// <summary>
+        /// Changed settings into Entity.Storage: at world save (IsSerialized) and, on the server, every 100 ticks, so
+        /// players who join later get the current settings with the entity (not the last save's).
+        /// </summary>
+        private void FlushSettingsStorage()
+        {
+            try
+            {
+                if (settings == null || !settingsDirty || Entity == null) return;
+                if (Entity.Storage == null)
+                    Entity.Storage = new MyModStorageComponent();
+                Entity.Storage.SetValue(AutomataSession.MOD_GUID, SerializeSettings());
+                settingsDirty = false;
+            }
+            catch (Exception ex)
+            {
+                Log.Error("DroneControllerBlock {0}: settings storage error: {1}", Entity?.EntityId, ex);
+            }
+        }
+
         private string SerializeSettings()
         {
             return Convert.ToBase64String(MyAPIGateway.Utilities.SerializeToBinary(settings));
@@ -500,20 +523,7 @@ namespace Automata.Drone
         // (e.g. several mods' gamelogic merged into a composite component).
         public override bool IsSerialized()
         {
-            try
-            {
-                if (settings != null && settingsDirty)
-                {
-                    if (Entity.Storage == null)
-                        Entity.Storage = new MyModStorageComponent();
-                    Entity.Storage.SetValue(AutomataSession.MOD_GUID, SerializeSettings());
-                    settingsDirty = false;
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Error("DroneControllerBlock {0}: IsSerialized error: {1}", Entity?.EntityId, ex);
-            }
+            FlushSettingsStorage();
             // Only when this is the block's sole gamelogic: a composite (another mod's gamelogic on the same block)
             // cannot be matched back on load. Entity.Storage carries the settings then.
             return Entity != null && Entity.GameLogic == this;
@@ -662,6 +672,7 @@ namespace Automata.Drone
             landingGears.Clear();
             cargoContainers.Clear();
             sensors.Clear();
+            cameraBlocks.Clear();
             hydrogenTanks.Clear();
             batteries.Clear();
             connectors.Clear();
@@ -760,7 +771,10 @@ namespace Automata.Drone
                     else if (fatBlock is IMyOreDetector)
                         oreDetectors++;
                     else if (fatBlock is IMyCameraBlock)
+                    {
                         cameras++;
+                        cameraBlocks.Add((IMyCameraBlock)fatBlock);
+                    }
                     else if (fatBlock is IMyMotorSuspension)
                         wheels++;
                     else if (fatBlock is IMyRadioAntenna)
@@ -1221,6 +1235,7 @@ namespace Automata.Drone
             else if (needsBatteryRecharge) { level = DisplayAlertLevel.Warning; text = "Battery low"; }
             else if (needsHydrogenRefuel) { level = DisplayAlertLevel.Warning; text = "Hydrogen low"; }
             else if (lastConstructionProblem != null) { level = DisplayAlertLevel.Warning; text = lastConstructionProblem; }
+            else if (IsFlyingBlind()) { level = DisplayAlertLevel.Warning; text = "No cameras / sensors: can't see obstacles"; }
             display.SetAlert(level, text);
         }
 
@@ -1321,6 +1336,30 @@ namespace Automata.Drone
             SetOrderOrientation(frame.Forward, frame.Up);
             order.ArrivalTolerance = (float)Math.Max(0.25, mount.WorkRadius * 0.25);
             return order;
+        }
+
+        /// <summary>
+        /// Debug "Place mount" through the pathfinder: the same pose as <see cref="OrderWorkAt"/>, reached by a route
+        /// to an approach point out along the tool's facing (the drone's length + 2.5 m, room to turn), then in.
+        /// </summary>
+        private FlightOrder RouteWorkAt(ref ToolMount mount, Vector3D target)
+        {
+            var direct = OrderWorkAt(ref mount, target);   // computes the pose (and a direct order, replaced below)
+            if (direct == null) return null;
+            Vector3D goal = direct.Target.ToVector3D();
+            Vector3D fwd = direct.Forward.ToVector3D(), up = direct.Up.ToVector3D();
+            MatrixD frame = MatrixD.CreateWorld(Vector3D.Zero, fwd, up);
+            Vector3D toolFwd = Vector3D.TransformNormal(mount.LocalForward, frame);
+            Vector3D approach = WithTurnRoom(goal - toolFwd * ManoeuvreDistance(), -toolFwd, Vector3D.TransformNormal(HullCentreLocal, frame));
+            MatrixD world = MatrixD.Identity;
+            ResetRoute();
+            if (FlyRoute(null, ref world, goal, approach, DroneRadius(), Vector3D.Zero, ref frame, false) != Orchestrator.TaskFailure.None)
+            {
+                ClearFlightOrder();
+                return null;
+            }
+            constructionOrder.Watched = false;   // the last stretch ends at the target itself
+            return constructionOrder;
         }
 
         /// <summary>
@@ -2268,11 +2307,13 @@ namespace Automata.Drone
             RequestAction(new DroneActionPacket { Action = DroneAction.QueueWaypoint, VectorA = Vector3DData.FromVector3D(navDebugTarget.Value), HasVectorA = true });
         }
 
+        // Appends to the player's route and plans it again from here (pathfinder); a new route when there is none
         private void ExecuteQueueWaypoint(Vector3D target)
         {
-            bool chained = activeFlightOrder != null;
-            QueueGoTo(target, WaypointBehavior.RunThrough, ApproachSpeed * 2f);
-            if (chained) Report("Nav: waypoint queued (run-through at {0:F0} m/s)", ApproachSpeed * 2f);
+            var wps = new List<Vector3D>();
+            if (activeFlightOrder != null && routeOwner == RouteOwner.Player) RemainingPlayerWaypoints(wps);
+            wps.Add(target);
+            if (FlyPlayerRoute(wps)) Report("Nav: waypoint queued ({0} in the route)", wps.Count);
         }
 
         #region Terminal - place mount (debug)
@@ -2315,14 +2356,14 @@ namespace Automata.Drone
             string name;
             switch (code)
             {
-                case MOUNT_WELDER:  name = "welder";  order = OrderWorkAt(ref welderMount, target);  break;
-                case MOUNT_GRINDER: name = "grinder"; order = OrderWorkAt(ref grinderMount, target); break;
-                case MOUNT_DRILL:   name = "drill";   order = OrderWorkAt(ref drillMount, target);   break;
+                case MOUNT_WELDER:  name = "welder";  order = RouteWorkAt(ref welderMount, target);  break;
+                case MOUNT_GRINDER: name = "grinder"; order = RouteWorkAt(ref grinderMount, target); break;
+                case MOUNT_DRILL:   name = "drill";   order = RouteWorkAt(ref drillMount, target);   break;
                 default:
                     Report("Mount: select a mount first");
                     return;
             }
-            if (order == null) { Report("Mount: {0} not available", name); return; }
+            if (order == null) { Report("Mount: {0} not available, or no route", name); return; }
             Report("Mount: {0} -> {1:F0} m", name, Vector3D.Distance(flightState.Position, order.Target.ToVector3D()));
         }
         #endregion
@@ -2649,8 +2690,22 @@ namespace Automata.Drone
         {
             IMyTerminalBlock anchor = AnchorDirectory.Resolve(block, anchorId);
             if (anchor == null || !AnchorDirectory.IsAllowed(identity, anchor.OwnerId)) { Report("Rel: anchor not available"); return; }
-            var order = OrderGoToRelative(anchor, offset);
-            if (order == null) { Report("Rel: order refused"); return; }
+            // Through the pathfinder, anchored to the block (moving grids)
+            CaptureFlightState();
+            MatrixD am = anchor.WorldMatrix;
+            Vector3D target = AnchorToWorldPoint(ref am, offset);
+            Vector3D gUp = flightState.InGravity ? flightState.GravityUp : flightState.WorldMatrix.Up;
+            Vector3D heading = target - flightState.Position;
+            heading -= gUp * Vector3D.Dot(heading, gUp);
+            if (heading.LengthSquared() < 1e-4) heading = flightState.WorldMatrix.Forward;
+            MatrixD frame = MatrixD.CreateWorld(Vector3D.Zero, Vector3D.Normalize(heading), gUp);
+            ResetRoute();
+            if (FlyRoute(anchor, ref am, target, target, DroneRadius(), Vector3D.Zero, ref frame, false) != Orchestrator.TaskFailure.None)
+            {
+                ClearFlightOrder();
+                Report("Rel: no route");
+                return;
+            }
             Report("Rel: {0} + ({1:F0}, {2:F0}, {3:F0})", anchor.CustomName, offset.X, offset.Y, offset.Z);
         }
         #endregion

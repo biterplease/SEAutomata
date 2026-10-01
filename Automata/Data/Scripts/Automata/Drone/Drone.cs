@@ -209,6 +209,10 @@ namespace Automata.Drone
         [ProtoMember(23)] public float FinalSpeed;              // m/s on the final leg; 0 = the drone's ApproachSpeed
         [ProtoMember(24)] public float LineTolerance;           // m: strict orders (docking) - approach point / line tolerance; 0 = WaypointTolerance
         [ProtoMember(25)] public bool HoldAttitudeInTransit;    // MatchSpeed / Transit: keep the current attitude (no turning to the travel direction, no gravity levelling)
+        /// <summary>Route leg the pathfinder watches on the way (look-ahead, replanning). Runtime only, not sent.</summary>
+        public bool Watched;
+        /// <summary>A waypoint the player gave (debug orders); detour legs in between are not. Runtime only.</summary>
+        public bool PlayerWaypoint;
     }
     [ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class Drone

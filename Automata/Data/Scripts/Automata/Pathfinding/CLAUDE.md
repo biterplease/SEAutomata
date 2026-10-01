@@ -1,114 +1,69 @@
 # Pathfinding
 
-## Overview
+## Overview (since 2026-09-30)
 
-The pathfinding system belongs exclusively to the `DroneController`. It produces one waypoint at a time via an **iterator pattern** — never computing full paths in the hot path. All state is held in `PathfindingContext` (a `struct`), which is passed by `ref` to every pathfinder method so no heap allocations occur during normal use.
+`PathfindingManager` is a session singleton (`AutomataSession.Init` -> `PathfindingManager.Load`, `Update()` every tick
+refills the look-ahead ray budget). It implements **direct pathfinding with geometric repositioning**. A* is **not
+wired** (`AllowAStar` only logs a warning); the legacy planners (`AStarPathfinder`, `DirectPathfinder`,
+`PathfindingContext`, `IPathfinder`, `Util`, `AdjancencyList`) still compile but nothing calls them. See
+`TODO/03-pathfinding-evaluation.md` and `TODO/04-pathfinding-architecture.md` for what to keep from them.
 
-## File Map
+## Conversation drone <-> pathfinder
 
-| File | Role |
-|---|---|
-| `PathfindingManager.cs` | Main entry point. Owns context lifecycle, component caching, obstacle scanning, raycast loop, waypoint behavior, method selection. |
-| `PathfindingContext.cs` | The single struct that carries all pathfinding state. No game-object references — primitives, `Vector3D`, `MatrixD` only. |
-| `IPathfinder.cs` | Interface both pathfinders implement: `GetNextWaypoint`, `CalculatePath`, complexity estimates. |
-| `DirectPathfinder.cs` | Stateless static. Straight-line approach with perpendicular reposition and gravity-altitude correction. |
-| `AStarPathfinder.cs` | Stateless static. Grid-based A* with adaptive grid spacing; falls back to direct on failure. |
-| `AStarNode.cs` | Heap node extending `FastPriorityQueueNode` (Position, GCost, HCost, Parent). |
-| `PriorityQueue.cs` | Fixed-size binary min-heap (BlueRaja design). No allocations after construction. |
-| `AdjancencyList.cs` | Sparse weighted graph. Not wired into the main flow — available for future pre-built graphs. |
-| `PathfindingResult.cs` | `PathfindingResult` enum (Success / NeedRaycast / Failed) and `PathfindingRequest` struct. |
-| `MyGamePruningStructureDelegate.cs` | Wraps `MyGamePruningStructure` behind `IMyGamePruningStructureDelegate` for testability. |
-| `MyPlanetDelegate.cs` | Wraps planet queries behind `IMyPlanetDelegate` for testability. |
-| `Util.cs` | `PathfindingUtil` — direction remapping, rotation matrices, thrust analysis helpers. |
+1. Dispatch (`FlyRoute` for jobs, `StartDocking` for docking / going home) -> `DroneControllerBlock.PlanPath`:
+   stand-alone observation-area detour first, then `PathfindingManager.PlanRoute(ref PathQuery, start, goal, waypoints)`
+   per stretch. Waypoints are controller positions (the legs hold the drone's attitude; the goal is offset by the
+   reference point: tool / connector).
+2. The drone flies them as legs (`QueueGoTo`), each waypoint passed per `PathfindingManager.Classify` (15° / 45°).
+   Route legs are `FlightOrder.Watched` (runtime only, not serialized).
+3. `UpdateRouteWatch` (UpdateBeforeSimulation10, every 20 ticks): `CheckAhead` along the current leg (a few seconds
+   of flight, never past the leg end; 5 rays per check, rationed by `RaysPerTick`). Hit -> `Replan()` re-invokes the
+   remembered `FlyRoute` / `StartDocking` from the current position. More than `MaxRepositionAttempts` replans or no
+   route -> `routeFailed`, the order is cleared, the task fails Unreachable.
 
-## Key Data Types
+## PathfindingManager
 
-**`PathfindingContext`** (struct, always passed by `ref`) holds:
-- Config scalars: `MinWaypointDistance`, `MaxWaypointDistance`, `MinAltitudeBuffer`, `MaxPathNodes`, `MaxRepositionAttempts`
-- Controller state: `ControllerPosition`, `ControllerWorldMatrix`, `ControllerForwardDirection`
-- Environment: `GravityVector`, `IsInPlanetGravity`, `PlanetCenter`, `PlanetRadius`
-- Ship: `ShipMass`, `MaxLoad`, `ThrustData` (per-direction thrust floats)
-- A* working sets (reused per call, never reallocated): `OpenSet`, `ClosedSet`, `OpenQueue`
-- Shared buffers: `PathBuffer`, `NeighborBuffer`, `TraveledNodes`
-- `KnownObstacles` (AABB list from sensors), `RaycastCache` (confirmed clear directions)
-- `WaypointHistory`: previous / current / next waypoint + `WaypointBehavior` + alignment angle
+- `PathQuery` (struct, built by the drone per call): controller matrix, hull box (controller frame), own grids,
+  cameras, sensors, gravity up, clearance, `InstrumentsAsleep` (docked: count switched-off instruments as on).
+- `ObservedRange(q, dir)`: simulated instruments, never real camera raycasts / sensor queries, measured from the
+  controller, functional + Enabled. Sensors = short range, omnidirectional: `SimulatedSensorRange` all around (field
+  settings irrelevant). Cameras = long range, directional: `CameraRange` along the camera's -Z (WorldMatrix.Forward)
+  where it is the dominant axis (90-degree square frustum; 6 cameras = all directions). Blocks the dock routine
+  switched off (`SleepingIds`) count as on. Not required -> simulated all around. All-around part cached per query. Beyond what the drone sees a stretch is assumed clear (checked on the way).
+- `SegmentBlocked`: ray bundle (hull centre + 4 sides of the hull cross-section + 0.5 m), up to the hull front at the
+  end point. Not obstacles: own grids, characters, floating objects, voxels (planets / asteroids).
+- `PlanRoute`: points list [start, goal]; per stretch: terrain (`GetClosestSurfacePointGlobal`, 15 m end margins,
+  climb to highest surface + `MinAltitudeBuffer`), then obstacles -> `DetourPoint` (backed off from the hit, out
+  across the travel direction: up / sides / diagonals / down in space only, steps x1..x8, a -> p clear and a probe
+  past the obstacle; last resort over the obstacle's box). Budgets: `MaxRepositionAttempts` detours, `MaxPathNodes`
+  waypoints, 400 rays per route (`BeginPlan`).
+- Config: `Config/PathfindingConfig.cs`, ini `[Pathfinding]` (RequireCamerasForPathfinding, RequireSensorsForPathfinding,
+  CameraRange, SimulatedSensorRange, RaysPerTick, AllowRepathing, UsePlanetAwarePathfinding,
+  MinAltitudeBuffer, MaxRepositionAttempts, MaxPathNodes, AllowDirectPathfinding, AllowAStar). MinWaypointDistance /
+  MaxWaypointDistance are not used by the direct planner.
 
-**`PathfindingResult`** — `byte` enum: `Success`, `NeedRaycast`, `Failed`
+## Route shape and attitude (2026-10-01)
 
-**`WaypointBehavior`** — `byte` enum: `RunThrough` (< 15° turn), `SlowApproach` (15–45°), `FullStop` (> 45°)
+- `AssignAttitudes`: each leg flown aligned with its direction (nose = controller forward; gravity: level heading,
+  pitch within `MaxPitch` = the drone's Align to P-Gravity pitch limit, else free; local vertical per leg on planets),
+  only when `TurnRoomFree` at the leg start (14 rays, hull radius about the controller + `ObstacleClearance`) and the
+  leg is clear at that attitude; else the previous attitude (if clear), else the one PlanRoute checked with.
+- Ray bundle margin and turn room use `ObstacleClearance` (default 1.5 m). Look-ahead doesn't extend past the leg end;
+  player goals (`LooseGoal`) get no berth beyond them.
+- Approach points (tool faces, dock) are pushed out (2.5 m steps, max 4) until there is room to turn there
+  (`WithTurnRoom`, hull radius about the tool / connector point).
+- Planets (`ShapeForPlanet`): stretches > `ArcMinDistance` follow the great circle (a point per `ArcStep`, capped at
+  MaxPathNodes/2); drone setting Min altitude (player flights only, not jobs) adds straight up / down points.
+- Asteroids are obstacles; only planets are excluded from rays (terrain checks).
+- Debug orders use the pathfinder: Navigate / Queue waypoint (`FlyPlayerRoute`, replans through the remaining
+  `FlightOrder.PlayerWaypoint` legs), Place mount (`RouteWorkAt`), Navigate relative (FlyRoute, anchored).
+- Route legs steer the **hull box centre** (`ReferenceOffset = localHullBox.Center`, `PathQuery.HullCentred`): route
+  points are hull-centre positions; at approach points the drone turns in place about the hull centre (a zero-length
+  leg with the work / dock attitude, `BuildHullLegs`), then the final order moves the tool / connector straight in.
+  `ObstacleClearance` default 3 m.
 
-**`WaypointResponse`** — returned by `GetWaypointResponse()`: position, estimated next position, behavior, alignment angle, `IsLastWaypoint`
+## Not done yet
 
-## Call Flow
-
-```
-DroneController
-  └─ PathfindingManager.SetTarget(ref target)
-  └─ PathfindingManager.GetNextWaypoint(ref currentPos, out waypoint)   ← called each tick
-        1. ScanSensorsForObstacles()        — single combined AABB scan
-        2. SelectPathfindingMethod()        — Direct if close; A* if sensors/cameras available and distance justifies it
-        3. Loop up to 3 iterations:
-             pathfinder.GetNextWaypoint()
-               → Success   → cache node, return
-               → NeedRaycast → PerformRaycast(), loop again
-               → Failed    → return Failed
-        4. Complexity budget check: NeedRaycast + reposition increments; abort if > MaxRepositionAttempts × 2
-```
-
-## Pathfinder Selection Logic (`SelectPathfindingMethod`)
-
-1. Distance < `MinWaypointDistance * 2` → **Direct**
-2. `AllowAStar` && (sensors or cameras present) && `AStarComplexity < MaxPathNodes` → **A\***
-3. `AllowDirectPathfinding` → **Direct**
-4. Otherwise → **None** (returns `Failed`)
-
-## DirectPathfinder
-
-- Projects a waypoint along the straight line to target at `WaypointDistance`.
-- If in gravity and below `MinAltitudeBuffer`, lifts waypoint to safe altitude above planet center.
-- Checks `KnownObstacles` (AABB bounding-box intersection). On hit, tries up to `MaxRepositionAttempts` perpendicular offsets (±perp1, ±perp2, diagonals at 30% of `WaypointDistance`).
-- If the chosen direction has not been raycasted yet, returns `NeedRaycast` instead of `Success`.
-- `CalculatePath()` cannot handle `NeedRaycast` — only `PathfindingManager` drives the raycast loop.
-
-## AStarPathfinder
-
-- Converts world positions to a discrete grid; grid spacing scales with distance:
-  - < 500 m → 25 m, < 2 km → 50 m, < 5 km → 100 m, ≥ 5 km → 200 m
-- Uses 26-directional neighbors, pre-computed per `ControllerForwardDirection`.
-- Reuses `OpenSet`, `ClosedSet`, `OpenQueue` from context (cleared, not reallocated).
-- Falls back to `DirectPathfinder` for short distances or when A* fails and `AllowRepathing` is true.
-- **Known GC issue**: `AStarNode` objects are heap-allocated per search. A node pool is the correct fix.
-
-## Component Caching in PathfindingManager
-
-`PathfindingManager` caches per-block state (thrusters, sensors, cameras keyed by `EntityId`). The `XxxChanged()` methods diff the new list against the cache and only call `RebuildXxxContext()` when something actually changes. This prevents re-running context construction every frame.
-
-Notify the manager when blocks change:
-- `ControllerChanged(IMyShipController)`
-- `ThrustersChanged(List<IMyThrust>)`
-- `SensorsChanged(List<IMySensorBlock>)`
-- `CamerasChanged(List<IMyCameraBlock>)`
-- `GridChanged(IMyCubeGrid)`
-
-## Waypoint Lookahead & Behavior
-
-When the drone is within 200 m of the current waypoint, `UpdateWaypointTracking()` pre-fetches the next waypoint and stores it in `WaypointHistory.NextWaypoint`. With all three waypoints (prev / current / next) known, `CalculateWaypointBehavior()` computes the incoming-to-outgoing angle and sets the appropriate `WaypointBehavior`. Call `AdvanceToNextWaypoint()` when the drone reaches a waypoint.
-
-## SE API Integration Points
-
-- `MyGamePruningStructure.GetTopMostEntitiesInBox` — sensor obstacle scanning
-- `MyGamePruningStructure.GetTopmostEntitiesOverlappingRay` — per-direction raycasts
-- `MyGamePruningStructure.GetClosestPlanet` — gravity-aware altitude correction
-
-Both are abstracted behind delegate interfaces for unit testing.
-
-## A* Node Pool
-
-All `AStarNode` objects are pre-allocated once in `InitializeContext` as `context.NodePool[MaxAStarNodes]`. `FindPath` resets `context.NodePoolIndex = 0` at the top of every search; `GetOrCreateNode` bumps the cursor and calls `node.Reset()`. Zero heap allocations per search.
-
-The `OpenSet`, `ClosedSet`, `OpenQueue`, `NeighborBuffer`, and `PathBuffer` are also pre-allocated in `InitializeContext` and only cleared (not reallocated) per search.
-
-## Known Gaps / TODO
-
-- `PathfindingManager.GetCameraDirection()` is a stub — always returns `Forward`.
-- `WaypointInfo.SuggestedSpeed` and `LookaheadDistance` are defined but not consumed.
+- A* over a sparse graph (obstacle box corners + detour points, cached confirmed edges), see TODO/04.
+- Route persistence (per-drone `Entity.Storage`, shared corridor cache in world storage), see TODO/04.
+- `CastRayParallel` (off-thread rays) instead of synchronous `CastRay`.

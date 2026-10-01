@@ -203,5 +203,11 @@ namespace Automata.Drone
                 /// </summary>
                 [ProtoMember(52)]
                 public int TaskTimeoutSeconds = 30;
+                /// <summary>
+                /// m above the surface on planets for routes between take-off and landing; 0 = off. Player flights
+                /// only (debug orders, Go home outside a job): jobs work at ground level.
+                /// </summary>
+                [ProtoMember(53)]
+                public float MinAltitude;
         }
 }

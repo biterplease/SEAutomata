@@ -152,6 +152,24 @@ namespace Automata.Drone
         }
         #endregion
 
+        #region Min altitude
+        public const float MIN_ALTITUDE_MAX = 1000f;
+
+        public float Terminal_MinAltitude
+        {
+            get { return settings != null ? settings.MinAltitude : 0f; }
+            set
+            {
+                if (settings == null) return;
+                float v = VRageMath.MathHelper.Clamp((float)Math.Round(value), 0f, MIN_ALTITUDE_MAX);
+                if (v == settings.MinAltitude) return;
+                settings.MinAltitude = v;
+                SaveSettings();
+                SyncSetting(DroneSettingKey.MinAltitude);
+            }
+        }
+        #endregion
+
         #region Behaviour profile (not in use yet)
         public long Terminal_BehaviourProfileValue
         {

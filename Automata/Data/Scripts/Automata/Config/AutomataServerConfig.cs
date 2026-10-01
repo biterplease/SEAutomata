@@ -380,6 +380,16 @@ namespace Automata.Config
             Pathfinding.maxPathNodes = Math.Max(100, ini.Get("Pathfinding", "MaxPathNodes").ToInt32(Pathfinding.maxPathNodes));
             var maxPathfindingMs = Math.Max(10, ini.Get("Pathfinding", "MaxPathfindingTimeMs").ToInt32(50));
             Pathfinding.maxPathfindingTime = TimeSpan.FromMilliseconds(maxPathfindingMs);
+            Pathfinding.requireSensorsForPathfinding = ini.Get("Pathfinding", "RequireSensorsForPathfinding").ToBoolean(Pathfinding.requireSensorsForPathfinding);
+            Pathfinding.requireCamerasForPathfinding = ini.Get("Pathfinding", "RequireCamerasForPathfinding").ToBoolean(Pathfinding.requireCamerasForPathfinding);
+            Pathfinding.maxSimulatedCameraRaycastMeters = (float)MathHelper.Clamp(ini.Get("Pathfinding", "CameraRange").ToDouble(Pathfinding.maxSimulatedCameraRaycastMeters), 10.0, 5000.0);
+            Pathfinding.SimulatedSensorRange = MathHelper.Clamp(ini.Get("Pathfinding", "SimulatedSensorRange").ToDouble(Pathfinding.SimulatedSensorRange), 1.0, 500.0);
+            Pathfinding.minAltitudeBuffer = (float)MathHelper.Clamp(ini.Get("Pathfinding", "MinAltitudeBuffer").ToDouble(Pathfinding.minAltitudeBuffer), 0.0, 1000.0);
+            Pathfinding.RaysPerTick = MathHelper.Clamp(ini.Get("Pathfinding", "RaysPerTick").ToInt32(Pathfinding.RaysPerTick), 5, 1000);
+            Pathfinding.allowRepathing = ini.Get("Pathfinding", "AllowRepathing").ToBoolean(Pathfinding.allowRepathing);
+            Pathfinding.ObstacleClearance = MathHelper.Clamp(ini.Get("Pathfinding", "ObstacleClearance").ToDouble(Pathfinding.ObstacleClearance), 0.0, 20.0);
+            Pathfinding.ArcMinDistance = MathHelper.Clamp(ini.Get("Pathfinding", "ArcMinDistance").ToDouble(Pathfinding.ArcMinDistance), 50.0, 100000.0);
+            Pathfinding.ArcStep = MathHelper.Clamp(ini.Get("Pathfinding", "ArcStep").ToDouble(Pathfinding.ArcStep), 25.0, 10000.0);
 
             // Parse SchedulerBounds (sample Automata.ini); [Scheduler] kept as legacy alias for same keys.
             const string schedBounds = "SchedulerBounds";

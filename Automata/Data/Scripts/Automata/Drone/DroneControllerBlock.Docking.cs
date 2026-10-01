@@ -40,6 +40,7 @@ namespace Automata.Drone
         private int dockingWaitTicks;
         private FlightOrder dockingOrder;    // the final (connector) order; legs before it go around the observation area
         private readonly List<Vector3D> dockRoutePoints = new List<Vector3D>();
+        private readonly List<FlightOrder> dockLegs = new List<FlightOrder>();
 
         // Parked = connected / gear locked / systems asleep. No flight control while parked and idle.
         private bool isParked;
@@ -343,6 +344,7 @@ namespace Automata.Drone
                 return false;
             }
             if (!EnsureDockPose(home, false)) { Report("Home: no usable drone connector"); return false; }
+            ResetRoute();
             int mi = FindConnectorMount(settings.HomeDockConnectorId);
             if (!StartDocking(home, mi, settings.HomeDockOffset, settings.HomeDockForward, settings.HomeDockUp)) return false;
             if (preflightStage == 0) SetState(State.ReturningToBase);
@@ -370,6 +372,7 @@ namespace Automata.Drone
             int mi;
             double tilt;
             if (!ComputeDockPose(target, out offset, out forward, out up, out mi, out tilt)) { Report("Dock: no usable drone connector"); return false; }
+            ResetRoute();
             if (!StartDocking(target, mi, offset, forward, up)) return false;
             Report("Docking at {0} ({1:F0} m)", target.CustomName, Vector3D.Distance(flightState.Position, target.GetPosition()));
             return true;
@@ -390,35 +393,48 @@ namespace Automata.Drone
             MatrixD dockFrameLocal = MatrixD.CreateWorld(Vector3D.Zero, dockForward.ToVector3D(), dockUp.ToVector3D());
             Vector3D connectorLocal = dockOffset.ToVector3D() + Vector3D.TransformNormal(mount.LocalPoint, dockFrameLocal);
             Vector3D approachLocal = connectorLocal + WorldToAnchorDir(ref hm, aH) * DockApproachDistance;
+            // Room to turn to the docking attitude there (the hull about the drone connector): further out if not
+            MatrixD dockFrame = MatrixD.CreateWorld(Vector3D.Zero, AnchorToWorldDir(ref hm, dockForward.ToVector3D()), AnchorToWorldDir(ref hm, dockUp.ToVector3D()));
+            Vector3D hullFromConnector = Vector3D.TransformNormal(HullCentreLocal - mount.LocalPoint, dockFrame);
+            approachLocal = WorldToAnchorPoint(ref hm, WithTurnRoom(AnchorToWorldPoint(ref hm, approachLocal), aH, hullFromConnector));
 
-            // Stand-alone, going home: around the observation area, not through what the drone just built there
+            // Stand-alone, going home: around the observation area, not through what the drone just built there.
+            // Every stretch through the pathfinder (obstacles the drone sees, terrain).
             dockRoutePoints.Clear();
-            if (settings.OperationMode == OperationMode.StandAlone && target.EntityId == settings.HomeConnectorId)
-                PlanObservationAreaDetour(flightState.Position, AnchorToWorldPoint(ref hm, approachLocal), dockRoutePoints, false);
-
-            FlightOrder order;
-            if (dockRoutePoints.Count > 0)
+            bool areaDetour = settings.OperationMode == OperationMode.StandAlone && target.EntityId == settings.HomeConnectorId;
+            // The route steers the hull centre; at the approach point, in the docking attitude, it sits here:
+            Vector3D approachWorld = AnchorToWorldPoint(ref hm, approachLocal);
+            Vector3D hullAtApproach = approachWorld + hullFromConnector;
+            Vector3D start = HullCentreWorld;
+            var docked = DockedConnector();
+            if (docked != null)
             {
-                // Legs anchored to the connector (moving bases), flown as the drone is oriented; then the dock order
-                Vector3D fwd = flightState.WorldMatrix.Forward, up = flightState.WorldMatrix.Up;
-                var first = OrderGoToRelative(target, WorldToAnchorPoint(ref hm, dockRoutePoints[0]));
-                if (first == null) { Report("Dock: order refused"); return false; }
-                SetDockLeg(first, ref hm, fwd, up);
-                for (int i = 1; i < dockRoutePoints.Count; i++)
-                    SetDockLeg(QueueGoTo(dockRoutePoints[i], Pathfinding.WaypointBehavior.FullStop, 0), ref hm, fwd, up);
-                order = QueueGoTo(AnchorToWorldPoint(ref hm, connectorLocal), Pathfinding.WaypointBehavior.FullStop, 0);
-                order.TargetLocal = Vector3DData.FromVector3D(connectorLocal);
-                order.ApproachFromLocal = Vector3DData.FromVector3D(approachLocal);
-                order.UseApproachLine = true;
-                order.Phase = FlightPhase.Transit;   // TransitStartLocal: the last leg's point (QueueGoTo)
-                Log.Debug("Drone {0}: going home around the observation area ({1} waypoints)", Entity.EntityId, dockRoutePoints.Count);
-                dockRoutePoints.Clear();
+                // Docked elsewhere: straight out along that connector's axis first (known clear), then the route
+                start += docked.WorldMatrix.Forward * Math.Max(CONSTRUCTION_BACKOUT_MIN, DroneRadius() + CONSTRUCTION_CLEARANCE);
+                dockRoutePoints.Add(start);
             }
-            else
+            if (!PlanPath(start, hullAtApproach, dockRoutePoints, areaDetour, false))
             {
-                order = OrderGoToRelative(target, connectorLocal, approachLocal);
-                if (order == null) { Report("Dock: order refused"); return false; }
+                Report("Dock: no route to {0}", target.CustomName);
+                return false;
             }
+            // Legs anchored to the connector (moving bases) with the pathfinder's attitudes, a turn in place at the
+            // approach point to the docking attitude, then the dock order (zero-length transit, straight in)
+            dockLegs.Clear();
+            if (BuildHullLegs(target, ref hm, dockRoutePoints, docked != null ? 1 : 0, hullAtApproach, dockFrame.Forward, dockFrame.Up, dockLegs) == null)
+            {
+                Report("Dock: order refused");
+                return false;
+            }
+            Log.Debug("Drone {0}: docking route, {1} waypoints", Entity.EntityId, dockRoutePoints.Count);
+            dockRoutePoints.Clear();
+            dockLegs.Clear();
+            FlightOrder order = QueueGoTo(AnchorToWorldPoint(ref hm, connectorLocal), Pathfinding.WaypointBehavior.FullStop, 0);
+            order.TargetLocal = Vector3DData.FromVector3D(connectorLocal);
+            order.ApproachFromLocal = order.TransitStartLocal = Vector3DData.FromVector3D(approachLocal);
+            order.UseApproachLine = true;
+            order.Phase = FlightPhase.Transit;
+            order.HoldAttitudeInTransit = true;
             order.ReferenceOffset = Vector3DData.FromVector3D(mount.LocalPoint);
             order.Orientation = FlightOrientationMode.Explicit;
             order.ForwardLocal = dockForward;
@@ -427,12 +443,8 @@ namespace Automata.Drone
             order.FinalSpeed = SafeSpeed;
             order.LineTolerance = DOCK_LINE_TOLERANCE;   // not WaypointTolerance: connectors need ~0.59 m
             order.ArrivalTolerance = 0.2f;
-            if (order == activeFlightOrder)
-            {
-                order.TransitStartLocal = Vector3DData.FromVector3D(WorldToAnchorPoint(ref hm, ReferencePoint(order)));
-                RefreshAnchoredOrder(order);
-            }
             dockingOrder = order;
+            RememberDocking(target.EntityId, mi, dockOffset, dockForward, dockUp);
 
             if (droneConnector != null)
             {
@@ -442,14 +454,6 @@ namespace Automata.Drone
             dockingConnectorId = droneConnector != null ? droneConnector.EntityId : 0;
             dockingWaitTicks = 0;
             return true;
-        }
-
-        // A leg before the dock order: translate only (the drone may start inside the area, next to blocks)
-        private void SetDockLeg(FlightOrder leg, ref MatrixD hm, Vector3D fwd, Vector3D up)
-        {
-            leg.ArrivalTolerance = CONSTRUCTION_ROUTE_TOLERANCE;
-            leg.HoldAttitudeInTransit = true;   // first leg: MatchSpeed
-            SetExplicitAttitude(leg, false, ref hm, fwd, up);
         }
 
         /// <summary>

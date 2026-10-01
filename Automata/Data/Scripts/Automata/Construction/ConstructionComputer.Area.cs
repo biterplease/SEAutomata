@@ -370,9 +370,10 @@ namespace Automata.Construction
         /// </summary>
         /// <param name="normal">Unit axis of 'grid', pointing out of the face towards the tool.</param>
         /// <param name="lineMustBeClear">Faces with a built block anywhere on the line out ('clearCells') don't count.</param>
+        /// <param name="reject">Faces (cell, normal) the caller rules out.</param>
         public static bool ChooseFace(IMyCubeGrid grid, Vector3I min, Vector3I max, Vector3D areaCenter, Vector3D gravityUp,
                                       int clearCells, Func<Vector3D, double> extraCost, out Vector3I faceCell, out Vector3I normal,
-                                      bool lineMustBeClear = false)
+                                      bool lineMustBeClear = false, Func<Vector3I, Vector3I, bool> reject = null)
         {
             faceCell = min;
             normal = Vector3I.Zero;
@@ -426,6 +427,7 @@ namespace Automata.Construction
                         for (c.Z = lo.Z; c.Z <= hi.Z; c.Z++)
                         {
                             if (grid.CubeExists(c + d)) continue;               // covered: not a face
+                            if (reject != null && reject(c, d)) continue;       // ruled out by the caller (e.g. another grid in front)
                             double score = sideScore;
                             bool lineBlocked = false;
                             for (int k = 1; k <= clearCells && !lineBlocked; k++)

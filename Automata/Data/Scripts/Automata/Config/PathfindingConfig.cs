@@ -101,5 +101,16 @@ namespace Automata.Config
 
         public float raycastCooldownSeconds { get; internal set; } = 1.0f;
         public float RaycastCooldownSeconds() => raycastCooldownSeconds;
+
+        /// <summary>m all around a drone with a working sensor (or any drone, when sensors aren't required).</summary>
+        public double SimulatedSensorRange { get; internal set; } = 50.0;
+        /// <summary>Look-ahead rays per tick shared by all drones (5 per check).</summary>
+        public int RaysPerTick { get; internal set; } = 60;
+        /// <summary>m kept between the hull and obstacles by route checks (ray bundle margin, turn room).</summary>
+        public double ObstacleClearance { get; internal set; } = 3.0;
+        /// <summary>m: on planets, stretches longer than this follow the planet's curve...</summary>
+        public double ArcMinDistance { get; internal set; } = 300;
+        /// <summary>m: ...with a point about every this many metres along it.</summary>
+        public double ArcStep { get; internal set; } = 200;
     }
 }

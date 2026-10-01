@@ -51,6 +51,7 @@ namespace Automata.Drone
         HomeBeacon,               // server -> clients only (selection is an action, validated on the server)
         BehaviourProfile,
         TaskTimeout,
+        MinAltitude,
     }
 
     /// <summary>Things a player can order the drone to do from the terminal.</summary>
@@ -182,6 +183,7 @@ namespace Automata.Drone
                 case DroneSettingKey.HomeBeacon:                  p.Id = s.HomeBeaconId; break;
                 case DroneSettingKey.BehaviourProfile:            p.Number = (double)s.BehaviourProfile; break;
                 case DroneSettingKey.TaskTimeout:                 p.Number = s.TaskTimeoutSeconds; break;
+                case DroneSettingKey.MinAltitude:                 p.Number = s.MinAltitude; break;
             }
         }
 
@@ -271,6 +273,7 @@ namespace Automata.Drone
                     break;
                 case DroneSettingKey.BehaviourProfile:            Terminal_BehaviourProfileValue = (long)p.Number; break;
                 case DroneSettingKey.TaskTimeout:                 Terminal_TaskTimeoutSeconds = f; break;
+                case DroneSettingKey.MinAltitude:                 Terminal_MinAltitude = f; break;
             }
         }
         #endregion
@@ -342,8 +345,14 @@ namespace Automata.Drone
             switch (p.Action)
             {
                 case DroneAction.NavigateTo:
-                    OrderGoTo(p.VectorA.ToVector3D(), p.HasVectorB ? p.VectorB.ToVector3D() : (Vector3D?)null);
+                {
+                    // Through the pathfinder: the approach point (if any), then the target
+                    var wps = new List<Vector3D>();
+                    if (p.HasVectorB) wps.Add(p.VectorB.ToVector3D());
+                    wps.Add(p.VectorA.ToVector3D());
+                    if (FlyPlayerRoute(wps)) Report("Nav: {0:F0} m", Vector3D.Distance(flightState.Position, p.VectorA.ToVector3D()));
                     break;
+                }
                 case DroneAction.QueueWaypoint:
                     if (queuedLegs.Count >= MAX_QUEUED_LEGS) { Report("Nav: waypoint queue full"); break; }
                     ExecuteQueueWaypoint(p.VectorA.ToVector3D());

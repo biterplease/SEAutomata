@@ -181,6 +181,7 @@ namespace Automata
                 _serverConfig = ServerConfig.Instance;
                 _serverConfig.LoadConfig();
                 Log.Verbose("Server config loaded.");
+                Pathfinding.PathfindingManager.Load(_serverConfig.Pathfinding);
                 MessageQueue.Init(_serverConfig.MessageQueue);
                 Log.Verbose("Message queue initialized.");
                 _messageQueue = MessageQueue.Instance;
@@ -309,6 +310,7 @@ namespace Automata
                 {
                     LoadComponentsAndBlocks();
                 }
+                Pathfinding.PathfindingManager.Instance?.Update();   // look-ahead ray budget
 
                 var currentFrame = MyAPIGateway.Session.GameplayFrameCounter;
                 if ((currentFrame - lastMessageQueueCleanupFrame) > messageQueueCleanupIntervalTicks)
@@ -339,6 +341,7 @@ namespace Automata
         {
             try
             {
+                Pathfinding.PathfindingManager.Unload();
                 // Reset message queue singleton
                 if (_messageQueue != null)
                 {

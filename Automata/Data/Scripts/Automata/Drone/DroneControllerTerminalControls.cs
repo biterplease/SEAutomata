@@ -557,6 +557,11 @@ namespace Automata.Drone
                 DroneControllerBlock.WAYPOINT_TOLERANCE_MIN, DroneControllerBlock.WAYPOINT_TOLERANCE_MAX,
                 l => l.Terminal_WaypointTolerance, (l, v) => l.Terminal_WaypointTolerance = v,
                 (l, sb) => sb.Append(l.Terminal_WaypointTolerance.ToString("F1")).Append(" m"));
+            AddSlider("Slider_MinAltitude", "Min altitude",
+                "Planets only: routes stay at least this high above the surface between take-off and landing (0 = off). Not used for jobs: connectors and blocks can be at ground level.",
+                0f, DroneControllerBlock.MIN_ALTITUDE_MAX,
+                l => l.Terminal_MinAltitude, (l, v) => l.Terminal_MinAltitude = v,
+                (l, sb) => { if (l.Terminal_MinAltitude <= 0) sb.Append("Off"); else sb.Append(l.Terminal_MinAltitude.ToString("F0")).Append(" m"); });
             AddCheckbox("Checkbox_AlignToPGravity", "Align to P-Gravity",
                 "In planetary gravity, keep the drone level: pitch and roll stay within the limits below.",
                 l => l.Terminal_AlignToPGravity, (l, v) => { l.Terminal_AlignToPGravity = v; l.Terminal_Refresh(); });
