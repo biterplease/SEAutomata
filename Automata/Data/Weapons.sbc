@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Automata scout laser pointers (TODO/11, TODO/15). Split like the vanilla Data files: AmmoMagazines, Ammos, Weapons, PhysicalItems, HandItems.
+     Weapons: the designators' weapon definitions (required by their rifle hand items; the industrial one is a tool to the
+     player): no vanilla shooting effect, no damage, no recoil. -->
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <Weapons>
+        <Weapon>
+            <Id>
+                <TypeId>WeaponDefinition</TypeId>
+                <SubtypeId>AutomataHostileTargetDesignator</SubtypeId>
+            </Id>
+            <ProjectileAmmoData RateOfFire="300" ShootSoundName="" ShotsInBurst="1" />
+            <NoAmmoSoundName></NoAmmoSoundName>
+            <DeviateShotAngle>0</DeviateShotAngle>
+            <DeviateShotAngleAiming>0</DeviateShotAngleAiming>
+            <ReleaseTimeAfterFire>100</ReleaseTimeAfterFire>
+            <MuzzleFlashLifeSpan>-1</MuzzleFlashLifeSpan>
+            <UseDefaultMuzzleFlash>false</UseDefaultMuzzleFlash>
+            <DamageMultiplier>0</DamageMultiplier>
+            <AmmoMagazines>
+                <AmmoMagazine Subtype="AutomataPointerCharge" />
+            </AmmoMagazines>
+            <ReloadTime>2400</ReloadTime>
+            <RecoilJetpackVertical>0</RecoilJetpackVertical>
+            <RecoilJetpackHorizontal>0</RecoilJetpackHorizontal>
+            <RecoilGroundVertical>0</RecoilGroundVertical>
+            <RecoilGroundHorizontal>0</RecoilGroundHorizontal>
+            <EquipDuration>0.5</EquipDuration>
+            <ShakeOnActionPrimary>false</ShakeOnActionPrimary>
+            <ShakeOnActionSecondary>false</ShakeOnActionSecondary>
+            <ShakeOnActionTertiary>false</ShakeOnActionTertiary>
+        </Weapon>
+        <Weapon>
+            <Id>
+                <TypeId>WeaponDefinition</TypeId>
+                <SubtypeId>AutomataIndustrialTargetDesignator</SubtypeId>
+            </Id>
+            <ProjectileAmmoData RateOfFire="300" ShootSoundName="" ShotsInBurst="1" />
+            <NoAmmoSoundName></NoAmmoSoundName>
+            <DeviateShotAngle>0</DeviateShotAngle>
+            <DeviateShotAngleAiming>0</DeviateShotAngleAiming>
+            <ReleaseTimeAfterFire>100</ReleaseTimeAfterFire>
+            <MuzzleFlashLifeSpan>-1</MuzzleFlashLifeSpan>
+            <UseDefaultMuzzleFlash>false</UseDefaultMuzzleFlash>
+            <DamageMultiplier>0</DamageMultiplier>
+            <AmmoMagazines>
+                <AmmoMagazine Subtype="AutomataPointerCharge" />
+            </AmmoMagazines>
+            <ReloadTime>2400</ReloadTime>
+            <RecoilJetpackVertical>0</RecoilJetpackVertical>
+            <RecoilJetpackHorizontal>0</RecoilJetpackHorizontal>
+            <RecoilGroundVertical>0</RecoilGroundVertical>
+            <RecoilGroundHorizontal>0</RecoilGroundHorizontal>
+            <EquipDuration>0.5</EquipDuration>
+            <ShakeOnActionPrimary>false</ShakeOnActionPrimary>
+            <ShakeOnActionSecondary>false</ShakeOnActionSecondary>
+            <ShakeOnActionTertiary>false</ShakeOnActionTertiary>
+        </Weapon>
+    </Weapons>
+</Definitions>

@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<!-- Automata target designators: recipes. Their assembler tabs are in BlueprintClasses.sbc (as vanilla). -->
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <Blueprints>
+    <Blueprint>
+      <Id>
+        <TypeId>BlueprintDefinition</TypeId>
+        <SubtypeId>Blueprint_AutomataHostileTargetDesignator</SubtypeId>
+      </Id>
+      <DisplayName>Automata Hostile Target Designator</DisplayName>
+      <Icon>Textures\GUI\Icons\Items\AutomataHostileTargetDesignator.dds</Icon>
+      <Prerequisites>
+        <Item Amount="20" TypeId="Ingot" SubtypeId="Iron" />
+        <Item Amount="2" TypeId="Ingot" SubtypeId="Nickel" />
+        <Item Amount="2" TypeId="Ingot" SubtypeId="Cobalt" />
+        <Item Amount="2" TypeId="Ingot" SubtypeId="Magnesium" />
+      </Prerequisites>
+      <Result Amount="1" TypeId="PhysicalGunObject" SubtypeId="AutomataHostileTargetDesignatorItem" />
+      <BaseProductionTimeInSeconds>10</BaseProductionTimeInSeconds>
+    </Blueprint>
+    <Blueprint>
+      <Id>
+        <TypeId>BlueprintDefinition</TypeId>
+        <SubtypeId>Blueprint_AutomataIndustrialTargetDesignator</SubtypeId>
+      </Id>
+      <DisplayName>Automata Industrial Target Designator</DisplayName>
+      <Icon>Textures\GUI\Icons\Items\AutomataIndustrialTargetDesignator.dds</Icon>
+      <Prerequisites>
+        <Item Amount="20" TypeId="Ingot" SubtypeId="Iron" />
+        <Item Amount="2" TypeId="Ingot" SubtypeId="Nickel" />
+        <Item Amount="2" TypeId="Ingot" SubtypeId="Cobalt" />
+      </Prerequisites>
+      <Result Amount="1" TypeId="PhysicalGunObject" SubtypeId="AutomataIndustrialTargetDesignatorItem" />
+      <BaseProductionTimeInSeconds>10</BaseProductionTimeInSeconds>
+    </Blueprint>
+  </Blueprints>
+</Definitions>

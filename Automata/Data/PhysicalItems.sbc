@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Automata scout laser pointers (TODO/11, TODO/15). Split like the vanilla Data files: AmmoMagazines, Ammos, Weapons, PhysicalItems, HandItems.
+     PhysicalItems: the two target designators (models Models\Items\AutomataHostileTargetDesignator / AutomataIndustrialTargetDesignator,
+     knob subparts Subpart_AutomataHostileTargetDesignator / Subpart_AutomataIndustrialTargetDesignator).
+     - AutomataHostileTargetDesignatorItem: a WEAPON (Weapons blueprint classes).
+     - AutomataIndustrialTargetDesignatorItem: a TOOL (Tools blueprint classes; the mod lists it as a tool). It is still a
+       MyObjectBuilder_WeaponItemDefinition: it is held as a rifle (MyObjectBuilder_AutomaticRifle hand item: pose,
+       Reload / trigger handling), and the rifle reads its WeaponDefinitionId from the item. The vanilla tool types
+       (welder, grinder, drill) carry their own behaviour, so a plain item is not an option here. -->
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <PhysicalItems>
+        <PhysicalItem xsi:type="MyObjectBuilder_WeaponItemDefinition">
+            <Id>
+                <TypeId>PhysicalGunObject</TypeId>
+                <SubtypeId>AutomataHostileTargetDesignatorItem</SubtypeId>
+            </Id>
+            <DisplayName>Automata Hostile Target Designator</DisplayName>
+            <Icon>Textures\GUI\Icons\Items\AutomataHostileTargetDesignator.dds</Icon>
+            <Description>Points combat drones at things. [Reload] cycles the mode: red engage, blue escort, green recall. [Fire] points.</Description>
+            <Size>
+                <X>0.8</X>
+                <Y>0.24</Y>
+                <Z>0.08</Z>
+            </Size>
+            <Mass>3</Mass>
+            <Volume>20</Volume>
+            <Model>Models\Items\AutomataHostileTargetDesignator.mwm</Model>
+            <PhysicalMaterial>Metal</PhysicalMaterial>
+            <WeaponDefinitionId Subtype="AutomataHostileTargetDesignator" />
+            <ShowAmmoCount>false</ShowAmmoCount>
+            <DepositAllEnabled>false</DepositAllEnabled>
+        </PhysicalItem>
+        <PhysicalItem xsi:type="MyObjectBuilder_WeaponItemDefinition">
+            <Id>
+                <TypeId>PhysicalGunObject</TypeId>
+                <SubtypeId>AutomataIndustrialTargetDesignatorItem</SubtypeId>
+            </Id>
+            <DisplayName>Automata Industrial Target Designator</DisplayName>
+            <Icon>Textures\GUI\Icons\Items\AutomataIndustrialTargetDesignator.dds</Icon>
+            <Description>Points scout drones at places. [Reload] cycles the mode: red spot check, blue area sweep, green recall. [Fire] points.</Description>
+            <Size>
+                <X>0.8</X>
+                <Y>0.24</Y>
+                <Z>0.08</Z>
+            </Size>
+            <Mass>3</Mass>
+            <Volume>20</Volume>
+            <Model>Models\Items\AutomataIndustrialTargetDesignator.mwm</Model>
+            <PhysicalMaterial>Metal</PhysicalMaterial>
+            <WeaponDefinitionId Subtype="AutomataIndustrialTargetDesignator" />
+            <ShowAmmoCount>false</ShowAmmoCount>
+            <DepositAllEnabled>false</DepositAllEnabled>
+        </PhysicalItem>
+    </PhysicalItems>
+</Definitions>

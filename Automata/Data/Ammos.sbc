@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Automata scout laser pointers (TODO/11, TODO/15). Split like the vanilla Data files: AmmoMagazines, Ammos, Weapons, PhysicalItems, HandItems.
+     Ammos: the pointer's harmless "beam" ammo (no damage, no range): the trigger is read by the mod (Pointer/ScoutPointer.cs). -->
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <Ammos>
+        <Ammo xsi:type="MyObjectBuilder_ProjectileAmmoDefinition">
+            <Id>
+                <TypeId>AmmoDefinition</TypeId>
+                <SubtypeId>AutomataPointerBeam</SubtypeId>
+            </Id>
+            <BasicProperties>
+                <DesiredSpeed>0</DesiredSpeed>
+                <SpeedVariance>0</SpeedVariance>
+                <MaxTrajectory>0</MaxTrajectory>
+                <BackkickForce>0</BackkickForce>
+                <ExplosiveDamageMultiplier>0</ExplosiveDamageMultiplier>
+            </BasicProperties>
+            <ProjectileProperties>
+                <ProjectileType>Bullet</ProjectileType>
+                <ProjectileHitImpulse>0</ProjectileHitImpulse>
+                <ProjectileMassDamage>0</ProjectileMassDamage>
+                <ProjectileHealthDamage>0</ProjectileHealthDamage>
+                <ProjectileTrailProbability>0</ProjectileTrailProbability>
+                <HeadShot>false</HeadShot>
+            </ProjectileProperties>
+        </Ammo>
+    </Ammos>
+</Definitions>

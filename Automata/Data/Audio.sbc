@@ -1,0 +1,136 @@
+<?xml version="1.0"?>
+<!-- Automata sounds (as vanilla Audio*.sbc). MySoundPair("AutomataDesignatorCharge") picks Arc / Real by the world's sound mode.
+     AutomataDesignatorCharge: "night vision" by noahbangs (https://freesound.org/s/636090/), CC BY 4.0
+     (https://creativecommons.org/licenses/by/4.0/), unmodified, renamed. See CREDITS.txt.
+     AutomataDesignatorOk: the game's ArcBlockSensor3d01.wav (copy). AutomataDesignatorError: the game's SoundBlock_Alert1.wav,
+     first 600 ms with a 30 ms fade-out. Both 2D: the firing player's own feedback (ScoutPointerFeedbackPacket). -->
+<Definitions xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <Sounds>
+    <Sound>
+      <Id>
+        <TypeId>MyObjectBuilder_AudioDefinition</TypeId>
+        <SubtypeId>ArcAutomataDesignatorCharge</SubtypeId>
+      </Id>
+      <Category>TOOL</Category>
+      <MaxDistance>30</MaxDistance>
+      <Volume>0.6</Volume>
+      <Loopable>false</Loopable>
+      <Waves>
+        <Wave Type="D2">
+          <Start>Audio\AutomataDesignatorCharge.wav</Start>
+        </Wave>
+        <Wave Type="D3">
+          <Start>Audio\AutomataDesignatorCharge.wav</Start>
+        </Wave>
+      </Waves>
+    </Sound>
+    <Sound>
+      <Id>
+        <TypeId>MyObjectBuilder_AudioDefinition</TypeId>
+        <SubtypeId>RealAutomataDesignatorCharge</SubtypeId>
+      </Id>
+      <Category>TOOL_R</Category>
+      <MaxDistance>30</MaxDistance>
+      <Volume>0.6</Volume>
+      <Loopable>false</Loopable>
+      <Waves>
+        <Wave Type="D2">
+          <Start>Audio\AutomataDesignatorCharge.wav</Start>
+        </Wave>
+        <Wave Type="D3">
+          <Start>Audio\AutomataDesignatorCharge.wav</Start>
+        </Wave>
+      </Waves>
+    </Sound>
+    <Sound>
+      <Id>
+        <TypeId>MyObjectBuilder_AudioDefinition</TypeId>
+        <SubtypeId>ArcAutomataDesignatorOk</SubtypeId>
+      </Id>
+      <Category>TOOL</Category>
+      <MaxDistance>30</MaxDistance>
+      <Volume>0.7</Volume>
+      <Loopable>false</Loopable>
+      <Waves>
+        <Wave Type="D2">
+          <Start>Audio\AutomataDesignatorOk.wav</Start>
+        </Wave>
+      </Waves>
+    </Sound>
+    <Sound>
+      <Id>
+        <TypeId>MyObjectBuilder_AudioDefinition</TypeId>
+        <SubtypeId>RealAutomataDesignatorOk</SubtypeId>
+      </Id>
+      <Category>TOOL_R</Category>
+      <MaxDistance>30</MaxDistance>
+      <Volume>0.7</Volume>
+      <Loopable>false</Loopable>
+      <Waves>
+        <Wave Type="D2">
+          <Start>Audio\AutomataDesignatorOk.wav</Start>
+        </Wave>
+      </Waves>
+    </Sound>
+    <Sound>
+      <Id>
+        <TypeId>MyObjectBuilder_AudioDefinition</TypeId>
+        <SubtypeId>ArcAutomataDesignatorRequest</SubtypeId>
+      </Id>
+      <Category>TOOL</Category>
+      <MaxDistance>30</MaxDistance>
+      <Volume>0.7</Volume>
+      <Loopable>false</Loopable>
+      <Waves>
+        <Wave Type="D2">
+          <Start>Audio\AutomataDesignatorRequest.wav</Start>
+        </Wave>
+      </Waves>
+    </Sound>
+    <Sound>
+      <Id>
+        <TypeId>MyObjectBuilder_AudioDefinition</TypeId>
+        <SubtypeId>RealAutomataDesignatorRequest</SubtypeId>
+      </Id>
+      <Category>TOOL_R</Category>
+      <MaxDistance>30</MaxDistance>
+      <Volume>0.7</Volume>
+      <Loopable>false</Loopable>
+      <Waves>
+        <Wave Type="D2">
+          <Start>Audio\AutomataDesignatorRequest.wav</Start>
+        </Wave>
+      </Waves>
+    </Sound>
+    <Sound>
+      <Id>
+        <TypeId>MyObjectBuilder_AudioDefinition</TypeId>
+        <SubtypeId>ArcAutomataDesignatorError</SubtypeId>
+      </Id>
+      <Category>TOOL</Category>
+      <MaxDistance>30</MaxDistance>
+      <Volume>0.7</Volume>
+      <Loopable>false</Loopable>
+      <Waves>
+        <Wave Type="D2">
+          <Start>Audio\AutomataDesignatorError.wav</Start>
+        </Wave>
+      </Waves>
+    </Sound>
+    <Sound>
+      <Id>
+        <TypeId>MyObjectBuilder_AudioDefinition</TypeId>
+        <SubtypeId>RealAutomataDesignatorError</SubtypeId>
+      </Id>
+      <Category>TOOL_R</Category>
+      <MaxDistance>30</MaxDistance>
+      <Volume>0.7</Volume>
+      <Loopable>false</Loopable>
+      <Waves>
+        <Wave Type="D2">
+          <Start>Audio\AutomataDesignatorError.wav</Start>
+        </Wave>
+      </Waves>
+    </Sound>
+  </Sounds>
+</Definitions>

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Automata scout laser pointers (TODO/11, TODO/15). Split like the vanilla Data files: AmmoMagazines, Ammos, Weapons, PhysicalItems, HandItems.
+     AmmoMagazines: the pointer's 1-round magazine: kept full by the mod, not craftable, so vanilla never reloads (Reload cycles the mode instead). -->
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <AmmoMagazines>
+        <AmmoMagazine>
+            <Id>
+                <TypeId>AmmoMagazine</TypeId>
+                <SubtypeId>AutomataPointerCharge</SubtypeId>
+            </Id>
+            <DisplayName>Pointer Charge</DisplayName>
+            <Icon>Textures\GUI\Icons\ammo\Rifle_Ammo_Precise.dds</Icon>
+            <Size>
+                <X>0.2</X>
+                <Y>0.05</Y>
+                <Z>0.02</Z>
+            </Size>
+            <Mass>0.01</Mass>
+            <Volume>0.01</Volume>
+            <Model>Models\Weapons\Rifle_Precise_Magazine_Warfare.mwm</Model>
+            <Capacity>1</Capacity>
+            <AmmoDefinitionId Subtype="AutomataPointerBeam" />
+            <DepositAllEnabled>false</DepositAllEnabled>
+            <CanPlayerOrder>false</CanPlayerOrder>
+            <CanPlayerOffer>false</CanPlayerOffer>
+        </AmmoMagazine>
+    </AmmoMagazines>
+</Definitions>
