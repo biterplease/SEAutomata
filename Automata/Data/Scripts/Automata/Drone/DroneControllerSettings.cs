@@ -46,23 +46,23 @@ namespace Automata.Drone
                 /// Logistics task generally use docking speed for approach
                 /// </summary>
                 [ProtoMember(9)]
-                public float ApproachSpeed = 5.0f;
+                public float ApproachSpeed = 10.0f;
                 /// <summary>
                         /// Max speed in m/s.
                         /// </summary>
                 [ProtoMember(10)]
-                public float MaxSpeed = 50.0f;
+                public float MaxSpeed = 100.0f;
                 /// <summary>
                         /// Docking speed in m/s.
                         /// </summary>
                 [ProtoMember(11)]
-                public float SafeSpeed = 0.5f;
+                public float SafeSpeed = 2.5f;
                 [ProtoMember(12, IsRequired = true)]   // default true: false would otherwise not be saved
                 public bool AlignToPGravity = true;
                 [ProtoMember(13, IsRequired = true)]
-                public float PGravityAlignMaxPitchDegrees = 10.0f;
+                public float PGravityAlignMaxPitchDegrees = 45.0f;
                 [ProtoMember(14, IsRequired = true)]
-                public float PGravityAlignMaxRollDegrees = 10.0f;
+                public float PGravityAlignMaxRollDegrees = 45.0f;
                 [ProtoMember(15)]
                 public string LCDScreenTag = "[AutomataDrone]"; // Drone state will be sent to each LCD screen that contains this tag.
 
@@ -120,7 +120,7 @@ namespace Automata.Drone
                 // stand-alone construction function
                 // Observation area: box around the home connector, in the connector's frame, in BLOCKS (1 = 2.5 m):
                 // Size X = width (right), Y = height (up), Z = depth (forward), 1–10 blocks each.
-                // Offset X/Y/Z along the connector's Right/Up/Forward, ±5 blocks. Even sizes are shifted half a block
+                // Offset X/Y/Z along the connector's Right/Up/Forward, ±15 blocks (OBSERVATION_OFFSET_MAX). Even sizes are shifted half a block
                 // towards +X/+Y/+Z so the box edges stay on the large-grid lattice.
                 // (ProtoMembers 28/29 were the old metre-based Vector3DData size/offset - retired.)
                 [ProtoMember(44, IsRequired = true)]
@@ -129,6 +129,16 @@ namespace Automata.Drone
                 public Vector3IData ObservationAreaOffsetBlocks;
                 // Runtime only (not serialized): drawing switches itself off after a while.
                 public bool ObservationAreaDraw = false;
+                // Stand-alone: the observation area centred on a GPS point instead of offset from the home connector
+                // (sizes still along the connector's axes, in blocks; the offsets don't apply)
+                [ProtoMember(71)]
+                public bool ObservationAreaAtGps;
+                [ProtoMember(72)]
+                public Vector3DData ObservationGpsPosition;
+                [ProtoMember(73)]
+                public string ObservationGpsName;
+                [ProtoMember(74)]
+                public bool ObservationGpsSet;   // a point is selected (ObservationGpsPosition / Name)
 
                 // Docking pose for the home connector, in the home connector's frame (Right, Up, Forward):
                 // where the drone controller must be, and how it must be oriented, for its connector to lock.
@@ -207,7 +217,73 @@ namespace Automata.Drone
                 /// m above the surface on planets for routes between take-off and landing; 0 = off. Player flights
                 /// only (debug orders, Go home outside a job): jobs work at ground level.
                 /// </summary>
-                [ProtoMember(53)]
-                public float MinAltitude;
+                // Required: 0 (off) must be written, or a reload would give back the default
+                [ProtoMember(53, IsRequired = true)]
+                public float MinAltitude = 50f;
+
+                // Combat handover (behaviour profile "Combat drone", managed by an orchestrator)
+                /// <summary>m from the enemy where the AI Flight / Offensive blocks take over.</summary>
+                [ProtoMember(54, IsRequired = true)]
+                public float CombatHandoverDistance = 2000f;
+                /// <summary>s without a target (AI Offensive) before the drone comes home.</summary>
+                [ProtoMember(55, IsRequired = true)]
+                public int CombatNoTargetSeconds = 15;
+                /// <summary>Obsolete (was: launch radius from the home connector, 0 = any). Replaced by AutoLaunchRadius.</summary>
+                [ProtoMember(56)]
+                public float CombatLaunchRadius;
+                /// <summary>The AI Defensive block fleeing (its flee trigger) brings the drone home.</summary>
+                [ProtoMember(57, IsRequired = true)]
+                public bool CombatRetreatOnFlee = true;
+                /// <summary>Battery / hydrogen below the refuel thresholds brings the drone home.</summary>
+                [ProtoMember(58, IsRequired = true)]
+                public bool CombatRetreatOnLowPower = true;
+
+                // Ore survey (any mode): what the drone's ore detector sees goes to mining surveyors in antenna range
+                [ProtoMember(59)]
+                public bool SurveyForOres;
+
+                /// <summary>A few events worth a chat line go out through a Broadcast Controller on the drone (Util/BroadcastControllerSender).</summary>
+                [ProtoMember(60)]
+                public bool UseBroadcastController;
+
+                /// <summary>m from the drone: enemies its AI Defensive block detects within this launch it (0 = never on its
+                /// own, designator jobs only). At most the vanilla detection range, 2000 m.</summary>
+                [ProtoMember(61, IsRequired = true)]
+                public float AutoLaunchRadius = 2000f;
+
+                /// <summary>Escort jobs: m between the escorted grid / character and the drone's station above it.</summary>
+                [ProtoMember(62, IsRequired = true)]
+                public float EscortFollowDistance = 30f;
+
+                /// <summary>Blocks painted exactly this colour are never welded (stand-alone). Packed; RGB(255,0,255).</summary>
+                [ProtoMember(63, IsRequired = true)]
+                public uint WeldIgnoreColor = 0xFFFF00FF;
+
+                /// <summary>Mining jobs for these ores ("Ore/Iron"...) get no bid from this drone.</summary>
+                [ProtoMember(64)]
+                public List<string> IgnoredOres = new List<string>();
+
+                /// <summary>Farming (not implemented yet): crops ("SeedItem/Fruit"...) this drone leaves alone.</summary>
+                [ProtoMember(65)]
+                public List<string> IgnoredCrops = new List<string>();
+
+                /// <summary>No home connector: where the drone last took off from (controller, world). Combat drones and ore
+                /// scouts go back there when recalled / done (park near it, or hover there without landing gear).</summary>
+                [ProtoMember(66)]
+                public Vector3DData DepartureSpot;
+                [ProtoMember(67)]
+                public bool HasDeparture;
+
+                /// <summary>Stone was put on the ignored ores once (the default); the player may take it off after that.</summary>
+                [ProtoMember(68)]
+                public bool StoneIgnoreDefaulted;
+
+                /// <summary>Stand-alone construction: the order the weld categories are taken in (default: repair, projected, unbuilt).</summary>
+                [ProtoMember(69)]
+                public Construction.WorkPriority ConstructionWorkPriority;
+
+                /// <summary>The name its logs (and other blocks' logs) show; empty: the controller's name.</summary>
+                [ProtoMember(70)]
+                public string Nickname = "";
         }
 }

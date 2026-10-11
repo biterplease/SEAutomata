@@ -21,3 +21,15 @@ Because the `MessageQueue` runs in real-time, it must stay in sync across all cl
 
 ## 3. Strict Constraints
 - **No Direct IGC**: Do not use the game's `IGC.SendBroadcastMessage` directly for drone logic; always route through our custom `MessageQueue` to maintain the simulation's state.
+
+## Delivery rules (2026-10-02)
+- Recipients are fixed at send time: blocks of the recipient types that are **subscribed to the channel**, sharing with the sender, inside the sender's antenna range.
+- A non-direct message is delivered **once per recipient** (it is removed from the message's recipients when read) and kept until it expires for the others; nobody re-reads a message.
+- `UnsubscribeAll` when a block closes. Channels and payloads of the job handshake: `TODO/10-handshake.md`.
+
+## Channels added (2026-10-06)
+
+- `JOB_WITHDRAWN`: announcer -> orchestrators, JobStatusReport (announcer, job id, reason): drop the job's queue entry /
+  auction.
+- Removed unused config keys: `[MessageQueue] SchedulerMessageThrottlingTicks`, `DroneMessageThrottlingTicks`
+  (never read; drones / computers read their channels every update).

@@ -1,0 +1,7 @@
+Automata - third-party assets
+
+Sound: Audio/AutomataDesignatorCharge.wav (industrial target designator charge)
+  "night vision" by noahbangs - https://freesound.org/s/636090/
+  Licensed under Creative Commons Attribution 4.0 International (CC BY 4.0)
+  https://creativecommons.org/licenses/by/4.0/
+  Changes: none to the audio; file renamed.

@@ -1,0 +1,471 @@
+[h1]Automata: Player Guide[/h1]
+
+[h2]Current status, what's implemented, what's planned[/h2]
+
+This mod is still very early in development. While some of its features work, a lot of it still needs polishing, namely:
+
+[list]
+[*]Welding and grinding: works 80% of the time, there are times where drones get stuck and need manual rescue, or simply burn all their battery/fuel trying to navigate to a block that they should be able to without issue
+[*]Mining is inefficient: because stone gets in the way, drones mine A LOT of stone before they can actually bring some useful ores
+[*]Timing issues: in order to reduce effect on simulation speed, actions are often throttled and deferred, this leads to getting feeling that things are not happening at all.
+[/list]
+
+The above said, welding, grinding, mining, logistic deliveries, ore scouting, combat, as well as the docking, takeoff, navigation, and healthcheck of the drone, work at acceptable levels, but I'm still working to make them better and more reliable.
+
+[h3]Still untested:[/h3]
+
+[list]
+[*]Server stuff: multiplayer infrastructure is there, and used everywhere in the mod, but it's only ever been tested locally
+[*]Moving grids: while the drones are expected to work with reference beacons on moving grids, has not been tested yet
+[/list]
+
+[h3]Planned features:[/h3]
+
+[list]
+[*]Quarry mining: mining drones HAVE to be borers, i.e. their hull needs to fit the hole that their drills make. With Quarry mining, a drone with a single drill to be able to clear its own area to maneuver and mine successfully.
+[*]Farm harvesting jobs: drone with a collector harvests farmed ores.
+[*]Rovers: for the really massive cargo move jobs, rovers should be available.
+[*]Mod config menu: live update server settings
+[*]Models: LG drone controller, all computer, still using vanilla models, custom models with custom actions are underway.
+[/list]
+
+[h2]Introduction[/h2]
+
+Automata lets you create drones that work for you. Put a [b]Drone Controller[/b] on a grid that has thrusters, a connector and whatever tools you want it to use (welder, grinder, drill, ore detector, cargo), and the drone figures out by itself what it is able to do. A single drone can already weld, repair and grind around its home on its own.
+
+The mod introduces 4 blocks that lets you scale your activities, 3 of them specify on checking for a specific type of job, and the [b]Orchestrator[/b] collects those jobs and hands them to the drones best suited for them. Everything talks over your antennas, so every Automata block needs a broadcasting antenna on its grid, and the blocks only hear each other within antenna range.
+
+The mod adds five blocks and two hand-held tools:
+
+[list]
+[*][b]Drone Controller[/b]: The workhorse, that allows a drone to check its own capabilities, and sign up to do the work distributed by the Orchestrator. It's the only block that actually does work: weld, grind, deliveries, mining.
+[*][b]Orchestrator[/b]: the dispatcher. It turns job announcements into auctions, picks the winning drones and gives them their orders. Usually one per base network is enough.
+[*][b]Logistics Computer[/b]: Analyzes inventory on its grid, keeps player-configured item min/max in its memory, and dispatches jobs to keep those amounts healthy. A grid needs one to take part in logistics.
+[*][b]Construction Computer[/b]: Scans a large area for blocks to grind, weld, or repair, and announces them as jobs.
+[*][b]Mining Surveyor[/b]: It collects ore deposit data and turns ore orders into mining jobs.
+[*][b]Industrial Target Designator[/b] and [b]Hostile Target Designator[/b]: hand-held tools to send drones somewhere by pointing: ore scouting with the industrial one, combat with the hostile one.
+[/list]
+
+[h2]How jobs get assigned[/h2]
+
+Every job managed by an Orchestrator goes through the same four steps:
+
+[olist]
+[*][b]Announcement[/b]: a computer (Construction, Logistics or Mining Surveyor) finds work and announces it: "these 10 blocks need welding", "this grid needs 500 steel plates", "mine 10,000 kg of iron here".
+[*][b]Auction[/b]: the Orchestrator opens an auction for the job and broadcasts it to every drone and Logistics Computer in range.
+[*][b]Bidding[/b]: drones that can do the job bid with their position, cargo room and tools. Logistics Computers that can supply the items (or take them) bid too. Most jobs need both: a drone to do the work, and a Logistics Computer to load from or unload to.
+[*][b]Winner selection[/b]: after a few seconds the Orchestrator picks the best bids. Drones whose behaviour profile matches the job always rank first, then the closest and best equipped. Big jobs are split over several drones and trips. The winners get their task lists, the Logistics Computers reserve the items or room, and the announcer stops repeating the job.
+[/olist]
+
+If nobody bids, the job is put on hold for a few minutes and announced again later. Every computer has a [b]Retry jobs[/b] button to skip the wait.
+
+[h2]General settings[/h2]
+
+These apply to all blocks, and provide quality of life to the mod's usage.
+
+[h3]Nicknames[/h3]
+
+All blocks have a "Nickname" field, that allows you to set a friendly-name to your drone or computer. This name will be shown in logs, and broadcasted messages.
+
+[h3]Use broadcast controller[/h3]
+
+If this is toggled, and there's a broadcast controller in their grid, Automata blocks will use the broadcast controller to message you about important updates.
+
+[h3]LCD output[/h3]
+
+All blocks log output to an LCD on their grid. An app called "Automata log" is added to the apps section of the LCD.
+
+In order to see the logs, you need to both:
+
+[list]
+[*]Select the "Automata log" app
+[*]Tag the LCD screen name according to the block you want to see, the defaults are
+[list]
+[*][AutomataDrone]
+[*][LogisticsComputer]
+[*][ConstructionComputer]
+[*][MiningSurveyor]
+[*][Orchestrator]
+[/list]
+[/list]
+
+The logs will show relevant data to the automata block, such as jobs taken, reasons for failure, retry timers, etc.
+
+[h2]Drone Controller[/h2]
+
+[h3]Behaviour profiles[/h3]
+
+The behaviour profile tells Orchestrators what this drone [i]prefers[/i] to do. A drone still bids on any job its equipment allows, but drones with a matching profile always win over the others.
+
+[table]
+[tr][th]Profile[/th][th]Preferred jobs[/th][th]Notes[/th][/tr]
+[tr][td]Cargo drone[/td][td]Item deliveries and pickups between Logistics Computers[/td][td][/td][/tr]
+[tr][td]Ore hauler[/td][td]Ore and ice deliveries[/td][td]Takes [b]only[/b] ore / ice deliveries (and mining, if it has a drill). Can dock with small connectors.[/td][/tr]
+[tr][td]Welder:All[/td][td]Weld jobs of every kind[/td][td][/td][/tr]
+[tr][td]Welder:Repair[/td][td]Weld jobs, repair first[/td][td]Ranks first for repair jobs (damaged blocks), and bids on them first when several auctions are open. Still takes the other weld jobs, ranked below Welder:All.[/td][/tr]
+[tr][td]Welder:Projected[/td][td]Weld jobs, projections first[/td][td]The same, for projected build jobs.[/td][/tr]
+[tr][td]Welder:Unbuilt[/td][td]Weld jobs, unbuilt blocks first[/td][td]The same, for unbuilt jobs (placed blocks not welded up yet).[/td][/tr]
+[tr][td]Grinder drone[/td][td]Grind jobs[/td][td][/td][/tr]
+[tr][td]Welder + grinder drone[/td][td]Weld and grind jobs[/td][td][/td][/tr]
+[tr][td]Mining drone[/td][td]Mining jobs[/td][td]Needs a drill and an ore detector.[/td][/tr]
+[tr][td]Ore scout[/td][td]Industrial designator scouting[/td][td]The [b]only[/b] drones that take scouting jobs. Needs an ore detector. Can dock with small connectors.[/td][/tr]
+[tr][td]Combat drone[/td][td]Hostile designator engage / escort[/td][td]The [b]only[/b] drones that take combat jobs. Needs AI Defensive, AI Flight and AI Offensive blocks. Can dock with small connectors.[/td][/tr]
+[tr][td]Farming drone, Rover[/td][td][/td][td]Not implemented yet.[/td][/tr]
+[/table]
+
+You can also stop a drone from bidding with some of its abilities in the [b]Jobs[/b] section (for example, "no jobs in space" even though it can fly there), and tell mining drones to ignore specific ores.
+
+[h3]Home connector and home beacon[/h3]
+
+Drones can be configured with a [b]home connector[/b]. When set, this drone will always return there to dock, recharge, refuel, and drop off leftover cargo.
+
+[list]
+[*]Pick one of your (or your faction's) connectors from the [b]Home connector[/b] list. Use [b]Scan[/b] to refresh the list, or type a connector's name to find one farther away.
+[*]Best results: dock the drone by hand, then press [b]Set current as home[/b]. The drone remembers that exact docking position and orientation.
+[*]Give each drone its own home connector. Two drones sharing one will fight over it.
+[*]If the home connector is on something that moves (a carrier, a mining ship), tick [b]Home connector is not station[/b] and select a [b]home beacon[/b] on the same ship. The drone uses the beacon to find its way back to the moving home.
+[/list]
+
+Drones with landing gear and no home connector can still park on nearby grids or the ground, and combat drones and ore scouts return to where they took off.
+
+A drone without a home connector clears leftover cargo (grinder salvage, a welder's unused components) at the last connector it loaded or unloaded at, or, if it knows none, at the nearest free connector within 2 km whose conveyor network has cargo room.
+
+[h3]Stand-alone mode[/h3]
+
+A stand-alone drone works by itself, without any computers or Orchestrator. It watches a small [b]observation area[/b] around its home connector (up to 10 x 10 x 10 blocks, which you can move with the offset sliders or centre on a GPS point instead) and:
+
+[list]
+[*]welds unfinished blocks, repairs damaged ones, and builds projections,
+[*]grinds down blocks painted with the [b]grind colour[/b],
+[*]never touches blocks painted with the [b]weld ignore colour[/b].
+[/list]
+
+It loads the components it needs from the conveyor network of its home connector, does as much as it can carry, comes back, and repeats. You can choose the order it works in (repair, projections, unbuilt). Turn on [b]Show observation area[/b] to see the box.
+
+Stand-alone drones are lack the capabilities to coordinate large jobs, so two stand-alone drones observing the same area may go for the same block, bump into each other, or crash. For several drones on one project, use the Orchestrator.
+
+[h3]Managed by Orchestrator mode[/h3]
+
+In this mode the drone waits at home and bids on jobs from Orchestrators in antenna range. This is the mode for logistics, mining, large construction projects, and designator jobs. The drone flies out, does its task list, reports back and returns home. It still watches its battery and hydrogen levels and goes home to recharge when needed.
+
+Combat drones in this mode also launch on their own when their AI Defensive block spots an enemy within the [b]auto-launch radius[/b].
+
+The operation mode can only be changed while the drone's AI is off.
+
+[h3]Which jobs a drone bids on[/h3]
+
+[table]
+[tr][th]Job[/th][th]What the drone needs[/th][/tr]
+[tr][td]Weld / repair / build[/td][td]A welder and cargo room for components[/td][/tr]
+[tr][td]Grind[/td][td]A grinder and cargo room for the salvage[/td][/tr]
+[tr][td]Item delivery / pickup[/td][td]Cargo room and a standard connector (ore haulers: ore and ice only)[/td][/tr]
+[tr][td]Mining[/td][td]A drill, an ore detector and free cargo; the ore must not be on its ignore list[/td][/tr]
+[tr][td]Scouting (industrial designator)[/td][td]Ore scout profile and an ore detector[/td][/tr]
+[tr][td]Engage / escort (hostile designator)[/td][td]Combat drone profile and the three AI blocks[/td][/tr]
+[/table]
+
+On top of that, the drone must be able to fly where the job is (atmosphere or space), have power, and not be busy. Its [b]Max load[/b] settings decide how much it agrees to carry.
+
+[h2]Logistics Computer[/h2]
+
+[h3]Conveyor networks[/h3]
+
+The Logistics Computer sees its grid as one or more [b]conveyor networks[/b]: groups of containers, connectors, refineries, assemblers and tanks that can move items between each other. Drones dock at a free [b]large connector[/b] of a network to load or unload; small connectors are ignored, with some exceptions: drones designated as ore haulers, scouts, and combat drones can still use small. lconnectors.
+
+Your Min / Max settings apply to the [b]main network[/b]: the one with the most cargo room and a free standard connector. That is where deliveries arrive and surplus leaves.
+
+[h3]The four work modes[/h3]
+
+The modes are checkboxes, so you can combine them.
+
+[list]
+[*][b]Provide for logistics[/b]: offers this grid's items to other Logistics Computers' requests (never going below its own Min for that item), and its free room for their surplus (never going above its own Max). Also needed to receive mined ore.
+[*][b]Provide for construction[/b]: offers components for weld jobs (drones dock here to load them) and room for what grind jobs bring back.
+[*][b]Request (below Min)[/b]: when an item drops below its Min, the computer asks for the difference. A drone brings it from another Logistics Computer.
+[*][b]Push (above Max)[/b]: when an item goes above its Max, the excess is announced as surplus, and a drone takes it away to another Logistics Computer.
+[/list]
+
+By default a new computer has both Provide modes on.
+
+[h3]How to configure it[/h3]
+
+[olist]
+[*]Place the Logistics Computer on the grid, with a broadcasting antenna and at least one free standard connector on the network you want drones to use.
+[*]Tick the work modes you want.
+[*]Set item limits in the [b]Min / Max[/b] lists: select an item in the top list, edit the entry as [i]item:min:max[/i] (for example [i]SteelPlate:100:5000[/i] or [i]Ingot/Iron:0:20000[/i], where 0 means "not set"), then press [b]Edit and add[/b]. You can also type an entry and press [b]Add manually[/b].
+[*]Mins only do something with [b]Request[/b] on, Maxes only with [b]Push[/b] on (the computer warns you otherwise).
+[*]For mining: by default it only accepts ore its working refineries can process. Tick [b]Accept ore from mining without a refinery[/b] to use it as plain ore storage. Ice goes to grids with an O2/H2 generator.
+[/olist]
+
+A typical setup: the main base on [b]Provide for logistics + Provide for construction[/b], and an outpost on [b]Request[/b] with Mins for the components it needs, or a mining outpost on [b]Push[/b] with Maxes on its ore.
+
+[h3]Which jobs it bids on[/h3]
+
+[table]
+[tr][th]Job[/th][th]What it offers[/th][th]Needs mode[/th][/tr]
+[tr][td]Weld / repair / build[/td][td]The components[/td][td]Provide for construction[/td][/tr]
+[tr][td]Grind[/td][td]Room for the salvaged parts[/td][td]Provide for construction[/td][/tr]
+[tr][td]Item delivery (another computer's request)[/td][td]The items, above its own Min[/td][td]Provide for logistics[/td][/tr]
+[tr][td]Item pickup (another computer's surplus)[/td][td]Room, below its own Max[/td][td]Provide for logistics[/td][/tr]
+[tr][td]Mining[/td][td]Room for the ore, with a refinery that takes it (or the "without a refinery" option); ore and its ingot below Max[/td][td]Provide for logistics[/td][/tr]
+[/table]
+
+A computer never bids on its own requests.
+
+[h2]Construction Computer[/h2]
+
+The Construction Computer watches a large box around itself (up to 50 x 50 x 50 blocks, movable with the offset sliders) and looks for:
+
+[list]
+[*]unfinished blocks, damaged blocks and projections to weld (each can be turned on or off),
+[*]blocks painted the grind colour to grind,
+[*]skipping anything painted the weld ignore colour.
+[/list]
+
+It sees every grid in the box that you, your faction, or nobody owns, including floating projections that aren't attached to anything.
+
+[b]Many drones at once.[/b] This is where the Construction Computer shines. Instead of one block at a time, it groups the work into jobs of several blocks (10 by default) and keeps several jobs open at the same time. Each job can be split over several drones, and different jobs go to different drones, so a whole swarm can build one projection together. Projections are built centre-first and bottom-up so the structure grows sensibly, and drones working close to each other watch out for one another and wait or pick another side instead of colliding.
+
+Useful settings: [b]Weld priority[/b], [b]Blocks per job[/b], scan interval, and [b]Show observation area[/b] to see the box.
+
+[b]Weld priority.[/b] Weld jobs come in three kinds: [b]Repair[/b] (damaged blocks), [b]Projected[/b] (projections) and [b]Unbuilt[/b] (placed blocks not welded up yet). The Construction Computer publishes jobs of every kind that has work at the same time, so drones set to Welder:Repair, Welder:Projected or Welder:Unbuilt always find their own kind of job. The order you pick sets each kind's share of the open jobs (MaxPublishedJobs): 3 : 2 : 1, first to last, with grinding getting the same share as the first kind. With 10 slots and all three kinds waiting that is 5 / 3 / 2. A kind with less work than its share leaves the rest to the others. The logs name the kind of every weld job (Weld:Repair, Weld:Projected, Weld:Unbuilt).
+
+A stand-alone drone's own Weld priority is a strict order: it finishes one kind before starting the next.
+
+[h3]Which bids its jobs need[/h3]
+
+[table]
+[tr][th]Job[/th][th]Drone[/th][th]Logistics Computer[/th][/tr]
+[tr][td]Weld / repair / build[/td][td]Has a welder and cargo room. Welder:Repair / Projected / Unbuilt rank first for their own kind of weld, then Welder:All and Welder + grinder, then the other Welder:* profiles.[/td][td]Has the components, with [b]Provide for construction[/b] on[/td][/tr]
+[tr][td]Grind[/td][td]Has a grinder and cargo room. Grinder and Welder + grinder drones rank first.[/td][td]Has room for the parts, with [b]Provide for construction[/b] on[/td][/tr]
+[/table]
+
+Drones whose welder or grinder can easily reach the blocks (for example, a downward-facing welder for the top of a structure) also rank higher. A weld job is never given out without a Logistics Computer that has the components.
+
+[h2]Mining Surveyor[/h2]
+
+[h3]Collecting ore surveys[/h3]
+
+The Mining Surveyor keeps a list of known ore deposits. They come from two sources:
+
+[list]
+[*][b]Its own ore detector[/b]: an ore detector on the surveyor's grid is scanned regularly.
+[*][b]Survey drones[/b]: any drone with a working ore detector and [b]Survey for ores[/b] ticked records the ore it sees while flying, and hands the data to a Mining Surveyor once it is back in antenna range. Ore scouts sent out with the industrial designator are the quickest way to explore.
+[/list]
+
+Deposits that a later scan no longer finds are marked as depleted. Stone is never listed. Press [b]Show known deposits[/b] to put them on your GPS for a few minutes.
+
+[h3]Configuring mining jobs[/h3]
+
+[olist]
+[*]The [b]Known ores[/b] list shows the ores of the deposits found so far.
+[*]Select an ore, enter an order as [i]ore:kg[/i] (for example [i]Ore/Iron:100000[/i] or [i]Iron:50000[/i]) and press [b]Add / update[/b].
+[*][b]Job size[/b] sets how many kg each mining job asks for (one drone trip; default 10,000 kg).
+[*]Each finished job is counted off the order; at 0 the jobs stop. Tick [b]Keep orders constant[/b] to keep mining as long as deposits are known.
+[*]Removing an order stops new jobs for it; drones already out finish their trip.
+[/olist]
+
+The surveyor always sends drones to the nearest known deposit. Large jobs are shared by several miners boring side by side.
+
+[h3]Which bids its jobs need[/h3]
+
+[table]
+[tr][th]Bidder[/th][th]Requirement[/th][/tr]
+[tr][td]Drone[/td][td]A drill, an ore detector and free cargo; the ore not on its ignore list. Mining drones rank first.[/td][/tr]
+[tr][td]Logistics Computer[/td][td][b]Provide for logistics[/b] on, room for the ore, a refinery that processes it (or "accept ore without a refinery"), and the ore / its ingot below Max. Ice prefers grids with an O2/H2 generator.[/td][/tr]
+[/table]
+
+Without a Logistics Computer to take the ore, no mining job is given out: your drones never mine ore with nowhere to put it.
+
+[h2]Manual jobs with the target designators[/h2]
+
+The two designators are hand-held tools. Press [b]Reload[/b] to cycle modes, [b]Fire[/b] to point. You must be within antenna range of one of your Orchestrators, and the drones you want to use must be [b]Managed by Orchestrator[/b]. The designator's lights and sounds tell you whether the order was sent (yellow), accepted by a drone (green / blue), or refused (red). If no suitable drone takes the order within about 10 seconds, it is cancelled.
+
+Both designators share two extra modes:
+
+[list]
+[*][b]Tag[/b]: point at your own drones to tag them (up to 32). The next order goes to every tagged drone, one job each. Without tags, one suitable drone is picked for you.
+[*][b]Recall[/b]: point at one of your drones to call it home. It drops its current job.
+[/list]
+
+[h3]Scouting (Industrial Target Designator)[/h3]
+
+Only drones with the [b]Ore scout[/b] profile and an ore detector take scouting jobs.
+
+[list]
+[*][b]Spot check[/b]: point at the ground or an asteroid. A scout flies there, scans for ore and comes back. With several tagged scouts, they spread around the spot.
+[*][b]Area sweep[/b]: point at an area. A scout sweeps it (low passes over a planet, rings around an asteroid). With several tagged scouts, the area is split between them.
+[/list]
+
+A GPS marker shows the order: yellow while waiting for a drone, green once taken. Everything the scouts find goes to your Mining Surveyors, ready to be ordered.
+
+[h3]Combat (Hostile Target Designator)[/h3]
+
+Only drones with the [b]Combat drone[/b] profile and AI Defensive, AI Flight and AI Offensive blocks take combat jobs.
+
+[list]
+[*][b]Engage[/b]: point at an enemy or neutral grid or character, or at a spot on the ground. The drone flies there, and once within its [b]handover distance[/b] switches on its AI Flight and AI Offensive blocks to fight. It returns home when the target is destroyed or disabled, or when it has had no target for a while. Pull the trigger again to send another drone.
+[*][b]Escort[/b]: point at one of your own moving grids or characters. The drone follows above it at the [b]follow distance[/b], fights any enemy that comes close, then resumes following. Point at the ground right next to yourself to have it escort you.
+[/list]
+
+Combat drones come home on their own when power or hydrogen runs low, when their AI Defensive block decides to flee, or when an AI block is lost. You can tune all of this in the drone's [b]Combat[/b] section.
+
+[h2]Server settings[/h2]
+
+Server admins can tune the mod in [b]Automata.ini[/b], in the mod's own folder (for a Workshop install, the mod's folder under [i]steamapps\workshop\content\244850\[/i], or the dedicated server's [i]content[/i] folder). Keep a copy of your edited file: a Workshop update replaces it.
+
+[list]
+[*]Only the server reads the file, once, when the world loads. Restart the world after editing it.
+[*]Times in [b]ticks[/b] are game frames: 60 ticks = 1 second.
+[*]Values outside the allowed range are clamped to it. Missing or unreadable values use the default.
+[*]When the world loads, the chat says "Server configuration loaded successfully", or "No config file found, using defaults".
+[*]Settings marked [i]Not used yet[/i] are read (or reserved) but don't change anything in this version.
+[/list]
+
+[h3][Pathfinding][/h3]
+
+How drones plan their routes and see obstacles. These are the main CPU settings for flying.
+
+[table]
+[tr][th]Setting[/th][th]Default[/th][th]What it does[/th][/tr]
+[tr][td]AllowDirectPathfinding[/td][td]true[/td][td]The drones' route planner. Off: drones fly straight lines to their targets without checking for obstacles. Leave it on.[/td][/tr]
+[tr][td]AllowAStar[/td][td]false[/td][td][i]Not available yet.[/i] Turning it on only logs a warning.[/td][/tr]
+[tr][td]AllowSensors, AllowObstacleAvoidance, AllowSimpleRepositioning, AllowDStarLite, UseGravityAwarePathing, RepositionStep[/td][td][/td][td][i]Not used yet.[/i][/td][/tr]
+[tr][td]UsePlanetAwarePathfinding[/td][td]true[/td][td]On planets, long routes follow the planet's curve and climb over terrain. Off: straight lines, which can run into hills and mountains.[/td][/tr]
+[tr][td]MinWaypointDistance, MaxWaypointDistance[/td][td]5, 15[/td][td][i]Not used yet.[/i][/td][/tr]
+[tr][td]MaxRepositionAttempts[/td][td]10[/td][td]How many detours one route may take around obstacles, and how many times a drone re-plans a blocked route before the task fails.[/td][/tr]
+[tr][td]MinAltitudeBuffer[/td][td]20[/td][td]Metres kept above the highest terrain when a route climbs over a hill (the drone's own [b]Min altitude[/b] is used when higher). 0 to 1000.[/td][/tr]
+[tr][td]MaxPathNodes[/td][td]1000[/td][td]Most points in one route (at least 100). Very long planet routes use wider steps to stay within it.[/td][/tr]
+[tr][td]MaxPathfindingTimeMs[/td][td]50[/td][td][i]Not used yet.[/i][/td][/tr]
+[tr][td]RequireCamerasForPathfinding[/td][td]true[/td][td]On: drones only see far-off obstacles through working, switched-on cameras, each looking along its facing (six cameras cover every direction). Off: every drone sees as if it had cameras all around.[/td][/tr]
+[tr][td]RequireSensorsForPathfinding[/td][td]true[/td][td]On: drones only see close obstacles all around them through a working, switched-on sensor block (the sensor's own range settings don't matter). Drones without one get a warning before take-off. Off: every drone has that close-range sight.[/td][/tr]
+[tr][td]CameraRange[/td][td]1000[/td][td]How far a camera sees, in metres (10 to 5000).[/td][/tr]
+[tr][td]SimulatedSensorRange[/td][td]50[/td][td]How far a sensor sees, in metres (1 to 500).[/td][/tr]
+[tr][td]RaysPerTick[/td][td]60[/td][td]Obstacle checks per tick, shared by all drones on the server (5 to 1000). Lower uses less CPU, but drones notice obstacles later when many are flying.[/td][/tr]
+[tr][td]AllowRepathing[/td][td]true[/td][td]Something blocks the route: the drone plans a way around it. Off: the drone stops and the task fails.[/td][/tr]
+[tr][td]ObstacleClearance[/td][td]3[/td][td]Metres kept between the hull and obstacles when routes are checked (0 to 20). Higher is safer, but tight spaces may become unreachable.[/td][/tr]
+[tr][td]CruiseAltitude[/td][td]40[/td][td](Not in the shipped file; add it to change it.) On planets, long flights cruise at least this many metres above the terrain: straight up after take-off, straight down to land. 0 to 1000.[/td][/tr]
+[tr][td]ArcMinDistance[/td][td]300[/td][td]On planets, routes longer than this (metres) follow the planet's curve (50 to 100000).[/td][/tr]
+[tr][td]ArcStep[/td][td]200[/td][td]Shortest straight piece of such a curved route, in metres (25 to 10000).[/td][/tr]
+[tr][td]ArcSag[/td][td]25[/td][td]How far a straight piece may dip below its ends, in metres (1 to 500). Bigger means fewer, longer straight pieces.[/td][/tr]
+[tr][td]DockClearance[/td][td]0.25[/td][td]Metres kept around the hull when flying in and out of hangars and docking bays (0.1 to 3).[/td][/tr]
+[tr][td]DockClearanceMin[/td][td]0.1[/td][td]Tried when no way in fits with DockClearance (tight doors). The drone then flies in at half speed (0.05 to 3).[/td][/tr]
+[tr][td]DockCorridorMaxLength[/td][td]40[/td][td]How far from a connector, in metres, the drone looks for a straight way in with room to turn (10 to 200).[/td][/tr]
+[/table]
+
+[h3][Drone][/h3]
+
+[table]
+[tr][th]Setting[/th][th]Default[/th][th]What it does[/th][/tr]
+[tr][td]TaskTimeoutSeconds[/td][td]30[/td][td]The highest [b]Task timeout[/b] a player can set on a drone (10 to 600). A task that stops making progress for that long fails.[/td][/tr]
+[tr][td]DebugDrawTimeoutSeconds[/td][td]3600[/td][td]The observation area and navigation target overlays switch themselves off after this many seconds (10 to 3600).[/td][/tr]
+[tr][td]DefaultMonitorHydrogen, DefaultMonitorBattery, DefaultHydrogenRefuelThreshold, DefaultHydrogenOperationalThreshold, DefaultBatteryRefuelThreshold, DefaultBatteryOperationalThreshold, MinPowerThreshold, MaxPowerThreshold[/td][td][/td][td][i]Not used yet.[/i] Each drone uses its own terminal settings.[/td][/tr]
+[tr][td]ComponentCheckIntervalSeconds[/td][td]600[/td][td]How often a drone re-checks all of its own blocks (60 to 86400). Adding or removing blocks triggers a check anyway.[/td][/tr]
+[tr][td]ConnectorScanIntervalSeconds[/td][td]60[/td][td]How often a drone's home connector / beacon lists may refresh on their own.[/td][/tr]
+[tr][td]ConnectorScanMinMoveMeters[/td][td]250[/td][td]...but only if the drone moved at least this far since the last refresh...[/td][/tr]
+[tr][td]ConnectorScanMaxAgeSeconds[/td][td]600[/td][td]...or the list is older than this.[/td][/tr]
+[tr][td]ConnectorManualScanIntervalSeconds[/td][td]60[/td][td]Shortest time between two presses of [b]Scan[/b] on one drone (5 to 3600).[/td][/tr]
+[tr][td]ConnectorScanRadius[/td][td]1000[/td][td]Radius of the automatic connector / beacon lists, in metres (100 to 5000).[/td][/tr]
+[tr][td]ConnectorNameSearchRadius[/td][td]15000[/td][td]Radius of [b]Add to list[/b] (search by name), and the farthest a home connector or beacon may be from the drone, in metres.[/td][/tr]
+[tr][td]ConnectorNameSearchIntervalSeconds[/td][td]10[/td][td]Shortest time between two name searches on one drone.[/td][/tr]
+[tr][td]CombatMaxDetectionRange[/td][td]2000[/td][td]Enemies the AI Defensive block reports farther away than this (metres) are ignored (100 to 50000). The vanilla block sees 2000 m; raise it only for modded AI blocks.[/td][/tr]
+[/table]
+
+[h3][ConstructionComputer][/h3]
+
+[table]
+[tr][th]Setting[/th][th]Default[/th][th]What it does[/th][/tr]
+[tr][td]DroneMaxJobsPerScan[/td][td]125[/td][td]Stand-alone drones: most blocks taken from one scan of the observation area (1 to 1000).[/td][/tr]
+[tr][td]DroneScanIntervalSeconds[/td][td]30[/td][td]Stand-alone drones: seconds between scans while idle, and the pause after a failed trip (5 to 3600).[/td][/tr]
+[tr][td]MaxPublishedJobs[/td][td]10[/td][td]Construction Computers: jobs open at once that no drone has taken yet (1 to 100). Higher lets more drones start at the same time, at the cost of more auctions.[/td][/tr]
+[/table]
+
+[h3][Orchestrator][/h3]
+
+[table]
+[tr][th]Setting[/th][th]Default[/th][th]What it does[/th][/tr]
+[tr][td]MaxConcurrentAuctions[/td][td]10[/td][td]Auctions one Orchestrator runs at once (1 to 100). Further jobs wait in its queue.[/td][/tr]
+[tr][td]NoBidTimeoutSeconds[/td][td]60[/td][td]An auction with no drone bid for this long is dropped, and the computer that announced it is told (10 to 600).[/td][/tr]
+[tr][td]FailedJobHoldSeconds[/td][td]60[/td][td]How long that computer then waits before announcing the job again (10 to 7200). The [b]Retry jobs[/b] buttons skip the wait.[/td][/tr]
+[/table]
+
+[h3][ScoutPointer][/h3]
+
+The target designators.
+
+[table]
+[tr][th]Setting[/th][th]Default[/th][th]What it does[/th][/tr]
+[tr][td]PendingGpsColor[/td][td]255,210,0[/td][td]Colour of an industrial designator order's GPS marker while it waits for a drone. [i]R,G,B[/i] or [i]#RRGGBB[/i].[/td][/tr]
+[tr][td]ConfirmedGpsColor[/td][td]40,220,60[/td][td]Colour of the marker once every job of the order has a drone.[/td][/tr]
+[tr][td]CombatGpsColor[/td][td]139,0,0[/td][td][i]Not used yet.[/i] Combat orders have no marker, since the target moves.[/td][/tr]
+[tr][td]ConfirmTimeoutSeconds[/td][td]10[/td][td]A designator order that no suitable drone takes within this many seconds is cancelled (3 to 300).[/td][/tr]
+[/table]
+
+[h3][Mining][/h3]
+
+[table]
+[tr][th]Setting[/th][th]Default[/th][th]What it does[/th][/tr]
+[tr][td]ScanCellsPerUpdate[/td][td]8[/td][td]How much of the voxel world one ore scan reads at a time (32 m cells, every 10 ticks; 1 to 128). The CPU cap of ore scanning: higher finishes scans faster but costs more.[/td][/tr]
+[tr][td]MaxScanRadius[/td][td]300[/td][td]Ore scans reach at most this far, in metres, whatever the ore detector's range (50 to 2000).[/td][/tr]
+[tr][td]DepositMergeMeters[/td][td]50[/td][td]The same ore found within this distance of a known deposit counts as that deposit (10 to 500).[/td][/tr]
+[tr][td]MaxDepositsPerSurveyor[/td][td]500[/td][td]Deposits one Mining Surveyor remembers; the farthest are forgotten first (10 to 5000).[/td][/tr]
+[tr][td]MaxPublishedJobs[/td][td]5[/td][td]Mining jobs one surveyor has open at once that no drone has taken yet (1 to 50).[/td][/tr]
+[tr][td]SurveyorScanIntervalSeconds[/td][td]120[/td][td]Seconds between a Mining Surveyor's scans with the ore detector on its own grid (10 to 3600).[/td][/tr]
+[tr][td]DroneSurveyIntervalSeconds[/td][td]10[/td][td]Seconds between a surveying drone's scans; it must also have moved half a scan radius (2 to 600).[/td][/tr]
+[tr][td]MaxGpsMarkers[/td][td]30[/td][td]Most deposit markers [b]Show known deposits[/b] puts on the GPS, nearest first (1 to 200).[/td][/tr]
+[/table]
+
+[h3][SchedulerBounds][/h3]
+
+[table]
+[tr][th]Setting[/th][th]Default[/th][th]What it does[/th][/tr]
+[tr][td]BidCollectionWindowTicks[/td][td]300[/td][td]How long an Orchestrator collects bids before picking the winners (at least 60). Longer gives better picks but slower starts. Big jobs wait a bit longer for more drones.[/td][/tr]
+[tr][td]BidBlacklistCooldownTicks[/td][td]3600[/td][td]How long a Construction Computer holds a block back after a drone gave it up (at least 60). Blocks a drone couldn't reach are always held 5 minutes.[/td][/tr]
+[tr][td]MaxTargetLimit, PerScanLimit, MaxTaskAssignmentPerBatch, ScanDelayTicks, ErrorRecoveryIntervalTicks, MaxConsecutiveErrors, MaintenanceIntervalTicks[/td][td][/td][td][i]Not used yet.[/i][/td][/tr]
+[/table]
+
+The [b][SchedulerBounds.StateUpdateIntervalTicks][/b] section (Initializing, Error, Standby, Scanning, Assigning) is [i]not used yet[/i].
+
+[h3][MessageQueue][/h3]
+
+The virtual radio network the Automata blocks talk over. The shipped file calls this section [b][DroneNetwork][/b], but the server reads these settings from [b][MessageQueue][/b].
+
+[table]
+[tr][th]Setting[/th][th]Default[/th][th]What it does[/th][/tr]
+[tr][td]MessageRetentionTicks[/td][td]1800[/td][td]How long a message waits on the network for its readers before it expires (at least 600).[/td][/tr]
+[tr][td]MessageCleanupIntervalTicks[/td][td]600[/td][td]How often expired messages are cleaned up (at least 60).[/td][/tr]
+[tr][td]MessageSerializationMode[/td][td]ProtoBuf[/td][td]Message format. [i]XML[/i] is only for debugging; keep [i]ProtoBuf[/i].[/td][/tr]
+[tr][td]AllowNetworkBroadcasting, DefaultAntennaRange, NetworkUpdateRate, SchedulerAntennaCacheUpdateIntervalTicks, SchedulerMessageReadLimit[/td][td][/td][td][i]Not used yet.[/i] Antenna ranges always come from the actual antennas.[/td][/tr]
+[/table]
+
+[h3][Logging][/h3]
+
+[table]
+[tr][th]Setting[/th][th]Default[/th][th]What it does[/th][/tr]
+[tr][td]LogLevel[/td][td]Info, Verbose, Debug, Error, Warning[/td][td]What goes into the mod's log file: any combination of [i]Verbose[/i], [i]Info[/i], [i]Debug[/i], [i]Warning[/i], [i]Error[/i], or [i]Quiet[/i] for nothing. [i]Debug[/i] logs every auction, bid and drone decision: useful to find out why a drone doesn't take a job, but the file grows fast.[/td][/tr]
+[tr][td]LogPathfinding, LogDroneNetwork, LogDroneOrders[/td][td][/td][td][i]Not used yet.[/i][/td][/tr]
+[/table]
+
+The log is [b]Automata.log[/b], in [i]%AppData%\SpaceEngineers\Storage\<mod id>.sbm_Automata\[/i] (on a dedicated server, the same [i]Storage[/i] folder of the server's instance).
+
+[h3][LogisticsComputer][/h3]
+
+Not in the shipped file; add the section to use it.
+
+[table]
+[tr][th]Setting[/th][th]Default[/th][th]What it does[/th][/tr]
+[tr][td]AllowLogistics[/td][td]true[/td][td]Off: Logistics Computers lose their [b]Provide for logistics[/b], [b]Push[/b] and [b]Request[/b] options, and the other work mode options are locked.[/td][/tr]
+[tr][td]AllowNetworkPush[/td][td]true[/td][td]Off: the [b]Push[/b] option is hidden.[/td][/tr]
+[tr][td]AllowNetworkRequests[/td][td]true[/td][td]Off: the [b]Request[/b] option is hidden.[/td][/tr]
+[tr][td]MinPushFrequencyTicks, MaxPushFrequencyTicks[/td][td][/td][td][i]Not used yet.[/i][/td][/tr]
+[/table]
+
+These settings only change the terminal: computers already set to a mode keep it.
+
+[h3]Sections not used yet[/h3]
+
+[list]
+[*][b][Session][/b]: UpdateInterval (and the unlisted EnableLogistics, EnableWeldTasks, EnableGrindTasks) don't change anything yet.
+[*][b][BlockLimits][/b]: block limits per player and faction are not enforced yet.
+[*][b][Performance][/b] and [b][Safety][/b]: old settings, no longer read.
+[/list]

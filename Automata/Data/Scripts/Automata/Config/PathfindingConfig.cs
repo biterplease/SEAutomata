@@ -110,7 +110,21 @@ namespace Automata.Config
         public double ObstacleClearance { get; internal set; } = 3.0;
         /// <summary>m: on planets, stretches longer than this follow the planet's curve...</summary>
         public double ArcMinDistance { get; internal set; } = 300;
-        /// <summary>m: ...with a point about every this many metres along it.</summary>
+        /// <summary>m: ...as straight chords at least this long (and see ArcSag).</summary>
         public double ArcStep { get; internal set; } = 200;
+        /// <summary>m a chord of a planet arc may sag below its ends (sets the chord length: sqrt(8 r sag)); the chord
+        /// ends are then lifted until the whole chord clears the terrain. Bigger: fewer, longer straight lines.</summary>
+        public double ArcSag { get; internal set; } = 25;
+        /// <summary>m kept between the hull and the hangar / dock walls in a dock's entry corridor (and when undocking
+        /// through one). The rest of the route keeps ObstacleClearance.</summary>
+        public double DockClearance { get; internal set; } = 0.25;
+        /// <summary>m: the corridor is searched again with this clearance when none is found with DockClearance (tight doors);
+        /// flown at half the corridor speed, the line held within half the clearance.</summary>
+        public double DockClearanceMin { get; internal set; } = 0.1;
+        /// <summary>m: how far from the connector the entry corridor is searched (to a point with room to turn).</summary>
+        public double DockCorridorMaxLength { get; internal set; } = 40;
+        /// <summary>m above the terrain long flights in gravity cruise at (routes longer than ArcMinDistance): take-off
+        /// straight up to it, landing straight down from it.</summary>
+        public double CruiseAltitude { get; internal set; } = 40;
     }
 }

@@ -19,6 +19,10 @@ namespace Automata.Construction
 {
     public partial class ConstructionComputer
     {
+        #region UI strings
+        private static readonly MyStringId StrNoAntennaInit = MyStringId.GetOrCompute("Failed to initialize construction computer; no antenna found");
+        #endregion
+
         /// Queue of discovered, but yet unporsed Jobs.
         /// </summary>
         private MyConcurrentQueue<Orchestrator.Job> jobQueue = new MyConcurrentQueue<Orchestrator.Job>();
@@ -38,6 +42,8 @@ namespace Automata.Construction
         private Vector3 weldIgnoreColor;
         private Vector3 grindColor;
         private int _jobIdCounter = 0;
+        /// <summary>Job id counter (kept through a world save by the construction computer block: ids stay unique).</summary>
+        public int JobIdCounter { get { return _jobIdCounter; } set { _jobIdCounter = value; } }
         private State currentState;
         public string errorMessage { get; internal set; } = "";
         private bool _initialized = false;
@@ -180,7 +186,7 @@ namespace Automata.Construction
             else
             {
                 currentState = State.Error;
-                errorMessage = "Failed to initialize construction computer; no antenna found";
+                errorMessage = Loc.T(StrNoAntennaInit);
             }
         }
 

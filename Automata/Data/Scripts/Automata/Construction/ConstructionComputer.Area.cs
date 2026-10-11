@@ -18,8 +18,9 @@ namespace Automata.Construction
     /// Area scanning, ordering and batching. Used by stand-alone drones (observation area) and meant to be reused by
     /// the Orchestrator / ConstructionComputerBlock at a larger scale.
     ///
-    /// Ordering is central-out: blocks nearest the area centre are built first, so the outer shell - which would wall
-    /// the drone out of the inside - comes last, and the result grows symmetrically.
+    /// Ordering: <see cref="BuildPlanner"/> (vertical slice through the centre first, then outwards; 3x3x3-cell units
+    /// on small grids; units that would wall others in held back). The scan keeps the PLAN_POOL x maxJobs blocks
+    /// nearest the area centre for it, then the first maxJobs of its order.
     /// </summary>
     public partial class ConstructionComputer
     {
@@ -29,8 +30,17 @@ namespace Automata.Construction
             public IMyProjector Projector;       // projections only
             public Orchestrator.JobType Type;
             public Vector3D Center;              // world
-            public double SortKey;               // squared distance to the area centre, area frame
+            public double SortKey;               // weld priority rank, then squared distance to the area centre, area frame
+            public WorkCategory Category;
+            public IMyCubeGrid Physical;         // where it is / will be built (projections: the projector's grid)
         }
+
+        private const int PLAN_POOL = 4;           // blocks kept for the planner, per job wanted...
+        private const int PLAN_POOL_MAX = 500;     // ...at most
+        private readonly BuildPlanner _planner = new BuildPlanner();
+        private readonly List<BuildPlanner.Item> _planItems = new List<BuildPlanner.Item>();
+        private readonly List<int> _planOrder = new List<int>();
+        private readonly List<IMyCubeGrid> _planGrids = new List<IMyCubeGrid>();
 
         private readonly List<IMyCubeGrid> _areaGrids = new List<IMyCubeGrid>();
         private readonly List<IMySlimBlock> _areaBlocks = new List<IMySlimBlock>();
@@ -52,13 +62,18 @@ namespace Automata.Construction
 
         /// <summary>
         /// Finds blocks to weld / repair / build (projections) / grind that intersect the area (an oriented box), on
-        /// the grids logically linked to 'rootGrid' (connectors, rotors, pistons, hinges; merged grids are one grid;
-        /// landing gear does not link). Grids in 'exclude' (the drone itself) are skipped. The nearest-to-centre
-        /// 'maxJobs' targets are appended to 'result', central-out. <see cref="PlanJob"/> turns them into trips.
+        /// the grids physically linked to 'rootGrid' (rotors, pistons, hinges, connectors, landing gear: a ship built
+        /// on a locked connector or an anchoring landing gear counts; merged grids are one grid). Grids in 'exclude'
+        /// (the drone itself) and those 'refuseGrid' gives a reason for (ownership, working drones) are skipped. Up to 'maxJobs' targets are
+        /// appended to 'result' in build order (<see cref="BuildPlanner"/>). <see cref="PlanJob"/> turns them into trips.
         /// </summary>
+        private readonly List<IMyCubeGrid> _extraGroup = new List<IMyCubeGrid>();
+
         public int ScanArea(IMyCubeGrid rootGrid, ref MatrixD areaMatrix, ref Vector3D areaHalfExtents,
-                            WorkModes modes, Vector3 grindColorMask, List<IMyCubeGrid> exclude, int maxJobs,
-                            List<ConstructionTarget> result)
+                            WorkModes modes, Color grindColor, Color weldIgnoreColor, List<IMyCubeGrid> exclude, int maxJobs,
+                            List<ConstructionTarget> result, Func<IMyCubeGrid, string> refuseGrid = null,
+                            WorkPriority priority = WorkPriority.RepairProjectedUnbuilt, List<IMyCubeGrid> extraRoots = null,
+                            bool shares = false)
         {
             if (rootGrid == null || maxJobs <= 0) return 0;
             bool weldBuilt = (modes & (WorkModes.WeldUnfinishedBlocks | WorkModes.RepairDamagedBlocks)) != 0;
@@ -79,13 +94,43 @@ namespace Automata.Construction
             Vector3I cell, min, max;
 
             _candidates.Clear();
+            for (int k = 0; k < _poolCount.Length; k++) _poolCount[k] = 0;
             _areaGrids.Clear();
-            rootGrid.GetGridGroup(GridLinkTypeEnum.Logical).GetGrids(_areaGrids);
+            rootGrid.GetGridGroup(GridLinkTypeEnum.Physical).GetGrids(_areaGrids);
+            // Other structures (a drone's GPS observation area away from its home): their physical groups too
+            if (extraRoots != null)
+                for (int r = 0; r < extraRoots.Count; r++)
+                {
+                    if (extraRoots[r] == null || _areaGrids.Contains(extraRoots[r])) continue;
+                    _extraGroup.Clear();
+                    extraRoots[r].GetGridGroup(GridLinkTypeEnum.Physical).GetGrids(_extraGroup);
+                    for (int k = 0; k < _extraGroup.Count; k++) if (!_areaGrids.Contains(_extraGroup[k])) _areaGrids.Add(_extraGroup[k]);
+                    _extraGroup.Clear();
+                }
+            int pool = Math.Min(maxJobs * PLAN_POOL, Math.Max(maxJobs, PLAN_POOL_MAX));
+            // Shares (construction computer): each kind (repair / projected / unbuilt / grind) keeps its own part of the
+            // pool, 3 : 2 : 1 by weld priority rank (grind as the first), so a big backlog of one kind doesn't crowd out
+            // the others; the computer publishes jobs of every kind at once. Without (stand-alone drone): strict order.
+            _shares = shares;
+            if (shares) SharesOf(priority, pool, _poolCap);
+            double scanStart = Util.PerfStats.Start();
+            var gridText = new System.Text.StringBuilder();
+            int gridsScanned = 0, refused = 0, projectionsSeen = 0, projectionsIdle = 0, unbuildable = 0, obstructed = 0, walledIn = 0;
 
             for (int g = 0; g < _areaGrids.Count; g++)
             {
                 var grid = _areaGrids[g];
                 if (grid.Physics == null || grid.MarkedForClose || (exclude != null && exclude.Contains(grid))) continue;
+                string refusal = refuseGrid != null ? refuseGrid(grid) : null;
+                if (refusal != null)
+                {
+                    refused++;
+                    gridText.Append(" [").Append(grid.DisplayName).Append(": skipped, ").Append(refusal).Append(']');
+                    continue;
+                }
+                gridsScanned++;
+                gridText.Append(" [").Append(grid.DisplayName).Append(grid.GridSizeEnum == VRage.Game.MyCubeSize.Small ? " small" : " large")
+                        .Append(grid.IsStatic ? " static" : "").Append(']');
 
                 // Built blocks: only grids that reach the area
                 if ((weldBuilt || grind) && grid.WorldAABB.Intersects(new BoundingSphereD(areaCenter, areaRadius)))
@@ -96,16 +141,18 @@ namespace Automata.Construction
                     {
                         var b = _areaBlocks[i];
                         Orchestrator.JobType type;
-                        if (grind && ColorUtil.ColorMatch(b, grindColorMask)) type = Orchestrator.JobType.Grind;
-                        else if (weldBuilt && NeedsWeld(b, modes)) type = Orchestrator.JobType.Weld;
+                        // Exact colours (ColorUtil.SameColor): the grind colour is ground; the weld-ignore colour is never welded
+                        if (grind && ColorUtil.SameColor(b, grindColor)) type = Orchestrator.JobType.Grind;
+                        else if (weldBuilt && NeedsWeld(b, modes) && !ColorUtil.SameColor(b, weldIgnoreColor)) type = Orchestrator.JobType.Weld;
                         else continue;
+                        var category = type == Orchestrator.JobType.Grind ? WorkCategory.Grind : CategoryOf(b, modes);
                         Vector3D center;
                         if (!IntersectsArea(b, ref areaObb, areaCenter, areaRadius, out center)) continue;
-                        double key = SortKeyOf(center, ref areaCenter, ref areaInv);
-                        if (!WouldKeep(key, maxJobs)) continue;
+                        double key = SortKeyOf(center, ref areaCenter, ref areaInv, WorkPriorities.Rank(priority, category));
+                        if (!WouldKeep(key, category, pool)) continue;
                         // Walled in (inside a solid chunk): unreachable, and must not take a slot
-                        if (!HasFreeFace(grid, b.Min, b.Max, ref gravityUp)) continue;
-                        AddCandidate(b, null, type, center, key, maxJobs);
+                        if (!HasFreeFace(grid, b.Min, b.Max, ref gravityUp)) { walledIn++; continue; }
+                        AddCandidate(b, null, grid, type, center, key, pool, category);
                     }
                     _areaBlocks.Clear();
                 }
@@ -118,20 +165,33 @@ namespace Automata.Construction
                         if (!projector.IsWorking || !projector.IsProjecting) continue;
                         var projected = projector.ProjectedGrid;
                         if (projected == null || !projected.WorldAABB.Intersects(new BoundingSphereD(areaCenter, areaRadius))) continue;
+                        // Only blocks buildable right now are looked at (no planning ahead). The projector counts them itself
+                        // (CanBuild without the physics test, rechecked by the game at most every 2 s after a block is added /
+                        // removed on its grid, at once on an offset change): none, the projection is ignored; else the scan
+                        // stops once that many were found in the area. A count up to 2 s old: one scan finds fewer, the next
+                        // catches up.
+                        int buildable = projector.BuildableBlocksCount;
+                        if (buildable <= 0) { projectionsIdle++; continue; }
+                        projectionsSeen++;
                         _projectedBlocks.Clear();
                         CollectBlocks(projected, ref areaMatrix, ref half, _projectedBlocks);
-                        for (int i = 0; i < _projectedBlocks.Count; i++)
+                        int found = 0;
+                        for (int i = 0; i < _projectedBlocks.Count && found < buildable; i++)
                         {
                             var b = _projectedBlocks[i];
+                            if (ColorUtil.SameColor(b, weldIgnoreColor)) continue;   // painted the weld-ignore colour in the blueprint
                             Vector3D center;
                             if (!IntersectsArea(b, ref areaObb, areaCenter, areaRadius, out center)) continue;
-                            double key = SortKeyOf(center, ref areaCenter, ref areaInv);
-                            if (!WouldKeep(key, maxJobs)) continue;   // before CanBuild, which is the expensive part
+                            double key = SortKeyOf(center, ref areaCenter, ref areaInv, WorkPriorities.Rank(priority, WorkCategory.Projected));
+                            if (!WouldKeep(key, WorkCategory.Projected, pool)) continue;
+                            // Buildable right now (cell free, attached to built blocks): the cheap test first, it drops most
+                            if (projector.CanBuild(b, false) != BuildCheckResult.OK) { unbuildable++; continue; }
+                            found++;
                             PhysicalExtent(b, grid, out cell, out min, out max);
-                            if (!HasFreeFace(grid, min, max, ref gravityUp)) continue;
-                            // Buildable right now: attached to built blocks and not obstructed
-                            if (projector.CanBuild(b, true) != BuildCheckResult.OK) continue;
-                            AddCandidate(b, projector, Orchestrator.JobType.Weld, center, key, maxJobs);
+                            if (!HasFreeFace(grid, min, max, ref gravityUp)) { walledIn++; continue; }
+                            // Not obstructed (physics test): only the few left
+                            if (projector.CanBuild(b, true) != BuildCheckResult.OK) { obstructed++; continue; }
+                            AddCandidate(b, projector, grid, Orchestrator.JobType.Weld, center, key, pool, WorkCategory.Projected);
                         }
                         _projectedBlocks.Clear();
                     }
@@ -139,17 +199,76 @@ namespace Automata.Construction
             }
             _areaGrids.Clear();
 
-            int count = 0;   // candidates are already sorted and capped
+            // Build order: grid by grid (the one nearest the area centre first: candidates are sorted by distance)
+            _planOrder.Clear();
+            _planGrids.Clear();
+            _planner.Reset();
+            bool inGravity = gravityUp.LengthSquared() > 0.5;
             for (int i = 0; i < _candidates.Count; i++)
+                if (!_planGrids.Contains(_candidates[i].Physical)) _planGrids.Add(_candidates[i].Physical);
+            for (int g = 0; g < _planGrids.Count; g++)
             {
-                Candidate c = _candidates[i];
-                ConstructionTarget target;
-                if (!CreateTarget(ref c, ref areaCenter, ref gravityUp, out target)) continue;   // no free face: unreachable
-                result.Add(target);
-                count++;
+                var physical = _planGrids[g];
+                _planItems.Clear();
+                Vector3D top = TopOf(physical, gravityUp, areaMatrix.Up);
+                for (int i = 0; i < _candidates.Count; i++)
+                {
+                    var c = _candidates[i];
+                    if (c.Physical != physical) continue;
+                    PhysicalExtent(c.Block, physical, out cell, out min, out max);
+                    _planItems.Add(new BuildPlanner.Item { Tag = i, Min = min, Max = max, Projected = c.Projector != null,
+                                                           Grind = c.Type == Orchestrator.JobType.Grind });
+                }
+                _planner.Plan(physical, _planItems, top, inGravity, _planOrder);
+                for (int r = 0; r < _planner.Report.Count; r++) Log.Debug("Scan {0}: plan {1}", entityId, _planner.Report[r]);
             }
+            _planItems.Clear();
+            _planGrids.Clear();
+
+            // Weld priority: the categories in their order, each in build order (a stable pass per rank)
+            // (shares: first each kind up to its part of maxJobs, then what is left in priority order)
+            int count = 0, noFace = 0;
+            if (shares) SharesOf(priority, maxJobs, _outCap);
+            for (int i = 0; i < _outCount.Length; i++) _outCount[i] = 0;
+            _outDone.Clear();
+            for (int round = shares ? 0 : 1; round < 2 && count < maxJobs; round++)
+                for (int pass = 0, k = 0; pass < 3 && count < maxJobs; k++)
+                {
+                    if (k >= _planOrder.Count) { pass++; k = -1; continue; }
+                    Candidate c = _candidates[_planOrder[k]];
+                    if (WorkPriorities.Rank(priority, c.Category) != pass || _outDone.Contains(_planOrder[k])) continue;
+                    int kind = KindOf(c.Category);
+                    if (round == 0 && _outCount[kind] >= _outCap[kind]) continue;
+                    _outDone.Add(_planOrder[k]);
+                    ConstructionTarget target;
+                    Vector3D topUp = TopOf(c.Physical, gravityUp, areaMatrix.Up);
+                    if (!CreateTarget(ref c, ref areaCenter, ref gravityUp, ref topUp, out target)) { noFace++; continue; }   // no free face: unreachable
+                    result.Add(target);
+                    _outCount[kind]++;
+                    count++;
+                }
+            _outDone.Clear();
+            Log.Debug("Scan {0}: {1} grids{2}; {3} skipped; {4} projections in the area ({13} with nothing buildable, ignored); {5} candidates (pool {6}), "
+                      + "skipped: {7} walled in, {8} projected not buildable yet, {14} projected obstructed, {9} without a face; {10} targets (max {11}); {12:F2} ms",
+                      entityId, gridsScanned, gridText, refused, projectionsSeen, _candidates.Count, pool, walledIn, unbuildable, noFace,
+                      count, maxJobs, Util.PerfStats.Since(scanStart), projectionsIdle, obstructed);
+            _planOrder.Clear();
             _candidates.Clear();
             return count;
+        }
+
+        // A built block to weld: damaged (repair) or not welded up yet (unbuilt)
+        private static WorkCategory CategoryOf(IMySlimBlock b, WorkModes modes)
+        {
+            return (modes & WorkModes.RepairDamagedBlocks) != 0 && (b.CurrentDamage > 0.0f || b.HasDeformation) ? WorkCategory.Repair : WorkCategory.Unbuilt;
+        }
+
+        /// <summary>A built block a scan would make a target of: welded / repaired by these modes, or grind-coloured.</summary>
+        public static bool NeedsWork(IMySlimBlock b, WorkModes modes, Color grindColor, Color weldIgnoreColor)
+        {
+            if ((modes & WorkModes.Grind) != 0 && ColorUtil.SameColor(b, grindColor)) return true;
+            return (modes & (WorkModes.WeldUnfinishedBlocks | WorkModes.RepairDamagedBlocks)) != 0 && NeedsWeld(b, modes)
+                   && !ColorUtil.SameColor(b, weldIgnoreColor);
         }
 
         private static bool NeedsWeld(IMySlimBlock b, WorkModes modes)
@@ -175,25 +294,72 @@ namespace Automata.Construction
             return area.Intersects(ref blockObb);
         }
 
-        private static double SortKeyOf(Vector3D center, ref Vector3D areaCenter, ref MatrixD areaInv)
+        // Weld priority rank first (the candidate pool keeps the higher categories), then the distance to the area centre
+        private const double RANK_STRIDE = 1e12;
+        private static double SortKeyOf(Vector3D center, ref Vector3D areaCenter, ref MatrixD areaInv, int rank)
         {
-            return Vector3D.TransformNormal(center - areaCenter, areaInv).LengthSquared();
+            return rank * RANK_STRIDE + Vector3D.TransformNormal(center - areaCenter, areaInv).LengthSquared();
         }
 
         // Candidates are kept sorted and capped at maxJobs (bounded insertion; System.Comparison is not whitelisted)
-        private bool WouldKeep(double key, int maxJobs)
+        private bool WouldKeep(double key, WorkCategory category, int maxJobs)
         {
-            return _candidates.Count < maxJobs || key < _candidates[_candidates.Count - 1].SortKey;
+            if (!_shares) return _candidates.Count < maxJobs || key < _candidates[_candidates.Count - 1].SortKey;
+            int kind = KindOf(category);
+            if (_poolCount[kind] < _poolCap[kind]) return true;
+            int last = LastOfKind(kind);
+            return last >= 0 && key < _candidates[last].SortKey;
         }
 
-        private void AddCandidate(IMySlimBlock b, IMyProjector projector, Orchestrator.JobType type, Vector3D center,
-                                  double key, int maxJobs)
+        #region Shares (construction computer)
+        private bool _shares;
+        private readonly int[] _poolCap = new int[4], _poolCount = new int[4], _outCap = new int[4], _outCount = new int[4];
+        private readonly HashSet<int> _outDone = new HashSet<int>();
+
+        // 0..2 the weld kinds (WorkCategory Repair / Projected / Unbuilt), 3 grind
+        private static int KindOf(WorkCategory c)
         {
-            var c = new Candidate { Block = b, Projector = projector, Type = type, Center = center, SortKey = key };
-            if (_candidates.Count >= maxJobs) _candidates.RemoveAt(_candidates.Count - 1);
+            return (int)c < 3 ? (int)c : 3;
+        }
+
+        // 'total' split 3 : 2 : 1 by weld priority rank, grind 3 (at least 1 each)
+        private static void SharesOf(WorkPriority priority, int total, int[] caps)
+        {
+            int sum = 0;
+            for (int k = 0; k < 4; k++) sum += k == 3 ? 3 : 3 - WorkPriorities.Rank(priority, (WorkCategory)k);
+            for (int k = 0; k < 4; k++)
+            {
+                int w = k == 3 ? 3 : 3 - WorkPriorities.Rank(priority, (WorkCategory)k);
+                caps[k] = Math.Max(1, (total * w + sum - 1) / sum);
+            }
+        }
+
+        private int LastOfKind(int kind)
+        {
+            for (int i = _candidates.Count - 1; i >= 0; i--) if (KindOf(_candidates[i].Category) == kind) return i;
+            return -1;
+        }
+        #endregion
+
+        private void AddCandidate(IMySlimBlock b, IMyProjector projector, IMyCubeGrid physical, Orchestrator.JobType type, Vector3D center,
+                                  double key, int maxJobs, WorkCategory category)
+        {
+            var c = new Candidate { Block = b, Projector = projector, Physical = physical, Type = type, Center = center, SortKey = key,
+                                    Category = category };
+            int kind = KindOf(category);
+            if (_shares)
+            {
+                if (_poolCount[kind] >= _poolCap[kind])
+                {
+                    int last = LastOfKind(kind);
+                    if (last >= 0) { _candidates.RemoveAt(last); _poolCount[kind]--; }
+                }
+            }
+            else if (_candidates.Count >= maxJobs) { _poolCount[KindOf(_candidates[_candidates.Count - 1].Category)]--; _candidates.RemoveAt(_candidates.Count - 1); }
             int i = _candidates.Count;
             while (i > 0 && _candidates[i - 1].SortKey > key) i--;
             _candidates.Insert(i, c);
+            _poolCount[kind]++;
         }
 
         /// <summary>
@@ -234,7 +400,7 @@ namespace Automata.Construction
             _cellBlocks.Clear();
         }
 
-        private bool CreateTarget(ref Candidate c, ref Vector3D areaCenter, ref Vector3D gravityUp, out ConstructionTarget target)
+        private bool CreateTarget(ref Candidate c, ref Vector3D areaCenter, ref Vector3D gravityUp, ref Vector3D topUp, out ConstructionTarget target)
         {
             target = default(ConstructionTarget);
             var b = c.Block;
@@ -244,7 +410,7 @@ namespace Automata.Construction
             PhysicalExtent(b, physical, out cell, out min, out max);
 
             Vector3I faceCell, normal;
-            if (!ChooseFace(physical, min, max, areaCenter, gravityUp, 1, null, out faceCell, out normal)) return false;
+            if (!ChooseFace(physical, min, max, areaCenter, gravityUp, 1, null, out faceCell, out normal, false, null, topUp)) return false;
 
             _missingCache.Clear();
             if (c.Type == Orchestrator.JobType.Weld)
@@ -254,8 +420,11 @@ namespace Automata.Construction
             }
             else AddMountedComponentsForGrind(b, _missingCache);
 
+            float top, side, bottom;
+            FaceAccess(physical, min, max, normal, ref gravityUp, out top, out side, out bottom);
             target = new ConstructionTarget
             {
+                AccessTop = top, AccessSide = side, AccessBottom = bottom,
                 Components = new DiscreteInventory(_missingCache),
                 Center = c.Center,
                 GridEntityId = physical.EntityId,
@@ -264,6 +433,8 @@ namespace Automata.Construction
                 FaceNormal = normal,
                 Type = c.Type,
                 IsProjected = c.Projector != null,
+                Category = c.Category,
+                BlockName = b.BlockDefinition is MyCubeBlockDefinition ? ((MyCubeBlockDefinition)b.BlockDefinition).DisplayNameText : b.BlockDefinition.ToString(),
             };
             return true;
         }
@@ -312,6 +483,14 @@ namespace Automata.Construction
         /// </summary>
         public static bool TryGetBlockExtent(IMyCubeGrid grid, Vector3I cell, out Vector3I min, out Vector3I max)
         {
+            IMyProjector projector;
+            return TryGetBlockExtent(grid, cell, out min, out max, out projector);
+        }
+
+        /// <summary>Same; 'projector': the one projecting it (null: built / started).</summary>
+        public static bool TryGetBlockExtent(IMyCubeGrid grid, Vector3I cell, out Vector3I min, out Vector3I max, out IMyProjector projector)
+        {
+            projector = null;
             Vector3I position;
             var slim = grid.GetCubeBlock(cell);
             if (slim != null)
@@ -320,18 +499,127 @@ namespace Automata.Construction
                 return true;
             }
             Vector3D world = grid.GridIntegerToWorld(cell);
-            foreach (var projector in grid.GetFatBlocks<IMyProjector>())
+            foreach (var p in grid.GetFatBlocks<IMyProjector>())
             {
-                var projected = projector.IsProjecting ? projector.ProjectedGrid : null;
+                var projected = p.IsProjecting ? p.ProjectedGrid : null;
                 if (projected == null) continue;
                 slim = projected.GetCubeBlock(projected.WorldToGridInteger(world));
                 if (slim == null) continue;
                 PhysicalExtent(slim, grid, out position, out min, out max);
+                projector = p;
                 return true;
             }
             min = max = cell;
             return false;
         }
+
+        private static readonly List<IMyCubeGrid> _projectedGrids = new List<IMyCubeGrid>();
+
+        /// <summary>
+        /// Cells in the shell one cell around min..max that are projected (by a projector on 'grid') and not built yet:
+        /// what a tool sphere working the block could build along with it.
+        /// </summary>
+        public static void ProjectedAround(IMyCubeGrid grid, Vector3I min, Vector3I max, List<Vector3I> into)
+        {
+            into.Clear();
+            _projectedGrids.Clear();
+            foreach (var p in grid.GetFatBlocks<IMyProjector>())
+                if (p.IsProjecting && p.ProjectedGrid != null) _projectedGrids.Add(p.ProjectedGrid);
+            if (_projectedGrids.Count == 0) return;
+            Vector3I c;
+            for (c.X = min.X - 1; c.X <= max.X + 1; c.X++)
+                for (c.Y = min.Y - 1; c.Y <= max.Y + 1; c.Y++)
+                    for (c.Z = min.Z - 1; c.Z <= max.Z + 1; c.Z++)
+                    {
+                        if (c.X >= min.X && c.X <= max.X && c.Y >= min.Y && c.Y <= max.Y && c.Z >= min.Z && c.Z <= max.Z) continue;
+                        if (grid.CubeExists(c)) continue;
+                        Vector3D world = grid.GridIntegerToWorld(c);
+                        for (int i = 0; i < _projectedGrids.Count; i++)
+                        {
+                            var pg = _projectedGrids[i];
+                            if (pg.GetCubeBlock(pg.WorldToGridInteger(world)) == null) continue;
+                            into.Add(c);
+                            break;
+                        }
+                    }
+            _projectedGrids.Clear();
+        }
+
+        /// <summary>
+        /// "Up" for building on 'grid': gravity; in space the up of a projector on the grid that is projecting (the
+        /// ship being built), else 'areaUp' (the observation area's), else the grid's own up. One rule for the scan,
+        /// the plan and the drone choosing its face, so they agree for the whole build.
+        /// </summary>
+        public static Vector3D TopOf(IMyCubeGrid grid, Vector3D gravityUp, Vector3D areaUp)
+        {
+            if (gravityUp.LengthSquared() > 0.5) return gravityUp;
+            if (grid != null)
+                foreach (var p in grid.GetFatBlocks<IMyProjector>())
+                    if (p.IsProjecting) return p.WorldMatrix.Up;
+            if (areaUp.LengthSquared() > 0.5) return areaUp;
+            return grid != null ? grid.WorldMatrix.Up : Vector3D.Up;
+        }
+
+        #region Tool face weights (TODO/14: bids prefer drones whose tool faces the easy side)
+        private const float BOTTOM_ACCESS_FACTOR = 0.25f;   // from below only when nothing else does (ChooseFace)
+
+        /// <summary>
+        /// Ease of access of a block by side, in gravity: free outer face cells above / beside / below it (see
+        /// <see cref="ConstructionTarget.AccessTop"/>), the chosen face's kind counting double. All 0 in space.
+        /// </summary>
+        public static void FaceAccess(IMyCubeGrid grid, Vector3I min, Vector3I max, Vector3I chosenNormal, ref Vector3D gravityUp,
+                                      out float top, out float side, out float bottom)
+        {
+            top = side = bottom = 0;
+            if (gravityUp.LengthSquared() < 0.5) return;
+            MatrixD m = grid.WorldMatrix;
+            for (int i = 0; i < 6; i++)
+            {
+                Vector3I d = Base6Directions.GetIntVector((Base6Directions.Direction)i);
+                Vector3I lo = min, hi = max;
+                if (d.X > 0) lo.X = max.X; else if (d.X < 0) hi.X = min.X;
+                if (d.Y > 0) lo.Y = max.Y; else if (d.Y < 0) hi.Y = min.Y;
+                if (d.Z > 0) lo.Z = max.Z; else if (d.Z < 0) hi.Z = min.Z;
+                int free = 0;
+                Vector3I c;
+                for (c.X = lo.X; c.X <= hi.X; c.X++)
+                    for (c.Y = lo.Y; c.Y <= hi.Y; c.Y++)
+                        for (c.Z = lo.Z; c.Z <= hi.Z; c.Z++)
+                            if (!grid.CubeExists(c + d)) free++;
+                AddAccess(Vector3D.Dot(Vector3D.TransformNormal((Vector3D)d, m), gravityUp), free, ref top, ref side, ref bottom);
+            }
+            float total = top + side + bottom;
+            AddAccess(Vector3D.Dot(Vector3D.TransformNormal((Vector3D)chosenNormal, m), gravityUp), Math.Max(1f, total), ref top, ref side, ref bottom);
+            total = top + side + bottom;
+            if (total <= 0) return;
+            top /= total; side /= total; bottom /= total;
+        }
+
+        private static void AddAccess(double up, float n, ref float top, ref float side, ref float bottom)
+        {
+            if (up > 0.7) top += n;
+            else if (up < -0.7) bottom += n * BOTTOM_ACCESS_FACTOR;
+            else side += n;
+        }
+
+        /// <summary>
+        /// A job's tool face weights, index = Base6Directions.Direction of the tool in the drone's controller frame,
+        /// 0..1 (the easiest kind 1). Null in space (or no access data): any tool orientation does.
+        /// </summary>
+        public static List<float> ToolFaceWeights(List<ConstructionTarget> targets)
+        {
+            float top = 0, side = 0, bottom = 0;
+            for (int i = 0; i < targets.Count; i++) { top += targets[i].AccessTop; side += targets[i].AccessSide; bottom += targets[i].AccessBottom; }
+            float max = Math.Max(top, Math.Max(side, bottom));
+            if (max <= 0) return null;
+            var w = new List<float>(6);
+            for (int i = 0; i < 6; i++) w.Add(0);
+            for (int i = 0; i < 4; i++) w[i] = side / max;                // Forward, Backward, Left, Right: from the sides
+            w[(int)Base6Directions.Direction.Up] = bottom / max;           // tool up: from below
+            w[(int)Base6Directions.Direction.Down] = top / max;            // tool down: from above
+            return w;
+        }
+        #endregion
 
         /// <summary>Cheap pre-check for <see cref="ChooseFace"/>: does the block have any face it could be reached from?</summary>
         private static bool HasFreeFace(IMyCubeGrid grid, Vector3I min, Vector3I max, ref Vector3D gravityUp)
@@ -360,8 +648,11 @@ namespace Automata.Construction
         /// vertex, which would reach into the neighbouring blocks), approached along that face's normal.
         /// Only faces on the outside of the block (min..max, cells of 'grid') whose neighbouring cell is free count
         /// (you can't weld through a wall). Among those:
-        /// - never from below in gravity (floors), slightly preferring above,
-        /// - preferably outwards from the area centre (build inside first, keep the drone outside),
+        /// - the top face first (TOP_FACE_WEIGHT: 'up' = gravity, else 'topUp', else the grid's up): blocks laid side
+        ///   by side (a floor, a layer of a build) stay reachable from above whatever was welded around them; the
+        ///   drone may come in at an angle (the work sphere sits on the face, see DispatchToolTo),
+        /// - never from below in gravity (floors),
+        /// - then outwards from the area centre (build inside first, keep the drone outside),
         /// - the line out along the normal ('clearCells' deep) and the cells around it free: built blocks there
         ///   count against the face (the drone would sit in them, or scrape them / the floor),
         /// - optional 'extraCost' per world normal (the drone attitude that side needs, which side it is on...),
@@ -371,14 +662,19 @@ namespace Automata.Construction
         /// <param name="normal">Unit axis of 'grid', pointing out of the face towards the tool.</param>
         /// <param name="lineMustBeClear">Faces with a built block anywhere on the line out ('clearCells') don't count.</param>
         /// <param name="reject">Faces (cell, normal) the caller rules out.</param>
+        private const double TOP_FACE_WEIGHT = 2.0;
+        private const double BOTTOM_FACE_PENALTY = 1.5;   // the underside only when no other face does
+
         public static bool ChooseFace(IMyCubeGrid grid, Vector3I min, Vector3I max, Vector3D areaCenter, Vector3D gravityUp,
                                       int clearCells, Func<Vector3D, double> extraCost, out Vector3I faceCell, out Vector3I normal,
-                                      bool lineMustBeClear = false, Func<Vector3I, Vector3I, bool> reject = null)
+                                      bool lineMustBeClear = false, Func<Vector3I, Vector3I, bool> reject = null,
+                                      Vector3D topUp = default(Vector3D))
         {
             faceCell = min;
             normal = Vector3I.Zero;
             MatrixD m = grid.WorldMatrix;
             bool inGravity = gravityUp.LengthSquared() > 0.5;
+            Vector3D top = inGravity ? gravityUp : topUp.LengthSquared() > 0.5 ? Vector3D.Normalize(topUp) : m.Up;
             Vector3D blockCenter = Vector3D.Transform((Vector3D)(min + max) * (grid.GridSize * 0.5), m);
             Vector3D outward = blockCenter - areaCenter;
             if (outward.LengthSquared() < 1e-4) outward = inGravity ? gravityUp : m.Up;
@@ -403,13 +699,12 @@ namespace Automata.Construction
             {
                 Vector3I d = Base6Directions.GetIntVector((Base6Directions.Direction)i);
                 Vector3D w = Vector3D.TransformNormal((Vector3D)d, m);
-                double sideScore = Vector3D.Dot(w, outward);                    // outwards first
-                if (inGravity)
-                {
-                    double up = Vector3D.Dot(w, gravityUp);
-                    if (up < -0.7) continue;                                    // from below: through the floor
-                    sideScore += up * 0.25;                                     // slight preference for above
-                }
+                double up = Vector3D.Dot(w, top);
+                // The top first, then outwards; the underside last (a block whose only free face is its bottom - an
+                // overhang - is reached from below; the way in is checked against the floor / terrain by the drone)
+                double sideScore = TOP_FACE_WEIGHT * Math.Max(0, up)
+                                 + 0.5 * Vector3D.Dot(w, outward)
+                                 - (inGravity && up < -0.7 ? BOTTOM_FACE_PENALTY : 0);
                 if (extraCost != null) sideScore -= extraCost(w);
                 if (sideScore + 0.1 <= bestScore) continue;                     // no face on this side can win
 
@@ -513,7 +808,7 @@ namespace Automata.Construction
         {
             normal = Vector3I.Zero;
             MatrixD m = grid.WorldMatrix;
-            double best = 0.9;
+            double best = 0.6;   // approaches tilted up to ~50° from the normal (DispatchToolTo) still find their face
             for (int i = 0; i < 6; i++)
             {
                 Vector3I d = Base6Directions.GetIntVector((Base6Directions.Direction)i);
@@ -582,7 +877,10 @@ namespace Automata.Construction
                         load.AddItem(items[k].Key, items[k].Value);
                     }
                 }
-                if (job == null) job = NewJob(target.Type);
+                // (weld kind for logs: the one its blocks share, else unknown)
+                byte weld = target.Type == Orchestrator.JobType.Weld ? Orchestrator.JobTypeExtensions.WeldCode(target.Category) : Orchestrator.JobTypeExtensions.WELD_ANY;
+                if (job == null) { job = NewJob(target.Type); job.WeldCategory = weld; }
+                else if (job.WeldCategory != weld) job.WeldCategory = Orchestrator.JobTypeExtensions.WELD_ANY;
                 AddWorkPair(job, ref target, beacon, ref am, naturalGravity, false);
             }
             if (job == null) job = PlanPartialJob(ordered, remaining, maxMass, maxVolume, beacon, ref am, naturalGravity, load);
@@ -592,6 +890,28 @@ namespace Automata.Construction
             job.Tasks.Add(Orchestrator.Task.Unload());
             job.CalculateTotalInventory();
             return job;
+        }
+
+        /// <summary>
+        /// A job to announce (construction computer block): the work tasks (NavigateToolTo, Weld / Grind, BackOut) of
+        /// 'targets' (one job type: the first target's; others are skipped), world positions; 'items' gets what they
+        /// need (weld) / return (grind). Null when none of them exists any more.
+        /// </summary>
+        public Orchestrator.Job JobFor(List<ConstructionTarget> targets, float naturalGravity, DiscreteInventory items)
+        {
+            if (targets == null || targets.Count == 0) return null;
+            var job = NewJob(targets[0].Type);
+            if (job.JobType == Orchestrator.JobType.Weld) job.WeldCategory = Orchestrator.JobTypeExtensions.WeldCode(targets[0].Category);
+            MatrixD am = MatrixD.Identity;
+            for (int i = 0; i < targets.Count; i++)
+            {
+                var t = targets[i];
+                if (t.Type != job.JobType || !MyAPIGateway.Entities.EntityExists(t.GridEntityId)) continue;
+                int before = job.BlockCount;
+                AddWorkPair(job, ref t, null, ref am, naturalGravity, false);
+                if (job.BlockCount > before && t.Components != null) items.AddItems(t.Components);
+            }
+            return job.BlockCount > 0 ? job : null;
         }
 
         private Orchestrator.Job NewJob(Orchestrator.JobType type)
@@ -720,5 +1040,13 @@ namespace Automata.Construction
         public Vector3I FaceNormal;
         public Orchestrator.JobType Type;
         public bool IsProjected;
+        /// <summary>Repair / projected / unbuilt (weld priority), or grind.</summary>
+        public WorkCategory Category;
+        /// <summary>The block's display name (logs).</summary>
+        public string BlockName;
+        /// <summary>Gravity only (0 in space): how easily the block is reached from above (tool facing down),
+        /// from the sides (tool facing forward / back / left / right: a level drone turns about the vertical) and from
+        /// below (tool facing up). Shares of 1: free outer faces of each kind, the chosen face counting double.</summary>
+        public float AccessTop, AccessSide, AccessBottom;
     }
 }

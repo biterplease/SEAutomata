@@ -69,6 +69,8 @@ namespace Automata.VirtualNetwork
         Auction = 1024,
         Bid = 2048,
         AuctionWinnerAnnouncement = 4096,
+        JobAnnouncementFailed = 8192,
+        JobStatusReport = 16384,
     }
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public enum Channel : byte
@@ -76,25 +78,9 @@ namespace Automata.VirtualNetwork
         [ProtoEnum]
         NONE,
         [ProtoEnum]
-        DRONE_REGISTRATION,
-        [ProtoEnum]
-        DRONE_REPORTS,
-        [ProtoEnum]
-        DRONE_PERFORMANCE,
-        [ProtoEnum]
-        DRONE_TASK_ANNOUNCEMENT,
-        [ProtoEnum]
-        DRONE_TASK_ASSIGNMENT,
-        [ProtoEnum]
-        LOGISTIC_REGISTRATION,
-        [ProtoEnum]
-        LOGISTIC_UPDATE,
-        [ProtoEnum]
         LOGISTIC_REQUEST,
         [ProtoEnum]
         LOGISTIC_PUSH,
-        [ProtoEnum]
-        SCHEDULER_FORWARD,
         [ProtoEnum]
         MAILMAN_FORWARD,
         [ProtoEnum]
@@ -117,38 +103,20 @@ namespace Automata.VirtualNetwork
         TASKS_ABORTED,
         [ProtoEnum]
         TASKS_COMPLETED,
-    }
-    /// <summary>
-    /// Drone messages sent back to the scheduler.
-    /// </summary>
-    [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
-    public class DroneReport : IMessagePayload
-    {
-        [ProtoMember(1)]
-        public string ErrorMessage;
-        [ProtoMember(2)]
-        public ushort? TaskId;
-        [ProtoMember(3)]
-        public float? BatteryChargePercent;
-        [ProtoMember(4)]
-        public float? BatteryRechargeThreshold;
-        [ProtoMember(5)]
-        public float? BatteryOperationalThreshold;
-        [ProtoMember(6)]
-        public float? H2Level;
-        [ProtoMember(7)]
-        public float? H2RefuelThreshold;
-        [ProtoMember(8)]
-        public float? H2OperationalThreshold;
-        [ProtoMember(10)]
-        public Drone.UpdateFlags Flags;
-        [ProtoMember(11)]
-        public Drone.State? DroneState;
-        [ProtoMember(12)]
-        public Drone.Capabilities? Capabilities;
-        /// <summary>EntityId of the drone that produced this report.</summary>
-        [ProtoMember(13)]
-        public long DroneEntityId;
+        /// <summary>Orchestrator -> announcer: a job's auction got no bid at all; the announcer holds the job.</summary>
+        [ProtoEnum]
+        JOB_ANNOUNCEMENT_FAILED,
+        /// <summary>Mining surveyor -> orchestrators: MineOre jobs.</summary>
+        [ProtoEnum]
+        MINING_JOB_ANNOUNCEMENT,
+        /// <summary>Drone -> the job's announcer (construction computer, mining surveyor): still working on it
+        /// (JobStatusReport, Outcome Working), every minute. Keeps the assigned job from expiring.</summary>
+        [ProtoEnum]
+        JOB_KEEPALIVE,
+        /// <summary>Announcer -> orchestrators: a job it no longer wants (order removed); its queue entry / running auction
+        /// is dropped (JobStatusReport: AnnouncerEntityId, JobId, Reason).</summary>
+        [ProtoEnum]
+        JOB_WITHDRAWN,
     }
 
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
@@ -220,6 +188,17 @@ namespace Automata.VirtualNetwork
         /// <summary>The job's ordered tasks (world positions: announced jobs have no anchor).</summary>
         [ProtoMember(13)] public List<Orchestrator.Task> Tasks;
         [ProtoMember(14)] public ushort BlockCount;
+        /// <summary>Logistics jobs: the logistics computer that announced it (requesting / pushing).</summary>
+        [ProtoMember(15)] public long RequesterEntityId;
+        /// <summary>Logistics jobs: where a drone docks at the announcer (a free connector of its network).</summary>
+        [ProtoMember(16)] public IOLocationData Dock;
+        /// <summary>Logistics jobs: every connector of the announcer's network a drone could use (TODO/14).</summary>
+        [ProtoMember(17)] public Logistics.DockSite DockSite;
+        /// <summary>Weld / grind jobs in gravity: how much each tool direction (Base6Directions.Direction, drone controller
+        /// frame; index) suits the job's blocks, 0..1. Null: no preference (space). See ConstructionComputer.ToolFaceWeights.</summary>
+        [ProtoMember(18)] public List<float> ToolFaceWeights;
+        /// <summary>Weld jobs: which weld (JobTypeExtensions.WELD_*: repair, projected, unbuilt; 0 unknown). Welder profiles rank by it.</summary>
+        [ProtoMember(19)] public byte WeldCategory;
 
         /// <summary>Summary fields from the job's first work site and total inventory.</summary>
         public static JobAnnouncement FromJob(Orchestrator.Job job, AutomataEntityType entityType, bool isStaticGrid)
@@ -241,6 +220,7 @@ namespace Automata.VirtualNetwork
                 IsInAtmosphere = site.NaturalGravity >= SPACE_GRAVITY,
                 Tasks = job.Tasks,
                 BlockCount = job.BlockCount,
+                WeldCategory = job.WeldCategory,
             };
         }
 
@@ -257,6 +237,7 @@ namespace Automata.VirtualNetwork
                 TotalInventory = ComponentsInventory,
                 Tasks = Tasks ?? new List<Orchestrator.Task>(),
                 BlockCount = BlockCount,
+                WeldCategory = WeldCategory,
             };
         }
     }
@@ -282,6 +263,20 @@ namespace Automata.VirtualNetwork
         [ProtoMember(13)] public bool IsStaticGrid;
         [ProtoMember(14)] public bool IsInSpace;
         [ProtoMember(15)] public bool IsInAtmosphere;
+        /// <summary>Logistics jobs: the announcing logistics computer (it never bids on its own job).</summary>
+        [ProtoMember(17)] public long RequesterEntityId;
+        /// <summary>Logistics jobs: where a drone docks at the announcer.</summary>
+        [ProtoMember(18)] public IOLocationData Dock;
+        /// <summary>The block that announced the job (with JobId: the job's identity; orchestrators dedupe on it).</summary>
+        [ProtoMember(19)] public long AnnouncerEntityId;
+        /// <summary>Logistics jobs: the announcer's connectors (with Dock: its preferred one).</summary>
+        [ProtoMember(20)] public Logistics.DockSite DockSite;
+        /// <summary>Weld / grind jobs in gravity: the announcement's tool face weights (null: no preference).</summary>
+        [ProtoMember(21)] public List<float> ToolFaceWeights;
+        /// <summary>A designator order for a tagged drone: only this drone (controller entity id) bids; 0: any.</summary>
+        [ProtoMember(22)] public long OnlyDroneEntityId;
+        /// <summary>Weld jobs: which weld (JobTypeExtensions.WELD_*; 0 unknown).</summary>
+        [ProtoMember(23)] public byte WeldCategory;
     }
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class Bid : IMessagePayload
@@ -320,6 +315,28 @@ namespace Automata.VirtualNetwork
         /// When the job demands inventory space, this response should be interpreted as "Has space to take inventory"
         /// </summary>
         [ProtoMember(15)] public Logistics.InventoryFulfillment InventoryFulfillmentFlags;   // was a duplicate tag 13 (EntityType)
+        /// <summary>Logistics computers: the connectors of the bidding network (IOLocationData: the preferred one).</summary>
+        [ProtoMember(16)] public Logistics.DockSite DockSite;
+        /// <summary>Drones: the faces (Base6Directions.Direction, controller frame) of their usable standard (large) connectors.</summary>
+        [ProtoMember(17)] public List<byte> DockFaces;
+        /// <summary>Drones: the same for their small connectors (combat drones, ore scouts, ore haulers only; TODO/14).</summary>
+        [ProtoMember(18)] public List<byte> SmallDockFaces;
+        /// <summary>Drones, weld / grind auctions: the faces (Base6Directions.Direction, controller frame) of their welders / grinders.</summary>
+        [ProtoMember(19)] public List<byte> ToolFaces;
+        /// <summary>Drones, weld / grind auctions: the steepest pitch / roll (degrees from level, in gravity) it works at:
+        /// its P-Gravity limits (180 with Align to P-Gravity off), capped by what it learnt it can hold.</summary>
+        [ProtoMember(20)] public float WorkPitchDegrees;
+        [ProtoMember(21)] public float WorkRollDegrees;
+        /// <summary>Drones, weld / grind auctions: can work upside down (no P-Gravity limits, and its "down" thrusters lift it).</summary>
+        [ProtoMember(22)] public bool CanFlyInverted;
+        /// <summary>Logistics computers, MineOre auctions: the best working refinery on the bid's network: 0 none, 1 basic,
+        /// 2 refinery / industrial, 3 prototech (ores a basic one can't take go to the better ones).</summary>
+        [ProtoMember(23)] public byte RefineryTier;
+        /// <summary>Logistics computers, MineOre auctions: a working O2/H2 generator on the bid's network (ice).</summary>
+        [ProtoMember(24)] public bool GasGenerators;
+        /// <summary>The connector the drone is docked at right now (0: none). The orchestrator keeps it as the dock of a
+        /// job that starts at that station: no undock / dock again to load.</summary>
+        [ProtoMember(25)] public long DockedConnectorId;
 
     }
 
@@ -335,53 +352,105 @@ namespace Automata.VirtualNetwork
         [ProtoMember(7)] public uint JobId;
         [ProtoMember(8)] public uint AuctionId;
         [ProtoMember(9)] public uint BidId;
+        /// <summary>The block that announced the job (job ids are only unique per announcer).</summary>
+        [ProtoMember(10)] public long AnnouncerEntityId;
+        /// <summary>The logistics computers the drones dock at for this job (component sources, ore / part takers, suppliers).</summary>
+        [ProtoMember(11)] public List<long> ComponentSources;
+        [ProtoMember(12)] public Orchestrator.JobType JobType;
+        /// <summary>Weld / grind: other drones work (or may work) the same site - the job went to several drones, or
+        /// another weld / grind job awarded near it is still being worked. Drones managed by orchestrator watch the
+        /// others near the site more closely (DroneControllerBlock.SharedSite.cs).</summary>
+        [ProtoMember(13)] public bool SharedSite;
+        /// <summary>Weld jobs: which weld (JobTypeExtensions.WELD_*; 0 unknown).</summary>
+        [ProtoMember(14)] public byte WeldCategory;
+    }
+
+    /// <summary>
+    /// Orchestrator -> announcer (construction / logistics computer): the job's auction got no bid within the
+    /// orchestrator's no-bid timeout. The announcer puts the job on hold for HoldSeconds, then announces it again.
+    /// </summary>
+    [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
+    public class JobAnnouncementFailed : IMessagePayload
+    {
+        [ProtoMember(1)] public long AnnouncerEntityId;
+        [ProtoMember(2)] public uint JobId;
+        [ProtoMember(3)] public uint AuctionId;
+        [ProtoMember(4)] public string Reason;
+        [ProtoMember(5)] public int HoldSeconds;
+        [ProtoMember(6)] public long OrchestratorEntityId;
     }
 
 
 
-    /// <summary>
-    /// One ore hit from a drone ore detector (or other survey source).
-    /// </summary>
+    /// <summary>One ore an ore scan found (<see cref="Mining.OreScanner"/>): averaged position of its voxels in a 32 m cell.</summary>
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class MiningOreDepositSample
     {
         [ProtoMember(1)] public Vector3DData Position;
-        [ProtoMember(2)] public MyStringHash OreSubtype;
-        [ProtoMember(3)] public MyFixedPoint EstimatedMass;
+        /// <summary>Ore inventory key ("Ore/Iron").</summary>
+        [ProtoMember(2)] public string Ore;
+        /// <summary>Ore voxels of LOD 2 counted: a rough size.</summary>
+        [ProtoMember(3)] public int Voxels;
+        [ProtoMember(4)] public long VoxelId;
     }
 
     /// <summary>
-    /// Batch of ore samples broadcast to mining surveyors.
+    /// One complete ore scan: the sphere it covered and everything it found in it. A surveyor's known deposit inside
+    /// the sphere that the scan did not find again (same ore within the merge distance) is depleted.
     /// </summary>
+    [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
+    public class SurveySweep
+    {
+        [ProtoMember(1)] public Vector3DData Center;
+        [ProtoMember(2)] public float Radius;
+        /// <summary>Seconds before the message was sent (old sweeps don't undo newer knowledge).</summary>
+        [ProtoMember(3)] public double AgeSeconds;
+        [ProtoMember(4)] public List<MiningOreDepositSample> Hits = new List<MiningOreDepositSample>();
+        /// <summary>Kept by the drone: when it was scanned (UTC ticks; AgeSeconds is computed from it when sent).</summary>
+        [ProtoMember(5)] public long ScannedUtcTicks;
+    }
+
+    /// <summary>Drone -> mining surveyors (MINING_DATA_FOUND_ANNOUNCEMENT): its ore scans since the last delivery, oldest first.</summary>
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class MiningSurveyDataBroadcast : IMessagePayload
     {
-        [ProtoMember(1)] public List<MiningOreDepositSample> Samples;
-    }
-    [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
-    public class TasksAborted
-    {
-        [ProtoMember(5)] public DateTime CompletedTime;
-        [ProtoMember(6)] public long EntityId;
-        [ProtoMember(7)] public uint JobId;
-        [ProtoMember(8)] public uint BidRoundId;
-        [ProtoMember(9)] public uint BidRoundBidId;
-
-        [ProtoMember(9)] public uint CurrentTask;
-        [ProtoMember(9)] public uint TotalTasks;
+        [ProtoMember(2)] public List<SurveySweep> Sweeps = new List<SurveySweep>();
+        [ProtoMember(3)] public long DroneEntityId;
     }
 
-    [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
-    public class TasksCompleted
+    public enum JobOutcome : byte
     {
-        [ProtoMember(1)] public List<uint> TaskIds;
-        [ProtoMember(5)] public DateTime CompletedTime;
-        [ProtoMember(6)] public long EntityId;
-        [ProtoMember(7)] public uint JobId;
-        [ProtoMember(8)] public uint BidRoundId;
-        [ProtoMember(9)] public uint BidRoundBidId;
+        /// <summary>Every task of the drone's share done.</summary>
+        Completed,
+        /// <summary>Started, not finished (task failed, power, load, stopped, AI off...).</summary>
+        Aborted,
+        /// <summary>The award arrived while the drone could not take it (busy, AI off, mode changed).</summary>
+        Declined,
+        /// <summary>Keepalive (JOB_KEEPALIVE): still working on it.</summary>
+        Working,
+    }
 
-        [ProtoMember(9)] public uint CurrentTask;
-        [ProtoMember(9)] public uint TotalTasks;
+    /// <summary>
+    /// Drone -> announcer + orchestrator (TASKS_COMPLETED or TASKS_ABORTED): how the drone's share of an awarded job
+    /// ended. The announcer closes or re-opens the job on it instead of waiting for its award to time out.
+    /// </summary>
+    [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
+    public class JobStatusReport : IMessagePayload
+    {
+        [ProtoMember(1)] public long AnnouncerEntityId;
+        [ProtoMember(2)] public uint JobId;
+        [ProtoMember(3)] public uint AuctionId;
+        [ProtoMember(4)] public long OrchestratorEntityId;
+        [ProtoMember(5)] public long DroneEntityId;
+        [ProtoMember(6)] public JobOutcome Outcome;
+        [ProtoMember(7)] public string Reason;
+        /// <summary>Tool tasks done / in its share (0 / 0 for logistics trips).</summary>
+        [ProtoMember(8)] public int BlocksDone;
+        [ProtoMember(9)] public int BlocksTotal;
+        [ProtoMember(10)] public Orchestrator.JobType JobType;
+        /// <summary>Mining: kg of ore unloaded (the surveyor's order counts it).</summary>
+        [ProtoMember(11)] public double OreKg;
+        /// <summary>Weld jobs: which weld (JobTypeExtensions.WELD_*; 0 unknown).</summary>
+        [ProtoMember(12)] public byte WeldCategory;
     }
 }

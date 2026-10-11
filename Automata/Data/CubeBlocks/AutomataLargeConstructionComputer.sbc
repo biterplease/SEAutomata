@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+	<CubeBlocks>
+		<!-- Automata: a programmable block (its LCD support) with the broadcast controller model; Automata game logic.
+		     ScreenAreas name the screen materials of the custom model (Broadcast.mwm has none: nothing renders until then). -->
+		<Definition xsi:type="MyObjectBuilder_ProgrammableBlockDefinition">
+            <Id>
+                <TypeId>MyProgrammableBlock</TypeId>
+                <SubtypeId>AutomataLargeConstructionComputer</SubtypeId>
+            </Id>
+            <DisplayName>Automata Construction Computer</DisplayName>
+            <Icon>Textures\GUI\Icons\Cubes\Broadcast.dds</Icon>
+            <Description>Scans the area around it for blocks to weld, repair, build (projections) or grind, and announces the jobs to orchestrators. Needs a broadcasting antenna on its grid.</Description>
+            <CubeSize>Large</CubeSize>
+            <BlockTopology>TriangleMesh</BlockTopology>
+            <Size x="1" y="1" z="1" />
+            <ModelOffset x="0" y="0" z="0" />
+            <Model>Models\Cubes\Large\Broadcast.mwm</Model>
+            <PlaceDecals>false</PlaceDecals>
+            <Components>
+                <Component Subtype="InteriorPlate" Count="10" />
+                <Component Subtype="Construction" Count="20" />
+                <Component Subtype="RadioCommunication" Count="5" />
+                <Component Subtype="Computer" Count="10" />
+                <Component Subtype="Display" Count="4" />
+                <Component Subtype="Construction" Count="10" />
+            </Components>
+            <CriticalComponent Subtype="Display" Index="0" />
+            <MountPoints>
+                <MountPoint Side="Bottom" StartX="0" StartY="0" EndX="1" EndY="1" Default="true" />
+                <MountPoint Side="Top" StartX="0" StartY="0.5" EndX="1" EndY="1" />
+                <MountPoint Side="Left" StartX="0" StartY="0" EndX="1" EndY="0.6" />
+                <MountPoint Side="Left" StartX="0" StartY="0.6" EndX="0.5" EndY="1" />
+                <MountPoint Side="Right" StartX="0" StartY="0" EndX="1" EndY="0.8" />
+                <MountPoint Side="Right" StartX="0.5" StartY="0.8" EndX="1" EndY="1" />
+                <MountPoint Side="Back" StartX="0" StartY="0" EndX="1" EndY="0.6" />
+                <MountPoint Side="Front" StartX="0" StartY="0" EndX="1" EndY="1" />
+            </MountPoints>
+            <BuildProgressModels>
+                <Model BuildPercentUpperBound="0.33" File="Models\Cubes\Large\BroadcastConstruction1.mwm" />
+                <Model BuildPercentUpperBound="0.66" File="Models\Cubes\Large\BroadcastConstruction2.mwm" />
+                <Model BuildPercentUpperBound="1.00" File="Models\Cubes\Large\BroadcastConstruction3.mwm" />
+            </BuildProgressModels>
+            <ScreenAreas>
+                <ScreenArea Name="AutomataScreen_01" DisplayName="DisplayName_Screen_Large" TextureResolution="512" ScreenWidth="16" ScreenHeight="10" />
+                <ScreenArea Name="AutomataScreen_02" DisplayName="DisplayName_Screen_Keyboard" TextureResolution="256" ScreenWidth="5" ScreenHeight="2" />
+            </ScreenAreas>
+            <BlockPairName>AutomataConstructionComputer</BlockPairName>
+            <EdgeType>Light</EdgeType>
+            <BuildTimeSeconds>16</BuildTimeSeconds>
+            <MirroringY>Z</MirroringY>
+            <MirroringZ>Y</MirroringZ>
+            <DamageEffectName>Damage_Electrical_Damaged</DamageEffectName>
+            <DamagedSound>ParticleElectrical</DamagedSound>
+            <ResourceSinkGroup>Utility</ResourceSinkGroup>
+            <EmissiveColorPreset>Extended</EmissiveColorPreset>
+            <DestroyEffect>BlockDestroyedExplosion_Large</DestroyEffect>
+            <DestroySound>WepSmallWarheadExpl</DestroySound>
+            <PCU>25</PCU>
+            <IsAirTight>false</IsAirTight>
+        </Definition>
+	</CubeBlocks>
+</Definitions>

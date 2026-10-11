@@ -4,9 +4,7 @@
     {
         float NetworkUpdateRate();
         int SchedulerAntennaCacheUpdateIntervalTicks();
-        int SchedulerMessageThrottlingTicks();
         int SchedulerMessageReadLimit();
-        int DroneMessageThrottlingTicks();
         int MessageRetentionTicks();
         int DlqMessageRetentionTicks();
         int MessageCleanupIntervalTicks();
@@ -26,20 +24,8 @@
         /// </summary>
         public int schedulerAntennaCacheUpdateIntervalTicks { get; internal set; } = 60;
         public int SchedulerAntennaCacheUpdateIntervalTicks() => schedulerAntennaCacheUpdateIntervalTicks;
-        /// <summary>
-        /// Throttling for scheduler reading subscribed messages.
-        /// </summary>
-        // 4 messages/second, scheduler expects a lot of messages from managed drones
-        public int schedulerMessageThrottlingTicks { get; internal set; } = 15;
-        public int SchedulerMessageThrottlingTicks() => schedulerMessageThrottlingTicks;
         public int schedulerMessageReadLimit { get; internal set; } = 50;
         public int SchedulerMessageReadLimit() => schedulerMessageReadLimit;
-        /// <summary>
-        /// Throttling for drone reading subscribed messages.
-        /// </summary>
-        // 1 message every 3 seconds, drone orders are not as frequent.
-        public int droneMessageThrottlingTicks { get; internal set; } = 180; // 3 seconds
-        public int DroneMessageThrottlingTicks() => droneMessageThrottlingTicks;
         /// <summary>
         /// How long messages live in the message queue.
         /// </summary>

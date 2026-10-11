@@ -1,15 +1,15 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <ModInfo xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <SteamPublishedFileId>0</SteamPublishedFileId>
+  <SteamIDOwner>76561198031538501</SteamIDOwner>
   <Name>Automata</Name>
   <Description>Automatons to make your life easier.
   This mod encourages logistics-driven gameplay by offloading tasks that are commonly performed by players.</Description>
   <IsDependency>false</IsDependency>
-  <WorkshopId>0</WorkshopId>
+  <WorkshopId>3817483229</WorkshopId>
   <Authors>
     <Author>biter_please</Author>
   </Authors>
-  <Version>10100</Version>
+  <Version>0.0.1</Version>
   <MinGameVersion>01198025</MinGameVersion>
   <MaxGameVersion>01999999</MaxGameVersion>
   <DependsOnMods />

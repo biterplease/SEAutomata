@@ -260,7 +260,7 @@ namespace Automata.Pointer
             if (rifle.TryGetSubpart(name, out sp) && sp != null)
             {
                 p.Entity = sp;
-                p.Base = sp.PositionComp.LocalMatrix;
+                p.Base =  sp.PositionComp.LocalMatrixRef;
             }
             else
             {

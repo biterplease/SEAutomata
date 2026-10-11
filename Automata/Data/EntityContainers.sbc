@@ -19,9 +19,9 @@
             <Component BuilderType="MyObjectBuilder_ModStorageComponent" SubtypeId="AutomataMod" ForceCreate="true"/>
          </DefaultComponents>
       </Container>
-      <!-- <Container>
+      <Container>
          <Id>
-            <TypeId>BroadcastController</TypeId>
+            <TypeId>MyProgrammableBlock</TypeId>
             <SubtypeId>AutomataLargeOrchestrator</SubtypeId>
          </Id>
          <DefaultComponents>
@@ -40,11 +40,20 @@
       <Container>
          <Id>
             <TypeId>MyProgrammableBlock</TypeId>
+            <SubtypeId>AutomataLargeConstructionComputer</SubtypeId>
+         </Id>
+         <DefaultComponents>
+            <Component BuilderType="MyObjectBuilder_ModStorageComponent" SubtypeId="AutomataMod" ForceCreate="true"/>
+         </DefaultComponents>
+      </Container>
+      <Container>
+         <Id>
+            <TypeId>MyProgrammableBlock</TypeId>
             <SubtypeId>AutomataLargeMiningSurveyor</SubtypeId>
          </Id>
          <DefaultComponents>
             <Component BuilderType="MyObjectBuilder_ModStorageComponent" SubtypeId="AutomataMod" ForceCreate="true"/>
          </DefaultComponents>
-      </Container> -->
+      </Container>
    </EntityContainers>
 </Definitions>

@@ -18,6 +18,14 @@ namespace Digi.NetworkLib
     [ProtoInclude(14, typeof(Automata.Network.DroneNavRoutePacket))]
     [ProtoInclude(15, typeof(Automata.Network.ClientSettingsRequestPacket))]
     [ProtoInclude(16, typeof(Automata.Network.ClientSettingsPacket))]
+    [ProtoInclude(17, typeof(Automata.Network.BlockSettingsPacket))]
+    [ProtoInclude(18, typeof(Automata.Pointer.ScoutPointerPacket))]
+    [ProtoInclude(19, typeof(Automata.Pointer.ScoutPointerFeedbackPacket))]
+    [ProtoInclude(20, typeof(Automata.Pointer.ScoutPointerClearTagsPacket))]
+    [ProtoInclude(21, typeof(Automata.Pointer.ScoutPointerTagsPacket))]
+    [ProtoInclude(22, typeof(Automata.Util.LcdFeedPacket))]
+    [ProtoInclude(23, typeof(Automata.Util.LcdSubscribePacket))]
+    [ProtoInclude(24, typeof(Automata.Util.LcdAttachPacket))]
     public abstract partial class PacketBase
     {
     }
@@ -25,6 +33,27 @@ namespace Digi.NetworkLib
 
 namespace Automata.Network
 {
+    /// <summary>
+    /// All settings of a logistics / construction computer (XML), client -> server (access checked, applied,
+    /// relayed to the other clients) or server -> clients.
+    /// </summary>
+    [ProtoContract]
+    public class BlockSettingsPacket : PacketBase
+    {
+        public BlockSettingsPacket() { }
+
+        [ProtoMember(1)] public long EntityId;
+        [ProtoMember(2)] public string Xml;
+
+        public override void Received(ref PacketInfo packetInfo, ulong senderSteamId)
+        {
+            VRage.ModAPI.IMyEntity e;
+            if (!MyAPIGateway.Entities.TryGetEntityById(EntityId, out e) || e.GameLogic == null) return;
+            var logic = e.GameLogic.GetAs<Util.SettingsBlockLogic>();
+            if (logic != null) logic.ReceiveSettings(this, ref packetInfo, senderSteamId);
+        }
+    }
+
     /// <summary>
     /// One drone setting changed. Client -> server (validated, applied, relayed to the other clients), or
     /// server -> clients (changes made on the server / by the host player).

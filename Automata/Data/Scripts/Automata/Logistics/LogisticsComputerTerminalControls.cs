@@ -1,12 +1,13 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.Text;
 
 using Sandbox.Game.Localization;
 using Sandbox.ModAPI;
 using Sandbox.ModAPI.Interfaces.Terminal;
 using VRage.Game.ModAPI;
+using VRage.ModAPI;
 using VRage.Utils;
-using VRageMath;
 
 using Automata.Config;
 using Automata.Util;
@@ -14,42 +15,75 @@ using Automata.Util.Logging;
 
 namespace Automata.Logistics
 {
+    /// <summary>
+    /// Logistics computer terminal: on / off, work modes and the Min / Max lists. Top: every item (components,
+    /// tools, player weapons, their ammo, block ammo, ingots, ores) without an entry yet, as "item:0:0". Bottom: the
+    /// Min / Max entries. Selecting an entry puts it in the edit box; the buttons apply the edit box.
+    /// </summary>
     public static class LogisticsComputerTerminalControls
     {
+        #region UI strings
+        private static readonly MyStringId StrCategoryComponent = MyStringId.GetOrCompute("Component");
+        private static readonly MyStringId StrCategoryTool = MyStringId.GetOrCompute("Tool");
+        private static readonly MyStringId StrCategoryPlayerWeapon = MyStringId.GetOrCompute("Player weapon");
+        private static readonly MyStringId StrCategoryPlayerAmmo = MyStringId.GetOrCompute("Player weapon ammo");
+        private static readonly MyStringId StrCategoryBlockAmmo = MyStringId.GetOrCompute("Block ammo");
+        private static readonly MyStringId StrCategoryIngot = MyStringId.GetOrCompute("Ingot");
+        private static readonly MyStringId StrCategoryOre = MyStringId.GetOrCompute("Ore");
+        private static readonly MyStringId StrCategoryOther = MyStringId.GetOrCompute("Other");
+        private static readonly MyStringId StrBroadcastSends = MyStringId.GetOrCompute("nothing yet.");
+        private static readonly MyStringId StrModeProvideForLogistics = MyStringId.GetOrCompute("Provide for logistics");
+        private static readonly MyStringId StrModeProvideForLogisticsTip = MyStringId.GetOrCompute("Offer this grid's items to other logistics computers' requests (never below its own Min), and its room to their surplus (never above its own Max).");
+        private static readonly MyStringId StrModeProvideForConstruction = MyStringId.GetOrCompute("Provide for construction");
+        private static readonly MyStringId StrModeProvideForConstructionTip = MyStringId.GetOrCompute("Offer components for weld jobs (drones dock here to load), and room for what grind jobs return.");
+        private static readonly MyStringId StrModePush = MyStringId.GetOrCompute("Push (above Max)");
+        private static readonly MyStringId StrModePushTip = MyStringId.GetOrCompute("Items above their Max are announced as surplus: a drone takes them to another logistics computer.");
+        private static readonly MyStringId StrModeRequest = MyStringId.GetOrCompute("Request (below Min)");
+        private static readonly MyStringId StrModeRequestTip = MyStringId.GetOrCompute("Items below their Min are requested: a drone brings the difference from another logistics computer.");
+        private static readonly MyStringId StrAcceptOreWithoutRefinery = MyStringId.GetOrCompute("Accept ore from mining without a refinery");
+        private static readonly MyStringId StrAcceptOreWithoutRefineryTip = MyStringId.GetOrCompute("With Provide for logistics: bid room for mined ore even when no refinery here takes it (ore storage). Off: only ore a working refinery here can process.");
+        private static readonly MyStringId StrQuotaEditAndAdd = MyStringId.GetOrCompute("Edit and add");
+        private static readonly MyStringId StrQuotaEditAndAddTip = MyStringId.GetOrCompute("The entry (for the item selected at the top) goes into the Min / Max list.");
+        private static readonly MyStringId StrQuotaEdit = MyStringId.GetOrCompute("Edit");
+        private static readonly MyStringId StrQuotaEditTip = MyStringId.GetOrCompute("The entry replaces the one selected in the Min / Max list.");
+        private static readonly MyStringId StrQuotaRemove = MyStringId.GetOrCompute("Remove");
+        private static readonly MyStringId StrQuotaRemoveTip = MyStringId.GetOrCompute("Removes the entry selected in the Min / Max list.");
+        private static readonly MyStringId StrQuotaAddManually = MyStringId.GetOrCompute("Add manually");
+        private static readonly MyStringId StrQuotaAddManuallyTip = MyStringId.GetOrCompute("Adds the entry as typed (item and whole numbers checked; nothing happens if they don't match).");
+        private static readonly MyStringId StrQuotaClear = MyStringId.GetOrCompute("Clear all");
+        private static readonly MyStringId StrQuotaClearTip = MyStringId.GetOrCompute("Empties the Min / Max list.");
+        private static readonly MyStringId StrRetryHeld = MyStringId.GetOrCompute("Retry held jobs");
+        private static readonly MyStringId StrRetryHeldTip = MyStringId.GetOrCompute("Its request / push jobs that are on hold (an auction failed) or waiting for an answer are announced again now.");
+        private static readonly MyStringId StrWorkModes = MyStringId.GetOrCompute("Work modes");
+        private static readonly MyStringId StrItemsItemMinMax = MyStringId.GetOrCompute("Items (item:min:max)");
+        private static readonly MyStringId StrMinMax0NotSet = MyStringId.GetOrCompute("Min / Max (0 = not set)");
+        private static readonly MyStringId StrEnableTip = MyStringId.GetOrCompute("Enable this Logistics Computer AI behaviour.");
+        private static readonly MyStringId StrItems = MyStringId.GetOrCompute("Items");
+        private static readonly MyStringId StrItemsTip = MyStringId.GetOrCompute("Components, tools, player weapons, player ammo, block ammo, ingots, ores. Select one to edit it below.");
+        private static readonly MyStringId StrMinMax = MyStringId.GetOrCompute("Min / Max");
+        private static readonly MyStringId StrMinMaxTip = MyStringId.GetOrCompute("Below Min: requested (Request mode). Above Max: pushed away (Push mode). Never given below Min / taken above Max.");
+        private static readonly MyStringId StrEntry = MyStringId.GetOrCompute("Entry");
+        private static readonly MyStringId StrEntryTip = MyStringId.GetOrCompute("item:min:max, e.g. SteelPlate:100:5000 or Ingot/Iron:0:20000 (whole numbers, 0 = not set)");
+        #endregion
+
         public static ServerConfig.LogisticsComputerConfig BlockConfig = ServerConfig.Instance.LogisticsComputer;
 
         const string IdPrefix = AutomataSession.MOD_NAME + "_LogisticsComputer_";
         static bool Done = false;
 
-        private static readonly HashSet<string> defaultControlIdsToHide = new HashSet<string>
-        {
-            "Edit",
-            "ConsoleCommand",
-            "TerminalRun",
-            "Recompile",
-        };
-        private static readonly HashSet<string> defaultActionIdsToHide = new HashSet<string>
-        {
-            "Run",
-            "RunWithDefaultArgument",
-        };
+        // Redrawn after a button / selection changes them
+        static IMyTerminalControlListbox itemList, quotaList;
+        static IMyTerminalControlTextbox editBox;
 
         public static void DoOnce(IMyModContext context)
         {
             if (Done) return;
             Done = true;
-
-            HideDefaultControls();
-            HideDefaultActions();
+            AutomataProgrammableBlocks.HideVanillaOnce();
             CreateControls();
             Log.Info("Created LC terminal controls");
         }
 
-        /// <summary>
-        /// Check an return the GameLogic object
-        /// </summary>
-        /// <param name="block"></param>
-        /// <returns></returns>
         private static LogisticsComputerBlock GetBlock(IMyTerminalBlock block)
         {
             if (block != null && block.GameLogic != null) return block.GameLogic.GetAs<LogisticsComputerBlock>();
@@ -58,182 +92,215 @@ namespace Automata.Logistics
 
         static bool CustomVisibleCondition(IMyTerminalBlock b)
         {
-            // only visible for the blocks having this gamelogic comp
             return b?.GameLogic?.GetAs<LogisticsComputerBlock>() != null;
         }
 
-        /// <summary>
-        /// Hides default controls in the Programmable Block.
-        /// </summary>
-        public static void HideDefaultControls()
+        static void Refresh()
         {
-            List<IMyTerminalControl> controls;
-            MyAPIGateway.TerminalControls.GetControls<IMyProgrammableBlock>(out controls);
-
-            foreach (IMyTerminalControl c in controls)
-            {
-                if (defaultControlIdsToHide.Contains(c.Id))
-                {
-                    c.Visible = TerminalChainedDelegate.Create(c.Enabled, CustomVisibleCondition);
-                }
-            }
+            if (itemList != null) itemList.UpdateVisual();
+            if (quotaList != null) quotaList.UpdateVisual();
+            if (editBox != null) editBox.UpdateVisual();
         }
 
-        /// <summary>
-        /// Hides default actions in the Programmable Block.
-        /// </summary>
-        public static void HideDefaultActions()
+        static void Add(IMyTerminalControl c)
         {
-            List<IMyTerminalAction> actions;
-            MyAPIGateway.TerminalControls.GetActions<IMyProgrammableBlock>(out actions);
-
-            foreach (IMyTerminalAction a in actions)
-            {
-                if (defaultActionIdsToHide.Contains(a.Id))
-                {
-                    a.Enabled = TerminalChainedDelegate.Create(a.Enabled, CustomVisibleCondition);
-                }
-            }
+            MyAPIGateway.TerminalControls.AddControl<IMyProgrammableBlock>(c);
         }
 
-        /// <summary>
-        /// Initialize custom control definition
-        /// </summary>
+        static void Separator()
+        {
+            var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSeparator, IMyProgrammableBlock>("");
+            c.SupportsMultipleBlocks = true;
+            c.Visible = CustomVisibleCondition;
+            Add(c);
+        }
+
+        static void Label(string id, MyStringId text)
+        {
+            var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlLabel, IMyProgrammableBlock>(id);
+            c.Label = text;
+            c.SupportsMultipleBlocks = true;
+            c.Visible = CustomVisibleCondition;
+            Add(c);
+        }
+
+        static void Checkbox(string id, MyStringId title, MyStringId tooltip, Func<IMyTerminalBlock, bool> visible, Func<IMyTerminalBlock, bool> enabled,
+                             Func<LogisticsComputerBlock, bool> get, Action<LogisticsComputerBlock, bool> set)
+        {
+            var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlCheckbox, IMyProgrammableBlock>(IdPrefix + id);
+            c.Title = title;
+            c.Tooltip = tooltip;
+            c.SupportsMultipleBlocks = true;
+            c.Visible = visible;
+            c.Enabled = enabled;
+            c.Getter = b => { var l = GetBlock(b); return l != null && get(l); };
+            c.Setter = (b, v) => { var l = GetBlock(b); if (l != null) set(l, v); };
+            Add(c);
+        }
+
+        static void Button(string id, MyStringId title, MyStringId tooltip, Func<LogisticsComputerBlock, bool> act)
+        {
+            var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlButton, IMyProgrammableBlock>(IdPrefix + id);
+            c.Title = title;
+            c.Tooltip = tooltip;
+            c.SupportsMultipleBlocks = false;
+            c.Visible = CustomVisibleCondition;
+            c.Action = b =>
+            {
+                var l = GetBlock(b);
+                if (l == null) return;
+                if (act(l)) Refresh();
+            };
+            Add(c);
+        }
+
         public static void CreateControls()
         {
-            {
-                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSeparator, IMyProgrammableBlock>("");
-                c.SupportsMultipleBlocks = true;
-                c.Visible = CustomVisibleCondition;
-
-                MyAPIGateway.TerminalControls.AddControl<IMyProgrammableBlock>(c);
-            }
+            Separator();
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlOnOffSwitch, IMyProgrammableBlock>(IdPrefix + "OnOffEnabled");
                 c.Title = MySpaceTexts.BlockPropertyTitle_EnableAI;
-                c.Tooltip = MyStringId.GetOrCompute("Enable this Logistics Computer AI behaviour.");
-                c.SupportsMultipleBlocks = true; // wether this control should be visible when multiple blocks are selected (as long as they all have this control).
-
-                // callbacks to determine if the control should be visible or not-grayed-out(Enabled) depending on whatever custom condition you want, given a block instance.
-                // optional, they both default to true.
+                c.Tooltip = StrEnableTip;
+                c.SupportsMultipleBlocks = true;
                 c.Visible = CustomVisibleCondition;
-                //c.Enabled = CustomVisibleCondition;
-
                 c.OnText = MySpaceTexts.SwitchText_On;
                 c.OffText = MySpaceTexts.SwitchText_Off;
-
-                // setters and getters should both be assigned on all controls that have them, to avoid errors in mods or PB scripts getting exceptions from them.
-                c.Getter = (b) => GetBlock(b)?.Terminal_IsEnabled ?? false;
-                c.Setter = (b, v) =>
-                {
-                    var logic = GetBlock(b);
-                    if (logic != null)
-                        logic.Terminal_IsEnabled = v;
-                };
-
-                MyAPIGateway.TerminalControls.AddControl<IMyProgrammableBlock>(c);
+                c.Getter = b => GetBlock(b)?.Terminal_IsEnabled ?? false;
+                c.Setter = (b, v) => { var l = GetBlock(b); if (l != null) l.Terminal_IsEnabled = v; };
+                Add(c);
             }
+            Separator();
+            Label("", StrWorkModes);
+            Checkbox("CheckboxLCOpModeProvideForLogistics", StrModeProvideForLogistics,
+                     StrModeProvideForLogisticsTip,
+                     b => CustomVisibleCondition(b) && BlockConfig.AllowLogistics, b => BlockConfig.AllowLogistics,
+                     l => l.Terminal_WorkModeProvideForLogistics, (l, v) => l.Terminal_WorkModeProvideForLogistics = v);
+            Checkbox("CheckboxLCOpModeProvideForConstruction", StrModeProvideForConstruction,
+                     StrModeProvideForConstructionTip,
+                     CustomVisibleCondition, b => BlockConfig.AllowLogistics,
+                     l => l.Terminal_WorkModeProvideForConstruction, (l, v) => l.Terminal_WorkModeProvideForConstruction = v);
+            Checkbox("CheckboxLCOpModePush", StrModePush,
+                     StrModePushTip,
+                     b => CustomVisibleCondition(b) && BlockConfig.AllowLogistics && BlockConfig.AllowNetworkPush,
+                     b => BlockConfig.AllowLogistics && BlockConfig.AllowNetworkPush,
+                     l => l.Terminal_WorkModePush, (l, v) => l.Terminal_WorkModePush = v);
+            Checkbox("CheckboxLCOpModeRequest", StrModeRequest,
+                     StrModeRequestTip,
+                     b => CustomVisibleCondition(b) && BlockConfig.AllowLogistics && BlockConfig.AllowNetworkRequests,
+                     b => BlockConfig.AllowLogistics && BlockConfig.AllowNetworkRequests,
+                     l => l.Terminal_WorkModeRequest, (l, v) => l.Terminal_WorkModeRequest = v);
+            Checkbox("CheckboxLCAcceptOreWithoutRefinery", StrAcceptOreWithoutRefinery,
+                     StrAcceptOreWithoutRefineryTip,
+                     CustomVisibleCondition, b => BlockConfig.AllowLogistics,
+                     l => l.Terminal_AcceptOreWithoutRefinery, (l, v) => l.Terminal_AcceptOreWithoutRefinery = v);
+            Separator();
+            Label(IdPrefix + "LabelItems", StrItemsItemMinMax);
             {
-                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSeparator, IMyProgrammableBlock>("");
-                c.SupportsMultipleBlocks = true;
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlListbox, IMyProgrammableBlock>(IdPrefix + "ItemList");
+                c.Title = StrItems;
+                c.Tooltip = StrItemsTip;
+                c.SupportsMultipleBlocks = false;
                 c.Visible = CustomVisibleCondition;
-
-                MyAPIGateway.TerminalControls.AddControl<IMyProgrammableBlock>(c);
-            }
-            {
-                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlLabel, IMyProgrammableBlock>("");
-                c.Label = MyStringId.GetOrCompute("Automata_LogisticsComputer_TerminalControl_WorkModes_ProvideForConstruction_Title");
-                c.SupportsMultipleBlocks = true;
-                c.Visible = CustomVisibleCondition;
-
-                MyAPIGateway.TerminalControls.AddControl<IMyProgrammableBlock>(c);
-            }
-            {
-                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlCheckbox, IMyProgrammableBlock>(IdPrefix + "CheckboxLCOpModeProvideForLogistics");
-                c.Title = MyStringId.GetOrCompute("Automata_LogisticsComputer_TerminalControl_WorkModes_ProvideForLogistics_Title");
-                c.Tooltip = MyStringId.GetOrCompute("Automata_LogisticsComputer_TerminalControl_WorkModes_ProvideForLogistics_Tooltip");
-                c.SupportsMultipleBlocks = true;
-                c.Visible = (b) => CustomVisibleCondition(b) && BlockConfig.AllowLogistics;
-                c.Enabled = (b) => BlockConfig.AllowLogistics; // to see how the grayed out ones look
-
-                c.Getter = (b) => GetBlock(b)?.Terminal_WorkModeProvideForLogistics ?? false;
-                c.Setter = (b, v) =>
+                c.Multiselect = false;
+                c.VisibleRowsCount = 10;
+                c.ListContent = ItemListContent;
+                c.ItemSelected = (b, selected) =>
                 {
-                    var logic = GetBlock(b);
-                    if (logic != null)
-                        logic.Terminal_WorkModeProvideForLogistics = v;
+                    var l = GetBlock(b);
+                    if (l == null || selected.Count == 0 || !(selected[0].UserData is MyStringHash)) return;
+                    l.Terminal_SelectItem((MyStringHash)selected[0].UserData);
+                    Refresh();
                 };
-
-                MyAPIGateway.TerminalControls.AddControl<IMyProgrammableBlock>(c);
+                itemList = c;
+                Add(c);
             }
+            Label(IdPrefix + "LabelQuotas", StrMinMax0NotSet);
             {
-                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlCheckbox, IMyProgrammableBlock>(IdPrefix + "CheckboxLCOpModeProvideForConstruction");
-                c.Title = MyStringId.GetOrCompute("Automata_LogisticsComputer_TerminalControl_WorkModes_ProvideForConstruction_Title");
-                c.Tooltip = MyStringId.GetOrCompute("Automata_LogisticsComputer_TerminalControl_WorkModes_ProvideForConstruction_Tooltip");
-                c.SupportsMultipleBlocks = true;
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlListbox, IMyProgrammableBlock>(IdPrefix + "QuotaList");
+                c.Title = StrMinMax;
+                c.Tooltip = StrMinMaxTip;
+                c.SupportsMultipleBlocks = false;
                 c.Visible = CustomVisibleCondition;
-                c.Enabled = (b) => BlockConfig.AllowLogistics; // to see how the grayed out ones look
-
-                c.Getter = (b) => GetBlock(b)?.Terminal_WorkModeProvideForConstruction ?? false;
-                c.Setter = (b, v) =>
+                c.Multiselect = false;
+                c.VisibleRowsCount = 8;
+                c.ListContent = QuotaListContent;
+                c.ItemSelected = (b, selected) =>
                 {
-                    var logic = GetBlock(b);
-                    if (logic != null)
-                        logic.Terminal_WorkModeProvideForConstruction = v;
+                    var l = GetBlock(b);
+                    if (l == null || selected.Count == 0 || !(selected[0].UserData is int)) return;
+                    l.Terminal_SelectQuota((int)selected[0].UserData);
+                    Refresh();
                 };
-
-                MyAPIGateway.TerminalControls.AddControl<IMyProgrammableBlock>(c);
+                quotaList = c;
+                Add(c);
             }
             {
-                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlCheckbox, IMyProgrammableBlock>(IdPrefix + "CheckboxLCOpModePush");
-                c.Title = MyStringId.GetOrCompute("Automata_LogisticsComputer_TerminalControl_WorkModes_Push_Title");
-                c.Tooltip = MyStringId.GetOrCompute("Automata_LogisticsComputer_TerminalControl_WorkModes_Push_Tooltip");
-                c.SupportsMultipleBlocks = true;
-                c.Visible = (b) => CustomVisibleCondition(b) && BlockConfig.AllowLogistics && BlockConfig.AllowNetworkPush;
-                c.Enabled = (b) => BlockConfig.AllowLogistics && BlockConfig.AllowNetworkPush; // to see how the grayed out ones look
-
-                c.Getter = (b) => GetBlock(b)?.Terminal_WorkModePush ?? false;
-                c.Setter = (b, v) =>
-                {
-                    var logic = GetBlock(b);
-                    if (logic != null)
-                        logic.Terminal_WorkModePush = v;
-                };
-
-                MyAPIGateway.TerminalControls.AddControl<IMyProgrammableBlock>(c);
-            }
-            {
-                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlCheckbox, IMyProgrammableBlock>(IdPrefix + "CheckboxLCOpModeRequest");
-                c.Title = MyStringId.GetOrCompute("Automata_LogisticsComputer_TerminalControl_WorkModes_Request_Title");
-                c.Tooltip = MyStringId.GetOrCompute("Automata_LogisticsComputer_TerminalControl_WorkModes_Request_Tooltip");
-                c.SupportsMultipleBlocks = true;
-                c.Visible = (b) => CustomVisibleCondition(b) && BlockConfig.AllowLogistics && BlockConfig.AllowNetworkRequests;
-                c.Enabled = (b) => BlockConfig.AllowLogistics && BlockConfig.AllowNetworkRequests; // to see how the grayed out ones look
-
-                c.Getter = (b) => GetBlock(b)?.Terminal_WorkModeRequest ?? false;
-                c.Setter = (b, v) =>
-                {
-                    var logic = GetBlock(b);
-                    if (logic != null)
-                        logic.Terminal_WorkModeRequest = v;
-                };
-
-                MyAPIGateway.TerminalControls.AddControl<IMyProgrammableBlock>(c);
-            }
-            {
-                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSeparator, IMyProgrammableBlock>("");
-                c.SupportsMultipleBlocks = true;
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlTextbox, IMyProgrammableBlock>(IdPrefix + "QuotaEdit");
+                c.Title = StrEntry;
+                c.Tooltip = StrEntryTip;
+                c.SupportsMultipleBlocks = false;
                 c.Visible = CustomVisibleCondition;
-
-                MyAPIGateway.TerminalControls.AddControl<IMyProgrammableBlock>(c);
+                c.Getter = b => { var l = GetBlock(b); return l != null ? l.Terminal_EditText : new StringBuilder(); };
+                c.Setter = (b, v) => { var l = GetBlock(b); if (l != null && !ReferenceEquals(v, l.Terminal_EditText)) l.Terminal_EditText.Clear().Append(v); };
+                editBox = c;
+                Add(c);
             }
-            {
-                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlLabel, IMyProgrammableBlock>(IdPrefix + "LCLabelOthersettings");
-                c.Label = MyStringId.GetOrCompute("Requests");
-                c.SupportsMultipleBlocks = true;
-                c.Visible = CustomVisibleCondition;
+            Button("QuotaEditAndAdd", StrQuotaEditAndAdd, StrQuotaEditAndAddTip, l => l.Terminal_EditAndAdd());
+            Button("QuotaEdit2", StrQuotaEdit, StrQuotaEditTip, l => l.Terminal_EditQuota());
+            Button("QuotaRemove", StrQuotaRemove, StrQuotaRemoveTip, l => l.Terminal_RemoveQuota());
+            Button("QuotaAddManually", StrQuotaAddManually, StrQuotaAddManuallyTip, l => l.Terminal_AddManually());
+            Button("QuotaClear", StrQuotaClear, StrQuotaClearTip, l => { l.Terminal_ClearQuotas(); return true; });
+            Separator();
+            Button("RetryHeld", StrRetryHeld, StrRetryHeldTip,
+                   l => { l.Terminal_RetryHeld(); return false; });
+            NicknameControl.Add<IMyProgrammableBlock, LogisticsComputerBlock>(IdPrefix + "Nick", GetBlock, l => l.Nickname, (l, v) => l.Terminal_Nickname = v);
+            LcdTagControl.Add(IdPrefix + "LcdTag", GetBlock, l => l.Terminal_LcdTag, (l, v) => l.Terminal_LcdTag = v, "[LogisticComputer]");
+            LcdControls.Add(IdPrefix, GetBlock, l => l.Terminal_LcdStyle, l => l.Terminal_LcdEdited(), true);
+            BroadcastControllerControl.Add(IdPrefix + "UseBroadcastController", GetBlock, l => l.Terminal_UseBroadcastController, (l, v) => l.Terminal_UseBroadcastController = v, StrBroadcastSends);
+        }
 
-                MyAPIGateway.TerminalControls.AddControl<IMyProgrammableBlock>(c);
+        static readonly Dictionary<ItemCategory, MyStringId> CategoryNames = new Dictionary<ItemCategory, MyStringId>
+        {
+            { ItemCategory.Component, StrCategoryComponent },
+            { ItemCategory.Tool, StrCategoryTool },
+            { ItemCategory.PlayerWeapon, StrCategoryPlayerWeapon },
+            { ItemCategory.PlayerAmmo, StrCategoryPlayerAmmo },
+            { ItemCategory.BlockAmmo, StrCategoryBlockAmmo },
+            { ItemCategory.Ingot, StrCategoryIngot },
+            { ItemCategory.Ore, StrCategoryOre },
+            { ItemCategory.Other, StrCategoryOther },
+        };
+
+        static void ItemListContent(IMyTerminalBlock b, List<MyTerminalControlListBoxItem> items, List<MyTerminalControlListBoxItem> selected)
+        {
+            var l = GetBlock(b);
+            if (l == null) return;
+            var used = l.Terminal_QuotaKeys;
+            var catalog = AutomataSession.itemCatalog;
+            for (int i = 0; i < catalog.Count; i++)
+            {
+                var data = catalog[i];
+                if (used.Contains(data.Key)) continue;
+                MyStringId nameId;
+                string name = CategoryNames.TryGetValue(data.Category, out nameId) ? Loc.T(nameId) : null;
+                var item = new MyTerminalControlListBoxItem(MyStringId.GetOrCompute(QuotaEntry.Format(data.Key, 0, 0)),
+                                                            MyStringId.GetOrCompute(data.DisplayName + " (" + name + ")"), data.Key);
+                items.Add(item);
+                if (data.Key == l.Terminal_SelectedItem) selected.Add(item);
+            }
+        }
+
+        static void QuotaListContent(IMyTerminalBlock b, List<MyTerminalControlListBoxItem> items, List<MyTerminalControlListBoxItem> selected)
+        {
+            var l = GetBlock(b);
+            if (l == null) return;
+            var quotas = l.Terminal_Quotas;
+            for (int i = 0; i < quotas.Count; i++)
+            {
+                var text = MyStringId.GetOrCompute(quotas[i]);
+                var item = new MyTerminalControlListBoxItem(text, text, i);
+                items.Add(item);
+                if (i == l.Terminal_SelectedQuota) selected.Add(item);
             }
         }
     }

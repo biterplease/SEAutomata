@@ -6,25 +6,88 @@ using Sandbox.Definitions;
 using Sandbox.ModAPI;
 using Sandbox.ModAPI.Interfaces;
 using SpaceEngineers.Game.ModAPI;
+using VRage.Game;
 using VRage.Game.ModAPI;
 using VRage.ModAPI;
 using VRageMath;
 
 using Automata.Util;
 using Automata.Util.Logging;
+using VRage.Utils;
 
 namespace Automata.Drone
 {
     // Docking, sleep/wake, pre-flight, power and load monitoring, and player-facing reporting (terminal + LCD).
     public partial class DroneControllerBlock
     {
+        #region UI strings
+        private static readonly MyStringId StrOccupiedBy = MyStringId.GetOrCompute("occupied by {0}");
+        private static readonly MyStringId StrAnotherGrid = MyStringId.GetOrCompute("another grid");
+        private static readonly MyStringId StrHeadingAlternative = MyStringId.GetOrCompute(" || heading +{0}°: {1}");
+        private static readonly MyStringId StrDroneConnectorOff = MyStringId.GetOrCompute("drone connector {0} off / unpowered");
+        private static readonly MyStringId StrOwnersNotFriendly = MyStringId.GetOrCompute("owners not friendly ({0})");
+        private static readonly MyStringId StrInUseByDrone = MyStringId.GetOrCompute("in use by drone {0}");
+        private static readonly MyStringId StrState = MyStringId.GetOrCompute("State: {0}");
+        private static readonly MyStringId StrInit = MyStringId.GetOrCompute("Init");
+        private static readonly MyStringId StrNavigating = MyStringId.GetOrCompute("Navigating");
+        private static readonly MyStringId StrLoading = MyStringId.GetOrCompute("Loading");
+        private static readonly MyStringId StrReturning = MyStringId.GetOrCompute("Returning");
+        private static readonly MyStringId StrAligning = MyStringId.GetOrCompute("Aligning");
+        private static readonly MyStringId StrRefueling = MyStringId.GetOrCompute("Refueling");
+        private static readonly MyStringId StrRecharging = MyStringId.GetOrCompute("Recharging");
+        private static readonly MyStringId StrWarningDockingTiltsTheDrone = MyStringId.GetOrCompute("Warning: docking tilts the drone {0:F0}°");
+        private static readonly MyStringId StrHomeSetDockingPoseRecorded = MyStringId.GetOrCompute("Home set: {0} (docking pose recorded)");
+        private static readonly MyStringId StrHomeNoHomeConnectorSet = MyStringId.GetOrCompute("Home: no home connector set / in range");
+        private static readonly MyStringId StrHomeIsNotWorking = MyStringId.GetOrCompute("Home: {0} is not working");
+        private static readonly MyStringId StrHomeAlreadyDocked = MyStringId.GetOrCompute("Home: already docked");
+        private static readonly MyStringId StrHomeIsOccupied = MyStringId.GetOrCompute("Home: {0} is occupied");
+        private static readonly MyStringId StrHomeNoUsableDroneConnector = MyStringId.GetOrCompute("Home: no usable drone connector");
+        private static readonly MyStringId StrGoingHomeM = MyStringId.GetOrCompute("Going home: {0} ({1:F0} m)");
+        private static readonly MyStringId StrDockIsNotWorking = MyStringId.GetOrCompute("Dock: {0} is not working");
+        private static readonly MyStringId StrDockIsOccupied = MyStringId.GetOrCompute("Dock: {0} is occupied");
+        private static readonly MyStringId StrDockNoUsableDroneConnector = MyStringId.GetOrCompute("Dock: no usable drone connector");
+        private static readonly MyStringId StrDockingAtM = MyStringId.GetOrCompute("Docking at {0} ({1:F0} m)");
+        private static readonly MyStringId StrDockNeedsPGravityAlign = MyStringId.GetOrCompute("Dock: {0} needs {1} (P-Gravity align limits): not docking");
+        private static readonly MyStringId StrDockNoWayInCorrectedPose = MyStringId.GetOrCompute("Dock: no way in to {0}: the straight approach is blocked by {1}, and no corridor ({2})");
+        private static readonly MyStringId StrDockNoRouteTo = MyStringId.GetOrCompute("Dock: no route to {0}");
+        private static readonly MyStringId StrDockOrderRefused = MyStringId.GetOrCompute("Dock: order refused");
+        private static readonly MyStringId StrDockingAbortedDroneConnectorMissing = MyStringId.GetOrCompute("Docking aborted: drone connector missing");
+        private static readonly MyStringId StrDocking = MyStringId.GetOrCompute("Docking");
+        private static readonly MyStringId StrDockingFailedConnectorDidNot = MyStringId.GetOrCompute("Docking failed: connector did not lock ({0})");
+        private static readonly MyStringId StrDockNoWayInStraightBlocked = MyStringId.GetOrCompute("Dock: no way in to {0} with the corrected pose");
+        private static readonly MyStringId StrTargetConnectorGone = MyStringId.GetOrCompute("target connector gone");
+        private static readonly MyStringId StrTargetConnectorOffUnpowered = MyStringId.GetOrCompute("target connector off / unpowered");
+        private static readonly MyStringId StrGapMAlongAcrossAxes = MyStringId.GetOrCompute("gap {0:F2} m (along {1:F2}, across {2:F2}), axes {3:F0}° off, status {4} / {5}, {6} / {7}");
+        private static readonly MyStringId StrDockedAt = MyStringId.GetOrCompute("Docked at {0}");
+        private static readonly MyStringId StrHome = MyStringId.GetOrCompute("home");
+        private static readonly MyStringId StrRechargingBatteries = MyStringId.GetOrCompute("Recharging batteries ({0}%)");
+        private static readonly MyStringId StrRefuelingHydrogen = MyStringId.GetOrCompute("Refueling hydrogen ({0}%)");
+        private static readonly MyStringId StrPreFlightThrustersOn = MyStringId.GetOrCompute("Pre-flight: {0} thruster(s) that were off switched on");
+        private static readonly MyStringId StrPreFlightNoWorkingGyroscope = MyStringId.GetOrCompute("Pre-flight: no working gyroscope ({0} damaged, {1} without power): it can't turn");
+        private static readonly MyStringId StrPreFlightNoSensorOn = MyStringId.GetOrCompute("Pre-flight: no sensor on ({0} fitted): obstacles only seen ahead of {1} working camera(s)");
+        private static readonly MyStringId StrNoBatteryOrPowerProducer = MyStringId.GetOrCompute("no battery or power producer of its own");
+        private static readonly MyStringId StrBatteriesStuckOnRecharge = MyStringId.GetOrCompute("batteries stuck on Recharge");
+        private static readonly MyStringId StrBatteriesEmpty = MyStringId.GetOrCompute("batteries empty");
+        private static readonly MyStringId StrBatteriesSwitchedOff = MyStringId.GetOrCompute("batteries switched off");
+        private static readonly MyStringId StrPreFlightStayingDocked = MyStringId.GetOrCompute("Pre-flight: {0}: staying docked");
+        private static readonly MyStringId StrPreFlightKgLoad = MyStringId.GetOrCompute("Pre-flight: {0:N0} kg, load {1:F0}%");
+        private static readonly MyStringId StrBatteryLowRecharging = MyStringId.GetOrCompute("Battery low ({0}% < {1:F0}%), recharging");
+        private static readonly MyStringId StrBatteryRecharged = MyStringId.GetOrCompute("Battery recharged ({0}%)");
+        private static readonly MyStringId StrHydrogenLowRefueling = MyStringId.GetOrCompute("Hydrogen low ({0}% < {1:F0}%), refueling");
+        private static readonly MyStringId StrHydrogenRefueled = MyStringId.GetOrCompute("Hydrogen refueled ({0}%)");
+        private static readonly MyStringId StrMaxLoadExceededOffloading = MyStringId.GetOrCompute("Max load exceeded ({0:F0}% > {1:F0}%), offloading");
+        private static readonly MyStringId StrMaxLoadReachedOf = MyStringId.GetOrCompute("Max load reached ({0:F0}% of {1:F0}%)");
+        #endregion
+
         private const double DOCK_APPROACH_DISTANCE = 10.0;   // m: straight final approach along the home connector's axis (at least)
         // Long drones: their own length + 2.5 m, so they turn clear of the connector's grid
         private double DockApproachDistance { get { return Math.Max(DOCK_APPROACH_DISTANCE, ManoeuvreDistance()); } }
+        #region Timing
         private const int DOCK_TIMEOUT_TICKS = 1800;          // 30 s on top of the final approach time without locking
-        private const float DOCK_LINE_TOLERANCE = 0.25f;      // m: approach point and approach line tolerance when docking
         private const int PREFLIGHT_WAKE_TICKS = 30;          // let woken thrusters come online before releasing
         private const int PREFLIGHT_SETTLE_TICKS = 3;         // after release, before the mass is measured
+        #endregion
+        private const float DOCK_LINE_TOLERANCE = 0.25f;      // m: approach point and approach line tolerance when docking
         private const double SPACE_REFERENCE_ACCEL = 0.981;   // m/s²: "100% load" in space = weakest group gives 0.1 g
         private const double LOAD_EXCEEDED_MARGIN = 5.0;      // percentage points above the limit = exceeded
         private const double LOAD_HYSTERESIS = 2.0;
@@ -38,6 +101,72 @@ namespace Automata.Drone
         private bool IsGoingHome { get { return dockingHomeId != 0 && settings != null && dockingHomeId == settings.HomeConnectorId; } }
         private long dockingConnectorId;     // drone connector used
         private int dockingWaitTicks;
+
+        // Connectors drones are docking at / docked to (server). Validated when read: a claim holds while its drone is
+        // still on the way to that connector or docked there, so nothing has to release it.
+        private static readonly Dictionary<long, DroneControllerBlock> dockClaims = new Dictionary<long, DroneControllerBlock>();
+
+        private void ClaimConnector(long connectorId)
+        {
+            dockClaims[connectorId] = this;
+        }
+
+        /// <summary>Another drone docking at / docked to this connector, or null.</summary>
+        private DroneControllerBlock ConnectorClaimant(long connectorId)
+        {
+            DroneControllerBlock d;
+            if (!dockClaims.TryGetValue(connectorId, out d) || d == this) return null;
+            if (d == null || d.Entity == null || d.Entity.MarkedForClose || d.Entity.Closed
+                || !(d.dockingHomeId == connectorId || d.IsDockedAt(connectorId)))
+            {
+                dockClaims.Remove(connectorId);
+                return null;
+            }
+            return d;
+        }
+
+        private static readonly List<long> claimBuffer = new List<long>();
+        private void ReleaseConnectorClaims()
+        {
+            claimBuffer.Clear();
+            foreach (var kv in dockClaims) if (kv.Value == this) claimBuffer.Add(kv.Key);
+            for (int i = 0; i < claimBuffer.Count; i++) dockClaims.Remove(claimBuffer[i]);
+            claimBuffer.Clear();
+        }
+
+        /// <summary>Small connectors are usable by these behaviour profiles only (TODO/14); others need a standard one.</summary>
+        private bool SmallConnectorsAllowed
+        {
+            get
+            {
+                var p = settings != null ? settings.BehaviourProfile : BehaviourProfile.None;
+                return p == BehaviourProfile.IsCombatDrone || p == BehaviourProfile.IsOreScout || p == BehaviourProfile.IsOreHauler;
+            }
+        }
+
+        /// <summary>The faces (controller frame) of the drone's usable connectors of one size, for bids (TODO/14).</summary>
+        private List<byte> DockFaces(bool small = false)
+        {
+            var faces = new List<byte>();
+            for (int i = 0; i < connectorMounts.Count; i++)
+            {
+                var m = connectorMounts[i];
+                if (m.Block == null || !m.Block.IsFunctional || !m.CanConnect || m.SmallConnector != small) continue;
+                byte f = (byte)Base6Directions.GetClosestDirection((Vector3)m.LocalForward);
+                if (!faces.Contains(f)) faces.Add(f);
+            }
+            return faces;
+        }
+
+        /// <summary>Why this drone can't dock at the connector right now (another drone's, or another ship's), or null.</summary>
+        private string ConnectorBusy(IMyShipConnector target)
+        {
+            var other = ConnectorClaimant(target.EntityId);
+            if (other != null) return Loc.F(StrInUseByDrone, other.Entity.EntityId);
+            if (target.IsConnected && target.OtherConnector != null && FindConnectorMount(target.OtherConnector.EntityId) < 0)
+                return Loc.F(StrOccupiedBy, target.OtherConnector.CubeGrid != null ? target.OtherConnector.CubeGrid.DisplayName : Loc.T(StrAnotherGrid));
+            return null;
+        }
         private FlightOrder dockingOrder;    // the final (connector) order; legs before it go around the observation area
         private readonly List<Vector3D> dockRoutePoints = new List<Vector3D>();
         private readonly List<FlightOrder> dockLegs = new List<FlightOrder>();
@@ -51,7 +180,9 @@ namespace Automata.Drone
         private int batteryPercent = -1, h2Percent = -1;   // -1 = no batteries / tanks
         private int lastPowerCheckFrame;
         private int lastAutoHomeFrame = int.MinValue / 2;
+        #region Timing
         private const int AUTO_HOME_RETRY_TICKS = 30 * 60;
+        #endregion
         private int loadLevel;               // 0 ok, 1 reached, 2 exceeded
         private double lastMaxMassGravity, lastMaxMassSpace;
 
@@ -60,10 +191,16 @@ namespace Automata.Drone
         /// Player-facing log line: terminal custom info and tagged LCDs. Keep it to events (orders, state
         /// changes, thresholds) - nothing that fires every tick.
         /// </summary>
-        private void Report(string format, params object[] args)
+        private void Report(MyStringId format, params object[] args)
+        {
+            if (!IsServer) return;
+            Report(args != null && args.Length > 0 ? Loc.F(format, args) : Loc.T(format));
+        }
+
+        /// <summary>A log line already in the player's language.</summary>
+        private void Report(string text)
         {
             if (!IsServer) return;   // simulation runs on the server; clients get these lines relayed
-            string text = args != null && args.Length > 0 ? string.Format(format, args) : format;
             terminalLogger?.Echo(text);
             display.Add(text);
             Log.Debug("Drone {0}: {1}", Entity?.EntityId ?? 0, text);
@@ -71,9 +208,9 @@ namespace Automata.Drone
         }
 
         // Local UI feedback (input validation before a request is sent). Never relayed.
-        private void Feedback(string format, params object[] args)
+        private void Feedback(MyStringId format, params object[] args)
         {
-            string text = args != null && args.Length > 0 ? string.Format(format, args) : format;
+            string text = args != null && args.Length > 0 ? Loc.F(format, args) : Loc.T(format);
             terminalLogger?.Echo(text);
         }
 
@@ -81,7 +218,7 @@ namespace Automata.Drone
         {
             if (state == currentState) return;
             currentState = state;
-            Report("State: {0}", StateLabel(state));
+            Report(StrState, StateLabel(state));
             display.SetHeader(StateLabel(state), batteryPercent, h2Percent);
         }
 
@@ -89,13 +226,13 @@ namespace Automata.Drone
         {
             switch (s)
             {
-                case State.Initializing:       return "Init";
-                case State.NavigatingToTarget: return "Navigating";
-                case State.LoadingInventory:   return "Loading";
-                case State.ReturningToBase:    return "Returning";
-                case State.AligningToHome:     return "Aligning";
-                case State.RefuelingHydrogen:  return "Refueling";
-                case State.RechargingBattery:  return "Recharging";
+                case State.Initializing:       return Loc.T(StrInit);
+                case State.NavigatingToTarget: return Loc.T(StrNavigating);
+                case State.LoadingInventory:   return Loc.T(StrLoading);
+                case State.ReturningToBase:    return Loc.T(StrReturning);
+                case State.AligningToHome:     return Loc.T(StrAligning);
+                case State.RefuelingHydrogen:  return Loc.T(StrRefueling);
+                case State.RechargingBattery:  return Loc.T(StrRecharging);
                 default:                       return s.ToString();
             }
         }
@@ -208,7 +345,7 @@ namespace Automata.Drone
             settings.HomeDockRecorded = false;
             SaveSettings();
             if (flightState.InGravity && MathHelperD.ToDegrees(tilt) > 30)
-                Report("Warning: docking tilts the drone {0:F0}°", MathHelperD.ToDegrees(tilt));
+                Report(StrWarningDockingTiltsTheDrone, MathHelperD.ToDegrees(tilt));
             return true;
         }
 
@@ -319,7 +456,7 @@ namespace Automata.Drone
                 settings.HomeDockRecorded = true;
                 homeConnector = null;
                 SaveSettings();
-                Report("Home set: {0} (docking pose recorded)", other.CustomName);
+                Report(StrHomeSetDockingPoseRecorded, other.CustomName);
                 return true;
             }
             return false;
@@ -334,21 +471,21 @@ namespace Automata.Drone
             if (!initialized || settings == null) return false;
             CaptureFlightState();
             var home = GetHomeConnector();
-            if (home == null) { Report("Home: no home connector set / in range"); return false; }
-            if (!home.IsWorking) { Report("Home: {0} is not working", home.CustomName); return false; }
+            if (home == null) { Report(StrHomeNoHomeConnectorSet); return false; }
+            if (!home.IsWorking) { Report(StrHomeIsNotWorking, home.CustomName); return false; }
             if (home.IsConnected)
             {
                 var other = home.OtherConnector;
                 bool ours = other != null && FindConnectorMount(other.EntityId) >= 0;
-                Report(ours ? "Home: already docked" : "Home: {0} is occupied", home.CustomName);
+                Report(ours ? StrHomeAlreadyDocked : StrHomeIsOccupied, home.CustomName);
                 return false;
             }
-            if (!EnsureDockPose(home, false)) { Report("Home: no usable drone connector"); return false; }
+            if (!EnsureDockPose(home, false)) { Report(StrHomeNoUsableDroneConnector); return false; }
             ResetRoute();
             int mi = FindConnectorMount(settings.HomeDockConnectorId);
             if (!StartDocking(home, mi, settings.HomeDockOffset, settings.HomeDockForward, settings.HomeDockUp)) return false;
             if (preflightStage == 0) SetState(State.ReturningToBase);
-            Report("Going home: {0} ({1:F0} m)", home.CustomName, Vector3D.Distance(flightState.Position, home.GetPosition()));
+            Report(StrGoingHomeM, home.CustomName, Vector3D.Distance(flightState.Position, home.GetPosition()));
             return true;
         }
 
@@ -360,21 +497,21 @@ namespace Automata.Drone
         {
             if (!initialized || settings == null || target == null) return false;
             CaptureFlightState();
-            if (!target.IsWorking) { Report("Dock: {0} is not working", target.CustomName); return false; }
+            if (!target.IsWorking) { Report(StrDockIsNotWorking, target.CustomName); return false; }
             if (target.IsConnected)
             {
                 var other = target.OtherConnector;
                 if (other != null && FindConnectorMount(other.EntityId) >= 0) return true;   // already there
-                Report("Dock: {0} is occupied", target.CustomName);
+                Report(StrDockIsOccupied, target.CustomName);
                 return false;
             }
             Vector3DData offset, forward, up;
             int mi;
             double tilt;
-            if (!ComputeDockPose(target, out offset, out forward, out up, out mi, out tilt)) { Report("Dock: no usable drone connector"); return false; }
+            if (!ComputeDockPose(target, out offset, out forward, out up, out mi, out tilt)) { Report(StrDockNoUsableDroneConnector); return false; }
             ResetRoute();
             if (!StartDocking(target, mi, offset, forward, up)) return false;
-            Report("Docking at {0} ({1:F0} m)", target.CustomName, Vector3D.Distance(flightState.Position, target.GetPosition()));
+            Report(StrDockingAtM, target.CustomName, Vector3D.Distance(flightState.Position, target.GetPosition()));
             return true;
         }
 
@@ -390,13 +527,81 @@ namespace Automata.Drone
             // Position the drone's connection point, not the controller: orientation errors then don't move
             // the connector off the line (the lever arm to the connector can be several metres).
             ToolMount mount = connectorMounts[mi];
-            MatrixD dockFrameLocal = MatrixD.CreateWorld(Vector3D.Zero, dockForward.ToVector3D(), dockUp.ToVector3D());
-            Vector3D connectorLocal = dockOffset.ToVector3D() + Vector3D.TransformNormal(mount.LocalPoint, dockFrameLocal);
-            Vector3D approachLocal = connectorLocal + WorldToAnchorDir(ref hm, aH) * DockApproachDistance;
-            // Room to turn to the docking attitude there (the hull about the drone connector): further out if not
+            // The dock frame is built in world space: the anchor coordinates (right, up, FORWARD) are mirrored against the
+            // game's (right, up, backward), so CreateWorld there flips Right and with it a side connector's offset (a drone
+            // docking on a Left connector aimed 2 x its offset, 7.6 m, beside the port)
             MatrixD dockFrame = MatrixD.CreateWorld(Vector3D.Zero, AnchorToWorldDir(ref hm, dockForward.ToVector3D()), AnchorToWorldDir(ref hm, dockUp.ToVector3D()));
+            // Align to P-Gravity: a connector the drone can only meet tilted past its pitch / roll limits is refused
+            string tiltNeed;
+            if (!WithinGravityLimits(ref dockFrame, out tiltNeed))
+            {
+                Report(StrDockNeedsPGravityAlign, target.CustomName, tiltNeed);
+                return false;
+            }
+            Vector3D connectorLocal = dockOffset.ToVector3D() + WorldToAnchorDir(ref hm, Vector3D.TransformNormal(mount.LocalPoint, dockFrame));
+            // The entry corridor (DroneControllerBlock.Corridor): from the slide's start out to where the drone can turn,
+            // holding the dock attitude, with the dock clearance (then the minimum one). Connectors meet at any of four
+            // headings about their axis: each one that keeps the drone as level is tried (a long drone fits a door
+            // lengthwise), unless the player recorded the home pose.
+            Vector3D p0World = AnchorToWorldPoint(ref hm, connectorLocal);
+            Vector3D gUp = flightState.InGravity ? flightState.GravityUp : Vector3D.Zero;
+            corridorIgnore = target;   // the connector itself is where the drone goes, not an obstacle
+            bool recorded = settings.HomeDockRecorded && target.EntityId == settings.HomeConnectorId;
+            double up0 = Vector3D.Dot(dockFrame.Up, gUp);
+            string corridorHow = null;
+            double corridorBerth = 0;
+            dockCorridor = false;
+            int heading = 0;
+            for (int k = 0; k < (recorded ? 1 : 4) && !dockCorridor; k++)
+            {
+                MatrixD turn = MatrixD.CreateFromAxisAngle(Vector3D.Normalize(aH), k * MathHelperD.PiOver2);
+                MatrixD frameK = MatrixD.CreateWorld(Vector3D.Zero, Vector3D.TransformNormal(dockFrame.Forward, turn), Vector3D.TransformNormal(dockFrame.Up, turn));
+                if (k > 0 && Vector3D.Dot(frameK.Up, gUp) < up0 - 0.05) continue;   // would tilt the drone (a side connector)
+                Vector3D p0HullK = p0World + Vector3D.TransformNormal(HullCentreLocal - mount.LocalPoint, frameK);
+                string howK;
+                double berthK;
+                if (FindCorridorAny(p0HullK, aH, ref frameK, ref hm, dockCorridorPts, out howK, out berthK))
+                {
+                    dockCorridor = true;
+                    corridorHow = howK;
+                    corridorBerth = berthK;
+                    heading = k;
+                    if (k > 0)
+                    {
+                        dockFrame = frameK;
+                        dockForward = Vector3DData.FromVector3D(WorldToAnchorDir(ref hm, frameK.Forward));
+                        dockUp = Vector3DData.FromVector3D(WorldToAnchorDir(ref hm, frameK.Up));
+                        dockOffset = Vector3DData.FromVector3D(connectorLocal - WorldToAnchorDir(ref hm, Vector3D.TransformNormal(mount.LocalPoint, frameK)));
+                    }
+                }
+                else corridorHow = corridorHow == null ? howK : corridorHow + Loc.F(StrHeadingAlternative, k * 90, howK);
+            }
             Vector3D hullFromConnector = Vector3D.TransformNormal(HullCentreLocal - mount.LocalPoint, dockFrame);
-            approachLocal = WorldToAnchorPoint(ref hm, WithTurnRoom(AnchorToWorldPoint(ref hm, approachLocal), aH, hullFromConnector));
+            Vector3D approachLocal;
+            if (dockCorridor)
+            {
+                approachLocal = connectorLocal + WorldToAnchorDir(ref hm, aH) * CORRIDOR_SLIDE;
+                Log.Debug("Drone {0}: dock corridor at {1}{2}: {3}", Entity.EntityId, target.CustomName,
+                          heading > 0 ? string.Format(" (heading turned {0}°)", heading * 90) : "", corridorHow);
+            }
+            else
+            {
+                // The old way: the approach point out along the axis, further out until there is room to turn there -
+                // only when that line is clear (it used to be flown through a hangar's roof)
+                approachLocal = connectorLocal + WorldToAnchorDir(ref hm, aH) * DockApproachDistance;
+                approachLocal = WorldToAnchorPoint(ref hm, WithTurnRoom(AnchorToWorldPoint(ref hm, approachLocal), aH, hullFromConnector, ref dockFrame));
+                string lineBlocker;
+                if (!ApproachLineClear(p0World + hullFromConnector, AnchorToWorldPoint(ref hm, approachLocal) + hullFromConnector, ref dockFrame, out lineBlocker))
+                {
+                    corridorIgnore = null;
+                    Report(StrDockNoWayInCorrectedPose, target.CustomName, lineBlocker, corridorHow);
+                    return false;
+                }
+                Log.Debug("Drone {0}: no dock corridor at {1} ({2}): approach point {3:F1} m out", Entity.EntityId, target.CustomName,
+                          corridorHow, Vector3D.Distance(approachLocal, connectorLocal));
+            }
+            corridorIgnore = null;
+            CorridorFlight(corridorBerth, out dockCorridorSpeed, out dockLineTol);
 
             // Stand-alone, going home: around the observation area, not through what the drone just built there.
             // Every stretch through the pathfinder (obstacles the drone sees, terrain).
@@ -404,31 +609,53 @@ namespace Automata.Drone
             bool areaDetour = settings.OperationMode == OperationMode.StandAlone && target.EntityId == settings.HomeConnectorId;
             // The route steers the hull centre; at the approach point, in the docking attitude, it sits here:
             Vector3D approachWorld = AnchorToWorldPoint(ref hm, approachLocal);
-            Vector3D hullAtApproach = approachWorld + hullFromConnector;
+            // ...or, with a corridor, the turn point at its outer end
+            Vector3D hullAtApproach = dockCorridor ? dockCorridorPts[0] : approachWorld + hullFromConnector;
             Vector3D start = HullCentreWorld;
             var docked = DockedConnector();
-            if (docked != null)
+            int backOuts = 0;
+            backOutSpeedCap = 0;
+            // Docked elsewhere: out of that dock first (straight out, or its corridor), then the route
+            if (docked != null) backOuts = DeparturePoints(docked, ref start, dockRoutePoints);
+            else ClimbOut(ref start, DroneRadius(), dockRoutePoints);   // in a bore hole: out of it first
+            // The 4th endpoint: the route ends up to 50 m out from the turn point; in from there at Approach speed
+            Vector3D staging = DockStagingPoint(hullAtApproach, dockCorridor ? corridorExitDir : aH);
+            bool staged = Vector3D.DistanceSquared(staging, hullAtApproach) > 4;
+            if (!PlanPath(start, staged ? staging : hullAtApproach, dockRoutePoints, areaDetour, false))
             {
-                // Docked elsewhere: straight out along that connector's axis first (known clear), then the route
-                start += docked.WorldMatrix.Forward * Math.Max(CONSTRUCTION_BACKOUT_MIN, DroneRadius() + CONSTRUCTION_CLEARANCE);
-                dockRoutePoints.Add(start);
-            }
-            if (!PlanPath(start, hullAtApproach, dockRoutePoints, areaDetour, false))
-            {
-                Report("Dock: no route to {0}", target.CustomName);
+                Report(StrDockNoRouteTo, target.CustomName);
                 return false;
+            }
+            if (staged)
+            {
+                dockRoutePoints.Add(staging);
+                Log.Debug("Drone {0}: docking staging point {1:F0} m out from the turn point", Entity.EntityId, Vector3D.Distance(staging, hullAtApproach));
             }
             // Legs anchored to the connector (moving bases) with the pathfinder's attitudes, a turn in place at the
             // approach point to the docking attitude, then the dock order (zero-length transit, straight in)
             dockLegs.Clear();
-            if (BuildHullLegs(target, ref hm, dockRoutePoints, docked != null ? 1 : 0, hullAtApproach, dockFrame.Forward, dockFrame.Up, dockLegs) == null)
+            if (BuildHullLegs(target, ref hm, dockRoutePoints, backOuts, hullAtApproach, dockFrame.Forward, dockFrame.Up, dockLegs) == null)
             {
-                Report("Dock: order refused");
+                Report(StrDockOrderRefused);
                 return false;
             }
             Log.Debug("Drone {0}: docking route, {1} waypoints", Entity.EntityId, dockRoutePoints.Count);
+            // Staging point -> turn point: Approach speed (the leg before the turn in place)
+            if (staged && dockLegs.Count >= 2) dockLegs[dockLegs.Count - 2].SpeedCap = ApproachSpeed;
             dockRoutePoints.Clear();
             dockLegs.Clear();
+            // The corridor: in the dock attitude, precise and slow, a full stop at each corner
+            dockCorridorLegs.Clear();
+            float slow = dockCorridorSpeed;
+            if (dockCorridor)
+                for (int i = 1; i < dockCorridorPts.Count; i++)
+                {
+                    FlightOrder leg = QueueGoTo(dockCorridorPts[i], Pathfinding.WaypointBehavior.FullStop, 0);
+                    leg.ReferenceOffset = Vector3DData.FromVector3D(HullCentreLocal);
+                    SetExplicitAttitude(leg, false, ref hm, dockFrame.Forward, dockFrame.Up);
+                    MakeCorridorLeg(leg, slow, dockLineTol);
+                    dockCorridorLegs.Add(leg);
+                }
             FlightOrder order = QueueGoTo(AnchorToWorldPoint(ref hm, connectorLocal), Pathfinding.WaypointBehavior.FullStop, 0);
             order.TargetLocal = Vector3DData.FromVector3D(connectorLocal);
             order.ApproachFromLocal = order.TransitStartLocal = Vector3DData.FromVector3D(approachLocal);
@@ -443,6 +670,13 @@ namespace Automata.Drone
             order.FinalSpeed = SafeSpeed;
             order.LineTolerance = DOCK_LINE_TOLERANCE;   // not WaypointTolerance: connectors need ~0.59 m
             order.ArrivalTolerance = 0.2f;
+            if (dockCorridor)
+            {
+                // The slide: short and slow, on a tight line
+                order.FinalSpeed = slow;
+                order.SpeedCap = slow;
+                order.LineTolerance = dockLineTol;
+            }
             dockingOrder = order;
             RememberDocking(target.EntityId, mi, dockOffset, dockForward, dockUp);
 
@@ -451,8 +685,11 @@ namespace Automata.Drone
                 EnsurePowerTransferOverride(droneConnector);
             }
             dockingHomeId = target.EntityId;   // the connector being docked at (home or not)
+            ClaimConnector(target.EntityId);
             dockingConnectorId = droneConnector != null ? droneConnector.EntityId : 0;
             dockingWaitTicks = 0;
+            dockStuckTicks = dockNudges = dockCorrections = 0;
+            dockPoseVerified = false;   // computed again once close (VerifyDockPose)
             return true;
         }
 
@@ -590,9 +827,12 @@ namespace Automata.Drone
 
             int mi = FindConnectorMount(dockingConnectorId);
             var c = mi >= 0 ? connectorMounts[mi].Block as IMyShipConnector : null;
-            if (c == null || c.Closed) { Report("Docking aborted: drone connector missing"); dockingHomeId = 0; return; }
+            if (c == null || c.Closed) { Report(StrDockingAbortedDroneConnectorMissing); dockingHomeId = 0; return; }
 
             bool final = o == dockingOrder;   // not the legs around the observation area
+            // With a corridor the pose is checked before the drone goes in (the corridor depends on it), not at its end
+            if (dockCorridor && !dockPoseVerified && !final && !dockCorridorLegs.Contains(o) && ReplanDockIfMoved()) return;
+            if (final && !dockPoseVerified) { VerifyDockPose(o, ref c); if (c == null) return; }
             if (final && o.Phase == FlightPhase.Approach && currentState != State.Docking) SetState(State.Docking);
             if (c.IsConnected)
             {
@@ -607,16 +847,254 @@ namespace Automata.Drone
             }
             if (final && o.Phase == FlightPhase.Approach)
             {
+                // On the dock pose and still no lock: say why once, then press in a little (0.25 m steps)
+                if (Vector3D.DistanceSquared(ReferencePoint(o), o.Target.ToVector3D()) < 0.36 && flightState.RelativeVelocity.LengthSquared() < 0.01)
+                {
+                    dockStuckTicks += 10;
+                    if (dockStuckTicks >= DOCK_NUDGE_TICKS && dockNudges < DOCK_NUDGES_MAX)
+                    {
+                        if (dockNudges == 0 && dockCorrections == 0)
+                            Log.Debug("Drone {0}: on the dock pose, no lock: {1}; {2}", Entity.EntityId, DockFailDetail(c), DockPoseDetail(o, c));
+                        if (!CorrectDock(o, c)) NudgeDock(o);
+                    }
+                }
                 // Time allowed: the final approach at Safe speed, plus the timeout
                 dockingWaitTicks += 10;
-                int limit = (int)(DockApproachDistance / SafeSpeed * 60) + DOCK_TIMEOUT_TICKS;
+                int limit = (int)((dockCorridor ? CORRIDOR_SLIDE : DockApproachDistance) / SafeSpeed * 60) + DOCK_TIMEOUT_TICKS;
                 if (dockingWaitTicks >= limit)
                 {
-                    Report("Docking failed: connector did not lock");
+                    NoteSpeedTimeout(Loc.T(StrDocking));
+                    Report(StrDockingFailedConnectorDidNot, DockFailDetail(c));
                     ClearFlightOrder();
                     SetState(State.Standby);
                 }
             }
+        }
+
+        #region Timing
+        private const int DOCK_NUDGE_TICKS = 180;             // on the dock pose this long without a lock: press in
+        #endregion
+        private const int DOCK_NUDGES_MAX = 3;
+        private const double DOCK_NUDGE_STEP = 0.25;          // m along the target connector's axis
+        private int dockStuckTicks, dockNudges;
+
+        private const double DOCK_VERIFY_DISTANCE = 40;   // m: the pose is computed again this close (the full model is loaded)
+        private bool dockPoseVerified;
+
+        /// <summary>
+        /// The dock pose is computed when the order is given, often from far away, where the target connector's model may
+        /// lack its "connector" dummy (a far LOD): the fallback axis can be wrong, and the pose with it (a side connector
+        /// picked for a floor port, the target 7.5 m off). Once close, it is computed again from the live geometry; a
+        /// different mount or pose updates the dock order in place (back to the approach point when it changed).
+        /// </summary>
+        private void VerifyDockPose(FlightOrder o, ref IMyShipConnector c)
+        {
+            IMyEntity e;
+            var target = MyAPIGateway.Entities.TryGetEntityById(dockingHomeId, out e) ? e as IMyShipConnector : null;
+            if (target == null) { dockPoseVerified = true; return; }
+            // A home pose the player recorded ("Set current as home") is what it is
+            if (settings.HomeDockRecorded && dockingHomeId == settings.HomeConnectorId) { dockPoseVerified = true; return; }
+            if (Vector3D.DistanceSquared(HullCentreWorld, target.GetPosition()) > DOCK_VERIFY_DISTANCE * DOCK_VERIFY_DISTANCE) return;
+            dockPoseVerified = true;
+            Vector3DData offset, forward, up;
+            int mi;
+            double tilt;
+            if (!ComputeDockPose(target, out offset, out forward, out up, out mi, out tilt)) return;
+            var mount = connectorMounts[mi];
+            MatrixD hm = target.WorldMatrix;
+            MatrixD frameWorld = MatrixD.CreateWorld(Vector3D.Zero, AnchorToWorldDir(ref hm, forward.ToVector3D()), AnchorToWorldDir(ref hm, up.ToVector3D()));
+            Vector3D connectorLocal = offset.ToVector3D() + WorldToAnchorDir(ref hm, Vector3D.TransformNormal(mount.LocalPoint, frameWorld));
+            double moved = Vector3D.Distance(connectorLocal, o.TargetLocal.ToVector3D());
+            double turned = MathHelperD.ToDegrees(Math.Acos(MathHelperD.Clamp(Vector3D.Dot(forward.ToVector3D(), o.ForwardLocal.ToVector3D()), -1, 1)));
+            bool sameMount = mount.Block != null && mount.Block.EntityId == dockingConnectorId;
+            if (sameMount && moved < 0.2 && turned < 2) return;
+            Vector3D pH, aH;
+            ConnectorGeometry(target, out pH, out aH);
+            Vector3D approachLocal;
+            if (dockCorridor)
+            {
+                // At the end of the corridor: only a small correction fits (no turning, no other connector); the heading
+                // the corridor was planned with is kept
+                double turnedFree = HeadingFreeTurn(forward.ToVector3D(), up.ToVector3D(), o.ForwardLocal.ToVector3D(), o.UpLocal.ToVector3D());
+                if (!sameMount || turnedFree > 3 || moved > 0.5)
+                {
+                    Log.Debug("Drone {0}: dock pose re-computed in the corridor of {1}: {2:F2} m / {3:F0}° off, mount {4} -> {5}: kept the planned one",
+                              Entity.EntityId, target.CustomName, moved, turned, FindConnectorMount(dockingConnectorId), mi);
+                    return;
+                }
+                approachLocal = connectorLocal + WorldToAnchorDir(ref hm, aH) * CORRIDOR_SLIDE;
+                forward = o.ForwardLocal;
+                up = o.UpLocal;
+                MatrixD planned = MatrixD.CreateWorld(Vector3D.Zero, AnchorToWorldDir(ref hm, forward.ToVector3D()), AnchorToWorldDir(ref hm, up.ToVector3D()));
+                offset = Vector3DData.FromVector3D(connectorLocal - WorldToAnchorDir(ref hm, Vector3D.TransformNormal(mount.LocalPoint, planned)));
+            }
+            else
+            {
+                approachLocal = connectorLocal + WorldToAnchorDir(ref hm, aH) * DockApproachDistance;
+                Vector3D hullFromConnector = Vector3D.TransformNormal(HullCentreLocal - mount.LocalPoint, frameWorld);
+                approachLocal = WorldToAnchorPoint(ref hm, WithTurnRoom(AnchorToWorldPoint(ref hm, approachLocal), aH, hullFromConnector, ref frameWorld));
+            }
+            Log.Debug("Drone {0}: dock pose re-computed close to {1}: target {2:F2} m off, attitude {3:F0}° off, mount {4} -> {5}",
+                      Entity.EntityId, target.CustomName, moved, turned, FindConnectorMount(dockingConnectorId), mi);
+            o.TargetLocal = Vector3DData.FromVector3D(connectorLocal);
+            o.ApproachFromLocal = Vector3DData.FromVector3D(approachLocal);
+            o.ReferenceOffset = Vector3DData.FromVector3D(mount.LocalPoint);
+            o.ForwardLocal = forward;
+            o.UpLocal = up;
+            if (o.Phase != FlightPhase.Transit && o.Phase != FlightPhase.MatchSpeed)
+            {
+                o.Phase = FlightPhase.Transit;   // to the new approach point from here, then straight in
+                o.TransitStartLocal = Vector3DData.FromVector3D(WorldToAnchorPoint(ref hm, ReferencePoint(o)));
+                o.Captured = false;
+            }
+            o.Arrived = false;
+            RefreshAnchoredOrder(o);
+            RememberDocking(target.EntityId, mi, offset, forward, up);
+            if (!sameMount)
+            {
+                SetConnectorsPower(0);
+                dockingConnectorId = mount.Block.EntityId;
+                var dc = mount.Block as IMyShipConnector;
+                if (dc != null) EnsurePowerTransferOverride(dc);
+                c = dc;
+            }
+            dockingWaitTicks = 0;
+            dockStuckTicks = dockNudges = dockCorrections = 0;
+            taskProgressFrame = MyAPIGateway.Session.GameplayFrameCounter;
+            watchedOrder = null;
+        }
+
+        /// <summary>
+        /// Corridor docking, on the way in (route legs), once within DOCK_VERIFY_DISTANCE: the dock pose computed again
+        /// from the live geometry (far LODs can give a wrong one). Changed: the whole docking is planned again from here,
+        /// corridor included (true). Unchanged / too far / recorded home pose: false.
+        /// </summary>
+        private bool ReplanDockIfMoved()
+        {
+            IMyEntity e;
+            var target = MyAPIGateway.Entities.TryGetEntityById(dockingHomeId, out e) ? e as IMyShipConnector : null;
+            var o = dockingOrder;
+            if (target == null || o == null) { dockPoseVerified = true; return false; }
+            if (settings.HomeDockRecorded && dockingHomeId == settings.HomeConnectorId) { dockPoseVerified = true; return false; }
+            if (Vector3D.DistanceSquared(HullCentreWorld, target.GetPosition()) > DOCK_VERIFY_DISTANCE * DOCK_VERIFY_DISTANCE) return false;
+            dockPoseVerified = true;
+            Vector3DData offset, forward, up;
+            int mi;
+            double tilt;
+            if (!ComputeDockPose(target, out offset, out forward, out up, out mi, out tilt)) return false;
+            var mount = connectorMounts[mi];
+            MatrixD hm = target.WorldMatrix;
+            MatrixD frameWorld = MatrixD.CreateWorld(Vector3D.Zero, AnchorToWorldDir(ref hm, forward.ToVector3D()), AnchorToWorldDir(ref hm, up.ToVector3D()));
+            Vector3D connectorLocal = offset.ToVector3D() + WorldToAnchorDir(ref hm, Vector3D.TransformNormal(mount.LocalPoint, frameWorld));
+            double moved = Vector3D.Distance(connectorLocal, o.TargetLocal.ToVector3D());
+            // Connectors meet at any of four headings about their axis (the corridor may have picked another)
+            double turned = HeadingFreeTurn(forward.ToVector3D(), up.ToVector3D(), o.ForwardLocal.ToVector3D(), o.UpLocal.ToVector3D());
+            bool sameMount = mount.Block != null && mount.Block.EntityId == dockingConnectorId;
+            if (sameMount && moved < 0.1 && turned < 1) return false;
+            Log.Debug("Drone {0}: dock pose re-computed close to {1} before its corridor: {2:F2} m / {3:F0}° off, mount {4} -> {5}: planned again",
+                      Entity.EntityId, target.CustomName, moved, turned, FindConnectorMount(dockingConnectorId), mi);
+            ResetRoute();
+            if (!StartDocking(target, mi, offset, forward, up))
+            {
+                Report(StrDockNoWayInStraightBlocked, target.CustomName);
+                ClearFlightOrder();
+                SetState(State.Standby);
+                return true;
+            }
+            dockPoseVerified = true;
+            return true;
+        }
+
+        // Degrees between two dock attitudes (anchor frame); with the same up, quarter turns about it don't count
+        private static double HeadingFreeTurn(Vector3D fwdA, Vector3D upA, Vector3D fwdB, Vector3D upB)
+        {
+            double turned = MathHelperD.ToDegrees(Math.Acos(MathHelperD.Clamp(Vector3D.Dot(fwdA, fwdB), -1, 1)));
+            if (Vector3D.Dot(upA, upB) < 0.99) return turned;
+            double m = turned % 90;
+            return Math.Min(m, 90 - m);
+        }
+
+        private const int DOCK_CORRECTIONS_MAX = 2;
+        private const double DOCK_CORRECT_MIN = 0.3;    // m: a measured gap above this is flown off first
+        private int dockCorrections;
+
+        // On the pose, still apart: move the target by the gap the game's own geometry shows between the two connection
+        // points (whatever made the pose wrong: a model seen from afar, a stale mount), then try again
+        private bool CorrectDock(FlightOrder o, IMyShipConnector c)
+        {
+            if (dockCorrections >= DOCK_CORRECTIONS_MAX) return false;
+            IMyEntity e;
+            var target = MyAPIGateway.Entities.TryGetEntityById(dockingHomeId, out e) ? e as IMyShipConnector : null;
+            if (target == null) return false;
+            Vector3D pd, ad, pt, at;
+            ConnectorGeometry(c, out pd, out ad);
+            ConnectorGeometry(target, out pt, out at);
+            Vector3D gap = pt - pd;
+            if (gap.Length() < DOCK_CORRECT_MIN) return false;
+            dockCorrections++;
+            dockStuckTicks = 0;
+            dockingWaitTicks = 0;                                         // the time allowed starts again
+            taskProgressFrame = MyAPIGateway.Session.GameplayFrameCounter; // and the job's stall clock
+            watchedOrder = null;
+            MatrixD hm = target.WorldMatrix;
+            o.TargetLocal = Vector3DData.FromVector3D(o.TargetLocal.ToVector3D() + WorldToAnchorDir(ref hm, gap));
+            o.Arrived = false;
+            RefreshAnchoredOrder(o);
+            Log.Debug("Drone {0}: dock correction {1}/{2}: target moved {3:F2} m (measured gap between the connection points)",
+                      Entity.EntityId, dockCorrections, DOCK_CORRECTIONS_MAX, gap.Length());
+            return true;
+        }
+
+        // Where the error is: the order's reference point vs the drone connector's live connection point (stale mount),
+        // the order's target vs the target connector's live connection point (wrong pose)
+        private string DockPoseDetail(FlightOrder o, IMyShipConnector c)
+        {
+            IMyEntity e;
+            var target = MyAPIGateway.Entities.TryGetEntityById(dockingHomeId, out e) ? e as IMyShipConnector : null;
+            if (target == null) return "";
+            Vector3D pd, ad, pt, at;
+            ConnectorGeometry(c, out pd, out ad);
+            ConnectorGeometry(target, out pt, out at);
+            int mi = FindConnectorMount(c.EntityId);
+            return string.Format("reference vs drone connector {0:F2} m, order target vs target connector {1:F2} m, mount {2} facing {3}",
+                Vector3D.Distance(ReferencePoint(o), pd), Vector3D.Distance(o.Target.ToVector3D(), pt), mi,
+                mi >= 0 ? Base6Directions.GetClosestDirection((Vector3)connectorMounts[mi].LocalForward).ToString() : "?");
+        }
+
+        private void NudgeDock(FlightOrder o)
+        {
+            IMyEntity e;
+            var target = MyAPIGateway.Entities.TryGetEntityById(dockingHomeId, out e) ? e as IMyShipConnector : null;
+            dockStuckTicks = 0;
+            dockNudges++;
+            if (target == null) return;
+            Vector3D p, a;
+            ConnectorGeometry(target, out p, out a);
+            MatrixD hm = target.WorldMatrix;
+            o.TargetLocal = Vector3DData.FromVector3D(o.TargetLocal.ToVector3D() - WorldToAnchorDir(ref hm, a) * DOCK_NUDGE_STEP);
+            o.Arrived = false;
+            RefreshAnchoredOrder(o);
+            Log.Debug("Drone {0}: dock nudge {1}/{2}: {3:F2} m into {4}", Entity.EntityId, dockNudges, DOCK_NUDGES_MAX, dockNudges * DOCK_NUDGE_STEP, target.CustomName);
+        }
+
+        // Why two connectors on the dock pose don't lock: power, owners, or the geometry (gap / axes) as the game sees it
+        private string DockFailDetail(IMyShipConnector c)
+        {
+            IMyEntity e;
+            var target = MyAPIGateway.Entities.TryGetEntityById(dockingHomeId, out e) ? e as IMyShipConnector : null;
+            if (target == null || target.Closed) return Loc.T(StrTargetConnectorGone);
+            if (!c.Enabled || !c.IsWorking) return Loc.F(StrDroneConnectorOff, c.CustomName);
+            if (!target.Enabled || !target.IsWorking) return Loc.T(StrTargetConnectorOffUnpowered);
+            var rel = target.GetUserRelationToOwner(c.OwnerId);
+            if (rel == MyRelationsBetweenPlayerAndBlock.Enemies || rel == MyRelationsBetweenPlayerAndBlock.Neutral)
+                return Loc.F(StrOwnersNotFriendly, rel);
+            Vector3D pd, ad, pt, at;
+            ConnectorGeometry(c, out pd, out ad);
+            ConnectorGeometry(target, out pt, out at);
+            double angle = MathHelperD.ToDegrees(Math.Acos(MathHelperD.Clamp(-Vector3D.Dot(ad, at), -1, 1)));
+            return Loc.F(StrGapMAlongAcrossAxes,
+                Vector3D.Distance(pd, pt), Vector3D.Dot(pd - pt, at), ((pd - pt) - at * Vector3D.Dot(pd - pt, at)).Length(), angle,
+                c.Status, target.Status, c.BlockDefinition.SubtypeId, target.BlockDefinition.SubtypeId);
         }
 
         private void OnDocked(IMyShipConnector c)
@@ -630,9 +1108,9 @@ namespace Automata.Drone
             if (settings.AlwaysRefuelWhenDocked || needsBatteryRecharge || needsHydrogenRefuel) StartRefuel();
             isParked = true;
             SetState(State.Docked);
-            Report("Docked at {0}", c.OtherConnector != null ? c.OtherConnector.CustomName : "home");
-            if (needsBatteryRecharge) Report("Recharging batteries ({0}%)", batteryPercent);
-            if (needsHydrogenRefuel) Report("Refueling hydrogen ({0}%)", h2Percent);
+            Report(StrDockedAt, c.OtherConnector != null ? c.OtherConnector.CustomName : Loc.T(StrHome));
+            if (needsBatteryRecharge) Report(StrRechargingBatteries, batteryPercent);
+            if (needsHydrogenRefuel) Report(StrRefuelingHydrogen, h2Percent);
             SaveSettings();
         }
 
@@ -648,6 +1126,41 @@ namespace Automata.Drone
         #endregion
 
         #region Sleep / wake / pre-flight
+        /// <summary>
+        /// Pre-flight: gyroscopes it can't turn without. Functional ones switched off (by hand, or left off) go back on;
+        /// what still doesn't work (no power, damaged) is logged, and reported when none works.
+        /// </summary>
+        private void CheckFlightSystems()
+        {
+            int working = 0, switchedOn = 0, damaged = 0, unpowered = 0;
+            for (int i = 0; i < gyroscopes.Count; i++)
+            {
+                var gy = gyroscopes[i].Gyro;
+                if (gy == null || gy.Closed) continue;
+                if (!gy.IsFunctional) { damaged++; continue; }
+                if (!gy.Enabled) { gy.Enabled = true; switchedOn++; }
+                if (gy.IsWorking) working++; else unpowered++;
+            }
+            int thrustersWorking = 0, thrustersTotal = 0, thrustersOn = 0;
+            for (int d = 0; d < 6; d++)
+                for (int i = 0; i < allThrusters[d].Count; i++)
+                {
+                    var t = allThrusters[d][i];
+                    thrustersTotal++;
+                    // Functional but switched off (by hand, or left off): a managed drone flies on all of them
+                    if (t.IsFunctional && !t.Enabled) { t.Enabled = true; thrustersOn++; }
+                    if (t.IsWorking) thrustersWorking++;
+                }
+            if (thrustersOn > 0) Report(StrPreFlightThrustersOn, thrustersOn);
+            Log.Debug("Drone {0}: pre-flight systems: gyros {1}/{2} working ({3} switched back on, {4} damaged, {5} without power), thrusters {6}/{7} working",
+                      Entity.EntityId, working, gyroscopes.Count, switchedOn, damaged, unpowered, thrustersWorking, thrustersTotal);
+            if (working == 0) Report(StrPreFlightNoWorkingGyroscope, damaged, unpowered);
+            // Obstacles are only seen through working sensors (all around) / cameras (their facing): flying without
+            // is flying into what nothing saw
+            if (AutomataSession.GetConfig().Pathfinding.RequireSensorsForPathfinding() && CountOn(sensors) == 0)
+                Report(StrPreFlightNoSensorOn, sensors.Count, CountOn(cameraBlocks));
+        }
+
         private bool IsParkedNow()
         {
             return settings.SleepingBlockIds.Count > 0 || AnyConnectorsConnected() || AnyLandingGearLocked();
@@ -665,7 +1178,7 @@ namespace Automata.Drone
                 {
                     if (b == shipController || !b.Enabled) continue;
                     if (b is IMyThrust || b is IMyGyro || b is IMyLightingBlock || b is IMyShipWelder || b is IMyShipGrinder
-                        || b is IMyShipDrill || b is IMySensorBlock || b is IMyCameraBlock || b is IMyOreDetector || b is IMySoundBlock)
+                        || b is IMyShipDrill || b is IMySensorBlock || b is IMyCameraBlock || b is IMySoundBlock)   // ore detectors stay on (surveys, scout bids)
                     {
                         b.Enabled = false;
                         settings.SleepingBlockIds.Add(b.EntityId);
@@ -693,19 +1206,58 @@ namespace Automata.Drone
             }
         }
 
+        // Every battery back to Auto and no tank stockpiling, whoever set them (the player, a previous controller
+        // whose list is lost): undocking on Recharge batteries cuts the drone's power the moment the connector lets go
+        private void ReleasePowerStorage()
+        {
+            for (int i = 0; i < batteries.Count; i++)
+            {
+                var b = batteries[i];
+                if (b != null && !b.Closed && b.ChargeMode != Sandbox.ModAPI.Ingame.ChargeMode.Auto)
+                    b.ChargeMode = Sandbox.ModAPI.Ingame.ChargeMode.Auto;
+            }
+            for (int i = 0; i < hydrogenTanks.Count; i++)
+            {
+                var t = hydrogenTanks[i];
+                if (t != null && !t.Closed && t.Stockpile) t.Stockpile = false;
+            }
+        }
+
+        // null when the drone can power itself off the connector: a charged, working battery (Auto / Discharge)
+        // or another working power producer (reactor, hydrogen engine...)
+        private string OwnPowerProblem()
+        {
+            int fitted = 0, onRecharge = 0, empty = 0;
+            for (int i = 0; i < batteries.Count; i++)
+            {
+                var b = batteries[i];
+                if (b == null || b.Closed || !b.IsFunctional) continue;
+                fitted++;
+                if (!b.Enabled) continue;
+                if (b.ChargeMode == Sandbox.ModAPI.Ingame.ChargeMode.Recharge) { onRecharge++; continue; }
+                if (b.CurrentStoredPower <= 0.001f) { empty++; continue; }
+                return null;
+            }
+            _gridCache.Clear();
+            shipController.CubeGrid.GetGridGroup(GridLinkTypeEnum.Mechanical).GetGrids(_gridCache);
+            foreach (var grid in _gridCache)
+                foreach (var p in grid.GetFatBlocks<IMyPowerProducer>())
+                    if (!(p is IMyBatteryBlock) && !(p is IMySolarPanel) && p.Enabled && p.IsWorking) { _gridCache.Clear(); return null; }
+            _gridCache.Clear();
+            if (fitted == 0) return Loc.T(StrNoBatteryOrPowerProducer);
+            if (onRecharge > 0) return Loc.T(StrBatteriesStuckOnRecharge);
+            if (empty > 0) return Loc.T(StrBatteriesEmpty);
+            return Loc.T(StrBatteriesSwitchedOff);
+        }
+
         private void WakeSystems()
         {
             IMyEntity e;
+            ReleasePowerStorage();
             foreach (long id in settings.SleepingBlockIds)
             {
                 var b = MyAPIGateway.Entities.TryGetEntityById(id, out e) ? e as IMyFunctionalBlock : null;
                 if (b != null && !b.Closed) b.Enabled = true;
-            }
-            foreach (long id in settings.RechargingBatteryIds)
-            {
-                var b = MyAPIGateway.Entities.TryGetEntityById(id, out e) ? e as IMyBatteryBlock : null;
-                if (b != null && !b.Closed && b.ChargeMode == Sandbox.ModAPI.Ingame.ChargeMode.Recharge)
-                    b.ChargeMode = Sandbox.ModAPI.Ingame.ChargeMode.Auto;
             }
             foreach (long id in settings.StockpilingTankIds)
             {
@@ -750,17 +1302,28 @@ namespace Automata.Drone
             if (--preflightTicks > 0) return;
             if (preflightStage == 1)
             {
+                // Still on the base's power: let go only with power of its own, or it drops (and shuts down) at once
+                string noPower = OwnPowerProblem();
+                if (noPower != null)
+                {
+                    Report(StrPreFlightStayingDocked, noPower);
+                    if (currentJob != null) StopJob(noPower);
+                    ClearFlightOrder();
+                    return;   // next update: order gone -> back to sleep, docked
+                }
+                RememberDeparture();   // no home connector: where to come back to (combat drones, ore scouts)
+                goingToDeparture = false;
                 for (int i = 0; i < connectors.Count; i++)
                     if (connectors[i].IsConnected) connectors[i].Disconnect();
                 SetConnectorsPower(0);   // released: magnets off before the drone moves
-                for (int i = 0; i < landingGears.Count; i++)
-                    if (landingGears[i].IsLocked) landingGears[i].Unlock();
+                OnTakeOffGears();   // unlocked, and off for the flight
                 preflightStage = 2;
                 preflightTicks = PREFLIGHT_SETTLE_TICKS;
                 return;
             }
             // stage 2: free of the base; measure what we actually carry
             preflightStage = 0;
+            legsSinceUndock = 0;   // the first two legs (backing out of the dock) aren't checked at their start
             isParked = false;
             UpdateMass();
             h2ThrustProfile = CalculateThrustProfile(shipController, physicalMass, hydrogenThrusters);
@@ -771,7 +1334,8 @@ namespace Automata.Drone
             ResetIntegralTerms();
             ResetThrustGains();
             double pct = LoadPercent();
-            Report("Pre-flight: {0:N0} kg, load {1:F0}%", physicalMass, pct);
+            Report(StrPreFlightKgLoad, physicalMass, pct);
+            CheckFlightSystems();
             CheckLoad();
             SetState(activeFlightOrder == null ? State.Standby
                 : dockingHomeId != 0 ? State.ReturningToBase : State.NavigatingToTarget);
@@ -814,12 +1378,12 @@ namespace Automata.Drone
                 if (!needsBatteryRecharge && batteryPercent < settings.BatteryRefuelThreshold)
                 {
                     needsBatteryRecharge = true;
-                    Report("Battery low ({0}% < {1:F0}%), recharging", batteryPercent, settings.BatteryRefuelThreshold);
+                    Report(StrBatteryLowRecharging, batteryPercent, settings.BatteryRefuelThreshold);
                 }
                 else if (needsBatteryRecharge && batteryPercent >= Math.Max(settings.BatteryOperationalThreshold, settings.BatteryRefuelThreshold + 5))
                 {
                     needsBatteryRecharge = false;
-                    Report("Battery recharged ({0}%)", batteryPercent);
+                    Report(StrBatteryRecharged, batteryPercent);
                 }
             }
             if (settings.MonitorHydrogenLevels && h2Percent >= 0)
@@ -827,22 +1391,31 @@ namespace Automata.Drone
                 if (!needsHydrogenRefuel && h2Percent < settings.HydrogenRefuelThreshold)
                 {
                     needsHydrogenRefuel = true;
-                    Report("Hydrogen low ({0}% < {1:F0}%), refueling", h2Percent, settings.HydrogenRefuelThreshold);
+                    Report(StrHydrogenLowRefueling, h2Percent, settings.HydrogenRefuelThreshold);
                 }
                 else if (needsHydrogenRefuel && h2Percent >= Math.Max(settings.HydrogenOperationalThreshold, settings.HydrogenRefuelThreshold + 5))
                 {
                     needsHydrogenRefuel = false;
-                    Report("Hydrogen refueled ({0}%)", h2Percent);
+                    Report(StrHydrogenRefueled, h2Percent);
                 }
             }
 
             // Level-triggered: keep trying to get home (refused, replaced by another order...) with a back-off
             // (docked somewhere else, e.g. at a job's connector, still counts as "not home")
-            if ((needsBatteryRecharge || needsHydrogenRefuel) && !IsDockedAtHome() && !IsGoingHome && preflightStage == 0
-                && HasHomeConnector && now - lastAutoHomeFrame >= AUTO_HOME_RETRY_TICKS)
+            if ((needsBatteryRecharge || needsHydrogenRefuel) && !CombatHoldsControl && preflightStage == 0 && now - lastAutoHomeFrame >= AUTO_HOME_RETRY_TICKS)
             {
-                lastAutoHomeFrame = now;
-                GoHome();
+                if (HasHomeConnector && !IsDockedAtHome() && !IsGoingHome)
+                {
+                    lastAutoHomeFrame = now;
+                    GoHome();
+                }
+                // Park mode: any connector it can dock at (not while a job runs: the job ends at low power itself)
+                else if (ParkMode && !AnyConnectorsConnected() && dockingHomeId == 0 && cPhase == ConstructionPhase.Idle && currentJob == null)
+                {
+                    lastAutoHomeFrame = now;
+                    if (parkPhase != ParkPhase.None) EndPark(null);
+                    GoCharge();
+                }
             }
         }
 
@@ -889,12 +1462,12 @@ namespace Automata.Drone
             {
                 if (level == 2)
                 {
-                    Report("Max load exceeded ({0:F0}% > {1:F0}%), offloading", pct, limit);
+                    Report(StrMaxLoadExceededOffloading, pct, limit);
                     // Construction batches are planned to the limit: only abort one that is still collecting (grinding)
-                    if (cPhase == ConstructionPhase.Running) AbortJobToHome();
-                    else if (!IsGoingHome && HasHomeConnector && cPhase == ConstructionPhase.Idle) GoHome();
+                    if (cPhase == ConstructionPhase.Running && !boring) AbortJobToHome();   // boring: RunMine ends the bore and delivers
+                    else if (!IsGoingToRest && (HasHomeConnector || ParkMode) && cPhase == ConstructionPhase.Idle && !CombatHoldsControl) GoRest();
                 }
-                else Report("Max load reached ({0:F0}% of {1:F0}%)", pct, limit);
+                else Report(StrMaxLoadReachedOf, pct, limit);
             }
             loadLevel = level;
         }

@@ -42,6 +42,7 @@
 			<EnableFirstPerson>true</EnableFirstPerson>
 			<EnableShipControl>true</EnableShipControl>
 			<EnableBuilderCockpit>false</EnableBuilderCockpit>
+			<ResourceSinkGroup>Utility</ResourceSinkGroup>
 			<PCU>25</PCU>
 			<IsAirTight>false</IsAirTight>
 		</Definition>

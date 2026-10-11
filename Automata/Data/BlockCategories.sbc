@@ -1,4 +1,4 @@
-<?xml version="1.0"  encoding="utf-8"?>
+﻿<?xml version="1.0"  encoding="utf-8"?>
 <Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
    <CategoryClasses>
       <Category xsi:type="MyObjectBuilder_GuiBlockCategoryDefinition">
@@ -11,9 +11,10 @@
          <ItemIds>
 			<string>RemoteControl/AutomataLargeDroneController</string>
          <string>RemoteControl/AutomataSmallDroneController</string>
-			 <!-- <string>BroadcastController/AutomataLargeOrchestrator</string>
-			 <string>MyProgrammableBlock/AutomataLargeLogisticsComputer</string>
-			 <string>MyProgrammableBlock/AutomataLargeMiningSurveyor</string> -->
+			<string>MyProgrammableBlock/AutomataLargeOrchestrator</string>
+			<string>MyProgrammableBlock/AutomataLargeLogisticsComputer</string>
+			<string>MyProgrammableBlock/AutomataLargeConstructionComputer</string>
+			 <string>MyProgrammableBlock/AutomataLargeMiningSurveyor</string>
 		 </ItemIds>
       </Category>
       
@@ -26,6 +27,10 @@
          <Name>LargeBlocks</Name>
          <ItemIds>
             <string>RemoteControl/AutomataLargeDroneController</string>
+            <string>MyProgrammableBlock/AutomataLargeOrchestrator</string>
+            <string>MyProgrammableBlock/AutomataLargeLogisticsComputer</string>
+            <string>MyProgrammableBlock/AutomataLargeConstructionComputer</string>
+            <string>MyProgrammableBlock/AutomataLargeMiningSurveyor</string>
          </ItemIds>
       </Category>
 	   
@@ -37,7 +42,7 @@
 		   <DisplayName>DisplayName_Category_LargeBlocks</DisplayName>
 		   <Name>LargeBlocks</Name>
 		   <ItemIds>
-			   <string>BroadcastController/AutomataLargeOrchestrator</string>
+			   <string>MyProgrammableBlock/AutomataLargeOrchestrator</string>
 		   </ItemIds>
 	   </Category>
 	   <Category xsi:type="MyObjectBuilder_GuiBlockCategoryDefinition">

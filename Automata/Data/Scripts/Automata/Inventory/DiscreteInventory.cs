@@ -381,13 +381,12 @@ namespace Automata.Inventory
             sourceInventory.GetItems(items);
             foreach (VRage.Game.ModAPI.Ingame.MyInventoryItem item in items)
             {
-                string subtypeStr = item.Type.SubtypeId.ToString();
                 int amount = (int)item.Amount;
                 if (amount <= 0)
                 {
                     continue;
                 }
-                MyStringHash subtypeHash = MyStringHash.GetOrCompute(subtypeStr);
+                MyStringHash subtypeHash = ItemKeys.Of(item.Type);   // components: subtype; else "Type/Subtype"
                 int cur;
                 Items.TryGetValue(subtypeHash, out cur);
                 Items[subtypeHash] = cur + amount;
@@ -521,6 +520,15 @@ namespace Automata.Inventory
         public bool IsEmpty()
         {
             return Items.Count == 0;
+        }
+
+        /// <summary>Ores only (Ice included: "Ore/..." keys), and not empty. One item of any other type: false (ore haulers).</summary>
+        public bool IsOreOnly()
+        {
+            if (Items.Count == 0) return false;
+            foreach (var kv in Items)
+                if (!kv.Key.String.StartsWith("Ore/", StringComparison.Ordinal)) return false;
+            return true;
         }
 
         public bool ContainsAtLeast(DiscreteInventory required)

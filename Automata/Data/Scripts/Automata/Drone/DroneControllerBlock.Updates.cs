@@ -14,7 +14,7 @@ namespace Automata.Drone
 
         private readonly List<IMyCubeGrid> subscribedGrids = new List<IMyCubeGrid>();
         private IMyGridGroupData subscribedGroup;
-        private Action<IMySlimBlock> onBlockChanged;
+        private Action<IMySlimBlock> onBlockChanged, onBlockDamaged;
         private Action<IMyGridGroupData, IMyCubeGrid, IMyGridGroupData> onGroupChanged;
 
         // Something needs flight control right now: subscribe immediately (UpdateFrameSubscription drops it later)
@@ -43,6 +43,7 @@ namespace Automata.Drone
         private void SubscribeGridEvents(List<IMyCubeGrid> grids, IMyGridGroupData group)
         {
             if (onBlockChanged == null) onBlockChanged = OnBlockChanged;
+            if (onBlockDamaged == null) onBlockDamaged = OnBlockDamaged;
             if (onGroupChanged == null) onGroupChanged = OnGroupChanged;
 
             for (int i = subscribedGrids.Count - 1; i >= 0; i--)
@@ -59,6 +60,7 @@ namespace Automata.Drone
                 if (subscribedGrids.Contains(g)) continue;
                 g.OnBlockAdded += onBlockChanged;
                 g.OnBlockRemoved += onBlockChanged;
+                g.OnBlockIntegrityChanged += onBlockDamaged;
                 subscribedGrids.Add(g);
             }
             if (group != subscribedGroup)
@@ -83,6 +85,7 @@ namespace Automata.Drone
             {
                 subscribedGrids[i].OnBlockAdded -= onBlockChanged;
                 subscribedGrids[i].OnBlockRemoved -= onBlockChanged;
+                subscribedGrids[i].OnBlockIntegrityChanged -= onBlockDamaged;
             }
             subscribedGrids.Clear();
             if (subscribedGroup != null)
@@ -96,6 +99,15 @@ namespace Automata.Drone
         private void OnBlockChanged(IMySlimBlock b)
         {
             capabilitiesDirty = true;
+        }
+
+        // Damage (or repair): a functional block that stopped working (below its functional integrity) counts like a
+        // removed one; the next 100-tick update rescans
+        private void OnBlockDamaged(IMySlimBlock b)
+        {
+            if (b.FatBlock != null && !b.FatBlock.IsFunctional) capabilitiesDirty = true;
+            if (combatPhase == CombatPhase.Handover) combatDamaged = true;   // "flee when taking damage"
+            else if (combatPhase == CombatPhase.Scramble) combatUnderFire = true;   // engage: fight back on the way
         }
 
         private void OnGroupChanged(IMyGridGroupData group, IMyCubeGrid grid, IMyGridGroupData other)

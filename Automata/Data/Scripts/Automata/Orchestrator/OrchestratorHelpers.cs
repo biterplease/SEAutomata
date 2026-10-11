@@ -143,6 +143,77 @@ namespace Automata.Orchestrator
         /// </summary>
         [ProtoEnum]
         MineOre = 5,
+        // Designator- jobs: ordered by a player with a target designator (Pointer/ScoutPointer), queued and auctioned by
+        // the orchestrator itself (OrchestratorBlock.PlayerJobs), only for drones of the job's behaviour profile.
+        /// <summary>Industrial designator, red: fly to a point, ore scan, home. Ore scouts only.</summary>
+        [ProtoEnum]
+        DesignatorScoutPoint = 6,
+        /// <summary>Industrial designator, blue: one sector of an area sweep, ore scan at each waypoint, home. Ore scouts only.</summary>
+        [ProtoEnum]
+        DesignatorScoutArea = 7,
+        /// <summary>Hostile designator, red: fly at a hostile grid / character, combat handover near it, home. Combat drones only.</summary>
+        [ProtoEnum]
+        DesignatorEngage = 8,
+        /// <summary>Hostile designator, blue: follow a friendly mobile grid / character, fight what comes near it, home on
+        /// low power or recall. Combat drones only.</summary>
+        [ProtoEnum]
+        DesignatorEscort = 9,
+    }
+
+    public static class JobTypeExtensions
+    {
+        /// <summary>A Designator- job: ordered by a player with a target designator.</summary>
+        public static bool IsDesignator(this JobType t)
+        {
+            return t >= JobType.DesignatorScoutPoint && t <= JobType.DesignatorEscort;
+        }
+
+        /// <summary>Hostile designator jobs (engage / escort): combat drones with the three AI blocks.</summary>
+        public static bool IsDesignatorCombat(this JobType t)
+        {
+            return t == JobType.DesignatorEngage || t == JobType.DesignatorEscort;
+        }
+
+        // Weld jobs: which weld (Job / JobAnnouncement / Auction / award / report .WeldCategory). 0: unknown (any).
+        public const byte WELD_ANY = 0, WELD_REPAIR = 1, WELD_PROJECTED = 2, WELD_UNBUILT = 3;
+
+        /// <summary>The wire code of a weld category (Construction.WorkCategory); grind: WELD_ANY.</summary>
+        public static byte WeldCode(Construction.WorkCategory c)
+        {
+            switch (c)
+            {
+                case Construction.WorkCategory.Repair: return WELD_REPAIR;
+                case Construction.WorkCategory.Projected: return WELD_PROJECTED;
+                case Construction.WorkCategory.Unbuilt: return WELD_UNBUILT;
+                default: return WELD_ANY;
+            }
+        }
+
+        /// <summary>For logs: "Weld:Repair", "Weld:Projected", "Weld:Unbuilt"; other jobs (and an unknown weld) their type.</summary>
+        public static string Label(this JobType t, byte weldCategory)
+        {
+            if (t != JobType.Weld) return t.ToString();
+            switch (weldCategory)
+            {
+                case WELD_REPAIR: return "Weld:Repair";
+                case WELD_PROJECTED: return "Weld:Projected";
+                case WELD_UNBUILT: return "Weld:Unbuilt";
+                default: return "Weld";
+            }
+        }
+
+        /// <summary>The weld a welder profile is biased to (WELD_ANY: Welder:All, Welder + grinder, others).</summary>
+        public static byte WeldBias(Drone.BehaviourProfile p)
+        {
+            if ((p & Drone.BehaviourProfile.IsWelderRepair) != 0) return WELD_REPAIR;
+            if ((p & Drone.BehaviourProfile.IsWelderProjected) != 0) return WELD_PROJECTED;
+            if ((p & Drone.BehaviourProfile.IsWelderUnbuilt) != 0) return WELD_UNBUILT;
+            return WELD_ANY;
+        }
+
+        /// <summary>Any welder profile (Welder:All / Repair / Projected / Unbuilt, Welder + grinder).</summary>
+        public const Drone.BehaviourProfile WELDER_PROFILES = Drone.BehaviourProfile.IsWelderDrone | Drone.BehaviourProfile.IsWelderGrinderDrone
+            | Drone.BehaviourProfile.IsWelderRepair | Drone.BehaviourProfile.IsWelderProjected | Drone.BehaviourProfile.IsWelderUnbuilt;
     }
 
     /// <summary>
@@ -187,6 +258,23 @@ namespace Automata.Orchestrator
         /// approach point the preceding NavigateToolTo used; the drone fills it in when it flies that one).
         /// </summary>
         [ProtoEnum] BackOut = 11,
+        /// <summary>Ore scan where the drone is (its ore detector's range), results kept for the mining surveyors.</summary>
+        [ProtoEnum] Survey = 12,
+        /// <summary>
+        /// Hostile designator: fly at TargetEntityId (a grid or character; 0: a point) - Position: where the designator hit - and hand
+        /// over to the drone's AI Flight + AI Offensive blocks within its handover distance; done when they have had no
+        /// target for the drone's no-target time (or the target is gone).
+        /// </summary>
+        [ProtoEnum] Engage = 13,
+        /// <summary>
+        /// Hostile designator: follow TargetEntityId (a friendly mobile grid or a character) at a standoff; enemies the
+        /// drone's AI Defensive block detects are fought (combat handover), then the drone follows again. Ends on low
+        /// power / hydrogen, recall, or the target gone.
+        /// </summary>
+        [ProtoEnum] Escort = 14,
+        /// <summary>While docked: the drone's own inventories (cargo, tools) emptied of components, ores and ingots into the
+        /// network there. Drone-side only (clearing before a job / before resting); orchestrators never send it.</summary>
+        [ProtoEnum] ClearCargo = 15,
     }
 
     /// <summary>Which fields a task uses; derived from its type (not sent).</summary>
@@ -197,6 +285,7 @@ namespace Automata.Orchestrator
         Inventory,    // Inventory
         Tool,         // TargetEntityId, TargetBlock, IsProjected, Completion, CompletionValue
         Message,      // TargetEntityId
+        Combat,       // TargetEntityId, Position (Engage / Escort)
     }
 
     /// <summary>
@@ -283,11 +372,14 @@ namespace Automata.Orchestrator
                 case TaskType.BackOut:
                 case TaskType.ReturnHome:      return TaskKind.Navigation;
                 case TaskType.LoadInventory:
-                case TaskType.UnloadInventory: return TaskKind.Inventory;
+                case TaskType.UnloadInventory:
+                case TaskType.ClearCargo:      return TaskKind.Inventory;
                 case TaskType.WeldBlock:
                 case TaskType.GrindBlock:
                 case TaskType.Mine:            return TaskKind.Tool;
                 case TaskType.DeliverMessage:  return TaskKind.Message;
+                case TaskType.Engage:
+                case TaskType.Escort:          return TaskKind.Combat;
                 default:                       return TaskKind.None;
             }
         }
@@ -364,6 +456,21 @@ namespace Automata.Orchestrator
             };
         }
 
+        public static Task Survey()
+        {
+            return new Task { Type = TaskType.Survey };
+        }
+
+        public static Task Engage(long targetId, Vector3D position)
+        {
+            return new Task { Type = TaskType.Engage, TargetEntityId = targetId, Position = Vector3DData.FromVector3D(position) };
+        }
+
+        public static Task Escort(long targetId, Vector3D position)
+        {
+            return new Task { Type = TaskType.Escort, TargetEntityId = targetId, Position = Vector3DData.FromVector3D(position) };
+        }
+
         public static Task Mine(ToolTaskCompletionTrigger completion = ToolTaskCompletionTrigger.DroneInventoryFull, float value = 0)
         {
             return new Task { Type = TaskType.Mine, Completion = completion, CompletionValue = value };
@@ -393,6 +500,8 @@ namespace Automata.Orchestrator
         /// <summary>Amount of individual blocks that are part of this job.</summary>
         [ProtoMember(7)] public ushort BlockCount;
         [ProtoMember(5)] public JobType JobType;
+        /// <summary>Weld jobs: which weld (JobTypeExtensions.WELD_*: repair, projected, unbuilt; 0 unknown).</summary>
+        [ProtoMember(8)] public byte WeldCategory;
 
         public Job() { }
 

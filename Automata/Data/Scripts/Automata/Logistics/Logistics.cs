@@ -16,7 +16,7 @@ namespace Automata.Logistics
         void ScanCargoContainers();
         void ReadBidRoundStartMessages();
         void SendRoundBids();
-        void SetOperationMode(OperationMode operationMode);
+        void SetOperationMode(OpMode_Obsolete operationMode);
     }
 
     // public enum ErrorCode : byte
@@ -77,7 +77,7 @@ namespace Automata.Logistics
         [ProtoEnum]
         Error
     }
-    public enum OperationMode : byte
+    public enum OpMode_Obsolete : byte
     {
         None = 0,
         BuiltInToDrone = 1,
@@ -85,7 +85,7 @@ namespace Automata.Logistics
         LogisticsComputer = 4,
     }
     [Flags, ProtoContract]
-    public enum WorkMode : byte
+    public enum OperationMode : byte
     {
         [ProtoEnum]
         None = 0,

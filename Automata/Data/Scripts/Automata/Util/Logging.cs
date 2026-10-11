@@ -7,6 +7,7 @@ using VRage.Game.ModAPI;
 using VRage.ModAPI;
 
 using Automata.Config;
+using Automata.Util;
 
 namespace Automata.Util.Logging
 {
@@ -115,6 +116,9 @@ namespace Automata.Util.Logging
             }
         }
 
+        /// <summary>Debug lines are written: check before building costly ones.</summary>
+        public static bool DebugEnabled { get { return IsLevelEnabled(LogLevel.Debug); } }
+
         private static bool IsLevelEnabled(LogLevel level)
         {
             if (_logger == null) return false;
@@ -129,6 +133,10 @@ namespace Automata.Util.Logging
     /// </summary>
     internal class LoggingEngine
     {
+        #region UI strings
+        private static readonly MyStringId StrErrorHud = MyStringId.GetOrCompute("{0} error - open %AppData%/SpaceEngineers/Storage/{1} for details");
+        #endregion
+
         private string _modName;
         private int _workshopId;
         private string _logFilename;
@@ -224,7 +232,7 @@ namespace Automata.Util.Logging
             {
                 MyLog.Default.WriteLineAndConsole(_modName + " error: " + msg);
 
-                string text = _modName + " error - open %AppData%/SpaceEngineers/Storage/" + _logFilename + " for details";
+                string text = Loc.F(StrErrorHud, _modName, _logFilename);
 
                 // Always show errors on HUD regardless of config
                 ShowOnHud(text);

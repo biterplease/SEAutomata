@@ -1,11 +1,18 @@
 using Sandbox.ModAPI;
 using System;
 using System.IO;
+using VRage.Utils;
+using Automata.Util;
 
 namespace Automata
 {
     public class AutomataSessionCommandHandler
     {
+        #region UI strings
+        private static readonly MyStringId StrTaskList = MyStringId.GetOrCompute("Task list: (not yet implemented)");
+        private static readonly MyStringId StrHelp = MyStringId.GetOrCompute("Automata {0} - Commands: {1} {2}");
+        #endregion
+
         public AutomataSessionCommandHandler() { }
 
         private const string CMDROOT = "/iai";
@@ -37,14 +44,12 @@ namespace Automata
         }
         private string GetTaskList()
         {
-            return "Task list: (not yet implemented)";
+            return Loc.T(StrTaskList);
         }
 
         private string GetHelpText()
         {
-            return string.Format(
-                "Automata {0} - Commands: {1} {2}",
-                AutomataSession.VERSION, LIST_TASKS, TASK_CMD);
+            return Loc.F(StrHelp, AutomataSession.VERSION, LIST_TASKS, TASK_CMD);
         }
     }
 }

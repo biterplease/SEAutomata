@@ -58,7 +58,9 @@ namespace Automata.Drone
             public readonly List<long> Pinned = new List<long>();   // added by name
         }
 
+        #region Timing
         private const int VALIDATE_INTERVAL_TICKS = 60;
+        #endregion
 
         private readonly Dictionary<long, ScanCache> caches = new Dictionary<long, ScanCache>();
         private readonly List<IMyCubeGrid> ownGroup = new List<IMyCubeGrid>();

@@ -23,10 +23,14 @@ namespace Automata.VirtualNetwork
         {
             [ProtoMember(1)]
             public List<TimestampedMessage> AllMessages;
+            /// <summary>When the snapshot was taken (TimeUtil ms): message times are moved on by the time the world was saved.</summary>
+            [ProtoMember(2)]
+            public ulong SavedAt;
             public MessageQueueSnapshot() { }
         }
+        /// <summary>A message in flight (also what a block saves of the messages it sent: see <see cref="CollectSent"/>).</summary>
         [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
-        private class TimestampedMessage
+        public class TimestampedMessage
         {
             [ProtoMember(1)]
             public byte[] Data;
@@ -116,6 +120,16 @@ namespace Automata.VirtualNetwork
                 LastUpdate = DateTime.UtcNow;
                 Antenna = antenna;
             }
+            /// <summary>Position and range as they are now (the antenna moves with its grid, the player changes its range).</summary>
+            public void RefreshLive()
+            {
+                if (Antenna == null || Antenna.Closed) return;
+                Position = Antenna.GetPosition();
+                TransmitRange = Antenna.Radius;
+                OwnerId = Antenna.OwnerId;
+                LastUpdate = DateTime.UtcNow;
+            }
+
             public uint ToFlags()
             {
                 uint flags = 0;
@@ -181,6 +195,8 @@ namespace Automata.VirtualNetwork
         /// </summary>
         public const uint FLAG_IS_VALID = 1 << 4;
         private readonly MyDynamicAABBTreeD antennaTree = new MyDynamicAABBTreeD();
+        /// <summary>The antenna network (relays through bases and drones, laser links), rebuilt every few seconds.</summary>
+        public readonly RelayGraph Relays = new RelayGraph();
         private readonly TimeSpan _antennaTreeTimeout = TimeSpan.FromMinutes(30);
         /// <summary>IAI EntityId to DAABBTree proxy.</summary>
         private readonly MyConcurrentDictionary<long, int> iaiEntityIdToProxy = new MyConcurrentDictionary<long, int>();
@@ -189,6 +205,7 @@ namespace Automata.VirtualNetwork
         // cleanup caches
         private readonly HashSet<long> _cleanupBuffer = new HashSet<long>();
         private readonly List<AntennaInfo> _allAntennas = new List<AntennaInfo>();
+        private readonly List<AntennaInfo> _recipientScan = new List<AntennaInfo>();
 
         private readonly TimeSpan _messageExpiration;
         private readonly TimeSpan _dlqMessageExpiration;
@@ -302,23 +319,53 @@ namespace Automata.VirtualNetwork
             MyConcurrentHashSet<long> subscribers;
             if (!_channelSubscribers.TryGetValue(message.Channel, out subscribers) || subscribers.Count == 0)
             {
+                if (Log.DebugEnabled)
+                    Log.Debug("VNet: {0} #{1} from {2}: nobody subscribed to the channel", message.Channel, message.MessageId, message.SenderId);
                 return ErrorCode.NoSubscribers;
             }
 
-            List<AntennaInfo> recipients = new List<AntennaInfo>();
-            GetRecipientsInRange(message.SenderId, senderAntenna, recipients, ToFlags(message.RecipientBlockType));
-
+            // Every registered block, live positions: drones move (their registered position / tree box would be
+            // stale), and the tree's user flags need ALL requested bits (a Drone | LogisticsComputer message matched none)
+            _recipientScan.Clear();
+            antennaTree.GetAll(_recipientScan, true);
             var validRecipients = new HashSet<long>();
-            for (int i = 0; i < recipients.Count; i++)
+            int registered = _recipientScan.Count, otherType = 0, invalid = 0, notShared = 0, outOfRange = 0, notListening = 0;
+            for (int i = 0; i < _recipientScan.Count; i++)
             {
-                AntennaInfo recipient = recipients[i];
-                if (!CanShare(message.SenderOwnerId, recipient.OwnerId, recipients[i].Antenna))
+                AntennaInfo recipient = _recipientScan[i];
+                if (recipient == null || recipient.IAIEntityId == message.SenderId) continue;
+                if (message.RecipientBlockType != IAIBlockType.None && (recipient.BlockType & message.RecipientBlockType) == 0)
+                {
+                    otherType++;
                     continue;
+                }
+                // Only blocks listening on the channel: a registered block of the type that doesn't read it is no recipient
+                if (!subscribers.Contains(recipient.IAIEntityId))
+                {
+                    notListening++;
+                    continue;
+                }
                 if (!recipient.IsValid())
+                {
+                    invalid++;
                     continue;
+                }
+                recipient.RefreshLive();
+                if (!CanShare(message.SenderOwnerId, recipient.OwnerId, recipient.Antenna))
+                {
+                    notShared++;
+                    continue;
+                }
                 if (IsInCommunicationRange(message.SenderId, senderAntenna, ref recipient, checkBothRanges: enforceCommsRange))
                     validRecipients.Add(recipient.IAIEntityId);
+                else outOfRange++;
             }
+            _recipientScan.Clear();
+            if (Log.DebugEnabled)
+                Log.Debug("VNet: {0} {1} #{2} from {3} ({4:F0} m) to {5}: {6} recipient(s) of {7} registered ({8} other type, {9} not listening, {10} invalid, {11} not shared, {12} out of range)",
+                          message.Channel, message.Payload != null ? message.Payload.GetType().Name : "null", message.MessageId, message.SenderId,
+                          senderAntenna != null ? senderAntenna.Radius : 0f, message.RecipientBlockType, validRecipients.Count, registered,
+                          otherType, notListening, invalid, notShared, outOfRange);
             if (validRecipients.Count == 0)
             {
                 return ErrorCode.NoSubscribers;
@@ -331,8 +378,6 @@ namespace Automata.VirtualNetwork
         {
             if (payload == null)
                 return PayloadType.None;
-            if (payload is DroneReport)
-                return PayloadType.DroneReport;
             if (payload is RelayMessage)
                 return PayloadType.RelayMessage;
             if (payload is TaskAssignment)
@@ -349,6 +394,10 @@ namespace Automata.VirtualNetwork
                 return PayloadType.Bid;
             if (payload is AuctionWinnerAnnouncement)
                 return PayloadType.AuctionWinnerAnnouncement;
+            if (payload is JobAnnouncementFailed)
+                return PayloadType.JobAnnouncementFailed;
+            if (payload is JobStatusReport)
+                return PayloadType.JobStatusReport;
             return PayloadType.None;
         }
 
@@ -423,13 +472,17 @@ namespace Automata.VirtualNetwork
             if (checkBothRanges)
             {
                 double recipientRangeSquared = Math.Pow(counterPartInfo.TransmitRange, 2);
-                return distanceToConterPartSquared <= antennaRangeSquared && distanceToConterPartSquared <= recipientRangeSquared;
+                if (distanceToConterPartSquared <= antennaRangeSquared && distanceToConterPartSquared <= recipientRangeSquared) return true;
+                return Relays.Reaches(antenna.CubeGrid, recipient.CubeGrid, antenna.OwnerId)
+                    && Relays.Reaches(recipient.CubeGrid, antenna.CubeGrid, recipient.OwnerId);
             }
 
             // Simulate IGC: : An antenna can RECEIVE messages even if it’s
             // transmit range is lower, but any messages it sends will not
             // make it to the destination.
-            return distanceToConterPartSquared <= antennaRangeSquared;
+            if (distanceToConterPartSquared <= antennaRangeSquared) return true;
+            // Relayed: the same base (connected grids), or other bases / drones in between (TODO/13)
+            return Relays.Reaches(antenna.CubeGrid, recipient.CubeGrid, antenna.OwnerId);
         }
 
         public bool GetAntennaInfo(long entityId, out AntennaInfo antennaInfo)
@@ -490,6 +543,8 @@ namespace Automata.VirtualNetwork
             int proxyId = antennaTree.AddProxy(ref aabb, antennaInfo, antennaInfo.ToFlags(), true);
             iaiEntityIdToProxy[iaiEntityId] = proxyId;
             proxyToEntityId[proxyId] = iaiEntityId;
+            Log.Debug("VNet: {0} {1} registered: antenna '{2}' ({3:F0} m){4}, {5} registered", iaiBlockType, iaiEntityId, antenna.CustomName,
+                      antenna.Radius, isStatic ? ", static" : "", iaiEntityIdToProxy.Count);
         }
 
         private bool RemoveAntennaProxy(int proxyId)
@@ -511,8 +566,19 @@ namespace Automata.VirtualNetwork
             antennaTree.RemoveProxy(proxyId);
             iaiEntityIdToProxy.Remove(iaiEntityId);
             proxyToEntityId.Remove(proxyId);
+            Log.Debug("VNet: {0} unregistered, {1} registered", iaiEntityId, iaiEntityIdToProxy.Count);
             return true;
         }
+        /// <summary>A block closed: off every channel (it is no recipient any more).</summary>
+        public void UnsubscribeAll(long subscriberId)
+        {
+            foreach (var channel in (Channel[])Enum.GetValues(typeof(Channel)))
+            {
+                MyConcurrentHashSet<long> subscribers;
+                if (_channelSubscribers.TryGetValue(channel, out subscribers)) subscribers.Remove(subscriberId);
+            }
+        }
+
         public bool AntennaMoved(long iaiEntityId, IMyRadioAntenna antenna)
         {
             int proxyId;
@@ -601,6 +667,7 @@ namespace Automata.VirtualNetwork
                 return ErrorCode.SubscriberAntennaNotRegistered;
 
             var subscriberInfo = antennaTree.GetUserData<AntennaInfo>(proxyId);
+            subscriberInfo.RefreshLive();   // moved since it registered (drones)
 
             if (clear)
                 outMessages.Clear();
@@ -622,11 +689,13 @@ namespace Automata.VirtualNetwork
                     const int maxDequeueScan = 512;
                     // Collect all messages
                     TimestampedMessage msg;
+                    int expired = 0, outOfRangeCount = 0;
                     while (messagesToProcess < maxMessages && dequeueScanCount < maxDequeueScan && queue.TryDequeue(out msg))
                     {
                         dequeueScanCount++;
                         if (IsMessageExpired(currentTime, msg.SentAt, _messageExpiration))
                         {
+                            expired++;
                             if (msg.RequiresAck)
                             {
                                 // if requires ack and expired, need to return it via DLQ
@@ -636,7 +705,11 @@ namespace Automata.VirtualNetwork
                         }
                         bool isInternalMessage = !iaiEntityIdToProxy.TryGetValue(msg.SenderId, out senderProxyId) && msg.SenderOwnerId == 0;
                         if (!isInternalMessage && !iaiEntityIdToProxy.ContainsKey(msg.SenderId))
-                            continue; // sender antenna no longer registered, drop message and continue
+                        {
+                            // Sender not registered (yet: blocks re-register after a load; or gone): kept until it expires
+                            messagesToReEnqueue.Add(msg);
+                            continue;
+                        }
 
                         if (msg.ValidRecipients.Contains(subscriberId))
                         {
@@ -663,13 +736,15 @@ namespace Automata.VirtualNetwork
                                 tempMessages.Add(msg);
                                 if (channel != Channel.DIRECT_MESSAGE)
                                 {
-                                    // message was not direct, resend so other callers can read
-                                    messagesToReEnqueue.Add(msg);
+                                    // Delivered once per recipient (no replays while it lives); kept for the others
+                                    msg.ValidRecipients.Remove(subscriberId);
+                                    if (msg.ValidRecipients.Count > 0) messagesToReEnqueue.Add(msg);
                                 }
                             }
                             else
                             {
                                 // caller is intended recipient, but out of range
+                                outOfRangeCount++;
                                 messagesToReEnqueue.Add(msg);
                             }
                         }
@@ -684,6 +759,9 @@ namespace Automata.VirtualNetwork
 
                     foreach (var message in messagesForDLQ)
                         ReturnUnackedMessage(message);
+                    if ((expired > 0 || outOfRangeCount > 0 || tempMessages.Count > 0) && Log.DebugEnabled)
+                        Log.Debug("VNet: {0} read {1}: {2} message(s), {3} out of range, {4} expired dropped, {5} queued", subscriberId, channel,
+                                  tempMessages.Count, outOfRangeCount, expired, queue.Count);
 
                     // Process messages using cached ValidRecipients
                     foreach (var message in tempMessages)
@@ -944,7 +1022,8 @@ namespace Automata.VirtualNetwork
                 }
             }
 
-            var snapshot = new MessageQueueSnapshot { AllMessages = allMessages };
+            var snapshot = new MessageQueueSnapshot { AllMessages = allMessages, SavedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow) };
+            Log.Debug("VNet: snapshot of {0} message(s) for the save", allMessages.Count);
             return MyUtilitiesDelegate.SerializeToBinary<MessageQueueSnapshot>(snapshot);
         }
 
@@ -960,9 +1039,16 @@ namespace Automata.VirtualNetwork
             var snapshot = MyUtilitiesDelegate.SerializeFromBinary<MessageQueueSnapshot>(data);
             if (snapshot == null || snapshot.AllMessages == null)
                 return;
+            // The world sat saved for a while: messages keep the age they had at the save (else all would be expired)
+            ulong now = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow);
+            ulong shift = snapshot.SavedAt > 0 && now > snapshot.SavedAt ? now - snapshot.SavedAt : 0;
+            Log.Info("VNet: {0} message(s) restored from the save (times moved on {1:F0} s)", snapshot.AllMessages.Count, shift / 1000.0);
 
             foreach (var msg in snapshot.AllMessages)
             {
+                if (msg == null) continue;
+                msg.SentAt += shift;
+                msg.CreatedAt += shift;
                 var channelLock = _channelLocks[msg.Channel];
                 lock (channelLock)
                 {
@@ -977,6 +1063,67 @@ namespace Automata.VirtualNetwork
                 }
             }
         }
+        /// <summary>
+        /// World save: copies of the messages 'senderId' sent that are still in flight (any channel, not expired), for
+        /// the sender's own save data. Times are ages (ms before now) in the copies' SentAt / CreatedAt.
+        /// </summary>
+        public void CollectSent(long senderId, List<TimestampedMessage> into)
+        {
+            ulong now = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow);
+            var currentTime = DateTime.UtcNow;
+            foreach (var kv in _channelQueues)
+            {
+                var channelLock = _channelLocks[kv.Key];
+                lock (channelLock)
+                {
+                    foreach (var msg in kv.Value)
+                    {
+                        if (msg == null || msg.SenderId != senderId || IsMessageExpired(currentTime, msg.SentAt, _messageExpiration)) continue;
+                        into.Add(new TimestampedMessage
+                        {
+                            Data = msg.Data,
+                            StringData = msg.StringData,
+                            ValidRecipients = msg.ValidRecipients != null ? new HashSet<long>(msg.ValidRecipients) : null,
+                            CreatedAt = now > msg.CreatedAt ? now - msg.CreatedAt : 0,
+                            SentAt = now > msg.SentAt ? now - msg.SentAt : 0,
+                            SenderId = msg.SenderId,
+                            SenderOwnerId = msg.SenderOwnerId,
+                            MessageId = msg.MessageId,
+                            SerializationMode = msg.SerializationMode,
+                            Channel = msg.Channel,
+                            RecipientBlockType = msg.RecipientBlockType,
+                            RequiresAck = msg.RequiresAck,
+                            PayloadTypeValue = msg.PayloadTypeValue,
+                        });
+                    }
+                }
+            }
+        }
+
+        /// <summary>World load: a block's saved in-flight messages (<see cref="CollectSent"/>) back in their queues, with the age they had.</summary>
+        public int RestoreSent(List<TimestampedMessage> saved)
+        {
+            if (saved == null || saved.Count == 0) return 0;
+            ulong now = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow);
+            int restored = 0;
+            for (int i = 0; i < saved.Count; i++)
+            {
+                var msg = saved[i];
+                if (msg == null) continue;
+                msg.SentAt = now > msg.SentAt ? now - msg.SentAt : now;
+                msg.CreatedAt = now > msg.CreatedAt ? now - msg.CreatedAt : now;
+                if (msg.ValidRecipients == null) msg.ValidRecipients = new HashSet<long>();
+                var channelLock = _channelLocks[msg.Channel];
+                lock (channelLock)
+                {
+                    var queue = _channelQueues.GetOrAdd(msg.Channel, _ => new MyConcurrentQueue<TimestampedMessage>());
+                    queue.Enqueue(msg);
+                }
+                restored++;
+            }
+            return restored;
+        }
+
         public void PrepareForShutdown()
         {
             antennaTree.Clear();

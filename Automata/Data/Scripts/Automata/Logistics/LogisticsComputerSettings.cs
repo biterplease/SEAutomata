@@ -1,42 +1,38 @@
-﻿using Automata.Inventory;
+using System.Collections.Generic;
+
+using ProtoBuf;
 
 namespace Automata.Logistics
 {
     /// <summary>
-    /// Logistics computer configurable settings.
-    /// These should always be validated, and bounded by, the mod server settings.
+    /// Player settings of a Logistics Computer (terminal), saved in the block's mod storage and synced.
     /// </summary>
-    public class IAILogisticsComputerSettings
+    [ProtoContract]
+    public class LogisticsComputerSettings
     {
+        [ProtoMember(1, IsRequired = true)] public bool Enabled = true;
         /// <summary>
-        /// Provide, Request, Push, or all
-        /// When Provide is checked, all items are passively provided to the network, and 
-        /// other LogisticsComputers may request items from this inventory.
-        /// When Request is checked, enables this LogisticsComputer to request items from the network.
-        /// When Push is checked, allows this LogisticsComputer to actively provide items to the network.
-        /// If only Push is checked, it has the ability to get rid of unwanted items while not sharing the rest
-        /// of the inventory.
+        /// Provide for logistics / construction: bid with this grid's items (or room) on other blocks' jobs.
+        /// Request: below a Min, ask for the difference. Push: above a Max, have the excess taken away.
         /// </summary>
-        public OperationMode OperationMode;
-        public WorkMode WorkMode;
-        public bool Enabled;
+        [ProtoMember(2, IsRequired = true)] public OperationMode WorkMode = OperationMode.ProvideForLogistics | OperationMode.ProvideForConstruction;
+        /// <summary>How often the conveyor networks are mapped again even without block changes.</summary>
+        [ProtoMember(3)] public int ConveyorNetworkUpdateIntervalSeconds = 60;
         /// <summary>
-        /// Items exceeding these values will be automatically pushed to the Logistics Network.
-        /// Requires OperationMode Push
+        /// Min / Max per item: "item:min:max" (item = inventory key: "SteelPlate", "Ingot/Iron", "Ore/Ice"...);
+        /// 0 = not set. See <see cref="QuotaEntry"/>.
         /// </summary>
-        public DiscreteInventory Limits;
-        /// <summary>
-        /// Ignore items in this list.
-        /// </summary>
-        public DiscreteInventory IgnoreList;
-        /// <summary>
-        /// The Logistics Computer will make sure these amounts are in storage at all times.
-        /// Anything missing will be requested periodically.
-        /// Requires operation mode Requester
-        /// </summary>
-        public DiscreteInventory Requests;
-        public float RequestPeriod;
-
-        public int ConveyorNetworkUpdateIntervalSeconds;
+        [ProtoMember(4)] public List<string> Quotas = new List<string>();
+        /// <summary>Bid room on mining jobs even with no refinery that takes the ore (plain ore storage).</summary>
+        [ProtoMember(5)] public bool AcceptOreWithoutRefinery;
+        /// <summary>LCDs whose name contains this show the computer's status.</summary>
+        [ProtoMember(6)] public string LcdTag = "[LogisticsComputer]";
+        /// <summary>Bumped by the terminal's "Retry held jobs" button (the server retries when it changes).</summary>
+        [ProtoMember(7)] public int RetryRequest;
+        /// <summary>A few events worth a chat line go out through a Broadcast Controller on the construct (Util/BroadcastControllerSender).</summary>
+        [ProtoMember(8)] public bool UseBroadcastController;
+        /// <summary>The name its logs (and other blocks' logs) show; empty: the block's name.</summary>
+        [ProtoMember(9)] public string Nickname = "";
+        [ProtoMember(10)] public Util.LcdStyle Lcd = new Util.LcdStyle();
     }
 }

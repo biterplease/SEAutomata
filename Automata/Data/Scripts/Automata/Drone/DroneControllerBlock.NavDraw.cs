@@ -20,7 +20,9 @@ namespace Automata.Drone
     /// </summary>
     public partial class DroneControllerBlock
     {
+        #region Timing
         private const int NAV_SUBSCRIPTION_MARGIN_TICKS = 10 * 60;    // server side, on top of the draw timeout, in case the "off" is lost
+        #endregion
         private const double NAV_POINT_EPSILON = 0.1;                 // m: same point / not worth resending
         private static readonly MyStringId NavDotMaterial = MyStringId.GetOrCompute("WhiteDot");
         private static readonly Color NavDotColor = Color.Red;

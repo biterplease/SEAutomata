@@ -1,6 +1,8 @@
 ﻿using ProtoBuf;
 using System;
 
+using VRageMath;
+
 using Automata.Util;
 using Automata.Pathfinding;
 
@@ -38,6 +40,9 @@ namespace Automata.Drone
         Docked,
         [ProtoEnum]
         Preflight,
+        /// <summary>Combat handover: the AI Flight + AI Offensive blocks fly and fight.</summary>
+        [ProtoEnum]
+        Combat,
     }
     [ProtoContract]
     public enum OperationMode : byte
@@ -45,9 +50,15 @@ namespace Automata.Drone
         [ProtoEnum]
         StandAlone,
         [ProtoEnum]
-        ManagedByScheduler,
+        ManagedByOrchestrator,
         [ProtoEnum]
         ManagedByPlayer,
+        /// <summary>
+        /// Obsolete (2026-10-05): combat handover is now the "Combat drone" behaviour profile in ManagedByOrchestrator.
+        /// Kept so older saves load; migrated on load (DroneControllerBlock.MigrateSettings), never offered.
+        /// </summary>
+        [ProtoEnum]
+        CombatHandover,
     }
     [Flags, ProtoContract]
     public enum Capabilities : uint
@@ -111,7 +122,11 @@ namespace Automata.Drone
         [ProtoEnum] LiftLt1000t = 1048576,
 
     }
-    public enum BehaviourProfile : byte
+    /// <summary>
+    /// A drone's role (one per drone, terminal). Values are bits so orchestrators test them with &amp;; ushort since the
+    /// job profiles (2026-10-05) outgrew a byte (protobuf writes the number either way).
+    /// </summary>
+    public enum BehaviourProfile : ushort
     {
         [ProtoEnum]
         None = 0,
@@ -123,10 +138,11 @@ namespace Automata.Drone
         [ProtoEnum]
         IsCargoDrone  = 4,
         /// <summary>
-        /// Scout drones are usually unarmed, and extremely lightweight. Used to scout for ore or enemy activity.
+        /// Ore scouts: usually unarmed and light, preferred for scout jobs (industry pointer, TODO/11). An ore detector
+        /// is required (the drone is in error without one).
         /// </summary>
         [ProtoEnum]
-        IsScoutDrone = 8,
+        IsOreScout = 8,
         /// <summary>
         /// Rovers are wheeled drones designed for surface navigation.
         /// They may on may not be equipped for flight, but will prefer surface
@@ -135,6 +151,39 @@ namespace Automata.Drone
         /// </summary>
         [ProtoEnum]
         IsRover = 16,
+        /// <summary>Combat drones: armed, the ones selected for combat jobs (combat pointer, TODO/11).</summary>
+        [ProtoEnum]
+        IsCombatDrone = 32,
+        /// <summary>
+        /// Ore haulers: preferred for logistics jobs whose items are all ores (Ice included), and only those (one item of
+        /// any other type rules them out); mining jobs too. May dock with small connectors (TODO/14).
+        /// </summary>
+        [ProtoEnum]
+        IsOreHauler = 64,
+        /// <summary>Welder:All: preferred for weld jobs (construction), any kind.</summary>
+        [ProtoEnum]
+        IsWelderDrone = 128,
+        /// <summary>Grinder drone: preferred for grind jobs.</summary>
+        [ProtoEnum]
+        IsGrinderDrone = 256,
+        /// <summary>Welder + grinder drone (both on one ship, as players usually build them): preferred for both.</summary>
+        [ProtoEnum]
+        IsWelderGrinderDrone = 512,
+        /// <summary>Mining drone: preferred for mining jobs.</summary>
+        [ProtoEnum]
+        IsMiningDrone = 1024,
+        /// <summary>Farming drone (farming not implemented yet).</summary>
+        [ProtoEnum]
+        IsFarmingDrone = 2048,
+        /// <summary>Welder:Repair: a welder that ranks first for repair jobs (damaged blocks); still takes any weld job.</summary>
+        [ProtoEnum]
+        IsWelderRepair = 4096,
+        /// <summary>Welder:Projected: a welder that ranks first for projected build jobs; still takes any weld job.</summary>
+        [ProtoEnum]
+        IsWelderProjected = 8192,
+        /// <summary>Welder:Unbuilt: a welder that ranks first for unbuilt jobs (placed, not welded up); still takes any weld job.</summary>
+        [ProtoEnum]
+        IsWelderUnbuilt = 16384,
 }
     [ProtoContract, Flags]
     public enum UpdateFlags : ushort
@@ -213,6 +262,22 @@ namespace Automata.Drone
         public bool Watched;
         /// <summary>A waypoint the player gave (debug orders); detour legs in between are not. Runtime only.</summary>
         public bool PlayerWaypoint;
+        /// <summary>
+        /// Route leg / back-out: arrived within ~10° of its attitude and below 0.3 m/s (the order after it settles the
+        /// rest), not the 3° / 0.1 m/s a work or dock position needs. Runtime only.
+        /// </summary>
+        public bool LooseArrival;
+        /// <summary>
+        /// Escort (station keeping): Target is the entity's centre + FollowOffset every tick, the drone matching the
+        /// entity's velocity and looking at it (a grid or a character: no ownership / range rules as for anchors, the
+        /// escort job checked the target). Runtime only: the escort task issues it again after a load.
+        /// </summary>
+        public long FollowEntityId;
+        /// <summary>Escort: world offset of the station from the followed entity's centre (updated by the escort logic).</summary>
+        public Vector3D FollowOffset;
+        /// <summary>m/s along the order, all of it (0 = none; FinalSpeed only slows its last metres). Mining bores, dock
+        /// corridors (saved: a drone in a hangar must not leave it at full speed after a reload).</summary>
+        [ProtoMember(26)] public double SpeedCap;
     }
     [ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class Drone

@@ -11,6 +11,7 @@ using Automata.Network;
 using Automata.Util;
 using Automata.Util.Logging;
 using Digi.NetworkLib;
+using VRage.Utils;
 
 namespace Automata.Drone
 {
@@ -52,6 +53,20 @@ namespace Automata.Drone
         BehaviourProfile,
         TaskTimeout,
         MinAltitude,
+        CombatHandoverDistance,
+        CombatNoTargetSeconds,
+        AutoLaunchRadius,         // (was CombatLaunchRadius)
+        CombatRetreatOnFlee,
+        CombatRetreatOnLowPower,
+        SurveyForOres,
+        UseBroadcastController,
+        EscortFollowDistance,
+        WeldIgnoreColor,
+        IgnoredOres,              // Text: keys, one per line
+        IgnoredCrops,             // Text: keys, one per line
+        ConstructionWorkPriority,
+        Nickname,                 // Text
+        ObservationGps,           // Number: on / off, Text: "name\nx;y;z" (the GPS point, invariant culture)
     }
 
     /// <summary>Things a player can order the drone to do from the terminal.</summary>
@@ -72,6 +87,7 @@ namespace Automata.Drone
         StopOrders,
         SelectHomeBeacon,         // Id (0 = none)
         DrawNavigation,           // Code 1 = send me the route (debug draw timeout), 0 = stop
+        DebugLog,                 // the server writes the drone's state to the mod log (any mode)
     }
 
     /// <summary>
@@ -89,7 +105,18 @@ namespace Automata.Drone
     /// </summary>
     public partial class DroneControllerBlock
     {
+        #region UI strings
+        private static readonly MyStringId StrAIIsDisabled = MyStringId.GetOrCompute("AI is disabled");
+        private static readonly MyStringId StrDebugOrdersNeedManagedBy = MyStringId.GetOrCompute("Debug orders need 'Managed by player' mode");
+        private static readonly MyStringId StrNavM = MyStringId.GetOrCompute("Nav: {0:F0} m");
+        private static readonly MyStringId StrNavWaypointQueueFull = MyStringId.GetOrCompute("Nav: waypoint queue full");
+        private static readonly MyStringId StrHomeDockTheDroneTo = MyStringId.GetOrCompute("Home: dock the drone to a connector first");
+        private static readonly MyStringId StrOrdersCleared = MyStringId.GetOrCompute("Orders cleared");
+        #endregion
+
+        #region Timing
         private const int ANCHOR_LIST_REFRESH_TICKS = 5 * 60;   // clients re-request a shown list at most every 5 s
+        #endregion
 
         private bool applyingRemote;          // applying a received setting: don't send it again
         private readonly Dictionary<ulong, int> anchorListRequests = new Dictionary<ulong, int>();
@@ -184,6 +211,23 @@ namespace Automata.Drone
                 case DroneSettingKey.BehaviourProfile:            p.Number = (double)s.BehaviourProfile; break;
                 case DroneSettingKey.TaskTimeout:                 p.Number = s.TaskTimeoutSeconds; break;
                 case DroneSettingKey.MinAltitude:                 p.Number = s.MinAltitude; break;
+                case DroneSettingKey.CombatHandoverDistance:      p.Number = s.CombatHandoverDistance; break;
+                case DroneSettingKey.CombatNoTargetSeconds:       p.Number = s.CombatNoTargetSeconds; break;
+                case DroneSettingKey.AutoLaunchRadius:            p.Number = s.AutoLaunchRadius; break;
+                case DroneSettingKey.EscortFollowDistance:        p.Number = s.EscortFollowDistance; break;
+                case DroneSettingKey.WeldIgnoreColor:             p.Number = s.WeldIgnoreColor; break;
+                case DroneSettingKey.IgnoredOres:                 p.Text = string.Join("\n", s.IgnoredOres ?? new List<string>()); break;
+                case DroneSettingKey.IgnoredCrops:                p.Text = string.Join("\n", s.IgnoredCrops ?? new List<string>()); break;
+                case DroneSettingKey.ConstructionWorkPriority:    p.Number = (double)s.ConstructionWorkPriority; break;
+                case DroneSettingKey.Nickname:                    p.Text = s.Nickname ?? ""; break;
+                case DroneSettingKey.ObservationGps:
+                    p.Number = s.ObservationAreaAtGps ? 1 : 0;
+                    p.Text = EncodeGps(s.ObservationGpsName, s.ObservationGpsPosition, s.ObservationGpsSet);
+                    break;
+                case DroneSettingKey.CombatRetreatOnFlee:         p.Number = s.CombatRetreatOnFlee ? 1 : 0; break;
+                case DroneSettingKey.CombatRetreatOnLowPower:     p.Number = s.CombatRetreatOnLowPower ? 1 : 0; break;
+                case DroneSettingKey.SurveyForOres:               p.Number = s.SurveyForOres ? 1 : 0; break;
+                case DroneSettingKey.UseBroadcastController:      p.Number = s.UseBroadcastController ? 1 : 0; break;
             }
         }
 
@@ -274,6 +318,27 @@ namespace Automata.Drone
                 case DroneSettingKey.BehaviourProfile:            Terminal_BehaviourProfileValue = (long)p.Number; break;
                 case DroneSettingKey.TaskTimeout:                 Terminal_TaskTimeoutSeconds = f; break;
                 case DroneSettingKey.MinAltitude:                 Terminal_MinAltitude = f; break;
+                case DroneSettingKey.CombatHandoverDistance:      Terminal_CombatHandoverDistance = f; break;
+                case DroneSettingKey.CombatNoTargetSeconds:       Terminal_CombatNoTargetSeconds = f; break;
+                case DroneSettingKey.AutoLaunchRadius:            Terminal_AutoLaunchRadius = f; break;
+                case DroneSettingKey.EscortFollowDistance:        Terminal_EscortFollowDistance = f; break;
+                case DroneSettingKey.WeldIgnoreColor:             Terminal_WeldIgnoreColor = new Color((uint)p.Number); break;
+                case DroneSettingKey.IgnoredOres:                 SetIgnoreList(false, SplitKeys(p.Text)); break;
+                case DroneSettingKey.IgnoredCrops:                SetIgnoreList(true, SplitKeys(p.Text)); break;
+                case DroneSettingKey.ConstructionWorkPriority:    Terminal_ConstructionWorkPriority = (long)p.Number; break;
+                case DroneSettingKey.Nickname:                    Terminal_Nickname = p.Text; break;
+                case DroneSettingKey.ObservationGps:
+                {
+                    string name;
+                    Vector3D pos;
+                    bool has = DecodeGps(p.Text, out name, out pos);
+                    SetObservationGps(flag, has ? name : null, has ? (Vector3D?)pos : null);
+                    break;
+                }
+                case DroneSettingKey.CombatRetreatOnFlee:         Terminal_CombatRetreatOnFlee = flag; break;
+                case DroneSettingKey.CombatRetreatOnLowPower:     Terminal_CombatRetreatOnLowPower = flag; break;
+                case DroneSettingKey.SurveyForOres:               Terminal_SurveyForOres = flag; break;
+                case DroneSettingKey.UseBroadcastController:      Terminal_UseBroadcastController = flag; break;
             }
         }
         #endregion
@@ -334,12 +399,12 @@ namespace Automata.Drone
         {
             if (!settings.IsEnabled && IsMovementAction(p.Action))
             {
-                Report("AI is disabled");
+                Report(StrAIIsDisabled);
                 return;
             }
             if (settings.OperationMode != OperationMode.ManagedByPlayer && IsDebugAction(p.Action))
             {
-                Report("Debug orders need 'Managed by player' mode");
+                Report(StrDebugOrdersNeedManagedBy);
                 return;
             }
             switch (p.Action)
@@ -350,11 +415,11 @@ namespace Automata.Drone
                     var wps = new List<Vector3D>();
                     if (p.HasVectorB) wps.Add(p.VectorB.ToVector3D());
                     wps.Add(p.VectorA.ToVector3D());
-                    if (FlyPlayerRoute(wps)) Report("Nav: {0:F0} m", Vector3D.Distance(flightState.Position, p.VectorA.ToVector3D()));
+                    if (FlyPlayerRoute(wps)) Report(StrNavM, Vector3D.Distance(flightState.Position, p.VectorA.ToVector3D()));
                     break;
                 }
                 case DroneAction.QueueWaypoint:
-                    if (queuedLegs.Count >= MAX_QUEUED_LEGS) { Report("Nav: waypoint queue full"); break; }
+                    if (queuedLegs.Count >= MAX_QUEUED_LEGS) { Report(StrNavWaypointQueueFull); break; }
                     ExecuteQueueWaypoint(p.VectorA.ToVector3D());
                     break;
                 case DroneAction.Orient:
@@ -369,7 +434,7 @@ namespace Automata.Drone
                     ExecuteNavigateRelative(p.Id, p.VectorA.ToVector3D(), identity);
                     break;
                 case DroneAction.GoHome:
-                    GoHome();
+                    GoRest();
                     break;
                 case DroneAction.ScanAnchors:
                     ExecuteScanAnchors(senderSteamId, identity);
@@ -384,7 +449,7 @@ namespace Automata.Drone
                     if (RecordDockPoseFromConnection(identity))
                         SyncSetting(DroneSettingKey.HomeConnector);
                     else
-                        Report("Home: dock the drone to a connector first");
+                        Report(StrHomeDockTheDroneTo);
                     break;
                 case DroneAction.RequestAnchorList:
                     SendAnchorList(senderSteamId, identity);
@@ -395,6 +460,9 @@ namespace Automata.Drone
                 case DroneAction.DrawNavigation:
                     SubscribeNavigationRoute(senderSteamId, p.Code != 0);
                     break;
+                case DroneAction.DebugLog:
+                    DebugLogSnapshot(senderSteamId);
+                    break;
                 case DroneAction.StopOrders:
                     ClearFlightOrder();
                     orientationTargetSet = false;
@@ -402,7 +470,7 @@ namespace Automata.Drone
                     constructionPausedUntil = int.MinValue / 2;   // a new Stop restarts the countdown
                     PauseConstruction(CONSTRUCTION_STOP_PAUSE_TICKS);
                     stopResumeFrame = constructionPausedUntil;
-                    Report("Orders cleared");
+                    Report(StrOrdersCleared);
                     break;
             }
         }

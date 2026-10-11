@@ -77,6 +77,10 @@ namespace Automata.Logistics
         public List<IMyAssembler> assemblers;
         public List<IMyRefinery> refineries;
         public List<IMyReactor> reactors;
+        /// <summary>O2/H2 generators (they take Ice from the network's cargo).</summary>
+        public List<IMyGasGenerator> gasGenerators;
+        /// <summary>Oxygen and hydrogen tanks (their inventories hold bottles).</summary>
+        public List<IMyGasTank> gasTanks;
         public DiscreteInventory Inventory;
 
         // player managed properties, set from the IAILogisticsComputer terminal controls
@@ -104,6 +108,8 @@ namespace Automata.Logistics
             assemblers = new List<IMyAssembler>();
             refineries = new List<IMyRefinery>();
             reactors = new List<IMyReactor>();
+            gasGenerators = new List<IMyGasGenerator>();
+            gasTanks = new List<IMyGasTank>();
             _sessionDelegate = sessionDelegate ?? new MySessionDelegate();
         }
         public void Clear()
@@ -114,6 +120,8 @@ namespace Automata.Logistics
             assemblers.Clear();
             refineries.Clear();
             reactors.Clear();
+            gasGenerators.Clear();
+            gasTanks.Clear();
         }
 
         public void UpdateInventories()
@@ -250,6 +258,31 @@ namespace Automata.Logistics
         public List<IOLocationData> GetIOBlockPositions()
         {
             return ioLocationData;
+        }
+
+        /// <summary>A (working) O2/H2 generator on the network: where Ice is worth delivering.</summary>
+        public bool HasGasGenerators(bool working = true)
+        {
+            for (int i = 0; i < gasGenerators.Count; i++)
+            {
+                var g = gasGenerators[i];
+                if (g != null && !g.Closed && (!working || g.IsWorking)) return true;
+            }
+            return false;
+        }
+
+        /// <summary>Oxygen tanks (true) or hydrogen tanks (false) on the network.</summary>
+        public int GasTankCount(bool oxygen)
+        {
+            int n = 0;
+            for (int i = 0; i < gasTanks.Count; i++)
+            {
+                var t = gasTanks[i];
+                if (t == null || t.Closed) continue;
+                bool h2 = t.BlockDefinition.SubtypeName.IndexOf("Hydrogen", StringComparison.OrdinalIgnoreCase) >= 0;
+                if (h2 != oxygen) n++;
+            }
+            return n;
         }
 
         public bool HasRefineries(bool working = false)
@@ -557,6 +590,32 @@ namespace Automata.Logistics
             return left.Length.CompareTo(right.Length);
         }
 
+        // Vanilla small connectors (they only mate with small connectors)
+        private static readonly HashSet<string> SmallConnectorSubtypes = new HashSet<string>
+        {
+            "ConnectorSmall",                   // small grid, 1x1x1
+            "LargeBlockInsetConnectorSmall",    // large grid "small connector"
+            "SmallBlockInsetConnector",         // small grid inset, 1x1x1
+        };
+
+        /// <summary>
+        /// A standard (large) connector, as opposed to a small one: they only mate with their own size (TODO/14). Small:
+        /// the vanilla subtypes, a model whose connector dummy is "small_connector", and (modded) a small-grid connector of
+        /// a single cell.
+        /// </summary>
+        public static bool IsStandardConnector(IMyShipConnector c)
+        {
+            if (c == null) return false;
+            if (SmallConnectorSubtypes.Contains(c.BlockDefinition.SubtypeName)) return false;
+            if (Drone.DroneControllerBlock.IsSmallConnector(c)) return false;
+            return !(c.CubeGrid != null && c.CubeGrid.GridSizeEnum == VRage.Game.MyCubeSize.Small && c.Min == c.Max);
+        }
+
+        public static bool IsSmallConnector(IMyShipConnector c)
+        {
+            return c != null && !IsStandardConnector(c);
+        }
+
         public static void CategorizeBlock(ConveyorNetwork network, IMyCubeBlock block)
         {
             // Use 'as' and null check for C# 6.0
@@ -592,6 +651,27 @@ namespace Automata.Logistics
             if (refinery != null)
             {
                 network.refineries.Add(refinery);
+                return;
+            }
+
+            var generator = block as IMyGasGenerator;
+            if (generator != null)
+            {
+                network.gasGenerators.Add(generator);
+                return;
+            }
+
+            var tank = block as IMyGasTank;
+            if (tank != null)
+            {
+                network.gasTanks.Add(tank);
+                return;
+            }
+
+            var reactor = block as IMyReactor;
+            if (reactor != null)
+            {
+                network.reactors.Add(reactor);
                 return;
             }
         }
