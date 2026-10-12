@@ -141,7 +141,7 @@ namespace Automata.Construction
                     {
                         var b = _areaBlocks[i];
                         Orchestrator.JobType type;
-                        // Exact colours (ColorUtil.SameColor): the grind colour is ground; the weld-ignore colour is never welded
+                        // Exact colours (ColorUtil.SameColor): the grind color is ground; the weld-ignore color is never welded
                         if (grind && ColorUtil.SameColor(b, grindColor)) type = Orchestrator.JobType.Grind;
                         else if (weldBuilt && NeedsWeld(b, modes) && !ColorUtil.SameColor(b, weldIgnoreColor)) type = Orchestrator.JobType.Weld;
                         else continue;
@@ -179,7 +179,7 @@ namespace Automata.Construction
                         for (int i = 0; i < _projectedBlocks.Count && found < buildable; i++)
                         {
                             var b = _projectedBlocks[i];
-                            if (ColorUtil.SameColor(b, weldIgnoreColor)) continue;   // painted the weld-ignore colour in the blueprint
+                            if (ColorUtil.SameColor(b, weldIgnoreColor)) continue;   // painted the weld-ignore color in the blueprint
                             Vector3D center;
                             if (!IntersectsArea(b, ref areaObb, areaCenter, areaRadius, out center)) continue;
                             double key = SortKeyOf(center, ref areaCenter, ref areaInv, WorkPriorities.Rank(priority, WorkCategory.Projected));

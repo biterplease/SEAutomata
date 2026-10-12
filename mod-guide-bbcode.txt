@@ -69,7 +69,7 @@ All blocks have a "Nickname" field, that allows you to set a friendly-name to yo
 
 [h3]Use broadcast controller[/h3]
 
-If this is toggled, and there's a broadcast controller in their grid, Automata blocks will use the broadcast controller to message you about important updates.
+If this is toggled, and there's a broadcast controller in their grid, Automata blocks will use the broadcast controller to message you about important updates. Computers and the Orchestrator also warn when a drone working one of their jobs hasn't been heard from for a minute ("Drone NAME has not been heard of for 60s!"); drones that run out of routes say so too.
 
 [h3]LCD output[/h3]
 
@@ -93,7 +93,7 @@ The logs will show relevant data to the automata block, such as jobs taken, reas
 
 [h2]Drone Controller[/h2]
 
-[h3]Behaviour profiles[/h3]
+[h3]Behavior profiles[/h3]
 
 The behaviour profile tells Orchestrators what this drone [i]prefers[/i] to do. A drone still bids on any job its equipment allows, but drones with a matching profile always win over the others.
 
@@ -136,8 +136,8 @@ A stand-alone drone works by itself, without any computers or Orchestrator. It w
 
 [list]
 [*]welds unfinished blocks, repairs damaged ones, and builds projections,
-[*]grinds down blocks painted with the [b]grind colour[/b],
-[*]never touches blocks painted with the [b]weld ignore colour[/b].
+[*]grinds down blocks painted with the [b]grind color[/b],
+[*]never touches blocks painted with the [b]weld ignore color[/b].
 [/list]
 
 It loads the components it needs from the conveyor network of its home connector, does as much as it can carry, comes back, and repeats. You can choose the order it works in (repair, projections, unbuilt). Turn on [b]Show observation area[/b] to see the box.
@@ -151,6 +151,14 @@ In this mode the drone waits at home and bids on jobs from Orchestrators in ante
 Combat drones in this mode also launch on their own when their AI Defensive block spots an enemy within the [b]auto-launch radius[/b].
 
 The operation mode can only be changed while the drone's AI is off.
+
+[h3]Economy Flight[/h3]
+
+A checkbox in the drone's [b]Flight[/b] section, off by default. In space, legs of 1 km or more are flown to save fuel: the drone turns its strongest thruster group along the way, burns up to a cruise speed, coasts with every thruster off, turns around and burns to brake. The last 150 m of each leg are flown normally. Short legs, work, docking and anything that changes the route mid-leg fall back to normal flight. Planetary gravity (quad-copter flight) is not done yet.
+
+[h3]When a drone finds no route[/h3]
+
+On a trip home, to a dock or to a waypoint (or when the route ahead gets blocked), a drone that finds no way flies to a free spot close by, a different one each time, and plans again from there. After 3 tries it stops in an error state and broadcasts it. Press [b]Stop[/b] or [b]Go home[/b], or recall it with the designator, once the way is clear.
 
 [h3]Which jobs a drone bids on[/h3]
 
@@ -218,8 +226,8 @@ The Construction Computer watches a large box around itself (up to 50 x 50 x 50 
 
 [list]
 [*]unfinished blocks, damaged blocks and projections to weld (each can be turned on or off),
-[*]blocks painted the grind colour to grind,
-[*]skipping anything painted the weld ignore colour.
+[*]blocks painted the grind color to grind,
+[*]skipping anything painted the weld ignore color.
 [/list]
 
 It sees every grid in the box that you, your faction, or nobody owns, including floating projections that aren't attached to anything.
@@ -285,7 +293,7 @@ Both designators share two extra modes:
 
 [list]
 [*][b]Tag[/b]: point at your own drones to tag them (up to 32). The next order goes to every tagged drone, one job each. Without tags, one suitable drone is picked for you.
-[*][b]Recall[/b]: point at one of your drones to call it home. It drops its current job.
+[*][b]Recall[/b]: point at one of your drones to call it home. It drops its current job. Point at the GPS marker of an order instead (within about 8 m) and every drone working that order comes home, and its jobs nobody has taken yet are cancelled.
 [/list]
 
 [h3]Scouting (Industrial Target Designator)[/h3]
@@ -294,7 +302,7 @@ Only drones with the [b]Ore scout[/b] profile and an ore detector take scouting 
 
 [list]
 [*][b]Spot check[/b]: point at the ground or an asteroid. A scout flies there, scans for ore and comes back. With several tagged scouts, they spread around the spot.
-[*][b]Area sweep[/b]: point at an area. A scout sweeps it (low passes over a planet, rings around an asteroid). With several tagged scouts, the area is split between them.
+[*][b]Area sweep[/b]: point at an area. A scout sweeps it (low passes over a planet; on an asteroid, 8 low orbits over the spot in random directions, close to the surface, with height and spacing set by the scout's ore detector range). With several tagged scouts, the area is split between them. A waypoint the scout can't reach is skipped (up to 3 in a row), and in space scouts wait longer before giving up on a stalled leg.
 [/list]
 
 A GPS marker shows the order: yellow while waiting for a drone, green once taken. Everything the scouts find goes to your Mining Surveyors, ready to be ordered.

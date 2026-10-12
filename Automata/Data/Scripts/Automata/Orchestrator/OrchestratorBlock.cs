@@ -41,8 +41,8 @@ namespace Automata.Orchestrator
         #region UI strings
         private static readonly MyStringId StrError = MyStringId.GetOrCompute("Error: {0}");
         private static readonly MyStringId StrJobTypeNotHandled = MyStringId.GetOrCompute("job type {0} not handled");
-        private static readonly MyStringId StrNoBidsWithin = MyStringId.GetOrCompute("no bids within {0} s");
-        private static readonly MyStringId StrNoDroneBidWithin = MyStringId.GetOrCompute("no drone bid within {0} s");
+        private static readonly MyStringId StrNoBidsWithin = MyStringId.GetOrCompute("no bids within {0}s");
+        private static readonly MyStringId StrNoDroneBidWithin = MyStringId.GetOrCompute("no drone bid within {0}s");
         private static readonly MyStringId StrPlanDelivery = MyStringId.GetOrCompute("{0} trip(s), {1} drone(s), {2} supplier(s): {3} to LC {4}{5}");
         private static readonly MyStringId StrPlanCollection = MyStringId.GetOrCompute("{0} trip(s), {1} drone(s), {2} taker(s): {3} from LC {4}{5}");
         private static readonly MyStringId StrPlanLeft = MyStringId.GetOrCompute("; left: {0}");
@@ -524,6 +524,7 @@ namespace Automata.Orchestrator
                 SendWinners();
                 SendFailures();
                 ReadJobReports(now);
+                ReadKeepalives(now);
                 ForgetJobs(now);
             }
             catch (Exception ex)
@@ -621,6 +622,7 @@ namespace Automata.Orchestrator
                 messaging.Subscribe(entityId, Channel.TASKS_COMPLETED);
                 messaging.Subscribe(entityId, Channel.TASKS_ABORTED);
                 messaging.Subscribe(entityId, Channel.JOB_WITHDRAWN);
+                messaging.Subscribe(entityId, Channel.JOB_KEEPALIVE);   // its own (player) jobs' drones
                 Log.Info("Orchestrator {0}: listening on antenna '{1}' ({2:F0} m)", entityId, ownAntenna.CustomName, ownAntenna.Radius);
             }
             return true;
@@ -1321,6 +1323,7 @@ namespace Automata.Orchestrator
             var lcsUsed = new HashSet<long>();
             int twoStops = 0;
             double carried = 0;
+            int oreLeft = OreKg(a.ComponentsInventory);   // kg still to be mined: each drone stops there (or when full)
             for (int i = 0; i < ranked.Count && result.Count < MAX_POOLED_DRONES && (result.Count == 0 || carried < total); i++)
             {
                 IOLocationData port, orePort = null;
@@ -1329,7 +1332,8 @@ namespace Automata.Orchestrator
                 var oreTaker = ice ? RefineryTakerFor(takers, ranked[i], taker, out orePort) : null;
                 var tasks = new List<Task>();
                 int slot = result.Count;
-                for (int k = 0; k < site.Count; k++) tasks.Add(slot == 0 || site[k].Type != TaskType.NavigateToolTo ? site[k] : OffsetSite(site[k], slot));
+                for (int k = 0; k < site.Count; k++)
+                    tasks.Add(site[k].Type == TaskType.Mine ? WithOreAmount(site[k], oreLeft) : slot == 0 || site[k].Type != TaskType.NavigateToolTo ? site[k] : OffsetSite(site[k], slot));
                 tasks.Add(DockTask(port));
                 tasks.Add(Task.Unload(a.ComponentsInventory));   // every ore aboard, or (another unload follows) the ice only
                 if (oreTaker != null)
@@ -1343,6 +1347,7 @@ namespace Automata.Orchestrator
                 result[ranked[i].EntityId] = tasks;
                 lcsUsed.Add(taker.Bid.EntityId);
                 carried += TripVolume(ranked[i]);
+                if (total > 0) oreLeft = Math.Max(1, oreLeft - (int)Math.Min(int.MaxValue / 2, TripVolume(ranked[i]) / total * OreKg(a.ComponentsInventory)));
                 taker.Room -= TripVolume(ranked[i]);
             }
             if (result.Count == 0) { why = Loc.F(StrNoConnectorForOre, DockFit.Describe(takers[0].Bid.DockSite)); return false; }
@@ -1351,6 +1356,24 @@ namespace Automata.Orchestrator
             droneBid = BidIdOf(drones, droneId);
             why = Loc.F(StrDroneSOfM3Of, result.Count, carried, total, lcsUsed.Count) + (twoStops > 0 ? Loc.F(StrIceTwoStops, twoStops) : "");
             return true;
+        }
+
+        private static int OreKg(DiscreteInventory inv)
+        {
+            long kg = 0;
+            if (inv != null)
+                foreach (var item in inv.GetAllItems()) kg += item.Value;
+            return (int)Math.Min(int.MaxValue / 2, kg);
+        }
+
+        // The Mine task with this drone's share of the ordered ore (the drone ends the bore when that much is aboard)
+        private static Task WithOreAmount(Task mine, int kg)
+        {
+            if (mine.Inventory == null) return mine;
+            var inv = new DiscreteInventory();
+            foreach (var item in mine.Inventory.GetAllItems()) { inv.AddItem(item.Key, Math.Max(1, kg)); break; }
+            mine.Inventory = inv;
+            return mine;
         }
 
         // The k-th extra miner's bore start: around the planned one, across the bore line, MINER_SPACING apart (the drone
@@ -1624,7 +1647,25 @@ namespace Automata.Orchestrator
 
         // How the drones' shares of awarded jobs ended: counted; an unfinished one is taken again soon when re-announced
         private readonly List<Message<JobStatusReport>> reportInbox = new List<Message<JobStatusReport>>();
+        private readonly List<Message<JobStatusReport>> keepaliveInbox = new List<Message<JobStatusReport>>();
+        private readonly Util.DroneWatch droneWatch = new Util.DroneWatch();
         private int completedCount, abortedCount;
+
+        // The drones on its own jobs (designator orders): unheard for a minute, said once (DroneWatch)
+        private void ReadKeepalives(int now)
+        {
+            messaging.ReadMessages(entityId, ownAntenna, Channel.JOB_KEEPALIVE, keepaliveInbox, 50, true, PayloadType.JobStatusReport);
+            for (int i = 0; i < keepaliveInbox.Count; i++)
+            {
+                var r = keepaliveInbox[i].Payload;
+                if (r == null || r.AnnouncerEntityId != entityId || r.DroneEntityId != keepaliveInbox[i].SenderId
+                    || !AnchorDirectory.IsAllowed(block.OwnerId, keepaliveInbox[i].SenderOwnerId)) continue;
+                droneWatch.Heard(r.DroneEntityId, r.JobId, now, AddEvent);
+                NoteSeen(r.DroneEntityId, AutomataEntityType.DroneControllerBlock, now);
+            }
+            keepaliveInbox.Clear();
+            droneWatch.Check(now, block, settings.UseBroadcastController, "Orchestrator {0}", entityId, AddEvent);
+        }
 
         private void ReadJobReports(int now)
         {
@@ -1638,6 +1679,7 @@ namespace Automata.Orchestrator
                     if (r == null || r.OrchestratorEntityId != entityId || r.DroneEntityId != reportInbox[i].SenderId) continue;
                     if (!AnchorDirectory.IsAllowed(block.OwnerId, reportInbox[i].SenderOwnerId)) continue;
                     NoteSeen(r.DroneEntityId, AutomataEntityType.DroneControllerBlock, now);
+                    if (r.AnnouncerEntityId == entityId) droneWatch.Done(r.DroneEntityId);
                     var key = new KeyValuePair<long, uint>(r.AnnouncerEntityId, r.JobId);
                     ActiveJob active;
                     if (activeJobs.TryGetValue(key, out active)) active.Drones--;

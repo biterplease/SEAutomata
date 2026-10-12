@@ -711,7 +711,7 @@ namespace Automata.Pointer
             if (!p.Hit) { Feedback(identity, DesignatorSignal.Error); return; }
             Vector3D hit = p.HitPosition.ToVector3D();
             double dist = Vector3D.Distance(at, hit);
-            if (p.Mode == PointerMode.Green) { RecallAt(p.HitEntityId, identity); return; }
+            if (p.Mode == PointerMode.Green) { Recall(p.HitEntityId, hit, identity); return; }
             // Orders: the tagged drones (tag mode) take them, one job each; none tagged: one drone of the profile
             var memory = TagsFor(identity, p.Kind);
             var tagged = LiveTags(memory);   // empty: one drone, any of the profile (as before tagging)
@@ -741,13 +741,28 @@ namespace Automata.Pointer
             }
             // Blue: an area sweep, one sector per tagged scout (none tagged: one drone)
             string how;
-            var sectors = ScoutPlanner.AreaSweep(hit, at, Math.Max(1, tagged.Count), out how);
+            var sectors = ScoutPlanner.AreaSweep(hit, at, Math.Max(1, tagged.Count), out how, SmallestDetectorRange(tagged));
             for (int s = 0; s < sectors.Count; s++)
                 orch.SubmitPlayerJob(Orchestrator.JobType.DesignatorScoutArea, sectors[s], hit, Loc.F(StrAreaSweepSector, s + 1, sectors.Count),
                                      identity, p.Kind, Loc.T(StrAreaSweep), ref order, s < tagged.Count ? tagged[s] : 0);
             Log.Info("Pointer: [server] area sweep at {0} for player {1}: {2}", hit, identity, how);
             Feedback(identity, DesignatorSignal.Requested);
             if (tagged.Count > 0) ForgetTags(identity, p.Kind, "order given");
+        }
+
+        // The smallest ore detector range among the tagged scouts (0: none tagged / none readable)
+        private static double SmallestDetectorRange(List<long> tagged)
+        {
+            double best = 0;
+            for (int i = 0; i < tagged.Count; i++)
+            {
+                IMyEntity e;
+                var tb = MyAPIGateway.Entities.TryGetEntityById(tagged[i], out e) ? e as IMyTerminalBlock : null;
+                var d = tb != null && tb.GameLogic != null ? tb.GameLogic.GetAs<Drone.DroneControllerBlock>() : null;
+                double r = d != null ? d.OreDetectorRangeMeters : 0;
+                if (r > 0 && (best == 0 || r < best)) best = r;
+            }
+            return best;
         }
 
         // The tagged drones were given their order (or the memory is otherwise done with): forgotten, the counter back to 0
@@ -852,17 +867,32 @@ namespace Automata.Pointer
             tagsExpired.Clear();
         }
 
-        // Green: the pointed drone (the player's / faction's) comes home
-        private static void RecallAt(long entityId, long identity)
+        private const double RECALL_MARKER_RADIUS = 8;   // m: a hit this close to an order's GPS marker recalls that order
+
+        // Green: the pointed drone (the player's / faction's) comes home; else the order whose marker is pointed at (its
+        // drones come home, jobs not yet taken are cancelled)
+        private static void Recall(long entityId, Vector3D hit, long identity)
         {
             IMyEntity e;
             var grid = MyAPIGateway.Entities.TryGetEntityById(entityId, out e) ? e as IMyCubeGrid : null;
-            if (grid == null) { Feedback(identity, DesignatorSignal.Error); return; }
             int n = 0;
-            DronesOn(grid);
-            for (int i = 0; i < groupDrones.Count; i++)
-                if (Drone.AnchorDirectory.IsAllowed(((IMyCubeBlock)groupDrones[i].Entity).OwnerId, identity) && groupDrones[i].Recall(Loc.T(StrScoutLaser))) n++;
-            groupDrones.Clear();
+            if (grid != null)
+            {
+                DronesOn(grid);
+                for (int i = 0; i < groupDrones.Count; i++)
+                    if (Drone.AnchorDirectory.IsAllowed(((IMyCubeBlock)groupDrones[i].Entity).OwnerId, identity) && groupDrones[i].Recall(Loc.T(StrScoutLaser))) n++;
+                groupDrones.Clear();
+            }
+            if (n == 0)
+            {
+                for (int i = 0; i < OrchestratorBlock.All.Count && n == 0; i++)
+                {
+                    var o = OrchestratorBlock.All[i];
+                    int drones, cancelled;
+                    if (!o.IsRunning || !Drone.AnchorDirectory.IsAllowed(o.OwnerId, identity)) continue;
+                    if (o.RecallOrderAt(hit, RECALL_MARKER_RADIUS, Loc.T(StrScoutLaser), out drones, out cancelled)) n = drones + cancelled;
+                }
+            }
             Feedback(identity, n > 0 ? DesignatorSignal.Recall : DesignatorSignal.Error);
         }
 

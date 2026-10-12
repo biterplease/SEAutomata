@@ -516,7 +516,16 @@ namespace Automata.Drone
         }
 
         // Anchored to the target connector (moving targets work): transit, align, final approach at Safe speed
+        // A dock / home trip that finds no route repositions and tries again (DroneControllerBlock.Recovery)
         private bool StartDocking(IMyShipConnector target, int mi, Vector3DData dockOffset, Vector3DData dockForward, Vector3DData dockUp)
+        {
+            bool was = recoverPlanning;
+            recoverPlanning = true;
+            try { return StartDockingCore(target, mi, dockOffset, dockForward, dockUp); }
+            finally { recoverPlanning = was; }
+        }
+
+        private bool StartDockingCore(IMyShipConnector target, int mi, Vector3DData dockOffset, Vector3DData dockForward, Vector3DData dockUp)
         {
             if (mi < 0) return false;
             var droneConnector = connectorMounts[mi].Block as IMyShipConnector;
@@ -618,6 +627,7 @@ namespace Automata.Drone
             // Docked elsewhere: out of that dock first (straight out, or its corridor), then the route
             if (docked != null) backOuts = DeparturePoints(docked, ref start, dockRoutePoints);
             else ClimbOut(ref start, DroneRadius(), dockRoutePoints);   // in a bore hole: out of it first
+            undockLegs = docked != null ? backOuts : 2;
             // The 4th endpoint: the route ends up to 50 m out from the turn point; in from there at Approach speed
             Vector3D staging = DockStagingPoint(hullAtApproach, dockCorridor ? corridorExitDir : aH);
             bool staged = Vector3D.DistanceSquared(staging, hullAtApproach) > 4;
@@ -830,6 +840,13 @@ namespace Automata.Drone
             if (c == null || c.Closed) { Report(StrDockingAbortedDroneConnectorMissing); dockingHomeId = 0; return; }
 
             bool final = o == dockingOrder;   // not the legs around the observation area
+            if (++dockDiagCalls >= DOCK_DIAG_CALLS)
+            {
+                dockDiagCalls = 0;
+                Log.Debug("Drone {0}: docking at {1}: {2} {3}, {4:F1} m to its target, {5:F2} m/s relative, connector {6}, {7} leg(s) queued, wait {8} s",
+                          Entity.EntityId, dockingHomeId, final ? "final order" : "route leg", o.Phase, Vector3D.Distance(ReferencePoint(o), o.Target.ToVector3D()),
+                          flightState.RelativeVelocity.Length(), c.Status, queuedLegs.Count, dockingWaitTicks / 60);
+            }
             // With a corridor the pose is checked before the drone goes in (the corridor depends on it), not at its end
             if (dockCorridor && !dockPoseVerified && !final && !dockCorridorLegs.Contains(o) && ReplanDockIfMoved()) return;
             if (final && !dockPoseVerified) { VerifyDockPose(o, ref c); if (c == null) return; }
@@ -875,6 +892,8 @@ namespace Automata.Drone
         private const int DOCK_NUDGE_TICKS = 180;             // on the dock pose this long without a lock: press in
         #endregion
         private const int DOCK_NUDGES_MAX = 3;
+        private const int DOCK_DIAG_CALLS = 90;              // UpdateDocking calls (every 10 ticks): a progress line every 15 s
+        private int dockDiagCalls;
         private const double DOCK_NUDGE_STEP = 0.25;          // m along the target connector's axis
         private int dockStuckTicks, dockNudges;
 

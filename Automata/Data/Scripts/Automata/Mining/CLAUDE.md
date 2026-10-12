@@ -39,3 +39,5 @@ job, `DeliveredKg` / `DronesOut` settle the order on the last drone's report.
 - While boring: no thrust-gain learning (rock contact isn't thrust), integral clamp 2.0 instead of 0.5 m/s^2 (steady drill / wall pushes).
 - Stone stays: delivered to the refineries (no ejection: PAM-style dumping is a simulation-speed cost; admins can add tools for it).
 
+## Collect phase steers to the ore (2026-10-11)
+While collecting, every 5th `RunMine` call reads the nearest voxel of the job's ore from the drill point (`NearestOre`, 16 m). More than 2 m off the bore line (and more than `MINE_REACH` 4 m away): the bore's end moves to that voxel + 2 m along the same direction (`DispatchBore` again, at most 12 per bore; attitude and the straight way out unchanged). The 15 s no-ore timer only runs once the drill point is within 4 m of an ore voxel (or no ore voxel is within 16 m, or it has not got closer for 30 s). Before: the bore went on along the line aimed at the deposit's average position; with the nearest voxel several metres off it, 15 s ended the bore with 0 kg (Big mino).

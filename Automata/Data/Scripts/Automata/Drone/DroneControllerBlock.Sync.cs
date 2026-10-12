@@ -48,7 +48,7 @@ namespace Automata.Drone
         GrindColor,
         WaypointTolerance,
         ExcludedCapabilities,
-        HomeNotStation,
+        HomeNotStatic,
         HomeBeacon,               // server -> clients only (selection is an action, validated on the server)
         BehaviourProfile,
         TaskTimeout,
@@ -67,6 +67,7 @@ namespace Automata.Drone
         ConstructionWorkPriority,
         Nickname,                 // Text
         ObservationGps,           // Number: on / off, Text: "name\nx;y;z" (the GPS point, invariant culture)
+        EconomyFlight,
     }
 
     /// <summary>Things a player can order the drone to do from the terminal.</summary>
@@ -206,7 +207,7 @@ namespace Automata.Drone
                 case DroneSettingKey.GrindColor:                  p.Number = s.GrindColor; break;
                 case DroneSettingKey.WaypointTolerance:           p.Number = s.WaypointTolerance; break;
                 case DroneSettingKey.ExcludedCapabilities:        p.Number = (double)s.ExcludedCapabilities; break;
-                case DroneSettingKey.HomeNotStation:              p.Number = s.HomeNotStation ? 1 : 0; break;
+                case DroneSettingKey.HomeNotStatic:              p.Number = s.HomeNotStatic ? 1 : 0; break;
                 case DroneSettingKey.HomeBeacon:                  p.Id = s.HomeBeaconId; break;
                 case DroneSettingKey.BehaviourProfile:            p.Number = (double)s.BehaviourProfile; break;
                 case DroneSettingKey.TaskTimeout:                 p.Number = s.TaskTimeoutSeconds; break;
@@ -228,6 +229,7 @@ namespace Automata.Drone
                 case DroneSettingKey.CombatRetreatOnLowPower:     p.Number = s.CombatRetreatOnLowPower ? 1 : 0; break;
                 case DroneSettingKey.SurveyForOres:               p.Number = s.SurveyForOres ? 1 : 0; break;
                 case DroneSettingKey.UseBroadcastController:      p.Number = s.UseBroadcastController ? 1 : 0; break;
+                case DroneSettingKey.EconomyFlight:               p.Number = s.EconomyFlight ? 1 : 0; break;
             }
         }
 
@@ -310,7 +312,7 @@ namespace Automata.Drone
                 case DroneSettingKey.GrindColor:                  Terminal_GrindColor = new Color((uint)p.Number); break;
                 case DroneSettingKey.WaypointTolerance:           Terminal_WaypointTolerance = f; break;
                 case DroneSettingKey.ExcludedCapabilities:        Terminal_ExcludedCapabilities = (Capabilities)(uint)p.Number; break;
-                case DroneSettingKey.HomeNotStation:              Terminal_HomeNotStation = flag; break;
+                case DroneSettingKey.HomeNotStatic:              Terminal_HomeNotStatic = flag; break;
                 case DroneSettingKey.HomeBeacon:   // server -> clients
                     settings.HomeBeaconId = p.Id;
                     RefreshTerminal();
@@ -339,6 +341,7 @@ namespace Automata.Drone
                 case DroneSettingKey.CombatRetreatOnLowPower:     Terminal_CombatRetreatOnLowPower = flag; break;
                 case DroneSettingKey.SurveyForOres:               Terminal_SurveyForOres = flag; break;
                 case DroneSettingKey.UseBroadcastController:      Terminal_UseBroadcastController = flag; break;
+                case DroneSettingKey.EconomyFlight:               Terminal_EconomyFlight = flag; break;
             }
         }
         #endregion
@@ -434,6 +437,7 @@ namespace Automata.Drone
                     ExecuteNavigateRelative(p.Id, p.VectorA.ToVector3D(), identity);
                     break;
                 case DroneAction.GoHome:
+                    ClearRouteError();
                     GoRest();
                     break;
                 case DroneAction.ScanAnchors:
@@ -464,6 +468,7 @@ namespace Automata.Drone
                     DebugLogSnapshot(senderSteamId);
                     break;
                 case DroneAction.StopOrders:
+                    ClearRouteError();
                     ClearFlightOrder();
                     orientationTargetSet = false;
                     StopJob();

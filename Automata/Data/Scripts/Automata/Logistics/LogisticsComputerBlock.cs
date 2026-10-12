@@ -340,6 +340,7 @@ namespace Automata.Logistics
             ReadFailures(now);
             ReadJobReports(now);
             ReadKeepalives(now);
+            droneWatch.Check(now, block, settings.UseBroadcastController, "LC {0}", entityId, null);
             RepeatAnnouncement(requestJob, now);
             RepeatAnnouncement(pushJob, now);
             ReadAuctions(now);
@@ -1032,6 +1033,7 @@ namespace Automata.Logistics
                 {
                     var r = reportInbox[i].Payload;
                     if (r == null || r.DroneEntityId != reportInbox[i].SenderId || !AnchorDirectory.IsAllowed(block.OwnerId, reportInbox[i].SenderOwnerId)) continue;
+                    if (r.AnnouncerEntityId == entityId) droneWatch.Done(r.DroneEntityId);
                     // A job it supplies / takes in for: the drone is done with it, the reservation ends
                     Commitment held;
                     if (commitments.TryGetValue(r.AuctionId, out held) && held.Won
@@ -1068,6 +1070,8 @@ namespace Automata.Logistics
         }
 
         // Drones still working on an awarded job (long multi-trip deliveries): the award's expiry starts again
+        private readonly Util.DroneWatch droneWatch = new Util.DroneWatch();
+
         private void ReadKeepalives(int now)
         {
             messaging.ReadMessages(entityId, antenna, Channel.JOB_KEEPALIVE, reportInbox, 50, true, PayloadType.JobStatusReport);
@@ -1076,6 +1080,7 @@ namespace Automata.Logistics
                 var r = reportInbox[i].Payload;
                 if (r == null || r.AnnouncerEntityId != entityId || r.DroneEntityId != reportInbox[i].SenderId
                     || !AnchorDirectory.IsAllowed(block.OwnerId, reportInbox[i].SenderOwnerId)) continue;
+                droneWatch.Heard(r.DroneEntityId, r.JobId, now);
                 var job = requestJob != null && requestJob.JobId == r.JobId ? requestJob : pushJob != null && pushJob.JobId == r.JobId ? pushJob : null;
                 if (job == null) continue;
                 if (job.Assigned == 0) job.DronesOut = Math.Max(job.DronesOut, 1);

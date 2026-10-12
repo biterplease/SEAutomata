@@ -44,6 +44,22 @@ namespace Automata.Drone
         private Vector3D siteWatchCenter;    // the current work site (DispatchToolTo)
         private bool siteWatchCenterSet;
 
+        /// <summary>
+        /// Recalls every drone that is working one of the jobs 'jobIds' announced by 'announcerId' (an orchestrator's
+        /// player jobs). Returns how many.
+        /// </summary>
+        public static int RecallJobs(long announcerId, ICollection<uint> jobIds, string by)
+        {
+            int n = 0;
+            for (int i = allDrones.Count - 1; i >= 0; i--)
+            {
+                var d = allDrones[i];
+                if (d.jobAnnouncerId != announcerId || d.currentJob == null || !jobIds.Contains(d.currentJob.JobId)) continue;
+                if (d.Recall(by)) n++;
+            }
+            return n;
+        }
+
         private static void RegisterDrone(DroneControllerBlock d)
         {
             if (!allDrones.Contains(d)) allDrones.Add(d);

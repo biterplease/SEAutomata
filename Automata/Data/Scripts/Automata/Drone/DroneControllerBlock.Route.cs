@@ -69,6 +69,7 @@ namespace Automata.Drone
         }
         private FlightOrder legChecked;
         private int legsSinceUndock = 99;
+        private int undockLegs = 2;       // back-out legs of the route just planned (a straight back-out is one: the leg after it is checked)
         // Just in time: stretches of the current route the drone couldn't see when it was planned, and from where
         private int routeUnseen;
         private int routePlanFrame = int.MinValue;
@@ -89,15 +90,29 @@ namespace Automata.Drone
         private int dockReplanMount;
         private Vector3DData dockReplanOffset, dockReplanForward, dockReplanUp;
 
-        /// <summary>The server requires cameras and / or sensors to see obstacles and the drone has none that work.</summary>
-        private bool IsFlyingBlind()
+        /// <summary>
+        /// The header warning for missing eyes, or null: no camera / no sensor / neither, among the ones the server
+        /// requires for pathfinding (an instrument that isn't required is simulated all around). Docked instruments
+        /// switched off until take-off count.
+        /// </summary>
+        private string MissingInstrumentsWarning()
         {
             var pf = AutomataSession.GetConfig().Pathfinding;
-            if (!pf.RequireCamerasForPathfinding() || !pf.RequireSensorsForPathfinding()) return false;   // simulated all around
-            var asleep = settings != null ? settings.SleepingBlockIds : null;   // docked: switched off until take-off
-            for (int i = 0; i < cameraBlocks.Count; i++) if (PathfindingManager.InstrumentOn(cameraBlocks[i], asleep)) return false;
-            for (int i = 0; i < sensors.Count; i++) if (PathfindingManager.InstrumentOn(sensors[i], asleep)) return false;
-            return true;
+            var asleep = settings != null ? settings.SleepingBlockIds : null;
+            bool noCamera = pf.RequireCamerasForPathfinding(), noSensor = pf.RequireSensorsForPathfinding();
+            for (int i = 0; i < cameraBlocks.Count && noCamera; i++) if (PathfindingManager.InstrumentOn(cameraBlocks[i], asleep)) noCamera = false;
+            for (int i = 0; i < sensors.Count && noSensor; i++) if (PathfindingManager.InstrumentOn(sensors[i], asleep)) noSensor = false;
+            if (noCamera && noSensor) return Loc.T(StrWarnNoSensorOrCamera);
+            if (noCamera) return Loc.T(StrWarnNoCamera);
+            if (noSensor) return Loc.T(StrWarnNoSensor);
+            return null;
+        }
+
+        private bool AnyCameraOn()
+        {
+            var asleep = settings != null ? settings.SleepingBlockIds : null;
+            for (int i = 0; i < cameraBlocks.Count; i++) if (PathfindingManager.InstrumentOn(cameraBlocks[i], asleep)) return true;
+            return false;
         }
 
         private void ResetRoute()
@@ -145,7 +160,7 @@ namespace Automata.Drone
                               Vector3D startForward, Vector3D startUp, bool looseGoal)
         {
             int count = points.Count;
-            if (PlanPathFrom(start, goal, points, avoidObservationArea, areaOnlyFromOutside, startForward, startUp, looseGoal)) return true;
+            if (PlanPathFrom(start, goal, points, avoidObservationArea, areaOnlyFromOutside, startForward, startUp, looseGoal)) { RecoverSucceeded(); return true; }
             // No way from here (boxed in where it hovers: under / beside the build, between drones): reposition - a free
             // spot it can reach in a straight line - and plan from there; the move there becomes the route's first leg
             var pm = PathfindingManager.Instance;
@@ -176,12 +191,14 @@ namespace Automata.Drone
                 Log.Debug("Drone {0}: no way from where it is; repositioning {1:F0} m ({2}) and going on from there",
                           Entity.EntityId, Vector3D.Distance(start, s), escapeWhy[i]);
                 escapeSpots.Clear();
+                RecoverSucceeded();
                 return true;
             }
             if (points.Count > count) points.RemoveRange(count, points.Count - count);
             escapeSpots.Clear();
             Log.Debug("Drone {0}: no way from here or from {1} spots around it", Entity.EntityId, escapeWhy.Count);
-            return false;
+            // Stuck (a dock / home trip, a NavigateTo, a replan): fly to a spot nearby and plan again there
+            return TryRecoverRoute(start, goal, points, count, startForward, startUp, pm, ref q);
         }
 
         private readonly List<Vector3D> escapeSpots = new List<Vector3D>();
@@ -722,7 +739,18 @@ namespace Automata.Drone
         }
 
         // A new route from where the drone is, to the same place. False: none.
+        private bool replanning;   // inside Replan: anchored orders start moving, not matching the anchor's speed
+
         private bool Replan()
+        {
+            bool was = recoverPlanning, wasReplanning = replanning;
+            recoverPlanning = true;
+            replanning = true;
+            try { return ReplanCore(); }
+            finally { recoverPlanning = was; replanning = wasReplanning; }
+        }
+
+        private bool ReplanCore()
         {
             CaptureFlightState();
             if (routeOwner == RouteOwner.FlyRoute)
@@ -770,7 +798,7 @@ namespace Automata.Drone
             legChecked = o;
             legsSinceUndock++;
             if (!o.Watched || routeOwner == RouteOwner.None) return;
-            if (legsSinceUndock <= 2) return;                                        // undocking
+            if (legsSinceUndock <= Math.Min(2, undockLegs)) return;                  // undocking (the back-out legs only)
             if (parkPhase != ParkPhase.None && o == parkOrder) return;               // landing: ends on the surface it parks on
             if (dockingOrder != null && (o == dockingOrder || nextLeg == dockingOrder
                 || (nextLeg == null && queuedLegs.Count > 0 && queuedLegs.Peek() == dockingOrder))) return;   // docking
@@ -840,7 +868,7 @@ namespace Automata.Drone
             var pf = AutomataSession.GetConfig().Pathfinding;
             // Just in time: parts of the route the drone couldn't see when it planned it are planned once it has
             // flown far enough to see them
-            if (routeUnseen > 0 && pf.AllowRepathing())
+            if (routeUnseen > 0 && pf.AllowRepathing() && !EconomyFlying())   // economy flight: planned after the handover
             {
                 IMyTerminalBlock anchor = o.AnchorEntityId == 0 ? null
                     : anchorBlock != null && anchorBlock.EntityId == o.AnchorEntityId ? anchorBlock : AnchorDirectory.Resolve(block, o.AnchorEntityId);

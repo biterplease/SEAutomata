@@ -269,8 +269,8 @@
   <data name="assigned" xml:space="preserve">
     <value>assigned</value>
   </data>
-  <data name="on hold {0} s" xml:space="preserve">
-    <value>on hold {0} s</value>
+  <data name="on hold {0}s" xml:space="preserve">
+    <value>on hold {0}s</value>
   </data>
   <data name="pending" xml:space="preserve">
     <value>pending</value>
@@ -310,26 +310,26 @@
   <data name="Grind" xml:space="preserve">
     <value>Grind</value>
   </data>
-  <data name="Blocks painted the grind colour are ground down." xml:space="preserve">
-    <value>Blocks painted the grind colour are ground down.</value>
+  <data name="Blocks painted the grind color are ground down." xml:space="preserve">
+    <value>Blocks painted the grind color are ground down.</value>
   </data>
-  <data name="Grind colour" xml:space="preserve">
-    <value>Grind colour</value>
+  <data name="Grind color" xml:space="preserve">
+    <value>Grind color</value>
   </data>
-  <data name="Blocks painted exactly this colour are ground (Grind mode). Default RGB(255,0,0)." xml:space="preserve">
-    <value>Blocks painted exactly this colour are ground (Grind mode). Default RGB(255,0,0).</value>
+  <data name="Blocks painted exactly this color are ground (Grind mode). Default RGB(255,0,0)." xml:space="preserve">
+    <value>Blocks painted exactly this color are ground (Grind mode). Default RGB(255,0,0).</value>
   </data>
-  <data name="Weld ignore colour" xml:space="preserve">
-    <value>Weld ignore colour</value>
+  <data name="Weld ignore color" xml:space="preserve">
+    <value>Weld ignore color</value>
   </data>
-  <data name="Blocks painted exactly this colour are never welded, repaired or built (projected blocks too). Default RGB(255,0,255)." xml:space="preserve">
-    <value>Blocks painted exactly this colour are never welded, repaired or built (projected blocks too). Default RGB(255,0,255).</value>
+  <data name="Ignore weld jobs on blocks with this color." xml:space="preserve">
+    <value>Blocks painted exactly this color are never welded, repaired or built (projected blocks too). Default RGB(255,0,255).</value>
   </data>
   <data name="Show observation area" xml:space="preserve">
     <value>Show observation area</value>
   </data>
-  <data name="Draws the observation area (magenta; drone areas are green). Only for you; switches off after a while (server setting, 10 minutes by default)." xml:space="preserve">
-    <value>Draws the observation area (magenta; drone areas are green). Only for you; switches off after a while (server setting, 10 minutes by default).</value>
+  <data name="Draws the observation area. Switches off after a while." xml:space="preserve">
+    <value>Draws the observation area. Switches off after a while.</value>
   </data>
   <data name="On" xml:space="preserve">
     <value>On</value>
@@ -385,8 +385,8 @@
   <data name="Blocks announced together as one job (an orchestrator splits it into trips)." xml:space="preserve">
     <value>Blocks announced together as one job (an orchestrator splits it into trips).</value>
   </data>
-  <data name="{0} s" xml:space="preserve">
-    <value>{0} s</value>
+  <data name="{0}s" xml:space="preserve">
+    <value>{0}s</value>
   </data>
   <data name="{0} block" xml:space="preserve">
     <value>{0} block</value>
@@ -1340,8 +1340,8 @@
   <data name="Home set: {0} (no drone connector can dock)" xml:space="preserve">
     <value>Home set: {0} (no drone connector can dock)</value>
   </data>
-  <data name="Scan: wait {0} s" xml:space="preserve">
-    <value>Scan: wait {0} s</value>
+  <data name="Scan: wait {0}s" xml:space="preserve">
+    <value>Scan: wait {0}s</value>
   </data>
   <data name="Scan: {0} connectors/beacons in range" xml:space="preserve">
     <value>Scan: {0} connectors/beacons in range</value>
@@ -1349,8 +1349,8 @@
   <data name="Add: enter a connector name" xml:space="preserve">
     <value>Add: enter a connector name</value>
   </data>
-  <data name="Add: wait {0} s" xml:space="preserve">
-    <value>Add: wait {0} s</value>
+  <data name="Add: wait {0}s" xml:space="preserve">
+    <value>Add: wait {0}s</value>
   </data>
   <data name="Add: connector &quot;{0}&quot; not found" xml:space="preserve">
     <value>Add: connector "{0}" not found</value>
@@ -1396,8 +1396,8 @@
   </data>
 
   <!-- Drone/DroneControllerTerminalControls.cs -->
-  <data name="Shows this section's settings (in your terminal only)." xml:space="preserve">
-    <value>Shows this section's settings (in your terminal only).</value>
+  <data name="Shows this section's settings." xml:space="preserve">
+    <value>Shows this section's settings.</value>
   </data>
   <data name="Crops" xml:space="preserve">
     <value>Crops</value>
@@ -1426,20 +1426,8 @@
   <data name="IGNORED ores" xml:space="preserve">
     <value>IGNORED ores</value>
   </data>
-  <data name="Crops in this list are IGNORED: the drone won't farm them (farming is not implemented yet)." xml:space="preserve">
-    <value>Crops in this list are IGNORED: the drone won't farm them (farming is not implemented yet).</value>
-  </data>
-  <data name="Ores in this list are IGNORED: the drone bids on no mining job for them." xml:space="preserve">
-    <value>Ores in this list are IGNORED: the drone bids on no mining job for them.</value>
-  </data>
   <data name="Remove selected" xml:space="preserve">
     <value>Remove selected</value>
-  </data>
-  <data name="Takes the selected crops off the IGNORED list." xml:space="preserve">
-    <value>Takes the selected crops off the IGNORED list.</value>
-  </data>
-  <data name="Takes the selected ores off the IGNORED list." xml:space="preserve">
-    <value>Takes the selected ores off the IGNORED list.</value>
   </data>
   <data name="AI" xml:space="preserve">
     <value>AI</value>
@@ -1462,11 +1450,11 @@
   <data name="{0} Off" xml:space="preserve">
     <value>{0} Off</value>
   </data>
-  <data name="{0} m/s" xml:space="preserve">
-    <value>{0} m/s</value>
+  <data name="{0}m/s" xml:space="preserve">
+    <value>{0}m/s</value>
   </data>
-  <data name="{0} m" xml:space="preserve">
-    <value>{0} m</value>
+  <data name="{0}m" xml:space="preserve">
+    <value>{0}m</value>
   </data>
   <data name="{0}°" xml:space="preserve">
     <value>{0}°</value>
@@ -1477,86 +1465,68 @@
   <data name="{0} blocks ({1} m)" xml:space="preserve">
     <value>{0} blocks ({1} m)</value>
   </data>
-  <data name="Seconds before a job task gives up and the drone moves on: a tool task that isn't done, or a flight that stopped getting closer. The server sets the maximum.&#xA;0 = no waiting: a task fails as soon as it stalls." xml:space="preserve">
-    <value>Seconds before a job task gives up and the drone moves on: a tool task that isn't done, or a flight that stopped getting closer. The server sets the maximum.
-0 = no waiting: a task fails as soon as it stalls.</value>
+  <data name="Seconds before a job task gives up and the drone moves on." xml:space="preserve">
+    <value>Seconds before a job task gives up and the drone moves on.</value>
   </data>
-  <data name="combat drones: &quot;Engaging target at &lt;GPS&gt;&quot; when dispatched, &quot;Escorting &lt;name&gt;&quot;, &quot;Target destroyed&quot;." xml:space="preserve">
-    <value>combat drones: "Engaging target at &lt;GPS&gt;" when dispatched, "Escorting &lt;name&gt;", "Target destroyed".</value>
+  <data name="Cruise speed limit for any flight." xml:space="preserve">
+    <value>Cruise speed limit for any flight.</value>
   </data>
-  <data name="Cruise speed limit for any flight, in m/s (0-1000; the game's own speed limit still applies).&#xA;Not tied to the other speeds: odd combinations show as an error in the LCD header." xml:space="preserve">
-    <value>Cruise speed limit for any flight, in m/s (0-1000; the game's own speed limit still applies).
-Not tied to the other speeds: odd combinations show as an error in the LCD header.</value>
+  <data name="Speed over the last 50 m before target location." xml:space="preserve">
+    <value>Speed over the last 50 m before target location.</value>
   </data>
-  <data name="Speed over the last 10 m before a target: tool work, waypoints that stop, the start of the final approach (0-100 m/s).&#xA;Should not be above Max speed." xml:space="preserve">
-    <value>Speed over the last 10 m before a target: tool work, waypoints that stop, the start of the final approach (0-100 m/s).
-Should not be above Max speed.</value>
-  </data>
-  <data name="Speed for delicate moves: the final docking approach to a connector (0-50 m/s).&#xA;Should not be above Approach speed." xml:space="preserve">
-    <value>Speed for delicate moves: the final docking approach to a connector (0-50 m/s).
-Should not be above Approach speed.</value>
+  <data name="Speed for delicate moves: docking, tool usage." xml:space="preserve">
+    <value>Speed for delicate moves: docking, tool usage, etc.</value>
   </data>
   <data name="Waypoint tolerance" xml:space="preserve">
     <value>Waypoint tolerance</value>
   </data>
-  <data name="How close the drone must get to a waypoint for it to count as reached, in metres (0 = as close as it gets, up to 500: combat drones can stop well short). Player / combat routes use it as is; job legs at most 50 m; docking and tool work use their own, tighter tolerances." xml:space="preserve">
-    <value>How close the drone must get to a waypoint for it to count as reached, in metres (0 = as close as it gets, up to 500: combat drones can stop well short). Player / combat routes use it as is; job legs at most 50 m; docking and tool work use their own, tighter tolerances.</value>
+  <data name="How close the drone must get to a waypoint." xml:space="preserve">
+    <value>How close the drone must get to a waypoint.</value>
   </data>
   <data name="Min altitude" xml:space="preserve">
     <value>Min altitude</value>
   </data>
-  <data name="Planets only: routes stay at least this high above the surface between take-off and landing (0 = off, default 50 m): up after take-off, down to land. Every flight, jobs included, except hops shorter than this altitude (work at a site, moves between nearby blocks), which stay low." xml:space="preserve">
-    <value>Planets only: routes stay at least this high above the surface between take-off and landing (0 = off, default 50 m): up after take-off, down to land. Every flight, jobs included, except hops shorter than this altitude (work at a site, moves between nearby blocks), which stay low.</value>
+  <data name="P-Gravity: keep altitude above surface. Work requiring lower altitude ignores." xml:space="preserve">
+    <value>P-Gravity: keep altitude above surface. Work requiring lower altitude ignores.</value>
   </data>
   <data name="Max pitch deviation" xml:space="preserve">
     <value>Max pitch deviation</value>
   </data>
-  <data name="Maximum pitch away from level while aligned to gravity (degrees)." xml:space="preserve">
-    <value>Maximum pitch away from level while aligned to gravity (degrees).</value>
-  </data>
   <data name="Max roll deviation" xml:space="preserve">
     <value>Max roll deviation</value>
   </data>
-  <data name="Maximum roll away from level while aligned to gravity (degrees)." xml:space="preserve">
-    <value>Maximum roll away from level while aligned to gravity (degrees).</value>
+  <data name="Max load (P-Gravity)" xml:space="preserve">
+    <value>Max load (P-Gravity)</value>
   </data>
-  <data name="Max load (gravity)" xml:space="preserve">
-    <value>Max load (gravity)</value>
+  <data name="% of max load in 1G." xml:space="preserve">
+    <value>% of max load in 1G.</value>
   </data>
-  <data name="Percent of max load. The drone stops collecting when this is exceeded; construction batches are sized to it.&#xA;100% = the heaviest total mass the up thrusters can hover in the current gravity (1 g when in space). The value in brackets is that mass limit." xml:space="preserve">
-    <value>Percent of max load. The drone stops collecting when this is exceeded; construction batches are sized to it.
-100% = the heaviest total mass the up thrusters can hover in the current gravity (1 g when in space). The value in brackets is that mass limit.</value>
+  <data name="Max load (0G)" xml:space="preserve">
+    <value>Max load (0G)</value>
   </data>
-  <data name="Max load (space)" xml:space="preserve">
-    <value>Max load (space)</value>
-  </data>
-  <data name="Percent of max load. The drone stops collecting when this is exceeded; construction batches are sized to it.&#xA;100% = the heaviest total mass the weakest thruster group can still accelerate at 0.1 g. The value in brackets is that mass limit." xml:space="preserve">
-    <value>Percent of max load. The drone stops collecting when this is exceeded; construction batches are sized to it.
-100% = the heaviest total mass the weakest thruster group can still accelerate at 0.1 g. The value in brackets is that mass limit.</value>
-  </data>
-  <data name="Battery: recharge below" xml:space="preserve">
-    <value>Battery: recharge below</value>
-  </data>
-  <data name="Threshold: when the batteries' total charge drops below this, the drone stops what it is doing and flies home to recharge." xml:space="preserve">
-    <value>Threshold: when the batteries' total charge drops below this, the drone stops what it is doing and flies home to recharge.</value>
+  <data name="Percent of max load in 0G." xml:space="preserve">
+    <value>Percent of max load in 0G.</value>
   </data>
   <data name="Battery: ready above" xml:space="preserve">
     <value>Battery: ready above</value>
   </data>
-  <data name="Once home, the drone counts as recharged (and goes back to work) when the charge is back above this." xml:space="preserve">
-    <value>Once home, the drone counts as recharged (and goes back to work) when the charge is back above this.</value>
+  <data name="Battery: recharge below" xml:space="preserve">
+    <value>Battery: recharge below</value>
   </data>
   <data name="H2: refuel below" xml:space="preserve">
     <value>H2: refuel below</value>
   </data>
-  <data name="Threshold: when the hydrogen tanks' total fill drops below this, the drone stops what it is doing and flies home to refuel." xml:space="preserve">
-    <value>Threshold: when the hydrogen tanks' total fill drops below this, the drone stops what it is doing and flies home to refuel.</value>
-  </data>
   <data name="H2: ready above" xml:space="preserve">
     <value>H2: ready above</value>
   </data>
-  <data name="Once home, the drone counts as refueled (and goes back to work) when the tanks are back above this." xml:space="preserve">
-    <value>Once home, the drone counts as refueled (and goes back to work) when the tanks are back above this.</value>
+  <data name="Threshold to stop work and recharge." xml:space="preserve">
+    <value>Threshold to stop work and recharge.</value>
+  </data>
+    <data name="Threshold to stop work and refuel." xml:space="preserve">
+    <value>Threshold to stop work and refuel.</value>
+  </data>
+  <data name="Threshold to return to work." xml:space="preserve">
+    <value>Threshold to return to work.</value>
   </data>
   <data name="Font size" xml:space="preserve">
     <value>Font size</value>
@@ -1567,38 +1537,35 @@ Should not be above Approach speed.</value>
   <data name="Handover distance" xml:space="preserve">
     <value>Handover distance</value>
   </data>
-  <data name="Within this distance of the enemy the AI Flight and AI Offensive blocks take over (both are switched on together). At most 2000 m: farther out the Offensive block detects nothing and the drone comes straight back." xml:space="preserve">
-    <value>Within this distance of the enemy the AI Flight and AI Offensive blocks take over (both are switched on together). At most 2000 m: farther out the Offensive block detects nothing and the drone comes straight back.</value>
+  <data name="Distance at which control is delegated to AI blocks." xml:space="preserve">
+    <value>Distance at which control is delegated to AI blocks.</value>
   </data>
   <data name="No target timeout" xml:space="preserve">
     <value>No target timeout</value>
   </data>
-  <data name="Seconds without a target for the AI Offensive block before the drone takes control back and flies home." xml:space="preserve">
-    <value>Seconds without a target for the AI Offensive block before the drone takes control back and flies home.</value>
+  <data name="Time elapsed before returning home with no contact." xml:space="preserve">
+    <value>Time elapsed before returning home with no contact.</value>
   </data>
   <data name="Auto-launch radius" xml:space="preserve">
     <value>Auto-launch radius</value>
   </data>
-  <data name="Managed by orchestrator: enemies the drone's AI Defensive block detects within this distance of the drone launch it on its own. 0 = never (designator jobs only). At most 2000 m, the vanilla detection range." xml:space="preserve">
-    <value>Managed by orchestrator: enemies the drone's AI Defensive block detects within this distance of the drone launch it on its own. 0 = never (designator jobs only). At most 2000 m, the vanilla detection range.</value>
+  <data name="Enemies detected within this distance trigger drone's combat protocol." xml:space="preserve">
+    <value>Enemies detected within this distance trigger drone's combat protocol.</value>
   </data>
-  <data name="Follow distance" xml:space="preserve">
-    <value>Follow distance</value>
-  </data>
-  <data name="Escort jobs (hostile designator, blue): how far above the escorted grid or character the drone keeps station." xml:space="preserve">
-    <value>Escort jobs (hostile designator, blue): how far above the escorted grid or character the drone keeps station.</value>
+  <data name="Escort distance" xml:space="preserve">
+    <value>Escort distance</value>
   </data>
   <data name="Home connector is not station" xml:space="preserve">
     <value>Home connector is not station</value>
   </data>
-  <data name="Tick when the home connector is on a ship or anything else that moves. The drone then finds home through the beacon selected below." xml:space="preserve">
-    <value>Tick when the home connector is on a ship or anything else that moves. The drone then finds home through the beacon selected below.</value>
+  <data name="Enable when home connector is a moving craft." xml:space="preserve">
+    <value>Enable when home connector is a moving craft.</value>
   </data>
   <data name="Align to P-Gravity" xml:space="preserve">
     <value>Align to P-Gravity</value>
   </data>
-  <data name="In planetary gravity, keep the drone level: pitch and roll stay within the limits below." xml:space="preserve">
-    <value>In planetary gravity, keep the drone level: pitch and roll stay within the limits below.</value>
+  <data name="Align to natural gravity." xml:space="preserve">
+    <value>Align to natural gravity.</value>
   </data>
   <data name="Monitor battery levels" xml:space="preserve">
     <value>Monitor battery levels</value>
@@ -1615,32 +1582,26 @@ Should not be above Approach speed.</value>
   <data name="Refuel when docked" xml:space="preserve">
     <value>Refuel when docked</value>
   </data>
-  <data name="Whenever the drone docks, set its batteries to Recharge and its hydrogen tanks to Stockpile, even when the levels are fine. Restored when it takes off. Reactors need no setting." xml:space="preserve">
-    <value>Whenever the drone docks, set its batteries to Recharge and its hydrogen tanks to Stockpile, even when the levels are fine. Restored when it takes off. Reactors need no setting.</value>
+  <data name="When docked, recharge batteries and/or refill H2." xml:space="preserve">
+    <value>When docked, recharge batteries and/or refill H2.</value>
   </data>
   <data name="Show header" xml:space="preserve">
     <value>Show header</value>
   </data>
-  <data name="Header lines: state, battery (POW) and hydrogen (H2) levels; then the current error (red) or warning (yellow)." xml:space="preserve">
-    <value>Header lines: state, battery (POW) and hydrogen (H2) levels; then the current error (red) or warning (yellow).</value>
-  </data>
   <data name="Survey for ores" xml:space="preserve">
     <value>Survey for ores</value>
-  </data>
-  <data name="Needs a working ore detector on the drone. Ores it sees while flying are recorded and handed to a mining surveyor when one is in antenna range." xml:space="preserve">
-    <value>Needs a working ore detector on the drone. Ores it sees while flying are recorded and handed to a mining surveyor when one is in antenna range.</value>
   </data>
   <data name="Retreat when fleeing" xml:space="preserve">
     <value>Retreat when fleeing</value>
   </data>
-  <data name="When the AI Defensive block decides to flee, the drone takes control back and flies home." xml:space="preserve">
-    <value>When the AI Defensive block decides to flee, the drone takes control back and flies home.</value>
+  <data name="If AI Defensive decides to flee, the drone returns home." xml:space="preserve">
+    <value>If AI Defensive decides to flee, the drone returns home.</value>
   </data>
   <data name="Retreat on low power" xml:space="preserve">
     <value>Retreat on low power</value>
   </data>
-  <data name="Below the recharge / refuel thresholds the drone takes control back and flies home." xml:space="preserve">
-    <value>Below the recharge / refuel thresholds the drone takes control back and flies home.</value>
+  <data name="Retake control from AI Flight on low power, and return home." xml:space="preserve">
+    <value>Retake control from AI Flight on low power, and return home.</value>
   </data>
   <data name="Text color" xml:space="preserve">
     <value>Text color</value>
@@ -1657,56 +1618,47 @@ Should not be above Approach speed.</value>
   <data name="Copy settings" xml:space="preserve">
     <value>Copy settings</value>
   </data>
-  <data name="Remembers this drone's settings (everything but AI on/off and the home connector, home beacon and 'not station'), for 'Paste settings' on other drones." xml:space="preserve">
-    <value>Remembers this drone's settings (everything but AI on/off and the home connector, home beacon and 'not station'), for 'Paste settings' on other drones.</value>
+  <data name="Copy settings (everything except AI on/off, home connector/beacon)" xml:space="preserve">
+    <value>Copy settings (everything except AI on/off, home connector/beacon)</value>
   </data>
   <data name="Paste settings" xml:space="preserve">
     <value>Paste settings</value>
   </data>
-  <data name="Applies the copied settings to this drone (or every selected drone). AI on/off and the home connector stay as they are; the operation mode only changes while the AI is off." xml:space="preserve">
-    <value>Applies the copied settings to this drone (or every selected drone). AI on/off and the home connector stay as they are; the operation mode only changes while the AI is off.</value>
+  <data name="Paste settings (everything except AI on/off, home connector/beacon)" xml:space="preserve">
+    <value>Paste settings (everything except AI on/off, home connector/beacon)</value>
   </data>
   <data name="Scan" xml:space="preserve">
     <value>Scan</value>
   </data>
-  <data name="Refresh the connector and beacon lists now (limited by server settings)." xml:space="preserve">
-    <value>Refresh the connector and beacon lists now (limited by server settings).</value>
+  <data name="Refresh the connector and beacon lists." xml:space="preserve">
+    <value>Refresh the connector and beacon lists.</value>
   </data>
   <data name="Add to list" xml:space="preserve">
     <value>Add to list</value>
   </data>
-  <data name="Looks up the connector named above and adds every match that is yours or your faction's to the list." xml:space="preserve">
-    <value>Looks up the connector named above and adds every match that is yours or your faction's to the list.</value>
+  <data name="Find connector by name." xml:space="preserve">
+    <value>Find connector by name.</value>
   </data>
   <data name="Set current as home" xml:space="preserve">
     <value>Set current as home</value>
   </data>
-  <data name="Dock the drone by hand, then press: that connector becomes home, and this exact position and orientation is used for docking." xml:space="preserve">
-    <value>Dock the drone by hand, then press: that connector becomes home, and this exact position and orientation is used for docking.</value>
+  <data name="Save current connector and docking orientation." xml:space="preserve">
+    <value>Save current connector and docking orientation.</value>
   </data>
-  <data name="Fly to the home connector, dock at Safe speed and power down (antenna, controller and LCDs stay on)." xml:space="preserve">
-    <value>Fly to the home connector, dock at Safe speed and power down (antenna, controller and LCDs stay on).</value>
+  <data name="Dock at home connector." xml:space="preserve">
+    <value>Dock at home connector.</value>
   </data>
   <data name="Stop" xml:space="preserve">
     <value>Stop</value>
   </data>
-  <data name="Cancel the current flight order and construction work; the drone holds position." xml:space="preserve">
-    <value>Cancel the current flight order and construction work; the drone holds position.</value>
+  <data name="Stops all actions." xml:space="preserve">
+    <value>Stops all actions.</value>
   </data>
   <data name="Exclude selected" xml:space="preserve">
     <value>Exclude selected</value>
   </data>
-  <data name="Moves the capabilities selected in the first list to the excluded list." xml:space="preserve">
-    <value>Moves the capabilities selected in the first list to the excluded list.</value>
-  </data>
-  <data name="Removes the capabilities selected in the excluded list." xml:space="preserve">
-    <value>Removes the capabilities selected in the excluded list.</value>
-  </data>
   <data name="Clear all" xml:space="preserve">
     <value>Clear all</value>
-  </data>
-  <data name="Empties the excluded list." xml:space="preserve">
-    <value>Empties the excluded list.</value>
   </data>
   <data name="Orient" xml:space="preserve">
     <value>Orient</value>
@@ -1747,8 +1699,8 @@ Should not be above Approach speed.</value>
   <data name="LCD tag" xml:space="preserve">
     <value>LCD tag</value>
   </data>
-  <data name="LCD panels on the drone's own grid (not subgrids or docked grids) with this tag in their name show the drone's log." xml:space="preserve">
-    <value>LCD panels on the drone's own grid (not subgrids or docked grids) with this tag in their name show the drone's log.</value>
+  <data name="Put this tag on LCD panels with Automata Log app set to show the block's logs." xml:space="preserve">
+    <value>Put this tag on LCD panels with Automata Log app set to show the block's logs.</value>
   </data>
   <data name="Set orientation target" xml:space="preserve">
     <value>Set orientation target</value>
@@ -1783,26 +1735,26 @@ Should not be above Approach speed.</value>
   <data name="Home connector" xml:space="preserve">
     <value>Home connector</value>
   </data>
-  <data name="Your own and your faction's connectors in range. The list refreshes automatically; use Scan to refresh now." xml:space="preserve">
-    <value>Your own and your faction's connectors in range. The list refreshes automatically; use Scan to refresh now.</value>
+  <data name="Friendly connectors in range." xml:space="preserve">
+    <value>Friendly connectors in range.</value>
   </data>
-  <data name="Home is relative to beacon" xml:space="preserve">
-    <value>Home is relative to beacon</value>
+  <data name="Home connector is not static" xml:space="preserve">
+    <value>Home connector is not static</value>
   </data>
-  <data name="Your own and your faction's beacons in range. Pick the one on the same ship as the home connector." xml:space="preserve">
-    <value>Your own and your faction's beacons in range. Pick the one on the same ship as the home connector.</value>
+  <data name="Friendly beacons in range." xml:space="preserve">
+    <value>Friendly beacons in range.</value>
   </data>
   <data name="Capabilities" xml:space="preserve">
     <value>Capabilities</value>
   </data>
-  <data name="What this drone can do. Select entries and press 'Exclude selected' to keep it from bidding for jobs that need them." xml:space="preserve">
-    <value>What this drone can do. Select entries and press 'Exclude selected' to keep it from bidding for jobs that need them.</value>
+  <data name="What this drone can do. Exclude below to prevent certain job types." xml:space="preserve">
+    <value>What this drone can do. Exclude below to prevent certain job types.</value>
   </data>
   <data name="Excluded" xml:space="preserve">
     <value>Excluded</value>
   </data>
-  <data name="Capabilities this drone won't bid with (e.g. no jobs in space, even though it can fly there). Only used when bidding for jobs." xml:space="preserve">
-    <value>Capabilities this drone won't bid with (e.g. no jobs in space, even though it can fly there). Only used when bidding for jobs.</value>
+  <data name="When bidding, exclude these capabilities." xml:space="preserve">
+    <value>When bidding, exclude these capabilities.</value>
   </data>
   <data name="Mount to place" xml:space="preserve">
     <value>Mount to place</value>
@@ -1816,38 +1768,8 @@ Should not be above Approach speed.</value>
   <data name="Home connector or one of your / your faction's beacons in range." xml:space="preserve">
     <value>Home connector or one of your / your faction's beacons in range.</value>
   </data>
-  <data name="Finish partly built blocks inside the observation area. Stand-alone drones work inside their observation area." xml:space="preserve">
-    <value>Finish partly built blocks inside the observation area. Stand-alone drones work inside their observation area.</value>
-  </data>
-  <data name="Repair damaged or deformed blocks inside the observation area. Stand-alone drones work inside their observation area." xml:space="preserve">
-    <value>Repair damaged or deformed blocks inside the observation area. Stand-alone drones work inside their observation area.</value>
-  </data>
-  <data name="Build projected blocks inside the observation area, centre first. Stand-alone drones work inside their observation area." xml:space="preserve">
-    <value>Build projected blocks inside the observation area, centre first. Stand-alone drones work inside their observation area.</value>
-  </data>
   <data name="Grind marked blocks" xml:space="preserve">
     <value>Grind marked blocks</value>
-  </data>
-  <data name="Grind down blocks painted with the grind colour inside the observation area. Stand-alone drones work inside their observation area." xml:space="preserve">
-    <value>Grind down blocks painted with the grind colour inside the observation area. Stand-alone drones work inside their observation area.</value>
-  </data>
-  <data name="Width of the observation area along the connector's right axis, in blocks (1 block = 2.5 m). Stand-alone drones only (the area they work in)." xml:space="preserve">
-    <value>Width of the observation area along the connector's right axis, in blocks (1 block = 2.5 m). Stand-alone drones only (the area they work in).</value>
-  </data>
-  <data name="Height of the observation area along the connector's up axis, in blocks (1 block = 2.5 m). Stand-alone drones only (the area they work in)." xml:space="preserve">
-    <value>Height of the observation area along the connector's up axis, in blocks (1 block = 2.5 m). Stand-alone drones only (the area they work in).</value>
-  </data>
-  <data name="Depth of the observation area along the connector's forward axis, in blocks (1 block = 2.5 m). Stand-alone drones only (the area they work in)." xml:space="preserve">
-    <value>Depth of the observation area along the connector's forward axis, in blocks (1 block = 2.5 m). Stand-alone drones only (the area they work in).</value>
-  </data>
-  <data name="Moves the area along the connector's right axis, in blocks. Stand-alone drones only (the area they work in)." xml:space="preserve">
-    <value>Moves the area along the connector's right axis, in blocks. Stand-alone drones only (the area they work in).</value>
-  </data>
-  <data name="Moves the area along the connector's up axis, in blocks. Stand-alone drones only (the area they work in)." xml:space="preserve">
-    <value>Moves the area along the connector's up axis, in blocks. Stand-alone drones only (the area they work in).</value>
-  </data>
-  <data name="Moves the area along the connector's forward axis, in blocks. Stand-alone drones only (the area they work in)." xml:space="preserve">
-    <value>Moves the area along the connector's forward axis, in blocks. Stand-alone drones only (the area they work in).</value>
   </data>
   <data name="Excluded capabilities" xml:space="preserve">
     <value>Excluded capabilities</value>
@@ -1904,11 +1826,11 @@ NOTE: AI must be disabled to change.</value>
   <data name="Managed by player" xml:space="preserve">
     <value>Managed by player</value>
   </data>
-  <data name="Behaviour profile" xml:space="preserve">
-    <value>Behaviour profile</value>
+  <data name="Behavior profile" xml:space="preserve">
+    <value>Behavior profile</value>
   </data>
-  <data name="The drone's role: orchestrators rank matching drones first for a job.&#xA;Cargo drone: logistics jobs.&#xA;Ore hauler: logistics of ores / ice only, and takes nothing else (plus mining).&#xA;Welder / Grinder / Welder + grinder drone: weld / grind jobs.&#xA;Mining drone: mining jobs.&#xA;Ore scout: the industrial designator's scout jobs, and only those drones (needs an ore detector).&#xA;Combat drone: the hostile designator's engage / escort jobs, and only those drones (needs AI Defensive, AI Flight and AI Offensive). Managed by orchestrator, it also launches on its own detections.&#xA;Farming drone: not implemented yet. Rover: wheeled (not implemented yet).&#xA;Combat drones, ore scouts and ore haulers may dock with small connectors; others need a standard one.&#xA;Every section below can be unfolded whatever the profile." xml:space="preserve">
-    <value>The drone's role: orchestrators rank matching drones first for a job.
+  <data name="The drone's role: Orchestrators select drones by matching roles.&#xA;Cargo drone: logistics jobs.&#xA;Ore hauler: logistics of ores / ice only, and takes nothing else (plus mining).&#xA;Welder / Grinder / Welder + grinder drone: weld / grind jobs.&#xA;Mining drone: mining jobs.&#xA;Ore scout: the industrial designator's scout jobs, and only those drones (needs an ore detector).&#xA;Combat drone: the hostile designator's engage / escort jobs, and only those drones (needs AI Defensive, AI Flight and AI Offensive). Managed by orchestrator, it also launches on its own detections.&#xA;Farming drone: not implemented yet. Rover: wheeled (not implemented yet).&#xA;Combat drones, ore scouts and ore haulers may dock with small connectors; others need a standard one.&#xA;Every section below can be unfolded whatever the profile." xml:space="preserve">
+    <value>The drone's role: Orchestrators select drones by matching roles.
 Cargo drone: logistics jobs.
 Ore hauler: logistics of ores / ice only, and takes nothing else (plus mining).
 Welder / Grinder / Welder + grinder drone: weld / grind jobs.
@@ -1952,17 +1874,8 @@ Every section below can be unfolded whatever the profile.</value>
   <data name="Rover" xml:space="preserve">
     <value>Rover</value>
   </data>
-  <data name="Stand-alone drones only: draws the observation area around the home connector. Switches off after a while (server setting, 10 minutes by default)." xml:space="preserve">
-    <value>Stand-alone drones only: draws the observation area around the home connector. Switches off after a while (server setting, 10 minutes by default).</value>
-  </data>
-  <data name="Blocks painted exactly this colour are ground down when 'Grind marked blocks' is on. Default RGB(255,0,0)." xml:space="preserve">
-    <value>Blocks painted exactly this colour are ground down when 'Grind marked blocks' is on. Default RGB(255,0,0).</value>
-  </data>
   <data name="Task timeout" xml:space="preserve">
     <value>Task timeout</value>
-  </data>
-  <data name="Red dots on the drone's navigation targets (approach points, waypoints, final target), blue lines between them, starting at the drone. Switches off after a while (server setting, 10 minutes by default)." xml:space="preserve">
-    <value>Red dots on the drone's navigation targets (approach points, waypoints, final target), blue lines between them, starting at the drone. Switches off after a while (server setting, 10 minutes by default).</value>
   </data>
 
   <!-- Drone/DroneStatusDisplay.cs -->
@@ -2106,26 +2019,26 @@ Every section below can be unfolded whatever the profile.</value>
   <data name="Provide for logistics" xml:space="preserve">
     <value>Provide for logistics</value>
   </data>
-  <data name="Offer this grid's items to other logistics computers' requests (never below its own Min), and its room to their surplus (never above its own Max)." xml:space="preserve">
-    <value>Offer this grid's items to other logistics computers' requests (never below its own Min), and its room to their surplus (never above its own Max).</value>
+  <data name="Offer this grid's items to other logistics computers' requests." xml:space="preserve">
+    <value>Offer this grid's items to other logistics computers' requests.</value>
   </data>
   <data name="Provide for construction" xml:space="preserve">
     <value>Provide for construction</value>
   </data>
-  <data name="Offer components for weld jobs (drones dock here to load), and room for what grind jobs return." xml:space="preserve">
-    <value>Offer components for weld jobs (drones dock here to load), and room for what grind jobs return.</value>
+  <data name="Offer components for weld jobs, and volume to accept ground-block components." xml:space="preserve">
+    <value>Offer components for weld jobs, and volume to accept ground-block components.</value>
   </data>
   <data name="Push (above Max)" xml:space="preserve">
     <value>Push (above Max)</value>
   </data>
-  <data name="Items above their Max are announced as surplus: a drone takes them to another logistics computer." xml:space="preserve">
-    <value>Items above their Max are announced as surplus: a drone takes them to another logistics computer.</value>
+  <data name="Items above their Max are announced as surplus." xml:space="preserve">
+    <value>Items above their Max are announced as surplus.</value>
   </data>
   <data name="Request (below Min)" xml:space="preserve">
     <value>Request (below Min)</value>
   </data>
-  <data name="Items below their Min are requested: a drone brings the difference from another logistics computer." xml:space="preserve">
-    <value>Items below their Min are requested: a drone brings the difference from another logistics computer.</value>
+  <data name="Items below their Min are requested." xml:space="preserve">
+    <value>Items below their Min are requested.</value>
   </data>
   <data name="Accept ore from mining without a refinery" xml:space="preserve">
     <value>Accept ore from mining without a refinery</value>
@@ -2391,11 +2304,11 @@ Every section below can be unfolded whatever the profile.</value>
   <data name="job type {0} not handled" xml:space="preserve">
     <value>job type {0} not handled</value>
   </data>
-  <data name="no bids within {0} s" xml:space="preserve">
-    <value>no bids within {0} s</value>
+  <data name="no bids within {0}s" xml:space="preserve">
+    <value>no bids within {0}s</value>
   </data>
-  <data name="no drone bid within {0} s" xml:space="preserve">
-    <value>no drone bid within {0} s</value>
+  <data name="no drone bid within {0}s" xml:space="preserve">
+    <value>no drone bid within {0}s</value>
   </data>
   <data name="{0} trip(s), {1} drone(s), {2} supplier(s): {3} to LC {4}{5}" xml:space="preserve">
     <value>{0} trip(s), {1} drone(s), {2} supplier(s): {3} to LC {4}{5}</value>

@@ -20,6 +20,7 @@ using Automata.Logistics;
 using Automata.Drone;
 using Automata.Construction;
 using Automata.Util;
+using Sandbox.Game.Entities;
 
 namespace Automata
 {
@@ -284,7 +285,8 @@ namespace Automata
 
         private void RunTerminalDumps(int now)
         {
-            if (terminalDumps.Count == 0 || now - lastTerminalDumpFrame < TERMINAL_DUMP_RETRY_TICKS) return;
+            if (terminalDumps.Count == 0 || now - lastTerminalDumpFrame < TERMINAL_DUMP_RETRY_TICKS)
+                return;
             lastTerminalDumpFrame = now;
             for (int i = terminalDumps.Count - 1; i >= 0; i--)
             {

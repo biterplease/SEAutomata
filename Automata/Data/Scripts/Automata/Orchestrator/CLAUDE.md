@@ -52,7 +52,7 @@ Job announcements are queued (de-duplicated per announcer + job id) and auctione
 - Orchestrators listen to each other's auctions (they carry `AnnouncerEntityId`): the lower entity id keeps a job, the other drops it quietly.
 - Drone outcome reports (`JobStatusReport`) are counted; an aborted job is taken again soon. Bids whose `EntityId` isn't the sender are ignored.
 - Every job is a dual award (drone + LC, two LCs for logistics): grind and MineOre without an LC bid are not awarded. MineOre: the drone needs a drill and an ore detector; the LC needs a refinery for the ore (or "accept ore from mining without a refinery") and the ore / ingot below Max. Won LCs keep their reservation until the drone reports.
-- Behaviour profiles: a drone whose profile the job type prefers ranks above all others (cargo drones for logistics). Full protocol: `TODO/10-handshake.md`.
+- Behavior profiles: a drone whose profile the job type prefers ranks above all others (cargo drones for logistics). Full protocol: `TODO/10-handshake.md`.
 
 ## Designator jobs (2026-10-05)
 - Jobs a player orders with a target designator are named `Designator...`: `DesignatorScoutPoint`, `DesignatorScoutArea` (industrial: ore scouts only), `DesignatorEngage`, `DesignatorEscort` (hostile: combat drones with the three AI blocks only, `HasDefenseSystems`). Single award (drone only), the player's tasks + ReturnHome, confirmed within `ConfirmTimeoutSeconds` or cancelled (`OrchestratorBlock.PlayerJobs.cs`). Combat orders show no GPS marker (the target moves).
@@ -112,3 +112,9 @@ Bid 25 `DockedConnectorId`: `PortFor` -> `DockFit.Pick(..., dockedAt)` takes the
 
 ## Active gauge (2026-10-11)
 Header line "Active Drones: N, LC: N, CC: N, MS: N": `seenEntities` (id -> type, last tick) is touched by a bid, a job announcement (allowed owners only) or a drone's job report; entries older than `SEEN_TICKS` (30 min) are pruned in `Prune`. Not persisted, not exact: a gauge for players.
+
+## Recall at a marker (2026-10-11)
+Designator recall (green): the aimed drone's grid first (as before); none of the player's drones there: `OrchestratorBlock.RecallOrderAt` takes the confirmed non-combat order whose GPS marker is within 8 m of the hit (`RECALL_MARKER_RADIUS` in `ScoutPointer`). Jobs of the order not taken yet are cancelled (queue, auctions, `knownJobs`); drones working the others are recalled (`DroneControllerBlock.RecallJobs(announcer, jobIds)`: `jobAnnouncerId` + `currentJob.JobId`), their "recalled" report ends the job and, with the last, the marker. No hit (open space): error as before.
+
+## Drone keepalives (2026-10-11)
+Subscribes to JOB_KEEPALIVE; keepalives for its own jobs (designator orders) feed `droneWatch` (`Util.DroneWatch`, also in CC / MS / LC) and the active gauge. 60 s unheard: "Drone NAME has not been heard of for 60s!" (event, log, broadcast controller when on). Final reports end the watch.

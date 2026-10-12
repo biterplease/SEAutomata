@@ -15,8 +15,11 @@ namespace Automata.Pointer
     /// an ore scan at each waypoint.
     ///  - Planet (natural gravity): a serpentine over the plane tangent to the surface, each waypoint dropped onto
     ///    the terrain below it and lifted ALTITUDE above it (low passes read deeper).
-    ///  - Asteroid: rings ("low orbits") around the pointed spot's axis, on a sphere around the asteroid's centre at
-    ///    ALTITUDE above the spot.
+    ///  - Asteroid: ASTEROID_ORBITS low orbits (great circles through the pointed spot, tilts spread by the golden angle
+    ///    from a random start, directions alternating), each waypoint dropped onto the real surface along the line from
+    ///    the asteroid's centre and lifted a detector-dependent height above it. Orbits longer than ORBIT_ARC_MAX are cut
+    ///    to an arc centred on the spot. Height / spacing from the scouts' detector range (the smallest tagged one, else
+    ///    ASSUMED_SMALL_RANGE). Several scouts: orbits shared out round-robin.
     ///  - Open space: the serpentine, facing the player.
     /// Waypoint spacing assumes a 100 m detector range (1.4 x range: scans overlap); drones with longer range overlap more.
     /// </summary>
@@ -27,6 +30,11 @@ namespace Automata.Pointer
         public const double SPACING = ASSUMED_RANGE * 1.4;
         public const double ALTITUDE = 20;          // m above the surface (planets: following the terrain)
         public const double SPOT_STANDOFF = 10;     // m off the pointed spot, along its surface normal
+        public const int ASTEROID_ORBITS = 4;
+        public const double ASSUMED_SMALL_RANGE = 50;   // m: a small ore detector (no tagged scout to read the range from)
+        public const double ORBIT_ARC_MAX = 1200;       // m of arc per orbit at most (large asteroids: centred on the spot)
+        private const double GOLDEN_ANGLE = 2.39996322972865332;   // rad
+        private static readonly Random random = new Random();
 
         public static List<Task> SpotCheck(Vector3D hit, Vector3D normal, Vector3D playerPos)
         {
@@ -36,7 +44,7 @@ namespace Automata.Pointer
         }
 
         /// <summary>N sector task lists (each: NavigateTo + Survey per waypoint) covering the disc around 'center'.</summary>
-        public static List<List<Task>> AreaSweep(Vector3D center, Vector3D playerPos, int sectors, out string how)
+        public static List<List<Task>> AreaSweep(Vector3D center, Vector3D playerPos, int sectors, out string how, double detectorRange = 0)
         {
             var points = new List<Vector3D>();
             float interference;
@@ -51,9 +59,14 @@ namespace Automata.Pointer
             }
             else if (body != null)
             {
-                Vector3D c = body.PositionComp.WorldAABB.Center;
-                Rings(c, center, points);
-                how = string.Format("asteroid rings around {0}", body.StorageName ?? body.EntityId.ToString());
+                double range = detectorRange > 0 ? detectorRange : ASSUMED_SMALL_RANGE;
+                double altitude = MathHelper.Clamp(range * 0.3, 8, 30);
+                double footprint = Math.Sqrt(Math.Max(1, range * range - altitude * altitude));
+                double spacing = Math.Max(15, footprint * 1.4);
+                var orbits = Orbits(body, center, altitude, spacing);
+                how = string.Format("asteroid {0}: {1} orbit(s), {2:F0} m above the surface, {3:F0} m apart ({4:F0} m detector)",
+                                    body.StorageName ?? body.EntityId.ToString(), orbits.Count, altitude, spacing, range);
+                return Share(orbits, sectors, ref how);
             }
             else
             {
@@ -78,6 +91,122 @@ namespace Automata.Pointer
             return result;
         }
 
+        // Orbits shared out round-robin, one task list per scout (NavigateTo + Survey per waypoint)
+        private static List<List<Task>> Share(List<List<Vector3D>> orbits, int sectors, ref string how)
+        {
+            sectors = Math.Max(1, Math.Min(sectors, orbits.Count));
+            var result = new List<List<Task>>();
+            int total = 0;
+            for (int s = 0; s < sectors; s++)
+            {
+                var tasks = new List<Task>();
+                for (int k = s; k < orbits.Count; k += sectors)
+                    foreach (var p in orbits[k])
+                    {
+                        tasks.Add(Task.NavigateTo(0, p, p, Gravity(p)));
+                        tasks.Add(Task.Survey());
+                        total++;
+                    }
+                if (tasks.Count > 0) result.Add(tasks);
+            }
+            how += string.Format(", {0} waypoint(s) in {1} sector(s)", total, result.Count);
+            return result;
+        }
+
+        /// <summary>
+        /// Low orbits around 'body': great circles through the spot (axis centre -> spot), tilted about that axis by the
+        /// golden angle from a random start, alternate ones flown the other way. Waypoints every 'spacing' along each,
+        /// dropped onto the surface (along the line from the centre) and lifted 'altitude'. Long orbits: an arc of
+        /// ORBIT_ARC_MAX centred on the spot.
+        /// </summary>
+        private static List<List<Vector3D>> Orbits(IMyVoxelBase body, Vector3D spot, double altitude, double spacing)
+        {
+            var orbits = new List<List<Vector3D>>();
+            Vector3D c = body.PositionComp.WorldAABB.Center;
+            Vector3D axis = spot - c;
+            double r0 = axis.Normalize();
+            if (r0 < 1) { axis = Vector3D.Up; r0 = 1; }
+            Vector3D e1 = Vector3D.CalculatePerpendicularVector(axis), e2 = Vector3D.Cross(axis, e1);
+            double start;
+            lock (random) start = random.NextDouble() * Math.PI;
+            double radius = r0 + altitude;
+            double arc = Math.Min(2 * Math.PI, ORBIT_ARC_MAX / radius);   // rad of each orbit flown
+            int n = Math.Max(3, (int)Math.Ceiling(arc * radius / spacing));
+            double lastR = r0;
+            for (int k = 0; k < ASTEROID_ORBITS; k++)
+            {
+                double tilt = start + k * GOLDEN_ANGLE;
+                Vector3D side = e1 * Math.Cos(tilt) + e2 * Math.Sin(tilt);   // the orbit's plane holds axis and side
+                bool reverse = k % 2 == 1;
+                var orbit = new List<Vector3D>();
+                bool full = arc >= 2 * Math.PI - 1e-6;
+                int count = full ? n : n + 1;
+                for (int i = 0; i < count; i++)
+                {
+                    // Full orbit: from the spot round and back; arc: from one end through the spot to the other
+                    double f = (double)i / (full ? n : n);
+                    double ang = full ? f * 2 * Math.PI : (f - 0.5) * arc;
+                    if (reverse) ang = -ang;
+                    Vector3D u = axis * Math.Cos(ang) + side * Math.Sin(ang);
+                    double r;
+                    if (!SurfaceRadius(body, c, u, lastR, out r)) r = lastR;
+                    lastR = r;
+                    orbit.Add(c + u * (r + altitude));
+                }
+                orbits.Add(orbit);
+            }
+            return orbits;
+        }
+
+        /// <summary>
+        /// Where the line from 'centre' along 'u' leaves the asteroid for good near 'guess' (m from the centre): from the
+        /// guess outward while solid, else inward to the first solid. False: no rock along it (a hollow, past an edge).
+        /// </summary>
+        private static bool SurfaceRadius(IMyVoxelBase v, Vector3D centre, Vector3D u, double guess, out double r)
+        {
+            r = guess;
+            if (v == null || v.Storage == null) return false;
+            BoundingBoxD box = v.PositionComp.WorldAABB;
+            double max = box.HalfExtents.Length() * 2;
+            const double step = 2;
+            double t = MathHelperD.Clamp(guess, 0, max);
+            if (Solid(v, centre + u * t))
+            {
+                while (t < max && Solid(v, centre + u * (t + step))) t += step;
+                r = t + step;
+                return true;
+            }
+            // Air at the guess: rock a little further out (the guess in a dip of the orbit): out to its far side
+            for (double o = step; o <= 60 && t + o < max; o += step)
+                if (Solid(v, centre + u * (t + o)))
+                {
+                    double tt = t + o;
+                    while (tt < max && Solid(v, centre + u * (tt + step))) tt += step;
+                    r = tt + step;
+                    return true;
+                }
+            int misses = 0;
+            while (t > 0)
+            {
+                t -= step;
+                if (Solid(v, centre + u * t)) { r = t + step; return true; }
+                if (++misses > max / step) break;
+            }
+            return false;
+        }
+
+        private static readonly VRage.Voxels.MyStorageData probe = new VRage.Voxels.MyStorageData(VRage.Voxels.MyStorageDataTypeFlags.Content);
+
+        private static bool Solid(IMyVoxelBase v, Vector3D p)
+        {
+            var size = v.Storage.Size;
+            Vector3I local = Vector3I.Floor(p - v.PositionLeftBottomCorner);
+            if (local.X < 0 || local.Y < 0 || local.Z < 0 || local.X >= size.X || local.Y >= size.Y || local.Z >= size.Z) return false;
+            probe.Resize(Vector3I.One);
+            v.Storage.ReadRange(probe, VRage.Voxels.MyStorageDataTypeFlags.Content, 0, local, local);
+            return probe.Content(0) > 127;
+        }
+
         // Rows across the disc in the plane through 'origin' perpendicular to 'normal', alternating direction
         private static void Serpentine(Vector3D origin, Vector3D normal, List<Vector3D> points)
         {
@@ -92,30 +221,6 @@ namespace Automata.Pointer
                 if (line.Count == 0) line.Add(origin + b * y);
                 if (row % 2 == 1) line.Reverse();
                 points.AddRange(line);
-            }
-        }
-
-        // Rings around the axis centre -> spot, on a sphere ALTITUDE above the spot, as far as AREA_RADIUS from it
-        private static void Rings(Vector3D bodyCenter, Vector3D spot, List<Vector3D> points)
-        {
-            Vector3D axis = spot - bodyCenter;
-            double r = axis.Normalize() + ALTITUDE;
-            Vector3D a = Vector3D.CalculatePerpendicularVector(axis);
-            Vector3D b = Vector3D.Cross(axis, a);
-            double thetaMax = Math.Min(Math.PI, AREA_RADIUS / r);
-            double dTheta = SPACING / r;
-            points.Add(bodyCenter + axis * r);
-            int ring = 0;
-            for (double t = dTheta; t <= thetaMax + 1e-6; t += dTheta, ring++)
-            {
-                double ringRadius = r * Math.Sin(t);
-                int n = Math.Max(3, (int)Math.Ceiling(2 * Math.PI * ringRadius / SPACING));
-                double start = ring % 2 == 0 ? 0 : Math.PI / n;
-                for (int i = 0; i < n; i++)
-                {
-                    double phi = start + (ring % 2 == 0 ? 1 : -1) * 2 * Math.PI * i / n;
-                    points.Add(bodyCenter + (axis * Math.Cos(t) + (a * Math.Cos(phi) + b * Math.Sin(phi)) * Math.Sin(t)) * r);
-                }
             }
         }
 

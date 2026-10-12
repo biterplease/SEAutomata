@@ -375,6 +375,7 @@ namespace Automata.Mining
                 ReadReports();
                 ReadKeepalives(now);
             }
+            droneWatch.Check(now, block, settings.UseBroadcastController, "MS {0}", entityId, AddEvent);
             ExpireJobs(now);
             if (online)
             {
@@ -846,6 +847,7 @@ namespace Automata.Mining
                     var r = reportInbox[i].Payload;
                     if (r == null || r.AnnouncerEntityId != entityId || r.DroneEntityId != reportInbox[i].SenderId
                         || !AnchorDirectory.IsAllowed(block.OwnerId, reportInbox[i].SenderOwnerId)) continue;
+                    droneWatch.Done(r.DroneEntityId);
                     var job = FindJob(r.JobId);
                     if (job == null) continue;   // (an award never heard here still counts: the drone did the job)
                     if (job.Assigned == 0) job.DronesOut = Math.Max(job.DronesOut, 1);
@@ -866,6 +868,8 @@ namespace Automata.Mining
         }
 
         // Drones still mining for an awarded job: its expiry starts again (a dead / destroyed / lost drone stops sending)
+        private readonly Util.DroneWatch droneWatch = new Util.DroneWatch();
+
         private void ReadKeepalives(int now)
         {
             messaging.ReadMessages(entityId, antenna, Channel.JOB_KEEPALIVE, reportInbox, 50, true, PayloadType.JobStatusReport);
@@ -874,6 +878,7 @@ namespace Automata.Mining
                 var r = reportInbox[i].Payload;
                 if (r == null || r.AnnouncerEntityId != entityId || r.DroneEntityId != reportInbox[i].SenderId
                     || !AnchorDirectory.IsAllowed(block.OwnerId, reportInbox[i].SenderOwnerId)) continue;
+                droneWatch.Heard(r.DroneEntityId, r.JobId, now, AddEvent);
                 var job = FindJob(r.JobId);
                 if (job != null) job.Assigned = now;   // an award never heard here: assigned now
             }

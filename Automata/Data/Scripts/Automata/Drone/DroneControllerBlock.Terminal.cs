@@ -70,7 +70,7 @@ namespace Automata.Drone
                 case DroneSettingKey.Retired_EnableInertialDampening:
                 case DroneSettingKey.HomeConnector:
                 case DroneSettingKey.HomeBeacon:
-                case DroneSettingKey.HomeNotStation:
+                case DroneSettingKey.HomeNotStatic:
                 case DroneSettingKey.Nickname:
                     return false;
             }
@@ -179,15 +179,15 @@ namespace Automata.Drone
         #endregion
 
         #region Home connector is not a station: home beacon
-        public bool Terminal_HomeNotStation
+        public bool Terminal_HomeNotStatic
         {
-            get { return settings != null && settings.HomeNotStation; }
+            get { return settings != null && settings.HomeNotStatic; }
             set
             {
-                if (settings == null || settings.HomeNotStation == value) return;
-                settings.HomeNotStation = value;
+                if (settings == null || settings.HomeNotStatic == value) return;
+                settings.HomeNotStatic = value;
                 SaveSettings();
-                SyncSetting(DroneSettingKey.HomeNotStation);
+                SyncSetting(DroneSettingKey.HomeNotStatic);
                 RefreshTerminal();   // beacon list enables with this
             }
         }
@@ -349,6 +349,18 @@ namespace Automata.Drone
             }
         }
 
+        public bool Terminal_EconomyFlight
+        {
+            get { return settings != null && settings.EconomyFlight; }
+            set
+            {
+                if (settings == null || settings.EconomyFlight == value) return;
+                settings.EconomyFlight = value;
+                SaveSettings();
+                SyncSetting(DroneSettingKey.EconomyFlight);
+            }
+        }
+
         public bool Terminal_CombatRetreatOnFlee
         {
             get { return settings == null || settings.CombatRetreatOnFlee; }
@@ -425,7 +437,7 @@ namespace Automata.Drone
             }
         }
 
-        #region Behaviour profile (orchestrators prefer matching drones; rover navigation not implemented yet)
+        #region Behavior profile (orchestrators prefer matching drones; rover navigation not implemented yet)
         /// <summary>The drone's behaviour profile (designator tagging: ore scouts, combat drones).</summary>
         public BehaviourProfile Profile { get { return settings != null ? settings.BehaviourProfile : BehaviourProfile.None; } }
 

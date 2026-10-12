@@ -274,7 +274,7 @@ namespace Automata.Config
             var parts = text.Split(',');
             if (parts.Length == 3 && int.TryParse(parts[0].Trim(), out r) && int.TryParse(parts[1].Trim(), out g) && int.TryParse(parts[2].Trim(), out b))
                 return new Color(MathHelper.Clamp(r, 0, 255), MathHelper.Clamp(g, 0, 255), MathHelper.Clamp(b, 0, 255));
-            Log.Warning("Config: colour '{0}' not understood (R,G,B or #RRGGBB), default used", text);
+            Log.Warning("Config: color '{0}' not understood (R,G,B or #RRGGBB), default used", text);
             return fallback;
         }
 

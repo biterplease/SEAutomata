@@ -24,7 +24,7 @@ namespace Automata.Construction
     /// Construction Computer block (a programmable block subtype): scans its observation area (a box of up to 50 x 50 x
     /// 50 blocks of 2.5 m, default 25, along the block's axes, its centre offset up to 250 m each way) for blocks to
     /// weld (unfinished, damaged, projected - projections floating in the area included) and to grind (painted the
-    /// grind colour), on every grid in the area that its owner / faction owns (or nobody does), working drones excepted.
+    /// grind color), on every grid in the area that its owner / faction owns (or nobody does), working drones excepted.
     /// Targets are grouped in build order (<see cref="BuildPlanner"/>) into jobs of a few blocks and announced to
     /// orchestrators (CONSTRUCTION_COMPUTER_JOB_ANNOUNCEMENT); a weld job lists the components it needs (a logistics
     /// computer supplies them), a grind job what it returns. At most MaxPublishedJobs (server setting) jobs are
@@ -76,7 +76,7 @@ namespace Automata.Construction
         private static readonly MyStringId StrInfoJobs = MyStringId.GetOrCompute("Jobs: {0} cached, done {1}, failed {2}, expired {3}");
         private static readonly MyStringId StrInfoJobLine = MyStringId.GetOrCompute(" - {1}: {2} block(s), {3}");
         private static readonly MyStringId StrAssigned = MyStringId.GetOrCompute("assigned");
-        private static readonly MyStringId StrOnHoldSeconds = MyStringId.GetOrCompute("on hold {0} s");
+        private static readonly MyStringId StrOnHoldSeconds = MyStringId.GetOrCompute("on hold {0}s");
         private static readonly MyStringId StrPending = MyStringId.GetOrCompute("pending");
         private static readonly MyStringId StrWarnNoAntenna = MyStringId.GetOrCompute("Warning: no broadcasting antenna on the grid");
         #endregion
@@ -365,6 +365,7 @@ namespace Automata.Construction
             ReadFailures(now);
             ReadJobReports(now);
             ReadKeepalives(now);
+            droneWatch.Check(now, block, settings.UseBroadcastController, "CC {0}", entityId, AddEvent);
             if (now - lastScan >= settings.ScanIntervalSeconds * 60)
             {
                 lastScan = now;
@@ -801,6 +802,7 @@ namespace Automata.Construction
                     var r = reportInbox[i].Payload;
                     if (r == null || r.AnnouncerEntityId != entityId || r.DroneEntityId != reportInbox[i].SenderId
                         || !AnchorDirectory.IsAllowed(block.OwnerId, reportInbox[i].SenderOwnerId)) continue;
+                    droneWatch.Done(r.DroneEntityId);
                     for (int j = jobs.Count - 1; j >= 0; j--)
                     {
                         var job = jobs[j];
@@ -841,6 +843,8 @@ namespace Automata.Construction
         }
 
         // Drones still working on an awarded job: its expiry starts again (a dead / destroyed / lost drone stops sending)
+        private readonly Util.DroneWatch droneWatch = new Util.DroneWatch();
+
         private void ReadKeepalives(int now)
         {
             messaging.ReadMessages(entityId, antenna, Channel.JOB_KEEPALIVE, reportInbox, 50, true, PayloadType.JobStatusReport);
@@ -849,6 +853,7 @@ namespace Automata.Construction
                 var r = reportInbox[i].Payload;
                 if (r == null || r.AnnouncerEntityId != entityId || r.DroneEntityId != reportInbox[i].SenderId
                     || !AnchorDirectory.IsAllowed(block.OwnerId, reportInbox[i].SenderOwnerId)) continue;
+                droneWatch.Heard(r.DroneEntityId, r.JobId, now, AddEvent);
                 for (int j = 0; j < jobs.Count; j++)
                     if (jobs[j].JobId == r.JobId) { if (jobs[j].Assigned == 0) jobs[j].DronesOut = Math.Max(jobs[j].DronesOut, 1); jobs[j].Assigned = now; }   // unheard award: assigned now
             }

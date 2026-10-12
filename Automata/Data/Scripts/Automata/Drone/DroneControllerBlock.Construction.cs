@@ -470,12 +470,12 @@ namespace Automata.Drone
         private bool TryGetStandAloneFrame(IMyShipConnector home, out IMyTerminalBlock beacon)
         {
             beacon = null;
-            bool moving = settings.HomeNotStation
+            bool moving = settings.HomeNotStatic
                 || (home.CubeGrid.Physics != null && home.CubeGrid.Physics.LinearVelocity.LengthSquared() > 0.25);
             if (!moving) return true;
             beacon = settings.HomeBeaconId != 0 ? AnchorDirectory.Resolve(block, settings.HomeBeaconId) : null;
             if (beacon != null) return true;
-            ReportProblem(settings.HomeNotStation
+            ReportProblem(settings.HomeNotStatic
                 ? Loc.T(StrConstructionMovingBaseSelectIts)
                 : Loc.T(StrConstructionHomeIsMovingTick));
             return false;

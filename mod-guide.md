@@ -77,7 +77,7 @@ The logs will show relevant data to the automata block, such as jobs taken, reas
 
 ## Drone Controller
 
-### Behaviour profiles
+### Behavior profiles
 
 The behaviour profile tells Orchestrators what this drone *prefers* to do. A drone still bids on any job its equipment allows, but drones with a matching profile always win over the others.
 
@@ -116,8 +116,8 @@ A drone without a home connector clears leftover cargo (grinder salvage, a welde
 A stand-alone drone works by itself, without any computers or Orchestrator. It watches a small **observation area** around its home connector (up to 10 x 10 x 10 blocks, which you can move with the offset sliders or centre on a GPS point instead) and:
 
 - welds unfinished blocks, repairs damaged ones, and builds projections,
-- grinds down blocks painted with the **grind colour**,
-- never touches blocks painted with the **weld ignore colour**.
+- grinds down blocks painted with the **grind color**,
+- never touches blocks painted with the **weld ignore color**.
 
 It loads the components it needs from the conveyor network of its home connector, does as much as it can carry, comes back, and repeats. You can choose the order it works in (repair, projections, unbuilt). Turn on **Show observation area** to see the box.
 
@@ -130,6 +130,14 @@ In this mode the drone waits at home and bids on jobs from Orchestrators in ante
 Combat drones in this mode also launch on their own when their AI Defensive block spots an enemy within the **auto-launch radius**.
 
 The operation mode can only be changed while the drone's AI is off.
+
+### Economy Flight
+
+A checkbox in the drone's **Flight** section, off by default. In space, legs of 1 km or more are flown to save fuel: the drone turns its strongest thruster group along the way, burns up to a cruise speed, coasts with every thruster off, turns around and burns to brake. The last 150 m of each leg are flown normally. Short legs, work, docking and anything that changes the route mid-leg fall back to normal flight. Planetary gravity (quad-copter flight) is not done yet.
+
+### When a drone finds no route
+
+On a trip home, to a dock or to a waypoint (or when the route ahead gets blocked), a drone that finds no way flies to a free spot close by, a different one each time, and plans again from there. After 3 tries it stops in an error state and broadcasts it. Press **Stop** or **Go home**, or recall it with the designator, once the way is clear.
 
 ### Which jobs a drone bids on
 
@@ -190,8 +198,8 @@ A computer never bids on its own requests.
 The Construction Computer watches a large box around itself (up to 50 x 50 x 50 blocks, movable with the offset sliders) and looks for:
 
 - unfinished blocks, damaged blocks and projections to weld (each can be turned on or off),
-- blocks painted the grind colour to grind,
-- skipping anything painted the weld ignore colour.
+- blocks painted the grind color to grind,
+- skipping anything painted the weld ignore color.
 
 It sees every grid in the box that you, your faction, or nobody owns, including floating projections that aren't attached to anything.
 
@@ -212,7 +220,16 @@ A stand-alone drone's own Weld priority is a strict order: it finishes one kind 
 
 Drones whose welder or grinder can easily reach the blocks (for example, a downward-facing welder for the top of a structure) also rank higher. A weld job is never given out without a Logistics Computer that has the components.
 
-## Mining Surveyor
+## Mining, and the Mining Surveyor
+
+In order to mine, you will need:
+- A drone with the **Mining Drone** behaviour profile. The drone must be a "boring" drone, meaning that the hole that its drills make must be large enough for the drone's hull to follow through it.
+- A Mining Surveyor
+- Orchestrator, within antenna network range or via laser antenna
+
+Mining may take a long time, its because the drone's mine stone around the target ore, and don't dispose of it. Because a) Stone gets consumed very quiclky by refineries, and b) there are mods, plugins, other solutions to stone, and Automata does not attempt to fix "the stone problem".
+
+Expect drones to mine stone alongside other ores. For this reason, starting a mine shaft will be slow at first, but the order for ores will start filling up really quickly once the stone layer gets consumed.
 
 ### Collecting ore surveys
 
@@ -225,7 +242,7 @@ Deposits that a later scan no longer finds are marked as depleted. Stone is neve
 
 ### Configuring mining jobs
 
-1. The **Known ores** list shows the ores of the deposits found so far.
+1. The Mining Surveyor's **Known ores** list shows the ores of the deposits found so far.
 2. Select an ore, enter an order as `ore:kg` (for example `Ore/Iron:100000` or `Iron:50000`) and press **Add / update**.
 3. **Job size** sets how many kg each mining job asks for (one drone trip; default 10,000 kg).
 4. Each finished job is counted off the order; at 0 the jobs stop. Tick **Keep orders constant** to keep mining as long as deposits are known.
@@ -249,14 +266,14 @@ The two designators are hand-held tools. Press **Reload** to cycle modes, **Fire
 Both designators share two extra modes:
 
 - **Tag**: point at your own drones to tag them (up to 32). The next order goes to every tagged drone, one job each. Without tags, one suitable drone is picked for you.
-- **Recall**: point at one of your drones to call it home. It drops its current job.
+- **Recall**: point at one of your drones to call it home. It drops its current job. Point at the GPS marker of an order instead (within about 8 m) and every drone working that order comes home, and its jobs nobody has taken yet are cancelled.
 
 ### Scouting (Industrial Target Designator)
 
 Only drones with the **Ore scout** profile and an ore detector take scouting jobs.
 
 - **Spot check**: point at the ground or an asteroid. A scout flies there, scans for ore and comes back. With several tagged scouts, they spread around the spot.
-- **Area sweep**: point at an area. A scout sweeps it (low passes over a planet, rings around an asteroid). With several tagged scouts, the area is split between them.
+- **Area sweep**: point at an area. A scout sweeps it (low passes over a planet; on an asteroid, 8 low orbits over the spot in random directions, close to the surface, with height and spacing set by the scout's ore detector range). With several tagged scouts, the area is split between them. A waypoint the scout can't reach is skipped (up to 3 in a row), and in space scouts wait longer before giving up on a stalled leg.
 
 A GPS marker shows the order: yellow while waiting for a drone, green once taken. Everything the scouts find goes to your Mining Surveyors, ready to be ordered.
 

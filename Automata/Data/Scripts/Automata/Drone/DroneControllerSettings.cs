@@ -186,7 +186,7 @@ namespace Automata.Drone
                 [ProtoMember(46, IsRequired = true)]
                 public Construction.WorkModes ConstructionWorkModes =
                         Construction.WorkModes.WeldUnfinishedBlocks | Construction.WorkModes.RepairDamagedBlocks | Construction.WorkModes.WeldProjectedBlocks;
-                /// <summary>Blocks painted this colour are ground down (Grind work mode). Packed RGB.</summary>
+                /// <summary>Blocks painted this color are ground down (Grind work mode). Packed RGB.</summary>
                 [ProtoMember(47)]
                 public uint GrindColor = 0xFF0000FF;   // RGB(255,0,0)
 
@@ -195,7 +195,7 @@ namespace Automata.Drone
                 /// HomeBeaconId. Beacons are selectable only when owned by the drone owner / their faction.
                 /// </summary>
                 [ProtoMember(48)]
-                public bool HomeNotStation;
+                public bool HomeNotStatic;
                 [ProtoMember(49)]
                 public long HomeBeaconId;
                 /// <summary>Player-designated special behaviour (not in use yet).</summary>
@@ -255,7 +255,7 @@ namespace Automata.Drone
                 [ProtoMember(62, IsRequired = true)]
                 public float EscortFollowDistance = 30f;
 
-                /// <summary>Blocks painted exactly this colour are never welded (stand-alone). Packed; RGB(255,0,255).</summary>
+                /// <summary>Blocks painted exactly this color are never welded (stand-alone). Packed; RGB(255,0,255).</summary>
                 [ProtoMember(63, IsRequired = true)]
                 public uint WeldIgnoreColor = 0xFFFF00FF;
 
@@ -285,5 +285,9 @@ namespace Automata.Drone
                 /// <summary>The name its logs (and other blocks' logs) show; empty: the controller's name.</summary>
                 [ProtoMember(70)]
                 public string Nickname = "";
+
+                /// <summary>Economy flight: long legs in space as burn / coast / flip-and-burn with the strongest thruster group.</summary>
+                [ProtoMember(75)]
+                public bool EconomyFlight;
         }
 }

@@ -46,6 +46,7 @@ namespace Automata.Drone
         private static readonly MyStringId StrMineNeedsAnOreDetector = MyStringId.GetOrCompute("Mine: needs an ore detector");
         private static readonly MyStringId StrMineNoLeftAtThe = MyStringId.GetOrCompute("Mine: no {0} left at the site");
         private static readonly MyStringId StrMineMaxLoadReached = MyStringId.GetOrCompute("Mine: max load reached");
+        private static readonly MyStringId StrMineAmountReached = MyStringId.GetOrCompute("Mine: ordered amount reached ({0:F0} kg of {1})");
         private static readonly MyStringId StrMineCargoFull = MyStringId.GetOrCompute("Mine: cargo full");
         private static readonly MyStringId StrMineBoreStuckMFrom = MyStringId.GetOrCompute("Mine: bore stuck {0:F0} m from its end{1}");
         private static readonly MyStringId StrTakingWhatItHas = MyStringId.GetOrCompute(", taking what it has");
@@ -75,6 +76,11 @@ namespace Automata.Drone
         private const int BORE_RETRIES_MAX = 3;            // stuck: back up (a hull length) and bore on, this many times, then deliver            // other bores per job nearby once a spot gives no more of the ore
         private const double REBORE_SPACING = 10;          // m: a new bore at least this far from the drone's earlier bores
         private const float MINE_BORE_SPEED = 1f;          // m/s through rock
+        private const double MINE_REACH = 4;               // m: the drill point this close to an ore voxel is on the ore (the no-ore timer runs from here)
+        private const double MINE_STEER_LATERAL = 2;       // m: the nearest ore voxel this far off the bore line: the bore's end moves to it
+        private const int MINE_STEERS_MAX = 12;            // per bore
+        private const int MINE_STEER_CHECK = 5;            // RunMine calls between live readings while collecting
+        private const int MINE_APPROACH_STALL_TICKS = 30 * 60;   // collecting, not getting closer to the ore this long: the no-ore timer runs anyway
         #region Timing
         private const int MINE_MAX_TICKS = 20 * 3600;
         private const int BORE_STALL_TICKS = 20 * 60;   // boring: neither closer to the bore's end (0.5 m) nor cargo growing this long: stuck
@@ -93,6 +99,7 @@ namespace Automata.Drone
         // Bore in progress
         private Vector3D boreEnd, boreDir, boreDeposit;
         private MyStringHash boreOre;
+        private int boreTargetKg;   // the job's ore amount (kg of boreOre aboard that ends the bore); 0: no target
         private bool boreCollecting, boreClearingSet, boreClearingWas;
         private int boreExtensions, boreGainFrame, boreProgressFrame;
         private double boreBest;
@@ -104,6 +111,10 @@ namespace Automata.Drone
         private bool boreStartSet;
         private double boreCollectAt;          // m from the nearest ore voxel: collecting
         private int boreNearCheck;             // RunMine calls until the next live ore reading
+        private int boreSteers, boreSteerCheck;            // collecting: the bore's end moved to the nearest ore voxel (count), calls until the next reading
+        private double boreOreDist = double.MaxValue;      // last reading: drill point to the nearest ore voxel (MaxValue: none within the radius)
+        private double boreOreBest = double.MaxValue;      // closest it has been while collecting
+        private int boreOreBestFrame;
         private bool mineAngled;               // PlanMineSite planned an angled bore for this site
         private Vector3D mineAngledDir;        // its direction (into the rock)
         private readonly List<OreHit> planHits = new List<OreHit>();
@@ -118,6 +129,12 @@ namespace Automata.Drone
         private static Config.ServerConfig.MiningConfig MiningConfig
         {
             get { var c = AutomataSession.GetConfig(); return c != null ? c.Mining : Config.ServerConfig.Instance.Mining; }
+        }
+
+        /// <summary>m its ore detector scans (capped by the server's MaxScanRadius); 0 without one.</summary>
+        public double OreDetectorRangeMeters
+        {
+            get { return oreDetector != null && !oreDetector.Closed && oreDetector.IsFunctional ? Math.Min(oreDetector.Range, MiningConfig.MaxScanRadius) : 0; }
         }
 
         private bool OreDetectorWorking { get { return oreDetector != null && !oreDetector.Closed && oreDetector.IsWorking; } }
@@ -136,8 +153,9 @@ namespace Automata.Drone
                 }
                 boreDeposit = task.Position.ToVector3D();
                 boreOre = MyStringHash.NullOrEmpty;
+                boreTargetKg = 0;
                 if (task.Inventory != null)
-                    foreach (var item in task.Inventory.GetAllItems()) { boreOre = item.Key; break; }
+                    foreach (var item in task.Inventory.GetAllItems()) { boreOre = item.Key; boreTargetKg = item.Value; break; }
                 // Is the ore still there? (scanned in one go: a small sphere)
                 siteHits.Clear();
                 surveyScanner.Cancel();
@@ -168,6 +186,10 @@ namespace Automata.Drone
                 boreBackingUp = false;
                 boreCollectAt = mineAngled ? MINE_COLLECT_ANGLED : MINE_COLLECT_DOWN;
                 boreNearCheck = 0;
+                boreSteers = 0;
+                boreSteerCheck = 0;
+                boreOreDist = boreOreBest = double.MaxValue;
+                boreOreBestFrame = now;
                 boreCollecting = OreWithin(tool, boreCollectAt);
                 SetDrillClearing(!boreCollecting);
                 BackOutAlongBore(tool);
@@ -198,14 +220,54 @@ namespace Automata.Drone
                     SetDrillClearing(false);
                     boreGainFrame = now;
                     oreGainFrame = now;
+                    boreOreBest = double.MaxValue;
+                    boreOreBestFrame = now;
                     Log.Debug("Drone {0}: mine: within {1:F1} m of the ore{2}: terrain clearing off, collecting", Entity.EntityId, boreCollectAt,
                               boreEndReached ? " (bore end)" : "");
                 }
             }
+            // Collecting: the bore line was aimed at the deposit's average position, the ore voxels can lie off it. The bore's
+            // end moves to the nearest voxel of the ore (same direction, so the attitude and the way out stay), and the
+            // no-ore timer only runs once the drill point is within reach of one
+            if (boreCollecting && !boreBackingUp && --boreSteerCheck < 0)
+            {
+                boreSteerCheck = MINE_STEER_CHECK;
+                Vector3D nearOre;
+                double nearDist;
+                if (OreScanner.NearestOre(at, MINE_NEAR_RADIUS, boreOre, out nearOre, out nearDist))
+                {
+                    boreOreDist = nearDist;
+                    if (nearDist < boreOreBest - 0.5) { boreOreBest = nearDist; boreOreBestFrame = now; }
+                    Vector3D want = nearOre + boreDir * 2;
+                    Vector3D off = want - boreEnd;
+                    double lateral = (off - boreDir * Vector3D.Dot(off, boreDir)).Length();
+                    if (nearDist > MINE_REACH && lateral > MINE_STEER_LATERAL && boreSteers < MINE_STEERS_MAX)
+                    {
+                        Vector3D old = boreEnd;
+                        boreEnd = want;
+                        if (DispatchBore())
+                        {
+                            boreSteers++;
+                            Log.Debug("Drone {0}: mine: ore voxel {1:F1} m from the drill, {2:F1} m off the bore line: the bore's end moves to it ({3}/{4})",
+                                      Entity.EntityId, nearDist, lateral, boreSteers, MINE_STEERS_MAX);
+                        }
+                        else boreEnd = old;
+                    }
+                }
+                else boreOreDist = double.MaxValue;
+            }
+            if (boreCollecting && boreOreDist > MINE_REACH && boreOreDist < double.MaxValue && now - boreOreBestFrame < MINE_APPROACH_STALL_TICKS)
+                oreGainFrame = now;   // still getting to the ore: the no-ore timer waits
             double cargo = CargoUsedVolume();
             if (cargo > boreLastCargo + 0.001) { boreLastCargo = cargo; boreGainFrame = now; }   // cutting (stone counts): not stuck
             double ore = MinedOre();
             if (ore > boreLastOre + 0.5) { boreLastOre = ore; oreGainFrame = now; }              // the job's ore coming in
+            // The ordered amount is in: enough, whatever room is left
+            if (boreTargetKg > 0 && ore >= boreTargetKg)
+            {
+                Report(StrMineAmountReached, ore, boreOre.String);
+                return EndBore(true);
+            }
             // Ore is heavy: in gravity the load limit usually comes long before full containers
             if (CargoFillRatio() >= 0.95 || IsLoadLimitReached)
             {
@@ -326,7 +388,7 @@ namespace Automata.Drone
                 if (!OreScanner.NearestOre(spot, MINE_NEAR_RADIUS, boreOre, out ore, out d)) continue;   // the detector: still there?
                 if (NearEarlierBore(ore)) continue;
                 Vector3D entry;
-                if (!OreScanner.FindSurface(voxel, ore, outward, MINE_BORE_SEARCH, out entry)) continue;
+                if (!OreScanner.FindSurface(voxel, ore, outward, MINE_BORE_SEARCH, out entry, MineFreeRun())) continue;
                 Vector3D approach = entry + outward * MINE_APPROACH_OUT;
                 var nav = Orchestrator.Task.NavigateToolTo(0, entry, approach, (float)flightState.Gravity.Length());
                 var next = mine;
@@ -470,12 +532,13 @@ namespace Automata.Drone
             Vector3D e1 = Vector3D.CalculatePerpendicularVector(up), e2 = Vector3D.Cross(up, e1);
             Vector3D bestDir = Vector3D.Zero, bestEntry = Vector3D.Zero;
             double bestScore = double.MaxValue;
+            double free = MineFreeRun();   // the line must leave the ground for this long: a pit / shaft dug before isn't the surface
             for (int k = 0; k < MINE_AZIMUTHS; k++)
             {
                 double az = k * MathHelperD.TwoPi / MINE_AZIMUTHS;
                 Vector3D dir = (e1 * Math.Cos(az) + e2 * Math.Sin(az)) * Math.Cos(angle) - up * Math.Sin(angle);
                 Vector3D entry;
-                if (!OreScanner.FindSurface(voxel, deposit, -dir, MINE_BORE_SEARCH, out entry)) continue;
+                if (!OreScanner.FindSurface(voxel, deposit, -dir, MINE_BORE_SEARCH, out entry, free)) continue;
                 double score = Vector3D.Distance(entry, deposit) + 0.05 * Vector3D.Distance(entry, flightState.Position);
                 if (score >= bestScore) continue;
                 bestScore = score;
@@ -495,7 +558,7 @@ namespace Automata.Drone
             if (offset.LengthSquared() > 0.25)
             {
                 Vector3D shiftedEntry;
-                if (OreScanner.FindSurface(voxel, deposit + offset, -bestDir, MINE_BORE_SEARCH, out shiftedEntry))
+                if (OreScanner.FindSurface(voxel, deposit + offset, -bestDir, MINE_BORE_SEARCH, out shiftedEntry, free))
                 {
                     deposit += offset;
                     bestEntry = shiftedEntry;
@@ -518,6 +581,12 @@ namespace Automata.Drone
             mineAngledDir = bestDir;
             Log.Debug("Drone {0}: mine: angled bore {1:F0}° from level ({2} drill, limit {3:F0}°), {4:F0} m of rock from {5}", Entity.EntityId,
                       MathHelperD.ToDegrees(angle), face, limit, Vector3D.Distance(bestEntry, deposit), bestEntry);
+        }
+
+        // Open air the angled bore's line needs past its entry: the hull's length and some, at most the approach distance
+        private double MineFreeRun()
+        {
+            return Math.Min(MINE_APPROACH_OUT, Math.Max(10, DroneLength() + 6));
         }
 
         private Vector3D ToolPointWorld()
@@ -675,6 +744,7 @@ namespace Automata.Drone
         public bool Recall(string by)
         {
             if (!IsServer || !initialized || settings == null) return false;
+            ClearRouteError();
             Report(StrRecalled, by);
             EndCombat(Loc.T(StrRecalledReason));
             StopJob(Loc.T(StrRecalledReason));

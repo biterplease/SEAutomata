@@ -71,7 +71,9 @@ namespace Automata.Drone
         private static readonly MyStringId StrMaxLoadExceeded = MyStringId.GetOrCompute("Max load exceeded");
         private static readonly MyStringId StrBatteryLow = MyStringId.GetOrCompute("Battery low");
         private static readonly MyStringId StrHydrogenLow = MyStringId.GetOrCompute("Hydrogen low");
-        private static readonly MyStringId StrNoCamerasSensorsCanT = MyStringId.GetOrCompute("No cameras / sensors: can't see obstacles");
+        private static readonly MyStringId StrWarnNoCamera = MyStringId.GetOrCompute("WARN: no camera detected");
+        private static readonly MyStringId StrWarnNoSensor = MyStringId.GetOrCompute("WARN: no sensor detected");
+        private static readonly MyStringId StrWarnNoSensorOrCamera = MyStringId.GetOrCompute("WARN: no sensor or camera detected");
         private static readonly MyStringId StrMaxSpeedIs0 = MyStringId.GetOrCompute("Max speed is 0");
         private static readonly MyStringId StrApproachSpeedIs0 = MyStringId.GetOrCompute("Approach speed is 0");
         private static readonly MyStringId StrSafeSpeedIs0 = MyStringId.GetOrCompute("Safe speed is 0");
@@ -98,10 +100,10 @@ namespace Automata.Drone
         private static readonly MyStringId StrMountM = MyStringId.GetOrCompute("Mount: {0} -> {1:F0} m");
         private static readonly MyStringId StrHomeSet = MyStringId.GetOrCompute("Home set: {0}");
         private static readonly MyStringId StrHomeSetNoDroneConnector = MyStringId.GetOrCompute("Home set: {0} (no drone connector can dock)");
-        private static readonly MyStringId StrScanWaitS = MyStringId.GetOrCompute("Scan: wait {0} s");
+        private static readonly MyStringId StrScanWaitS = MyStringId.GetOrCompute("Scan: wait {0}s");
         private static readonly MyStringId StrScanConnectorsBeaconsInRange = MyStringId.GetOrCompute("Scan: {0} connectors/beacons in range");
         private static readonly MyStringId StrAddEnterAConnectorName = MyStringId.GetOrCompute("Add: enter a connector name");
-        private static readonly MyStringId StrAddWaitS = MyStringId.GetOrCompute("Add: wait {0} s");
+        private static readonly MyStringId StrAddWaitS = MyStringId.GetOrCompute("Add: wait {0}s");
         private static readonly MyStringId StrAddConnectorNotFound = MyStringId.GetOrCompute("Add: connector \"{0}\" not found");
         private static readonly MyStringId StrAddedMatchingConnector = MyStringId.GetOrCompute("Added {0} matching connector");
         private static readonly MyStringId StrAddedMatchingConnectors = MyStringId.GetOrCompute("Added {0} matching connectors");
@@ -322,11 +324,18 @@ namespace Automata.Drone
         // available accel than the command may change by (a reserve for lag, a heavier load, a thruster that gives less),
         // with a margin of distance, a ramp that keeps the last metres slow, and a full-power brake when it runs past the curve
         private const double JOB_BRAKE         = 0.3;    // fraction of available accel the stop is planned with (TRANS_BRAKE 0.5)
-        private const double JOB_STOP_MARGIN   = 0.75;   // m kept in front of the stop point
+        private const double JOB_STOP_LAG      = 0.3;    // s of travel kept in front of the stop point (speed x this: no margin left at a standstill)
         private const double JOB_RAMP          = 0.45;   // 1/s: speed at most this x the distance left (+ final speed), stopping
         private const double JOB_BRAKE_OVER    = 0.4;    // m/s over the curve: the command may then change by EMERGENCY_FRACTION
         private const double EMERGENCY_FRACTION = 0.9;   // share of available accel for the command while over the curve
         private bool overCurve;                          // set by ComputeApproachVelocity, read by RateLimitCommand
+        // Space, a watched route leg whose direction no working camera looks along: the drone turns to face it before it
+        // picks up speed (a stretch nothing sees is assumed clear: leaving a dock sideways to the cameras, it flew into the station)
+        private const double FACE_SEEN_MIN = 30;         // m of sight along the leg wanted before it moves (short legs: their length)
+        private const int FACE_HOLD_TICKS = 6 * 60;      // at most this long per leg (cameras that never face it, a blind drone: on as before)
+        private FlightOrder faceOrder;
+        private int faceTicks, faceCheck;
+        private bool faceSeen = true;
         private Vector3D commandedVelocity;              // rate-limited velocity command
         #endregion
 
@@ -438,9 +447,11 @@ namespace Automata.Drone
                 double orientationError = 0;
                 bool orienting = false;
                 Vector3D fwd, up;
+                ecoActive = false;
                 if (activeFlightOrder != null)
                 {
                     BuildOrderFrame(activeFlightOrder, out fwd, out up);
+                    ecoActive = EconomyAttitude(activeFlightOrder, ref fwd, ref up);   // economy flight: the burn / flip attitude
                     UpdateOrientation(ref fwd, ref up, out orientationError);
                     orienting = true;
                 }
@@ -460,9 +471,17 @@ namespace Automata.Drone
                 if (activeFlightOrder != null)
                 {
                     FlightOrder o = activeFlightOrder;
-                    // Shared site: holding still for another drone (UpdateSharedSite10), the order waits
-                    Vector3D v = RateLimitCommand(siteYielding ? flightState.FrameVelocity : ComputeApproachVelocity(o, orientationError));
-                    UpdateTranslation(ref v);
+                    if (ecoActive)
+                    {
+                        ComputeApproachVelocity(o, orientationError);   // only for its leg bookkeeping (legPassed, legDir...: the chaining)
+                        EconomyTranslate(o);
+                    }
+                    else
+                    {
+                        // Shared site: holding still for another drone (UpdateSharedSite10), the order waits
+                        Vector3D v = RateLimitCommand(siteYielding ? flightState.FrameVelocity : ComputeApproachVelocity(o, orientationError));
+                        UpdateTranslation(ref v);
+                    }
                     if (!siteYielding) AdvanceFlightPhase(o, orientationError);
 
                     Vector3D rWorld = Vector3D.TransformNormal(o.ReferenceOffset.ToVector3D(), flightState.WorldMatrix);
@@ -524,6 +543,7 @@ namespace Automata.Drone
                     UpdateConnectorPower();
                     CheckLegStart();
                     UpdateRouteWatch();
+                    UpdateRecovery10();
                     UpdateDocking();
                     UpdateConstruction10();
                     UpdateSharedSite10();
@@ -1142,7 +1162,7 @@ namespace Automata.Drone
                 currentState = State.Error;
                 return false;
             }
-            if (initialized && IsServer && currentState == State.Error)
+            if (initialized && IsServer && currentState == State.Error && !routeError)
             {
                 Report(StrSystemsRestored);
                 SetState(IsParkedNow() ? State.Docked : State.Standby);
@@ -1237,6 +1257,7 @@ namespace Automata.Drone
             // Space: no air (atmospheric thrusters drop to their minimum), any direction able to move the drone
             var vacuum = CalculateThrustProfile(shipController, capabilityMass, allThrusters, 0f, false, potential);
             float spaceAccel = capabilityMass > 0.1f ? vacuum.MaxThrust.Max / capabilityMass : 0f;
+            spaceThrustMax = vacuum.MaxThrust.Max;
             if (spaceAccel > 0.981f)
                 capabilities |= Capabilities.CanFlySpace;
             string flight = string.Format("{0:N0} kg ({1}), lift {2:F2} m/s2 vs {3:F2} (air {4:F2}{5}), space {6:F2} m/s2, up thrusters {8}: {7}",
@@ -1281,6 +1302,15 @@ namespace Automata.Drone
         {
             double limitPct = settings != null ? settings.MaxLoadGravity : 100.0;
             return Math.Max(0, RatedThrust(Base6Directions.Direction.Up) / 9.81 * limitPct / 100.0 - DroneOwnMass());
+        }
+
+        private const double SPACE_MIN_ACCEL = 0.981;   // m/s2: what "can fly in space" asks for (CanFlySpace)
+        private double spaceThrustMax;                   // N, the strongest direction in vacuum (capability scan)
+
+        /// <summary>kg the drone can carry in space beyond its own mass: its best direction still accelerating at SPACE_MIN_ACCEL.</summary>
+        public double PayloadInSpace()
+        {
+            return Math.Max(0, spaceThrustMax / SPACE_MIN_ACCEL - DroneOwnMass());
         }
 
         /// <summary>Exactly one lift class, for quick job pre-filtering (100 t and up is the top class).</summary>
@@ -1622,7 +1652,7 @@ namespace Automata.Drone
             else if (needsHydrogenRefuel) { level = DisplayAlertLevel.Warning; text = Loc.T(StrHydrogenLow); }
             else if (lastConstructionProblem != null) { level = DisplayAlertLevel.Warning; text = lastConstructionProblem; }
             else if (combatAiNote != null) { level = DisplayAlertLevel.Warning; text = combatAiNote; }
-            else if (IsFlyingBlind()) { level = DisplayAlertLevel.Warning; text = Loc.T(StrNoCamerasSensorsCanT); }
+            else if ((text = MissingInstrumentsWarning()) != null) level = DisplayAlertLevel.Warning;
             display.SetAlert(level, text);
         }
 
@@ -1680,7 +1710,9 @@ namespace Automata.Drone
                 ApproachFromLocal = localApproachFrom.HasValue ? Vector3DData.FromVector3D(localApproachFrom.Value) : here,
                 TransitStartLocal = here,
                 UseApproachLine = localApproachFrom.HasValue,
-                Phase = FlightPhase.MatchSpeed,
+                // A route planned again on the way (replanning) carries on at its speed: matching the anchor's would brake
+                // the drone to a stop relative to it every time (a long trip crawled at a replan per 25 m)
+                Phase = replanning ? (localApproachFrom.HasValue ? FlightPhase.Transit : FlightPhase.Approach) : FlightPhase.MatchSpeed,
                 Orientation = FlightOrientationMode.FaceTravel,
                 ArrivalTolerance = Math.Min(WaypointTol, TRANSIT_TOLERANCE_MAX)
             };
@@ -2155,7 +2187,7 @@ namespace Automata.Drone
             {
                 double brake = AvailableAccel(-d) * brakeFrac;
                 double closing = Math.Max(0, Vector3D.Dot(flightState.RelativeVelocity, d));
-                double usable  = Math.Max(0, remaining - closing / Kp - (job && stopping ? JOB_STOP_MARGIN : 0));   // distance eaten by controller lag
+                double usable  = Math.Max(0, remaining - closing / Kp - (job && stopping ? closing * JOB_STOP_LAG : 0));   // distance eaten by controller lag
                 if (stopping)
                     along = usable > TRANS_LINEAR
                         ? Math.Sqrt(2 * brake * usable)
@@ -2181,6 +2213,24 @@ namespace Automata.Drone
                 ? MathHelperD.Clamp(2.0 - xt / o.LineTolerance, 0, 1)          // strict: full speed within tolerance, stop at 2x
                 : MathHelperD.Clamp(1.0 - xt / (XT_CAPTURE * 4), 0, 1);
             if (stopping && remaining < FINAL_LEG && orientationError > (o.LooseArrival ? LOOSE_ORIENT_GATE : ORIENT_GATE)) gate = 0;
+            if (!ecoActive && !flightState.InGravity && o.Watched && routeOwner != RouteOwner.None && !o.HoldAttitudeInTransit && len > 1e-3 && preflightStage == 0)
+            {
+                if (!ReferenceEquals(faceOrder, o)) { faceOrder = o; faceTicks = 0; faceCheck = 0; faceSeen = true; }
+                if (--faceCheck < 0)
+                {
+                    faceCheck = 9;
+                    var fpm = PathfindingManager.Instance;
+                    PathQuery fq;
+                    BuildPathQuery(out fq);
+                    faceSeen = fpm == null || !AnyCameraOn() || fpm.ObservedRange(ref fq, d) >= Math.Min(len, FACE_SEEN_MIN);
+                }
+                if (!faceSeen && faceTicks < FACE_HOLD_TICKS)
+                {
+                    if (faceTicks == 0) Log.Debug("Drone {0}: no camera looks along the leg ({1:F0} m): turning to face it first", Entity.EntityId, len);
+                    faceTicks++;
+                    gate = 0;
+                }
+            }
 
             Vector3D vCross = Vector3D.Zero;
             if (xt > 1e-3)

@@ -9,15 +9,15 @@ namespace Automata.Construction
     public class ConstructionComputerBlockSettings
     {
         [ProtoMember(1, IsRequired = true)] public bool Enabled = true;
-        /// <summary>What it looks for: unfinished / damaged / projected blocks to weld, blocks painted the grind colour.</summary>
+        /// <summary>What it looks for: unfinished / damaged / projected blocks to weld, blocks painted the grind color.</summary>
         [ProtoMember(2, IsRequired = true)] public WorkModes WorkModes = WorkModes.WeldUnfinishedBlocks | WorkModes.RepairDamagedBlocks | WorkModes.WeldProjectedBlocks;
         /// <summary>Seconds between scans.</summary>
         [ProtoMember(6)] public int ScanIntervalSeconds = 30;
         /// <summary>Blocks per announced job (an orchestrator splits a job into trips by drone capacity).</summary>
         [ProtoMember(7)] public int BlocksPerJob = 10;
-        /// <summary>Blocks painted exactly this colour are ground (Grind mode). Packed (Color.PackedValue).</summary>
+        /// <summary>Blocks painted exactly this color are ground (Grind mode). Packed (Color.PackedValue).</summary>
         [ProtoMember(8)] public uint GrindColor = 0xFF0000FF;   // RGB(255,0,0)
-        /// <summary>Blocks painted exactly this colour are never welded, repaired or built (projections too).</summary>
+        /// <summary>Blocks painted exactly this color are never welded, repaired or built (projections too).</summary>
         [ProtoMember(17)] public uint WeldIgnoreColor = 0xFFFF00FF;   // RGB(255,0,255)
         /// <summary>
         /// Observation area, in blocks of 2.5 m along the block's axes (right, up, forward): 1-50, default 25.

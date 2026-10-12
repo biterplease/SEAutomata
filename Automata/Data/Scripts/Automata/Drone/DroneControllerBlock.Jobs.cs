@@ -138,6 +138,8 @@ namespace Automata.Drone
             siteYielding = false;
             mineAngled = false;
             mineSiteFixed = false;
+            scoutSkips = 0;
+            lastKeepaliveFrame = int.MinValue / 2;   // the first keepalive at once: its announcer starts watching
             mineRebores = 0;
             boreLineStarts.Clear();
             boreLineEnds.Clear();
@@ -675,17 +677,17 @@ namespace Automata.Drone
                     if (starting)
                     {
                         var failure = DispatchNavigateTo(ref task);
-                        return failure == Orchestrator.TaskFailure.None ? TaskStatus.Running : Fail(failure, TaskStatus.ToReturnHome);
+                        return failure == Orchestrator.TaskFailure.None ? TaskStatus.Running : NavigateFailed(failure);
                     }
-                    if (routeFailed) return Fail(Orchestrator.TaskFailure.Unreachable, TaskStatus.ToReturnHome);
+                    if (routeFailed) return NavigateFailed(Orchestrator.TaskFailure.Unreachable);
                     if (!IsConstructionOrderActive()) return TaskStatus.Interrupted;
-                    if (constructionOrder.Arrived) return TaskStatus.Done;
+                    if (constructionOrder.Arrived) { scoutSkips = 0; return TaskStatus.Done; }
                     // Scouting: a fly-by. Close enough to the waypoint is there (no stop): the scan starts and the drone flies on
                     if (activeFlightOrder == constructionOrder && taskIndex + 1 < currentJob.Tasks.Count
                         && currentJob.Tasks[taskIndex + 1].Type == Orchestrator.TaskType.Survey
                         && Vector3D.DistanceSquared(ReferencePoint(constructionOrder), constructionOrder.Target.ToVector3D()) < SCOUT_PASS_DISTANCE * SCOUT_PASS_DISTANCE)
-                        return TaskStatus.Done;
-                    return WatchProgress() ? TaskStatus.Running : Fail(Orchestrator.TaskFailure.Timeout, TaskStatus.ToReturnHome);
+                    { scoutSkips = 0; return TaskStatus.Done; }
+                    return WatchProgress() ? TaskStatus.Running : NavigateFailed(Orchestrator.TaskFailure.Timeout);
                 }
 
                 case Orchestrator.TaskType.Mine:
@@ -819,6 +821,46 @@ namespace Automata.Drone
         private const int DOCK_WAIT_MAX_TICKS = 10 * 60 * 60;
         #endregion
         private const double SCOUT_PASS_DISTANCE = 15;   // m: a scout waypoint this close counts as reached
+        private const int SCOUT_SKIPS_MAX = 3;           // area sweep: waypoints in a row it may skip (unreachable, stalled) before going home
+        private const int SCOUT_SPACE_TIMEOUT_MIN = 120; // s: scout jobs out of natural gravity (asteroids): the stall timeout is at least this...
+        private const int SCOUT_SPACE_TIMEOUT_FACTOR = 3;// ...and this x the drone's task timeout
+        private int scoutSkips;
+
+        // A NavigateTo that failed. An area sweep's waypoint (a Survey follows): skipped with its scan, up to
+        // SCOUT_SKIPS_MAX in a row (a ring point inside an asteroid's rock ended the whole sweep); otherwise home
+        private bool SweepWaypointActive()
+        {
+            return currentJob != null && currentJob.JobType == Orchestrator.JobType.DesignatorScoutArea
+                   && taskIndex + 1 < currentJob.Tasks.Count && currentJob.Tasks[taskIndex + 1].Type == Orchestrator.TaskType.Survey;
+        }
+
+        private TaskStatus NavigateFailed(Orchestrator.TaskFailure failure)
+        {
+            bool sweepPoint = SweepWaypointActive();
+            if (sweepPoint && ++scoutSkips <= SCOUT_SKIPS_MAX)
+            {
+                Log.Debug("Drone {0}: sweep waypoint {1}/{2} skipped ({3}), {4}/{5} in a row", Entity.EntityId, taskIndex / 2 + 1,
+                          currentJob.Tasks.Count / 2, failure, scoutSkips, SCOUT_SKIPS_MAX);
+                routeFailed = false;
+                ClearFlightOrder();
+                return Fail(failure, TaskStatus.SkipBlock);
+            }
+            return Fail(failure, TaskStatus.ToReturnHome);
+        }
+
+        // The stall timeout: the drone's task timeout; scout jobs out of natural gravity get longer (long legs between
+        // asteroid ring points, the turn to face each one)
+        private int StallTimeoutTicks
+        {
+            get
+            {
+                int t = TaskTimeoutTicks;
+                if (currentJob != null && !flightState.InGravity
+                    && (currentJob.JobType == Orchestrator.JobType.DesignatorScoutArea || currentJob.JobType == Orchestrator.JobType.DesignatorScoutPoint))
+                    t = Math.Max(t * SCOUT_SPACE_TIMEOUT_FACTOR, SCOUT_SPACE_TIMEOUT_MIN * 60);
+                return t;
+            }
+        }
         private long dockWaitTarget;
         private int dockWaitFrame;
 
@@ -978,7 +1020,7 @@ namespace Automata.Drone
                 taskProgressFrame = now;
                 return true;
             }
-            if (stalled <= TaskTimeoutTicks) return true;
+            if (stalled <= StallTimeoutTicks) return true;
             LogStall(o, d);
             NoteSpeedTimeout(Loc.T(StrTask));
             return false;
@@ -1388,7 +1430,17 @@ namespace Automata.Drone
         }
 
         // Plain NavigateTo: the controller to Position, in along ApproachFrom -> Position, level
+        // A NavigateTo that finds no route repositions and tries again (DroneControllerBlock.Recovery)
         private Orchestrator.TaskFailure DispatchNavigateTo(ref Orchestrator.Task nav)
+        {
+            ResetRecovery();
+            bool was = recoverPlanning;
+            recoverPlanning = true;
+            try { return DispatchNavigateToCore(ref nav); }
+            finally { recoverPlanning = was; }
+        }
+
+        private Orchestrator.TaskFailure DispatchNavigateToCore(ref Orchestrator.Task nav)
         {
             IMyTerminalBlock anchor;
             MatrixD am;
@@ -1580,6 +1632,7 @@ namespace Automata.Drone
             // Stand-alone, coming from outside the observation area (the dock, elsewhere): around the area and in
             // only where the work is, not across what has been built there. Every stretch: the pathfinder.
             int backOutLegs = routePoints.Count;
+            undockLegs = docked != null ? backOutLegs : 2;
             if (!PlanPath(start, hullAtApproach, routePoints, jobSource == JobSource.StandAlone))
                 return Orchestrator.TaskFailure.Unreachable;
             if (checkApproachLine)
@@ -2541,6 +2594,16 @@ namespace Automata.Drone
         {
             CaptureFlightState();
             double maxLoad1G = Math.Max(0, RatedThrust(Base6Directions.Direction.Up) / 9.81 - DroneOwnMass());
+            // A job in space asks nothing of the drone's lift in 1 g (a large ship that can't hover is a fine miner there):
+            // its load is what it can still move at SPACE_MIN_ACCEL
+            double optimalLoad = PayloadIn1G();
+            Capabilities bidCaps = BidCapabilities;
+            if (auction.IsInSpace)
+            {
+                maxLoad1G = optimalLoad = PayloadInSpace();
+                bidCaps = (bidCaps & ~(Capabilities.LiftNil | Capabilities.LiftLt1t | Capabilities.LiftLt10t | Capabilities.LiftLt100t | Capabilities.LiftLt1000t))
+                          | LiftCapability(maxLoad1G);
+            }
             var msg = new Message<Bid>
             {
                 Payload = new Bid
@@ -2551,7 +2614,7 @@ namespace Automata.Drone
                     AuctionId = auction.AuctionId,
                     BidId = IdGenerator.GenerateId(ref bidIdCounter, _entityId),
                     CreatedTime = DateTime.UtcNow,
-                    Capabilities = BidCapabilities,
+                    Capabilities = bidCaps,
                     DockFaces = DockFaces(),
                     SmallDockFaces = DockFaces(true),
                     DockedConnectorId = DockedConnectorIdOrZero(),
@@ -2567,7 +2630,7 @@ namespace Automata.Drone
                         EntityId = _entityId,
                     },
                     MaxLoadIn1G = (MyFixedPoint)maxLoad1G,
-                    OptimalLoadIn1G = (MyFixedPoint)PayloadIn1G(),   // within the player's max-load setting
+                    OptimalLoadIn1G = (MyFixedPoint)optimalLoad,   // within the player's max-load setting (gravity)
                     MaxCargoVolume = (MyFixedPoint)DroneCargoFreeVolume(),
                 },
                 MessageId = IdGenerator.GenerateId(ref jobMessageCounter, _entityId),
@@ -2640,7 +2703,7 @@ namespace Automata.Drone
         }
 
         #region Timing
-        private const int JOB_KEEPALIVE_TICKS = 60 * 60;       // working on an awarded construction / mining job: tell its announcer this often
+        private const int JOB_KEEPALIVE_TICKS = 20 * 60;       // working on an awarded job: tell its announcer this often (it warns after 60 s unheard)
         #endregion
         private int lastKeepaliveFrame = int.MinValue / 2;
 
@@ -2668,7 +2731,7 @@ namespace Automata.Drone
                 SenderOwnerId = block.OwnerId,
                 RequiresAck = false,
                 RecipientBlockType = VirtualNetwork.MessageQueue.IAIBlockType.ConstructionComputer | VirtualNetwork.MessageQueue.IAIBlockType.MiningSurveyor
-                                     | VirtualNetwork.MessageQueue.IAIBlockType.LogisticsComputer,
+                                     | VirtualNetwork.MessageQueue.IAIBlockType.LogisticsComputer | VirtualNetwork.MessageQueue.IAIBlockType.Orchestrator,
                 Channel = Channel.JOB_KEEPALIVE,
             });
         }

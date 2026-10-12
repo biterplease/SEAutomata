@@ -25,11 +25,11 @@ namespace Automata.Pointer
     /// named with COUNTER_DUMMIES.
     ///
     /// Lights: emissive materials of the designator model, driven with SetEmissiveParts. That is what a block's
-    /// emissive "state" is: SetEmissiveState(Working / Disabled / ...) looks the state's colour and emissivity up in
+    /// emissive "state" is: SetEmissiveState(Working / Disabled / ...) looks the state's color and emissivity up in
     /// Data/EmissiveColors.sbc and sets them on the block's "Emissive" material. Hand items have no state presets, so
-    /// the colour / emissivity are set directly. One material changes all its faces at once:
-    ///  - MODE_LIGHTS: one material per mode; the current mode's lamp is lit in the mode's colour;
-    ///  - CHARGE_LIGHTS: one material per lamp, lit in order over the charge: green, the last one in the mode's colour
+    /// the color / emissivity are set directly. One material changes all its faces at once:
+    ///  - MODE_LIGHTS: one material per mode; the current mode's lamp is lit in the mode's color;
+    ///  - CHARGE_LIGHTS: one material per lamp, lit in order over the charge: green, the last one in the mode's color
     ///    (CHARGE_LAST_INDUSTRIAL / CHARGE_LAST_HOSTILE) (batteries do their charge bars this way, one material per bar);
     ///    the same lamps blink the server's signals (DesignatorSignal);
     ///  - CHARGE_GLOW: optional, one material whose glow ramps up 0 -> 1 over the charge;
@@ -62,7 +62,7 @@ namespace Automata.Pointer
         /// <summary>The knob's model (its dummy's "file"): this + the designator's subtype.</summary>
         public const string KNOB_FILE_PREFIX = "Subpart_";
 
-        /// <summary>Mode lamps, one per mode (red, blue, green): the current mode's lamp is lit in its colour.</summary>
+        /// <summary>Mode lamps, one per mode (red, blue, green): the current mode's lamp is lit in its color.</summary>
         public static readonly string[] MODE_LIGHTS = { "EmissiveMode0", "EmissiveMode1", "EmissiveMode2" };   // Red, Blue, Green; tag mode: all three teal
         /// <summary>Charge lamps, lit one after the other over the charge.</summary>
         public static readonly string[] CHARGE_LIGHTS = { "Emissive0", "Emissive1", "Emissive2", "Emissive3", "Emissive4" };
@@ -72,7 +72,7 @@ namespace Automata.Pointer
         public static readonly Color[] CHARGE_LAST_INDUSTRIAL = { new Color(255, 210, 0), new Color(40, 120, 255), new Color(10, 120, 25), new Color(0, 200, 180) };
         /// <summary>Last charge lamp per mode (Red, Blue, Green, Tag), hostile: engage, escort, recall, tag.</summary>
         public static readonly Color[] CHARGE_LAST_HOSTILE = { new Color(255, 30, 20), new Color(40, 120, 255), new Color(10, 120, 25), new Color(0, 200, 180) };
-        /// <summary>Unlit lamps: no glow, white so the material keeps its own colour.</summary>
+        /// <summary>Unlit lamps: no glow, white so the material keeps its own color.</summary>
         public static readonly Color OFF_COLOR = Color.White;
         public const float OFF_EMISSIVITY = 0f;
         /// <summary>Optional: one material whose glow ramps up over the charge (CHARGE_COLOR).</summary>
@@ -383,7 +383,7 @@ namespace Automata.Pointer
         }
 
         #region Lights
-        // The mode lamps: the current mode's lit in its colour, the others off (tag mode: all three teal)
+        // The mode lamps: the current mode's lit in its color, the others off (tag mode: all three teal)
         private static void ShowMode(Visual v, PointerMode mode)
         {
             if (v.ModeShown == (int)mode) return;
@@ -409,7 +409,7 @@ namespace Automata.Pointer
             if (ok) v.TagShown = want;
         }
 
-        /// <summary>Charge progress 0-1 lights CHARGE_LIGHTS in order (green, the last one in the mode's colour);
+        /// <summary>Charge progress 0-1 lights CHARGE_LIGHTS in order (green, the last one in the mode's color);
         /// below 0 turns them all off.</summary>
         public static void SetCharge(IMyAutomaticRifleGun rifle, float progress, PointerMode mode)
         {
@@ -528,7 +528,7 @@ namespace Automata.Pointer
             BlinkLights(v, on);
         }
 
-        // All the charge lights in the blink colour, or off (the next charge redraws them: LitCharge reset)
+        // All the charge lights in the blink color, or off (the next charge redraws them: LitCharge reset)
         private static void BlinkLights(Visual v, bool on)
         {
             for (int i = 0; i < CHARGE_LIGHTS.Length; i++)

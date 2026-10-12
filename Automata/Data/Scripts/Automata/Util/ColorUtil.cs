@@ -12,7 +12,7 @@ namespace Automata.Util
         public const uint DEFAULT_WELD_IGNORE_COLOR = 0xFFFF00FF;
 
         /// <summary>
-        /// The block is painted exactly this colour: its colour mask turned back into the RGB the colour picker shows, byte
+        /// The block is painted exactly this color: its color mask turned back into the RGB the color picker shows, byte
         /// for byte (no tolerance). The mask is stored as an HSV offset in floats, so comparing those directly would
         /// need an epsilon; the 0-255 channels don't.
         /// </summary>

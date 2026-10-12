@@ -102,7 +102,7 @@ namespace Automata.Orchestrator
                  : p == Drone.BehaviourProfile.IsOreHauler ? Loc.T(StrOreHauler) : p == Drone.BehaviourProfile.IsMiningDrone ? Loc.T(StrMiningDrone) : p.ToString();
         }
 
-        /// <summary>A new order: its marker (pending colour) shows at once; its jobs follow (SubmitPlayerJob).</summary>
+        /// <summary>A new order: its marker (pending color) shows at once; its jobs follow (SubmitPlayerJob).</summary>
         public uint BeginPlayerOrder(long identity, PointerKind kind, Vector3D position, string marker)
         {
             uint orderId = IdGenerator.GenerateId(ref playerJobCounter, entityId);
@@ -305,6 +305,52 @@ namespace Automata.Orchestrator
             Log.Debug("Orchestrator {0}: order {1} accepted, broadcast {2}: {3}", entityId, order.OrderId, sent ? "sent via" : "not sent", via);
         }
 
+        private readonly List<uint> recallJobIds = new List<uint>();
+
+        /// <summary>
+        /// Recall aimed at a marker: the order whose GPS marker (a confirmed, non-combat order) is nearest to 'hit' within
+        /// 'radius'. Its jobs end: the ones not yet taken are cancelled (queue / auction), the drones working the others
+        /// are recalled (their "recalled" report ends the job and, with the last one, the marker). False: no marker there.
+        /// </summary>
+        public bool RecallOrderAt(Vector3D hit, double radius, string by, out int drones, out int cancelled)
+        {
+            drones = cancelled = 0;
+            PlayerOrder best = null;
+            double bestD = radius * radius;
+            foreach (var o in playerOrders.Values)
+            {
+                if (!o.Confirmed || o.Kind == PointerKind.Combat) continue;
+                double d = Vector3D.DistanceSquared(o.Position, hit);
+                if (d <= bestD) { bestD = d; best = o; }
+            }
+            if (best == null) return false;
+            recallJobIds.Clear();
+            foreach (var pj in playerJobs.Values) if (pj.OrderId == best.OrderId) recallJobIds.Add(pj.JobId);
+            var taken = new List<uint>();
+            for (int i = 0; i < recallJobIds.Count; i++)
+            {
+                uint jobId = recallJobIds[i];
+                var pj = playerJobs[jobId];
+                if (pj.Assigned) { taken.Add(jobId); continue; }
+                var key = new KeyValuePair<long, uint>(entityId, jobId);
+                for (int q = jobQueue.Count - 1; q >= 0; q--)
+                    if (jobQueue[q].Key.Equals(key)) jobQueue.RemoveAt(q);
+                foreach (var open in auctions.Values)
+                    if (open.JobKey.Equals(key)) closing.Add(open.Auction.AuctionId);
+                for (int c = 0; c < closing.Count; c++) { auctions.Remove(closing[c]); _auctionJobs.Remove(closing[c]); }
+                closing.Clear();
+                knownJobs.Remove(key);
+                droppedCount++;
+                cancelled++;
+                EndPlayerJob(jobId, by);
+            }
+            recallJobIds.Clear();
+            if (taken.Count > 0) drones = Drone.DroneControllerBlock.RecallJobs(entityId, taken, by);
+            Log.Debug("Orchestrator {0}: order {1} recalled at its marker ({2}): {3} drone(s) recalled, {4} job(s) cancelled", entityId, best.OrderId, by,
+                      drones, cancelled);
+            return true;
+        }
+
         /// <summary>The job is over (reported, cancelled, forgotten): the order's marker goes with its last job.</summary>
         private void EndPlayerJob(uint jobId, string reason)
         {
@@ -348,7 +394,7 @@ namespace Automata.Orchestrator
                 order.Gps.GPSColor = color;
                 MyAPIGateway.Session.GPS.ModifyGps(order.Identity, order.Gps);
             }
-            catch (Exception ex) { Log.Error("Orchestrator {0}: GPS colour for order {1}: {2}", entityId, order.OrderId, ex.Message); }
+            catch (Exception ex) { Log.Error("Orchestrator {0}: GPS color for order {1}: {2}", entityId, order.OrderId, ex.Message); }
         }
 
         private void HideGps(PlayerOrder order)

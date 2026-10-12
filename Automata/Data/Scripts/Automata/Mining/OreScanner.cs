@@ -250,9 +250,10 @@ namespace Automata.Mining
 
         /// <summary>
         /// Where a bore from 'inside' going 'outward' leaves the voxel map: the first of three solid-free samples 2 m
-        /// apart (a cave or the surface). False when still solid after 'maxDistance'.
+        /// apart (a cave or the surface), or 'minFree' metres of it when asked for more (a bore line leaving a pit, a
+        /// shaft or a cave: the open air of the pit isn't the surface). False when still solid after 'maxDistance'.
         /// </summary>
-        public static bool FindSurface(IMyVoxelBase v, Vector3D inside, Vector3D outward, double maxDistance, out Vector3D surface)
+        public static bool FindSurface(IMyVoxelBase v, Vector3D inside, Vector3D outward, double maxDistance, out Vector3D surface, double minFree = 6)
         {
             surface = inside;
             if (v == null || v.Storage == null) return false;
@@ -260,7 +261,7 @@ namespace Automata.Mining
             var size = storage.Size;
             Vector3D corner = v.PositionLeftBottomCorner;
             probe.Resize(Vector3I.One);
-            int air = 0;
+            int air = 0, need = Math.Max(3, (int)Math.Ceiling(minFree / 2));
             Vector3D firstAir = inside;
             for (double t = 0; t <= maxDistance; t += 2)
             {
@@ -274,7 +275,7 @@ namespace Automata.Mining
                 }
                 if (solid) { air = 0; continue; }
                 if (air == 0) firstAir = p;
-                if (++air >= 3) { surface = firstAir; return true; }
+                if (++air >= need) { surface = firstAir; return true; }
             }
             return false;
         }

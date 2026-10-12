@@ -103,7 +103,7 @@ namespace Automata.Util.Logging
         {
             if (IsLevelEnabled(level))
             {
-                var formattedMsg = args.Length > 0 ? string.Format(msg, args) : msg;
+                var formattedMsg = args.Length > 0 ? string.Format(msg, WithNickname(msg, args)) : msg;
 
                 if (level == LogLevel.Error)
                 {
@@ -114,6 +114,26 @@ namespace Automata.Util.Logging
                     _logger?.Write($"[IAI.{level.ToString().ToUpper()}] {formattedMsg}");
                 }
             }
+        }
+
+        // Lines that start with "<block kind> {0}" and a block entity id there: the nickname goes with the id ("Grndr1 (1234...)")
+        private static readonly string[] IdPrefixes = { "Drone {0}", "Orchestrator {0}", "LC {0}", "MS {0}", "CC {0}", "Scan {0}", "VNet: {0}", "DroneControllerBlock {0}" };
+
+        private static object[] WithNickname(string msg, object[] args)
+        {
+            if (args == null || args.Length == 0 || !(args[0] is long)) return args;
+            for (int i = 0; i < IdPrefixes.Length; i++)
+            {
+                if (!msg.StartsWith(IdPrefixes[i], StringComparison.Ordinal)) continue;
+                long id = (long)args[0];
+                string nick = null;
+                try { nick = Nicknames.Of(id); } catch (Exception) { }
+                if (string.IsNullOrEmpty(nick) || nick == "-" || nick[0] == '#') return args;
+                var copy = (object[])args.Clone();
+                copy[0] = nick + " (" + id + ")";
+                return copy;
+            }
+            return args;
         }
 
         /// <summary>Debug lines are written: check before building costly ones.</summary>

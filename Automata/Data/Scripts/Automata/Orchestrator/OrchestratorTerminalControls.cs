@@ -8,6 +8,7 @@ using VRage.Utils;
 
 using Automata.Config;
 using Automata.Util;
+using Automata.Util.Strings;
 
 namespace Automata.Orchestrator
 {
@@ -18,22 +19,7 @@ namespace Automata.Orchestrator
     public static class OrchestratorTerminalControls
     {
         #region UI strings
-        private static readonly MyStringId StrMetres = MyStringId.GetOrCompute("{0} m");
-        private static readonly MyStringId StrBlockMetres = MyStringId.GetOrCompute("{0} block ({1} m)");
         private static readonly MyStringId StrBlocksMetres = MyStringId.GetOrCompute("{0} blocks ({1} m)");
-        private static readonly MyStringId StrBroadcastSends = MyStringId.GetOrCompute("designator orders accepted (scout spot / area, combat engage / escort).");
-        private static readonly MyStringId StrAreaSizeX = MyStringId.GetOrCompute("Area size X (right)");
-        private static readonly MyStringId StrAreaSizeY = MyStringId.GetOrCompute("Area size Y (up)");
-        private static readonly MyStringId StrAreaSizeZ = MyStringId.GetOrCompute("Area size Z (forward)");
-        private static readonly MyStringId StrAreaSizeXTip = MyStringId.GetOrCompute("Parking area size along the block's X (right) axis, in blocks (50 m at most).");
-        private static readonly MyStringId StrAreaSizeYTip = MyStringId.GetOrCompute("Parking area size along the block's Y (up) axis, in blocks (50 m at most).");
-        private static readonly MyStringId StrAreaSizeZTip = MyStringId.GetOrCompute("Parking area size along the block's Z (forward) axis, in blocks (50 m at most).");
-        private static readonly MyStringId StrAreaOffsetX = MyStringId.GetOrCompute("Area offset X (right)");
-        private static readonly MyStringId StrAreaOffsetY = MyStringId.GetOrCompute("Area offset Y (up)");
-        private static readonly MyStringId StrAreaOffsetZ = MyStringId.GetOrCompute("Area offset Z (forward)");
-        private static readonly MyStringId StrAreaOffsetXTip = MyStringId.GetOrCompute("Parking area centre, from the block, along its X (right) axis, in blocks (250 m at most).");
-        private static readonly MyStringId StrAreaOffsetYTip = MyStringId.GetOrCompute("Parking area centre, from the block, along its Y (up) axis, in blocks (250 m at most).");
-        private static readonly MyStringId StrAreaOffsetZTip = MyStringId.GetOrCompute("Parking area centre, from the block, along its Z (forward) axis, in blocks (250 m at most).");
         private static readonly MyStringId StrDroneStagingArea = MyStringId.GetOrCompute("Use parking protocol");
         private static readonly MyStringId StrDroneStagingAreaTip = MyStringId.GetOrCompute("Drones managed by this orchestrator with no home connector park on their landing gears as chosen below.\nOff: they park on any friendly grid, then on voxel.");
         private static readonly MyStringId StrStagingDraw = MyStringId.GetOrCompute("Show parking area");
@@ -58,8 +44,7 @@ namespace Automata.Orchestrator
                               l => l.Terminal_LcdTag, (l, v) => l.Terminal_LcdTag = v, "[Orchestrator]");
             LcdControls.Add(IdPrefix, GetBlock, l => l.Terminal_LcdStyle, l => l.Terminal_LcdEdited(), false);
             BroadcastControllerControl.Add(AutomataSession.MOD_NAME + "_Orchestrator_UseBroadcastController", GetBlock,
-                                           l => l.Terminal_UseBroadcastController, (l, v) => l.Terminal_UseBroadcastController = v,
-                                           StrBroadcastSends);
+                                           l => l.Terminal_UseBroadcastController, (l, v) => l.Terminal_UseBroadcastController = v);
             CreateStagingControls();
         }
 
@@ -108,7 +93,7 @@ namespace Automata.Orchestrator
 
         static void Slider(string id, MyStringId title, MyStringId tooltip, float min, float max, Func<OrchestratorBlock, float> get, Action<OrchestratorBlock, float> set)
         {
-            BlockSlider(id, title, tooltip, min, max, get, set, (l, sb) => sb.AppendLoc(StrMetres, get(l).ToString("0")));
+            BlockSlider(id, title, tooltip, min, max, get, set, (l, sb) => sb.AppendLoc(MyStrings.Metres, get(l).ToString("0")));
         }
 
         // Blocks of the orchestrator's grid, with the metres
@@ -117,7 +102,7 @@ namespace Automata.Orchestrator
             BlockSlider(id, title, tooltip, min, max, get, set, (l, sb) =>
             {
                 float v = get(l);
-                sb.AppendLoc(Math.Abs(v) == 1 ? StrBlockMetres : StrBlocksMetres, v.ToString("0"), (v * l.Terminal_GridSize).ToString("0.#"));
+                sb.AppendLoc(Math.Abs(v) == 1 ? MyStrings.BlockMetres : StrBlocksMetres, v.ToString("0"), (v * l.Terminal_GridSize).ToString("0.#"));
             });
         }
 
@@ -160,19 +145,19 @@ namespace Automata.Orchestrator
                 c.Setter = (b, v) => { var l = GetBlock(b); if (l == null) return; l.Terminal_ParkingMode = v; RefreshTerminal(b); };
                 Add(c);
             }
-            MyStringId[] sizeTitles = { StrAreaSizeX, StrAreaSizeY, StrAreaSizeZ }, sizeTips = { StrAreaSizeXTip, StrAreaSizeYTip, StrAreaSizeZTip };
-            MyStringId[] offsetTitles = { StrAreaOffsetX, StrAreaOffsetY, StrAreaOffsetZ }, offsetTips = { StrAreaOffsetXTip, StrAreaOffsetYTip, StrAreaOffsetZTip };
+            MyStringId[] sizeTitles = { MyStrings.AreaWidth, MyStrings.AreaHeight, MyStrings.AreaDepth };
+            MyStringId[] offsetTitles = { MyStrings.OffsetRight, MyStrings.OffsetUp, MyStrings.OffsetForward };
             for (int a = 0; a < 3; a++)
             {
                 int axis = a;
-                BlockSlider("StagingSize" + a, sizeTitles[a], sizeTips[a],
+                BlockSlider("StagingSize" + a, sizeTitles[a], MyStrings.BLANK,
                             OrchestratorBlock.STAGING_SIZE_MIN, OrchestratorBlock.STAGING_SIZE_SLIDER_MAX,
                             l => l.Terminal_GetStagingSize(axis), (l, v) => l.Terminal_SetStagingSize(axis, v));
             }
             for (int a = 0; a < 3; a++)
             {
                 int axis = a;
-                BlockSlider("StagingOffset" + a, offsetTitles[a], offsetTips[a],
+                BlockSlider("StagingOffset" + a, offsetTitles[a], MyStrings.BLANK,
                             -OrchestratorBlock.STAGING_OFFSET_SLIDER_MAX, OrchestratorBlock.STAGING_OFFSET_SLIDER_MAX,
                             l => l.Terminal_GetStagingOffset(axis), (l, v) => l.Terminal_SetStagingOffset(axis, v));
             }

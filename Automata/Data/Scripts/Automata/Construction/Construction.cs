@@ -115,8 +115,6 @@ namespace Automata.Construction
             MyStringId.GetOrCompute("Unbuilt, repair, projected"),
             MyStringId.GetOrCompute("Unbuilt, projected, repair"),
         };
-        public static readonly MyStringId Title = MyStringId.GetOrCompute("Weld priority");
-        public static readonly MyStringId Tooltip = MyStringId.GetOrCompute("The three kinds of weld: repair (damaged blocks), projected (projections), unbuilt (placed, not welded up yet).\nConstruction computer: every kind with work is published at once, the published job slots shared 3 : 2 : 1 in this order (grinding gets the first kind's share), so Welder:Repair / Projected / Unbuilt drones always find their kind of job.\nStand-alone drone: the order it takes them in.\nWithin each kind, the build order.");
 
         /// <summary>The terminal dropdown's items (Key = WorkPriority).</summary>
         public static void ComboContent(List<MyTerminalControlComboBoxItem> list)

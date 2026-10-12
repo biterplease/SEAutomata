@@ -158,7 +158,7 @@ namespace Automata.Util
     }
 
     /// <summary>
-    /// LCD controls of the Automata programmable-block computers, like the drone's: text / background colour, font size,
+    /// LCD controls of the Automata programmable-block computers, like the drone's: text / background color, font size,
     /// show header; and the "Header PgUp" / "Header PgDn" toolbar actions (blocks with a paged header).
     /// </summary>
     public static class LcdControls

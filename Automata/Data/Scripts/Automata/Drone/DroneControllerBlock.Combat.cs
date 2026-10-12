@@ -149,7 +149,7 @@ namespace Automata.Drone
             get { return settings != null && settings.OperationMode == OperationMode.ManagedByOrchestrator && settings.BehaviourProfile == BehaviourProfile.IsCombatDrone; }
         }
 
-        /// <summary>Behaviour profile "Combat drone": takes the hostile designator's engage / escort jobs (needs the three AI blocks).</summary>
+        /// <summary>Behavior profile "Combat drone": takes the hostile designator's engage / escort jobs (needs the three AI blocks).</summary>
         private bool IsCombatProfile { get { return settings != null && settings.BehaviourProfile == BehaviourProfile.IsCombatDrone; } }
 
         /// <summary>
@@ -205,7 +205,7 @@ namespace Automata.Drone
             return s;
         }
 
-        #region Behaviour switch
+        #region Behavior switch
         private static bool AiBlockUsable(IMyTerminalBlock b)
         {
             return b != null && !b.Closed && b.IsFunctional;
