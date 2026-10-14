@@ -19,7 +19,7 @@ namespace Automata.Util
     {
         [ProtoMember(1, IsRequired = true)] public uint Foreground = 0xFF00FF00;   // RGB(0,255,0)
         [ProtoMember(2, IsRequired = true)] public uint Background = 0xFF202020;   // RGB(32,32,32)
-        [ProtoMember(3, IsRequired = true)] public float FontSize = 0.4f;
+        [ProtoMember(3, IsRequired = true)] public float FontSize = 0.35f;
         [ProtoMember(4, IsRequired = true)] public bool ShowHeader = true;
         /// <summary>Header page shown ("Header PgUp" / "Header PgDn" actions), modulo the pages there are.</summary>
         [ProtoMember(5)] public int HeaderPage;

@@ -96,3 +96,8 @@ The `OperationMode` (byte) defines how the Logistics Computer interacts with the
 
 ## Mining bids (2026-10-11)
 MineOre bids carry `RefineryTier` (best working refinery of the bid network: 3 prototech, 2 refinery / industrial, 1 basic, by subtype name) and `GasGenerators`. Ice with no O2/H2 generator at the computer: the network with the best refinery is bid (the drone also brings stone / other ores; the orchestrator may send those here). Mining/CLAUDE.md, mining workflow.
+
+## Held vs pullable stock (2026-10-14)
+- A network accounts for every inventory of its cargo containers, connectors, collectors, assemblers, refineries, reactors, O2/H2 generators and gas tanks (`GetHeldInventory`), but only what a drone may take counts as stock to supply (`GetCurrentInventory`, `ConveyorNetwork.IsPullable`): cargo / connectors / collectors (inventory 0), assembler (survival kits too) and refinery **output** (inventory 1). Never: ice out of O2/H2 generators, a refinery's or an assembler's input, reactor fuel, tank bottles.
+- Supply bids use pullable stock; min / max quotas, the info panel and the LCD header count everything held. A minimum quota is kept on what is held: spare = min(pullable, held - minimum) - promised.
+- The drone's load (`TransferToDrone`) follows the same rules (collectors included).

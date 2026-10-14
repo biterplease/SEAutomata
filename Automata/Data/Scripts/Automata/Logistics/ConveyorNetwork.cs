@@ -64,6 +64,7 @@ namespace Automata.Logistics
         public IMyBeacon RelativeBeacon;
         private readonly DiscreteInventory _inventoryCache = new DiscreteInventory();
         private readonly DiscreteInventory currentInventory = new DiscreteInventory();
+        private readonly DiscreteInventory heldInventory = new DiscreteInventory();   // all of it, pullable or not
         private readonly Dictionary<uint, DiscreteInventory> pendingInventoryByBidRoundBidId = new Dictionary<uint, DiscreteInventory>();
         private readonly Dictionary<uint, DiscreteInventory> reservedInventoryByBidRoundWinningBidId = new Dictionary<uint, DiscreteInventory>();
         private readonly Dictionary<uint, MyFixedPoint> pendingVolumeByBidRoundBidId = new Dictionary<uint, MyFixedPoint>();
@@ -149,37 +150,32 @@ namespace Automata.Logistics
                     cargoCurrentVolume += cargoInv.CurrentVolume;
                 }
             }
-            foreach (IMyShipConnector b in connectors)
-            {
-                if (b != null) containers.Add(b);
-            }
-            foreach (IMyAssembler b in assemblers)
-            {
-                if (b != null) containers.Add(b);
-            }
-            foreach (IMyCollector b in collectors)
-            {
-                if (b != null) containers.Add(b);
-            }
-            foreach (IMyRefinery b in refineries)
-            {
-                if (b != null) containers.Add(b);
-            }
-            foreach (IMyReactor b in reactors)
-            {
-                if (b != null) containers.Add(b);
-            }
+            // Every block of the network that holds items is accounted for (held); only the inventories a drone may
+            // take from count as stock to supply (IsPullable): never ice out of O2/H2 generators, a refinery's or an
+            // assembler's input, a reactor's fuel, a tank's bottles
+            foreach (IMyShipConnector b in connectors) if (b != null) containers.Add(b);
+            foreach (IMyCollector b in collectors) if (b != null) containers.Add(b);
+            foreach (IMyAssembler b in assemblers) if (b != null) containers.Add(b);
+            foreach (IMyRefinery b in refineries) if (b != null) containers.Add(b);
+            foreach (IMyReactor b in reactors) if (b != null) containers.Add(b);
+            foreach (IMyGasGenerator b in gasGenerators) if (b != null) containers.Add(b);
+            foreach (IMyGasTank b in gasTanks) if (b != null) containers.Add(b);
 
             lock (_inventoryLock)
             {
                 _maxVolume = cargoMaxVolume;
                 _currentVolume = cargoCurrentVolume;
                 _inventoryCache.Clear();
+                heldInventory.Clear();
                 foreach (IMyCubeBlock container in containers)
                 {
-                    if (container != null)
+                    if (container == null || container.Closed || !container.HasInventory) continue;
+                    for (int i = 0; i < container.InventoryCount; i++)
                     {
-                        _inventoryCache.AddItems(container);
+                        IMyInventory inv = container.GetInventory(i);
+                        if (inv == null) continue;
+                        heldInventory.AddItems(inv);
+                        if (IsPullable(container, i)) _inventoryCache.AddItems(inv);
                     }
                 }
                 // Substract returns a new Inventory and does not mutate this; apply chain then copy into currentInventory.
@@ -202,6 +198,27 @@ namespace Automata.Logistics
         public DiscreteInventory GetCurrentInventory()
         {
             return currentInventory;
+        }
+
+        /// <summary>
+        /// Everything the network's blocks hold, whether a drone may take it or not (generators' ice, refinery /
+        /// assembler inputs, reactor fuel, tank bottles): quotas and displays. Supply bids use <see cref="GetCurrentInventory"/>.
+        /// </summary>
+        public DiscreteInventory GetHeldInventory()
+        {
+            return heldInventory;
+        }
+
+        /// <summary>
+        /// May items be taken out of this inventory of this block (supply, drone loads)? Cargo, connectors, collectors:
+        /// yes. Assemblers (survival kits too) and refineries: the output (1) only - never their input. Reactors, O2/H2
+        /// generators, gas tanks, anything else: no (fuel, ice, bottles stay where they are).
+        /// </summary>
+        public static bool IsPullable(IMyCubeBlock block, int inventoryIndex)
+        {
+            if (block is IMyCargoContainer || block is IMyShipConnector || block is IMyCollector) return inventoryIndex == 0;
+            if (block is IMyAssembler || block is IMyRefinery) return inventoryIndex == 1;
+            return false;
         }
 
         /// <summary>

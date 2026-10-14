@@ -8,6 +8,30 @@ wired** (`AllowAStar` only logs a warning); the legacy planners (`AStarPathfinde
 `PathfindingContext`, `IPathfinder`, `Util`, `AdjancencyList`) still compile but nothing calls them. See
 `TODO/04-pathfinding-architecture.md` for what to keep from them.
 
+## 2026-10-13: fall-forward chain, memory, Lazy Theta*, lanes, localized sensing (TODO/20)
+
+- `PlanRouteTimed` is a chain, simplest first, each stage only when the one before fails: 1. `StraightStage` (the
+  straight line, terrain climbs, greedy detours; only `STAGE1_DETOURS` = 3 when Lazy Theta* is on), 2. `RouteMemory`
+  (`Pathfinding/RouteMemory.cs`: points / links drones have flown, hull-centre positions in the order's anchor frame,
+  A* over links wide enough for the hull, each link of the answer checked; saved to world storage
+  `Automata_RouteMemory.bin`; ini UsePathMemory, PathMemoryMaxNodes, PathMemoryMaxAgeHours), 3. Lazy Theta*
+  (`PathfindingManager.Theta.cs`: free leaves of a bricked grid - bricks of 64 / 16 / 4 cells, a free brick answers for
+  all its cells; blocks via `HullSpaceFree`, asteroids via `IMyStorage.Intersect` (whitelisted); weighted heuristic x2;
+  answer checked with `SegmentBlocked`; far goals searched for 2 x ThetaSearchRadius, the rest by stage 1; ini
+  AllowLazyTheta, ThetaSearchRadius, ThetaMaxExpansions, ThetaMaxMs). Stage 4 is the drone's repositioning. The
+  per-plan log line names the stage and each stage's ms; later stages get their own check budget (`budgetBase`).
+- Recording: `DroneControllerBlock.RecordFlight10` (every 10 ticks on a watched route) feeds the memory and the lanes.
+- Lanes: `Pathfinding/FlightLanes.cs` (+ `Orchestrator/OrchestratorBlock.Lanes.cs` for the terminal list / drawing).
+  Made from a trip between two places (static grid with a Logistics Computer, asteroid), offset each way, tubes
+  checked at idle where the trip's sensors saw, lifted at crossings; `FindLane` makes the lane points the route's
+  preferred waypoints in `PlanPathFrom`; `Report` gives the safe following speed (`laneSpeedCap`); incidents suspend.
+  Saved to `Automata_Lanes.bin`; ini FlightLaneExpirationMinutes.
+- Localized sensing: `SeenSpan(q, a, dir, len)` (first seen stretch of a line: spheres around working sensors, 90°
+  cones from working cameras at their own positions; not required: SimulatedSensorRange around the hull box /
+  one simulated forward camera on the hull's front) and `Seen(q, p)` replace the controller-centred `ObservedRange`
+  (kept as a wrapper from the controller). `SegmentBlocked` checks the first seen stretch.
+- Defaults: SimulatedSensorRange 100, CameraRange 1500.
+
 ## Conversation drone <-> pathfinder
 
 1. Dispatch (`FlyRoute` for jobs, `StartDocking` for docking / going home) -> `DroneControllerBlock.PlanPath`:
@@ -112,3 +136,5 @@ wired** (`AllowAStar` only logs a warning); the legacy planners (`AStarPathfinde
 ## Docking legs, way out of a bay (2026-10-11)
 `CheckLegStart` treats docking route legs as loose ends (nothing past the end: the turn point sits at the station). `PlanPath` escape candidates start with the dock departure's direction (Drone/CLAUDE.md, fixes 2).
 
+## Real-shape refinement (2026-10-14)
+`PathQuery.RealShapeGrid`: in `SegmentBlocked`, a block of that grid in the way by its cell box is checked with rays against the grid's physics across the swept box's cross-section (`RealShapeClear`); clear unless a ray hits inside the block's cells. Budget `RealShapeRayBudget` (caller sets / resets), stats `RealShapeClears` / `RealShapeRays`. Used by weld work sites only.

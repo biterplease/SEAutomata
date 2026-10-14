@@ -22,9 +22,6 @@ namespace Automata.Orchestrator
         /// small-grid range (100 / 500 blocks); a large grid is clamped to the metres.</summary>
         public const float STAGING_SIZE_MIN = 1, STAGING_SIZE_MAX_M = 50, STAGING_OFFSET_MAX_M = 250;
         public const float STAGING_SIZE_SLIDER_MAX = 100, STAGING_OFFSET_SLIDER_MAX = 500;
-        #region Timing
-        private const int STAGING_DRAW_TICKS = 60 * 60;   // the drawing switches itself off after a minute
-        #endregion
         private static readonly MyStringId StagingMaterial = MyStringId.GetOrCompute("Square");
         private bool stagingDraw;
         private int stagingDrawStart;
@@ -162,7 +159,7 @@ namespace Automata.Orchestrator
             SettingsEdited();
         }
 
-        /// <summary>Local drawing of the area (this player only, a minute at most).</summary>
+        /// <summary>Local drawing of the area (this player only, off after the server's DebugDrawTimeoutSeconds).</summary>
         public bool Terminal_StagingDraw
         {
             get { return stagingDraw; }
@@ -170,7 +167,7 @@ namespace Automata.Orchestrator
             {
                 stagingDraw = value && settings.StagingArea && settings.ParkingMode == ParkingProtocolMode.ParkingArea;
                 stagingDrawStart = MyAPIGateway.Session.GameplayFrameCounter;
-                if (AutomataSession.Instance != null) AutomataSession.Instance.RequestDraw(this, stagingDraw);
+                if (AutomataSession.Instance != null) AutomataSession.Instance.RequestDraw(this, stagingDraw || laneDraw);
             }
         }
         #endregion
@@ -178,8 +175,15 @@ namespace Automata.Orchestrator
         #region Draw (clients)
         public bool DrawDebug()
         {
+            bool area = DrawStaging();
+            bool lane = DrawLane();
+            return area || lane;
+        }
+
+        private bool DrawStaging()
+        {
             if (!stagingDraw || Entity == null || Entity.MarkedForClose) { stagingDraw = false; return false; }
-            if (MyAPIGateway.Session.GameplayFrameCounter - stagingDrawStart > STAGING_DRAW_TICKS) { stagingDraw = false; return false; }
+            if (MyAPIGateway.Session.GameplayFrameCounter - stagingDrawStart > DrawTimeoutTicks) { stagingDraw = false; return false; }   // the server's DebugDrawTimeoutSeconds
             MatrixD box;
             Vector3D half;
             if (!TryGetStagingArea(out box, out half)) { stagingDraw = false; return false; }
@@ -198,6 +202,7 @@ namespace Automata.Orchestrator
         public void StopDebugDraw()
         {
             stagingDraw = false;
+            StopLaneDraw();
         }
         #endregion
     }

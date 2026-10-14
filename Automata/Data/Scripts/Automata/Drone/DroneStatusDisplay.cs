@@ -28,8 +28,12 @@ namespace Automata.Drone
     public class DroneStatusDisplay
     {
         #region UI strings
-        private static readonly MyStringId StrHeaderLevels = MyStringId.GetOrCompute("POW:{0}%  H2:{1}%");
+        private static readonly MyStringId StrHeaderLevels = MyStringId.GetOrCompute("Pow:{0}%  H2:{1}%");
+        private static readonly MyStringId StrHeaderDrone = MyStringId.GetOrCompute("Drone {0}");
+        private static readonly MyStringId StrHeaderThrustTable = MyStringId.GetOrCompute("Thrust table:");
         #endregion
+
+        private const int HEADER_LEFT = 26;              // columns of the header's left part (name, levels, state)
 
         public const string FONT = "Monospace";          // fixed width, so the header columns line up
         private const int CAPACITY = 40;                 // lines kept (and sent); panels show as many as fit
@@ -44,6 +48,8 @@ namespace Automata.Drone
         private bool dirty = true;
         private string headerState = "";
         private int headerPower = -1, headerH2 = -1;
+        private string headerName = "";
+        private string thrustFB = "", thrustLR = "", thrustUD = "";   // "234.5kN, 234.5kN": usable thrust per face
         private string alertText = "";
         private DisplayAlertLevel alertLevel;
 
@@ -77,6 +83,35 @@ namespace Automata.Drone
             headerPower = powerPercent;
             headerH2 = h2Percent;
             dirty = true;
+        }
+
+        /// <summary>The drone's name (nickname) for the header's first line.</summary>
+        public void SetName(string name)
+        {
+            name = name ?? "";
+            if (name == headerName) return;
+            headerName = name;
+            dirty = true;
+        }
+
+        /// <summary>The thrust table: what each face may use under the Max thrust setting, per axis ("fw, bk" and so on).</summary>
+        public void SetThrustTable(string forwardBack, string leftRight, string upDown)
+        {
+            if (forwardBack == thrustFB && leftRight == thrustLR && upDown == thrustUD) return;
+            thrustFB = forwardBack ?? "";
+            thrustLR = leftRight ?? "";
+            thrustUD = upDown ?? "";
+            dirty = true;
+        }
+
+        /// <summary>"234.5 N", " 12.0kN", "  1.5MN": hundreds padded, one decimal, the unit in two columns.</summary>
+        public static string Force(double newtons)
+        {
+            string[] units = { " N", "kN", "MN", "GN" };
+            double v = Math.Max(0, newtons);
+            int u = 0;
+            while (v >= 999.95 && u < units.Length - 1) { v /= 1000; u++; }
+            return v.ToString("F1").PadLeft(5) + units[u];
         }
 
         /// <summary>The header's reserved line: the most important current problem, or nothing.</summary>
@@ -126,16 +161,29 @@ namespace Automata.Drone
             };
             if (settings.LcdShowHeader)
             {
-                sb.Clear();
-                sb.Append(headerState.Length > 10 ? headerState.Substring(0, 10) : headerState.PadRight(10));
-                sb.Append(' ').AppendLoc(StrHeaderLevels, Pct(headerPower), Pct(headerH2));
-                packet.Header = new List<string>(1) { sb.ToString() };
+                // Drone <name>             Thrust table:
+                // Pow:100%  H2:  -%          FW/BK: 234.5kN, 234.5kN
+                // <state>                    L /R : 234.5kN, 234.5kN
+                //                            UP/DN: 234.5kN, 234.5kN
+                packet.Header = new List<string>(4)
+                {
+                    Left(Loc.F(StrHeaderDrone, headerName)) + Loc.T(StrHeaderThrustTable),
+                    Left(Loc.F(StrHeaderLevels, Pct(headerPower), Pct(headerH2))) + "FW/BK: " + thrustFB,
+                    Left(headerState) + "L /R : " + thrustLR,
+                    Left("") + "UP/DN: " + thrustUD,
+                };
                 packet.AlertRow = true;
                 packet.AlertLevel = (byte)alertLevel;
                 packet.Alert = alertText;
             }
             for (int k = 0; k < count; k++) packet.Lines.Add(lines[(head + k) % CAPACITY]);
             feeder.Send(packet);
+        }
+
+        private static string Left(string s)
+        {
+            s = s ?? "";
+            return s.Length >= HEADER_LEFT ? s.Substring(0, HEADER_LEFT - 1) + " " : s.PadRight(HEADER_LEFT);
         }
 
         private static string Pct(int v)

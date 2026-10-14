@@ -1389,6 +1389,7 @@ namespace Automata.Drone
             }
             h2Percent = capacity > 0 ? (int)Math.Round(gas / capacity * 100) : -1;
             display.SetHeader(StateLabel(currentState), batteryPercent, h2Percent);
+            RefreshThrustTable();
             if (!settings.IsEnabled) return;   // AI off: levels for the header only
 
             bool docked = currentState == State.Docked;
@@ -1421,7 +1422,7 @@ namespace Automata.Drone
 
             // Level-triggered: keep trying to get home (refused, replaced by another order...) with a back-off
             // (docked somewhere else, e.g. at a job's connector, still counts as "not home")
-            if ((needsBatteryRecharge || needsHydrogenRefuel) && !CombatHoldsControl && preflightStage == 0 && now - lastAutoHomeFrame >= AUTO_HOME_RETRY_TICKS)
+            if ((needsBatteryRecharge || needsHydrogenRefuel) && !Grounded && !CombatHoldsControl && preflightStage == 0 && now - lastAutoHomeFrame >= AUTO_HOME_RETRY_TICKS)
             {
                 if (HasHomeConnector && !IsDockedAtHome() && !IsGoingHome)
                 {

@@ -72,7 +72,7 @@ namespace Automata.Util
         {
             ComponentData data;
             if (AutomataSession.componentLookup.TryGetValue(key, out data) && !string.IsNullOrEmpty(data.DisplayName)) return data.DisplayName;
-            string s = key.String ?? "";
+            string s = Inventory.ItemKeys.Name(key);   // key.String throws for a hash not registered this session
             int slash = s.IndexOf('/');
             return slash >= 0 ? s.Substring(slash + 1) : s;
         }

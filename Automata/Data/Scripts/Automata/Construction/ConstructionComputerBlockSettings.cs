@@ -12,9 +12,9 @@ namespace Automata.Construction
         /// <summary>What it looks for: unfinished / damaged / projected blocks to weld, blocks painted the grind color.</summary>
         [ProtoMember(2, IsRequired = true)] public WorkModes WorkModes = WorkModes.WeldUnfinishedBlocks | WorkModes.RepairDamagedBlocks | WorkModes.WeldProjectedBlocks;
         /// <summary>Seconds between scans.</summary>
-        [ProtoMember(6)] public int ScanIntervalSeconds = 30;
+        [ProtoMember(6)] public int ScanIntervalSeconds = 10;
         /// <summary>Blocks per announced job (an orchestrator splits a job into trips by drone capacity).</summary>
-        [ProtoMember(7)] public int BlocksPerJob = 10;
+        [ProtoMember(7)] public int BlocksPerJob = 50;
         /// <summary>Blocks painted exactly this color are ground (Grind mode). Packed (Color.PackedValue).</summary>
         [ProtoMember(8)] public uint GrindColor = 0xFF0000FF;   // RGB(255,0,0)
         /// <summary>Blocks painted exactly this color are never welded, repaired or built (projections too).</summary>

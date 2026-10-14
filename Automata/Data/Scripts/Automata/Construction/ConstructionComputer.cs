@@ -429,7 +429,9 @@ namespace Automata.Construction
                 {
                     continue;
                 }
-                string name = info.ComponentName;
+                // The item key: a component's subtype ("SteelPlate"), as for welding. ComponentName is the display name
+                // ("Steel Plate", localized): it matched no item, and after a reload its hash had no text (KeyNotFound)
+                string name = info.DefinitionId.SubtypeName;
                 if (string.IsNullOrEmpty(name))
                 {
                     continue;

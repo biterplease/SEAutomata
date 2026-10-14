@@ -278,6 +278,9 @@ namespace Automata.Drone
         /// <summary>m/s along the order, all of it (0 = none; FinalSpeed only slows its last metres). Mining bores, dock
         /// corridors (saved: a drone in a hangar must not leave it at full speed after a reload).</summary>
         [ProtoMember(26)] public double SpeedCap;
+        /// <summary>Straight into Approach on the approach line, from the start or after MatchSpeed: no transit / align
+        /// hold at ApproachFrom (the line control corrects position and attitude on the way in). Tool work orders.</summary>
+        [ProtoMember(27)] public bool DirectApproach;
     }
     [ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class Drone

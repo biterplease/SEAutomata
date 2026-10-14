@@ -40,6 +40,8 @@ namespace Automata.Mining
         private static readonly MyStringId StrOrderClearTip = MyStringId.GetOrCompute("Empties the order list.");
         private static readonly MyStringId StrRetryJobs = MyStringId.GetOrCompute("Retry jobs");
         private static readonly MyStringId StrRetryJobsTip = MyStringId.GetOrCompute("Mining jobs no drone has taken are announced again now, holds after failed auctions lifted.");
+        private static readonly MyStringId StrDeleteDeposits = MyStringId.GetOrCompute("Delete known deposits");
+        private static readonly MyStringId StrDeleteDepositsTip = MyStringId.GetOrCompute("Forgets every known deposit (and those found depleted). Jobs no drone has taken for them are dropped. New scans and drone surveys find deposits again.");
         private static readonly MyStringId StrKnownOresOreDeposits = MyStringId.GetOrCompute("Known ores (ore:deposits)");
         private static readonly MyStringId StrOrdersOreKg = MyStringId.GetOrCompute("Orders (ore:kg)");
         private static readonly MyStringId StrEnableThisMiningSurveyorOre = MyStringId.GetOrCompute("Enable this Mining Surveyor: ore scans, survey data from drones, mining jobs.");
@@ -144,6 +146,8 @@ namespace Automata.Mining
                 c.Setter = (b, v) => { var l = GetBlock(b); if (l != null) l.Terminal_IsEnabled = v; };
                 Add(c);
             }
+            Button("RetryJobs", StrRetryJobs, StrRetryJobsTip, l => l.Terminal_RetryJobs());
+            Button("DeleteDeposits", StrDeleteDeposits, StrDeleteDepositsTip, l => l.Terminal_DeleteDeposits());
             Checkbox("CheckboxShowGps", StrCheckboxShowGps,
                      StrCheckboxShowGpsTip,
                      l => l.Terminal_ShowGps, (l, v) => l.Terminal_ShowGps = v);
@@ -219,7 +223,6 @@ namespace Automata.Mining
             Button("OrderEdit2", StrOrderEdit, StrOrderEdit2Tip, l => l.Terminal_EditOrder());
             Button("OrderRemove", StrOrderRemove, StrOrderRemoveTip, l => l.Terminal_RemoveOrder());
             Button("OrderClear", StrOrderClear, StrOrderClearTip, l => { l.Terminal_ClearOrders(); return true; });
-            Button("RetryJobs", StrRetryJobs, StrRetryJobsTip, l => l.Terminal_RetryJobs());
             NicknameControl.Add<IMyProgrammableBlock, MiningSurveyorBlock>(IdPrefix + "Nick", GetBlock, l => l.Nickname, (l, v) => l.Terminal_Nickname = v);
             LcdTagControl.Add(IdPrefix + "LcdTag", GetBlock, l => l.Terminal_LcdTag, (l, v) => l.Terminal_LcdTag = v, "[MiningSurveyor]");
             LcdControls.Add(IdPrefix, GetBlock, l => l.Terminal_LcdStyle, l => l.Terminal_LcdEdited(), true);

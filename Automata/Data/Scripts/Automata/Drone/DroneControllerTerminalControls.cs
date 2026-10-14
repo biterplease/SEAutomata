@@ -632,6 +632,10 @@ namespace Automata.Drone
             AddCheckbox("Checkbox_EconomyFlight", MyStrings.EconomyFlight,
                 MyStrings.EconomyFlightTip,
                 l => l.Terminal_EconomyFlight, (l, v) => l.Terminal_EconomyFlight = v, multipleBlocks: true);
+            AddSlider("Slider_MaxThrust", MyStrings.MaxThrust,
+                MyStrings.MaxThrustTip,
+                DroneControllerBlock.MAX_THRUST_MIN, DroneControllerBlock.MAX_THRUST_MAX,
+                l => l.Terminal_MaxThrustPercent, (l, v) => l.Terminal_MaxThrustPercent = v, (l, sb) => AppendPercent(sb, l.Terminal_MaxThrustPercent));
             AddSlider("Slider_MaxSpeed", MyStrings.MaxSpeed,
                 MyStrings.MaxSpeed,
                 DroneControllerBlock.MAX_SPEED_MIN, DroneControllerBlock.MAX_SPEED_MAX,

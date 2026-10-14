@@ -179,6 +179,7 @@ namespace Automata.Drone
         {
             if (!IsServer || settings == null) return;
             if (savedSave != null) return;   // its saved job comes first
+            if (Grounded) return;            // no power to fly: nothing to start
             if (jobSource == JobSource.Orchestrator || jobSource == JobSource.Housekeeping) return;   // awarded jobs: UpdateOrchestratorJobs; its own errand
             bool home = HasHomeConnector;
             bool wanted = settings.IsEnabled && IsStandAlone && settings.ConstructionWorkModes != Construction.WorkModes.None;
@@ -589,6 +590,7 @@ namespace Automata.Drone
                 int remaining = kvBuffer[k].Value;
                 remaining -= PullFrom(homeNetwork.cargoContainers, key, remaining, 0);
                 if (remaining > 0) remaining -= PullFrom(homeNetwork.connectors, key, remaining, 0);
+                if (remaining > 0) remaining -= PullFrom(homeNetwork.collectors, key, remaining, 0);   // (ConveyorNetwork.IsPullable: the same rules)
                 if (remaining > 0) remaining -= PullFrom(homeNetwork.assemblers, key, remaining, 1);   // assembler output
                 if (remaining > 0) remaining -= PullFrom(homeNetwork.refineries, key, remaining, 1);   // refinery output (ingots)
                 total += kvBuffer[k].Value - remaining;

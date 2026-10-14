@@ -48,7 +48,7 @@ namespace Automata.Construction
         private static readonly MyStringId StrBlocksFoundNoJob = MyStringId.GetOrCompute("Blocks found, no job yet");
         private static readonly MyStringId StrNothingToDo = MyStringId.GetOrCompute("Nothing to do in the area");
         private static readonly MyStringId StrJobsSummary = MyStringId.GetOrCompute("{0} job(s) published, {1} on hold, {2} assigned");
-        private static readonly MyStringId StrJobDone = MyStringId.GetOrCompute("Done: {1}: {0}");
+        private static readonly MyStringId StrJobDone = MyStringId.GetOrCompute("Done: {1}:\n{0}");
         private static readonly MyStringId StrHeaderTitle = MyStringId.GetOrCompute("CC {0}");
         private static readonly MyStringId StrHeaderJobs = MyStringId.GetOrCompute("Active jobs: {0}, Total tasks: {1}");
         private static readonly MyStringId StrHeaderPriority = MyStringId.GetOrCompute("Weld priority: {0}");
@@ -58,8 +58,8 @@ namespace Automata.Construction
         private static readonly MyStringId StrCatRepair = MyStringId.GetOrCompute("Repair:");
         private static readonly MyStringId StrCatProjected = MyStringId.GetOrCompute("Projected:");
         private static readonly MyStringId StrCatUnbuilt = MyStringId.GetOrCompute("Unbuilt:");
-        private static readonly MyStringId StrLogJob = MyStringId.GetOrCompute("{0}: {1}");
-        private static readonly MyStringId StrLogJobDrone = MyStringId.GetOrCompute("{0}: {1} Drone: {2}");
+        private static readonly MyStringId StrLogJob = MyStringId.GetOrCompute("{0}:\n{1}");
+        private static readonly MyStringId StrLogJobDrone = MyStringId.GetOrCompute("{0} Drone: {2}\n{1}");
         private static readonly MyStringId StrNotOwnerFaction = MyStringId.GetOrCompute("not owner/faction");
         private static readonly MyStringId StrWorkingDrone = MyStringId.GetOrCompute("a working drone");
         private static readonly MyStringId StrJobCreated = MyStringId.GetOrCompute("Job {0}: {1} {2} block(s)");
@@ -112,6 +112,9 @@ namespace Automata.Construction
             public string Summary;          // its blocks by name, for the log
             public bool Logged;             // its first announcement is in the log
             public readonly HashSet<KeyValuePair<long, Vector3I>> Blocks = new HashSet<KeyValuePair<long, Vector3I>>();
+            // Blocks of a predicted projection line (not buildable when the job was made): no scan finds them until the
+            // block before is built, so they stay in the job while their cell is still empty
+            public readonly HashSet<KeyValuePair<long, Vector3I>> Predicted = new HashSet<KeyValuePair<long, Vector3I>>();
             public Message<JobAnnouncement> Message;
             public int Opened, LastAnnounced = int.MinValue / 2;
             public int Assigned;      // frame of the award, 0 = not yet
@@ -153,6 +156,51 @@ namespace Automata.Construction
             return false;
         }
         private readonly HashSet<KeyValuePair<long, Vector3I>> found = new HashSet<KeyValuePair<long, Vector3I>>();
+
+        #region Small jobs wait
+        // A group of fewer than BlocksPerJob blocks is published once its oldest block has waited this long since a scan
+        // first found it: a projection's frontier opens a block or two per scan, and waiting lets them pile up into one job
+        private const int SMALL_JOB_WAIT_TICKS = 30 * 60;
+        private readonly Dictionary<KeyValuePair<long, Vector3I>, int> firstSeen = new Dictionary<KeyValuePair<long, Vector3I>, int>();
+        private readonly List<KeyValuePair<long, Vector3I>> firstSeenGone = new List<KeyValuePair<long, Vector3I>>();
+
+        // This scan's targets not in a job yet: since when they're known (blocks no longer found, or in a job, are forgotten)
+        private void UpdateFirstSeen(int now)
+        {
+            for (int i = 0; i < targets.Count; i++)
+            {
+                var k = Key(targets[i]);
+                if (!inJobs.Contains(k) && !firstSeen.ContainsKey(k)) firstSeen[k] = now;
+            }
+            firstSeenGone.Clear();
+            foreach (var kv in firstSeen) if (!found.Contains(kv.Key) || inJobs.Contains(kv.Key)) firstSeenGone.Add(kv.Key);
+            for (int i = 0; i < firstSeenGone.Count; i++) firstSeen.Remove(firstSeenGone[i]);
+            firstSeenGone.Clear();
+        }
+
+        // The group may be published now: full, a predicted line (the batch itself), or its oldest block waited long enough
+        private bool Ripe(int now)
+        {
+            if (group.Count >= settings.BlocksPerJob) return true;
+            int oldest = now;
+            for (int i = 0; i < group.Count; i++)
+            {
+                if (group[i].Line > 0) return true;
+                int seen;
+                if (firstSeen.TryGetValue(Key(group[i]), out seen) && seen < oldest) oldest = seen;
+            }
+            return now - oldest >= SMALL_JOB_WAIT_TICKS;
+        }
+
+        // A predicted block of an awarded job (or one some of whose blocks the scan still finds) whose cell is still empty
+        private bool StillAhead(OpenJob job, KeyValuePair<long, Vector3I> k, bool live)
+        {
+            if (!live || !job.Predicted.Contains(k)) return false;
+            IMyEntity e;
+            var grid = MyAPIGateway.Entities.TryGetEntityById(k.Key, out e) ? e as IMyCubeGrid : null;
+            return grid != null && grid.GetCubeBlock(k.Value) == null;
+        }
+        #endregion
         private readonly List<ConstructionTarget> targets = new List<ConstructionTarget>();
         private readonly List<ConstructionTarget> group = new List<ConstructionTarget>();
         private readonly List<IMyEntity> entityBuffer = new List<IMyEntity>();
@@ -333,7 +381,7 @@ namespace Automata.Construction
             int minScan = config != null ? config.ConstructionComputer.MinScanRetryIntervalSeconds : 10;
             int maxScan = config != null ? config.ConstructionComputer.MaxScanRetryIntervalSeconds : 3600;
             settings.ScanIntervalSeconds = MathHelper.Clamp(settings.ScanIntervalSeconds, minScan, maxScan);
-            settings.BlocksPerJob = MathHelper.Clamp(settings.BlocksPerJob, 1, 50);
+            settings.BlocksPerJob = MathHelper.Clamp(settings.BlocksPerJob, 1, 100);
         }
         #endregion
 
@@ -410,7 +458,7 @@ namespace Automata.Construction
 
         private bool EnsureAntenna()
         {
-            if (antenna == null || antenna.Closed || !antenna.IsWorking || !antenna.EnableBroadcasting) return false;
+            if (!AntennaUtil.Alive(antenna) || !antenna.IsWorking || !antenna.EnableBroadcasting) return false;
             MessageQueue.AntennaInfo antennaInfo;
             if (!messaging.GetAntennaInfo(entityId, out antennaInfo) || antennaInfo.Antenna != antenna)
             {
@@ -478,7 +526,7 @@ namespace Automata.Construction
                 }
                 int first = targets.Count;
                 computer.ScanArea(grid, ref area, ref half, settings.WorkModes, grindColor, weldIgnoreColor, null, limit, targets, RefuseGrid,
-                                  settings.WorkPriority, null, true);
+                                  settings.WorkPriority, null, true, Math.Max(0, settings.BlocksPerJob - 1));
                 scanCache.Store(groupKey, signature, limit, targets, first);
                 PerfStats.Stop(PerfStats.CcGroup, tg);
             }
@@ -499,7 +547,10 @@ namespace Automata.Construction
             for (int j = jobs.Count - 1; j >= 0 && complete; j--)
             {
                 var job = jobs[j];
-                job.Blocks.RemoveWhere(k => !found.Contains(k) && !refusedGrids.Contains(k.Key));   // a drone flying off isn't repaired
+                bool live = job.Assigned != 0;
+                if (!live) foreach (var k in job.Blocks) if (found.Contains(k)) { live = true; break; }
+                job.Blocks.RemoveWhere(k => !found.Contains(k) && !refusedGrids.Contains(k.Key)   // a drone flying off isn't repaired
+                                            && !StillAhead(job, k, live));
                 if (job.Blocks.Count > 0) continue;
                 doneCount++;
                 AddEvent(Loc.F(StrJobDone, job.Summary ?? job.Blocks.Count.ToString(), LabelOf(job)));
@@ -513,18 +564,31 @@ namespace Automata.Construction
             int maxOpen = AutomataSession.GetConfig() != null ? AutomataSession.GetConfig().ConstructionComputer.MaxPublishedJobs : 10;
             int created = 0;
             ShareSlots(maxOpen, now);
+            UpdateFirstSeen(now);
             group.Clear();
+            int waiting = 0;
+            bool lineOpen = false;   // the group holds the seed of the predicted blocks that follow it
             for (int i = 0; i <= targets.Count && OpenCount() < maxOpen; i++)
             {
-                bool flush = i == targets.Count || group.Count >= settings.BlocksPerJob
+                bool eligible = i < targets.Count && !inJobs.Contains(Key(targets[i])) && !CoolingDown(Key(targets[i]), now);
+                bool startsLine = eligible && targets[i].Line > 0;   // a line starts a job of its own
+                bool flush = i == targets.Count || group.Count >= settings.BlocksPerJob || (group.Count > 0 && startsLine)
                              || (group.Count > 0 && (targets[i].Type != group[0].Type || targets[i].Category != group[0].Category));
                 if (flush && group.Count > 0)
                 {
                     int b = Bucket(group[0]);
-                    if (openPer[b] < slotsPer[b] && CreateJob(now)) { created++; openPer[b]++; }   // else: its kind's share is full
+                    if (openPer[b] >= slotsPer[b]) { }                     // its kind's share is full
+                    else if (!Ripe(now)) waiting += group.Count;          // small: more may join it by the next scans
+                    else if (CreateJob(now)) { created++; openPer[b]++; }
                     group.Clear();
+                    lineOpen = false;
                 }
-                if (i < targets.Count && !inJobs.Contains(Key(targets[i])) && !CoolingDown(Key(targets[i]), now)) group.Add(targets[i]);
+                if (i == targets.Count) continue;
+                if (!targets[i].Predicted) lineOpen = false;
+                // A predicted block only right behind its seed, in the seed's job (never ahead of it, never alone)
+                if (!eligible || (targets[i].Predicted && !lineOpen)) { if (targets[i].Predicted) lineOpen = false; continue; }
+                group.Add(targets[i]);
+                if (startsLine) lineOpen = true;
             }
             group.Clear();
             lastFound = targets.Count;
@@ -533,8 +597,8 @@ namespace Automata.Construction
             for (int c = 0; c < lastCategory.Length; c++) lastCategory[c] = 0;
             for (int t = 0; t < targets.Count; t++)
                 if (targets[t].Type == Orchestrator.JobType.Weld && (int)targets[t].Category < lastCategory.Length) lastCategory[(int)targets[t].Category]++;
-            Log.Debug("CC {0}: scan {1:F1} ms: {2} grid group(s) ({8} unchanged), {3} block(s) ({4} weld, {5} grind), {6} new job(s), {7} open",
-                      entityId, PerfStats.Since(watch), groups, targets.Count, weld, grind, created, jobs.Count, cached);
+            Log.Debug("CC {0}: scan {1:F1} ms: {2} grid group(s) ({8} unchanged), {3} block(s) ({4} weld, {5} grind), {6} new job(s), {7} open, {9} block(s) waiting to batch",
+                      entityId, PerfStats.Since(watch), groups, targets.Count, weld, grind, created, jobs.Count, cached, waiting);
             targets.Clear();
         }
 
@@ -668,6 +732,7 @@ namespace Automata.Construction
             {
                 var k = Key(group[i]);
                 open.Blocks.Add(k);
+                if (group[i].Predicted) open.Predicted.Add(k);
                 inJobs.Add(k);
             }
             var ja = JobAnnouncement.FromJob(job, AutomataEntityType.ConstructionComputerBlock, block.CubeGrid.IsStatic);
@@ -679,6 +744,7 @@ namespace Automata.Construction
             ja.IsInSpace = g < JobAnnouncement.SPACE_GRAVITY;
             ja.IsInAtmosphere = g >= JobAnnouncement.SPACE_GRAVITY;
             if (ja.IsInAtmosphere) ja.ToolFaceWeights = ConstructionComputer.ToolFaceWeights(group);   // in space any tool orientation does
+            for (int i = 0; i < group.Count && !ja.Sequential; i++) ja.Sequential = group[i].Predicted;   // a line: one drone, trip after trip
             open.Message = AnnouncementMessage(ja);
             jobs.Add(open);
             Log.Debug("CC {0}: job {1} ({2}): {3} block(s), first at {4}, {5}", entityId, job.JobId, LabelOf(open), job.BlockCount,
@@ -751,7 +817,7 @@ namespace Automata.Construction
                     if (job.HeldUntil != 0 && job.HeldUntil > now) continue;   // the same failure read again
                     job.HeldUntil = now + Math.Max(10, f.HoldSeconds) * 60;
                     failedCount++;
-                    AddEvent(Loc.F(StrJobOnHold, LabelOf(job) + ": " + job.Summary, f.HoldSeconds, f.Reason));
+                    AddEvent(Loc.F(StrJobOnHold, LabelOf(job) + ":\n" + job.Summary, f.HoldSeconds, f.Reason));
                     Log.Debug("CC {0}: job {1} on hold for {2} s: orchestrator {3}: {4}", entityId, job.JobId, f.HoldSeconds, f.OrchestratorEntityId, f.Reason);
                 }
             }
@@ -871,7 +937,7 @@ namespace Automata.Construction
                 expiredCount++;
                 Log.Debug("CC {0}: job {1} ({2}) no drone keepalive for {3} s: {4} block(s) back to the pool", entityId, job.JobId, LabelOf(job),
                           ASSIGNED_TTL_TICKS / 60, job.Blocks.Count);
-                AddEvent(Loc.F(StrJobExpired, LabelOf(job) + ": " + job.Summary));
+                AddEvent(Loc.F(StrJobExpired, LabelOf(job) + ":\n" + job.Summary));
                 jobs.RemoveAt(j);
                 changed = true;
             }
@@ -898,7 +964,7 @@ namespace Automata.Construction
             log.Add(text);
         }
 
-        // "Light Armor Block:8, Window:2": a job's blocks by name, most first
+        // "  Light Armor Block: 8\n  Window: 2": a job's blocks by name, one per line (LCD width)
         private static string Summarize(List<ConstructionTarget> group)
         {
             var names = new List<string>();
@@ -912,8 +978,8 @@ namespace Automata.Construction
             var sb = new StringBuilder();
             for (int i = 0; i < names.Count; i++)
             {
-                if (i > 0) sb.Append(", ");
-                sb.Append(names[i]).Append(':').Append(counts[i]);
+                if (i > 0) sb.Append('\n');
+                sb.Append("  ").Append(names[i]).Append(": ").Append(counts[i]);
             }
             return sb.ToString();
         }
@@ -1024,6 +1090,14 @@ namespace Automata.Construction
                 {
                     var js = s.Jobs[j];
                     if (js.Announcement == null || js.Blocks == null || js.Blocks.Count == 0) continue;
+                    // Saved with item keys this session can't name (grind returns keyed by display name before the
+                    // fix): dropped, the next scan plans those blocks again
+                    if (!Inventory.ItemKeys.AllKnown(js.Announcement.ComponentsInventory))
+                    {
+                        Log.Info("CC {0}: saved job {1} ({2}) dropped: its items use old keys; planned again by the next scan", entityId,
+                                 js.Announcement.JobId, js.Announcement.Type);
+                        continue;
+                    }
                     var job = new OpenJob
                     {
                         JobId = js.Announcement.JobId,

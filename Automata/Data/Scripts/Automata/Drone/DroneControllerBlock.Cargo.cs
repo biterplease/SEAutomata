@@ -347,7 +347,7 @@ namespace Automata.Drone
         /// </summary>
         private bool TryStartHousekeeping()
         {
-            if (!IsServer || currentJob != null || cPhase != ConstructionPhase.Idle || !ClearsCargo || !initialized) return false;
+            if (!IsServer || currentJob != null || cPhase != ConstructionPhase.Idle || !ClearsCargo || !initialized || Grounded) return false;
             int now = MyAPIGateway.Session.GameplayFrameCounter;
             if (now < clearRetryFrame) return false;
             double volume = ClearableVolume();

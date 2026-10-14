@@ -170,7 +170,7 @@ namespace Automata.Drone
                 [ProtoMember(38)]
                 public uint LcdBackground = 0xFF202020;   // RGB(32,32,32)
                 [ProtoMember(39)]
-                public float LcdFontSize = 0.6f;
+                public float LcdFontSize = 0.35f;
                 [ProtoMember(40, IsRequired = true)]
                 public bool LcdShowHeader = true;
 
@@ -289,5 +289,9 @@ namespace Automata.Drone
                 /// <summary>Economy flight: long legs in space as burn / coast / flip-and-burn with the strongest thruster group.</summary>
                 [ProtoMember(75)]
                 public bool EconomyFlight;
+
+                /// <summary>Share (%) of the strongest face's thrust used to accelerate and brake (not to hold the weight).</summary>
+                [ProtoMember(76, IsRequired = true)]
+                public float MaxThrustPercent = 50f;
         }
 }

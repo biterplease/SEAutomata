@@ -58,6 +58,7 @@ namespace Automata.Mining
         private static readonly MyStringId StrActiveRequests = MyStringId.GetOrCompute("Active requests");
         private static readonly MyStringId StrStarting = MyStringId.GetOrCompute("Starting");
         private static readonly MyStringId StrDepositsShownAsGps = MyStringId.GetOrCompute("{0} known deposit(s) shown as GPS");
+        private static readonly MyStringId StrDeletedDeposits = MyStringId.GetOrCompute("Deleted {0} known deposit(s)");
         private static readonly MyStringId StrRetryJobSAnnouncedAgain = MyStringId.GetOrCompute("Retry: {0} job(s) announced again");
         private static readonly MyStringId StrWaitingForTheMod = MyStringId.GetOrCompute("Waiting for the mod");
         private static readonly MyStringId StrLoading = MyStringId.GetOrCompute("Loading");
@@ -167,6 +168,20 @@ namespace Automata.Mining
         /// <summary>Surveyors loaded on this machine.</summary>
         public static readonly List<MiningSurveyorBlock> All = new List<MiningSurveyorBlock>();
 
+        /// <summary>Known deposits of every surveyor within 'radius' of 'p' (ore, position), for the flight lanes' hotspots.</summary>
+        public static void DepositsNear(Vector3D p, double radius, List<KeyValuePair<MyStringHash, Vector3D>> into)
+        {
+            double r2 = radius * radius;
+            for (int i = 0; i < All.Count; i++)
+            {
+                var s = All[i];
+                if (!s.ready) continue;
+                for (int k = 0; k < s.deposits.Count; k++)
+                    if (Vector3D.DistanceSquared(s.deposits[k].Position, p) <= r2)
+                        into.Add(new KeyValuePair<MyStringHash, Vector3D>(s.deposits[k].Ore, s.deposits[k].Position));
+            }
+        }
+
         /// <summary>A working mining surveyor of this owner / their faction exists (drones keep ore scans only then).</summary>
         public static bool AnyFor(long owner)
         {
@@ -267,6 +282,7 @@ namespace Automata.Mining
             gpsDirty = true;
             CheckRetryRequest();
             CheckShowDepositsRequest();
+            CheckDeleteDepositsRequest();
         }
 
         #region Retry jobs (terminal button)
@@ -285,6 +301,37 @@ namespace Automata.Mining
             settings.ShowDepositsRequest++;
             SettingsEdited();
             return true;
+        }
+
+        private int lastDeleteRequest;
+        private bool deleteSeen;
+
+        private void CheckDeleteDepositsRequest()
+        {
+            if (deleteSeen && settings.DeleteDepositsRequest != lastDeleteRequest && IsServer) DeleteDeposits();
+            lastDeleteRequest = settings.DeleteDepositsRequest;
+            deleteSeen = true;
+        }
+
+        public bool Terminal_DeleteDeposits()
+        {
+            settings.DeleteDepositsRequest++;
+            SettingsEdited();
+            return true;
+        }
+
+        // Every known deposit forgotten, and the depleted ones with them (a fresh start); the jobs no drone has taken for
+        // them go with the next pass (their deposit is no longer known), the published ore list is renewed now
+        private void DeleteDeposits()
+        {
+            int n = deposits.Count;
+            deposits.Clear();
+            depleted.Clear();
+            lastKnownOres = int.MinValue / 2;
+            gpsDirty = true;
+            ordersDirty = true;
+            AddEvent(Loc.F(StrDeletedDeposits, n));
+            Log.Info("MS {0}: known deposits deleted on request: {1} deposit(s)", entityId, n);
         }
 
         private int lastRetryRequest;
@@ -336,6 +383,7 @@ namespace Automata.Mining
             int now = MyAPIGateway.Session.GameplayFrameCounter;
             if (!retrySeen) CheckRetryRequest();   // loaded: the saved request counts as seen
             if (!showSeen) CheckShowDepositsRequest();
+            if (!deleteSeen) CheckDeleteDepositsRequest();
             if (messaging == null) messaging = AutomataSession.GetMessageQueue();
             if (messaging == null) { status = Loc.T(StrWaitingForTheMod); return; }
             if (pendingState != null)
@@ -405,7 +453,7 @@ namespace Automata.Mining
             for (int g = 0; g < gridBuffer.Count; g++)
             {
                 foreach (var a in gridBuffer[g].GetFatBlocks<IMyRadioAntenna>())
-                    if (a.IsFunctional && a.Enabled && a.EnableBroadcasting && (bestAntenna == null || a.Radius > bestAntenna.Radius)) bestAntenna = a;
+                    if (a.IsFunctional && a.Enabled && a.EnableBroadcasting && (bestAntenna == null || AntennaUtil.Range(a) > AntennaUtil.Range(bestAntenna))) bestAntenna = a;
                 foreach (var d in gridBuffer[g].GetFatBlocks<IMyOreDetector>())
                     if (d.IsFunctional && (bestDetector == null || d.Range > bestDetector.Range)) bestDetector = d;
             }
@@ -418,7 +466,7 @@ namespace Automata.Mining
 
         private bool EnsureAntenna()
         {
-            if (antenna == null || antenna.Closed || !antenna.IsWorking || !antenna.EnableBroadcasting) return false;
+            if (!AntennaUtil.Alive(antenna) || !antenna.IsWorking || !antenna.EnableBroadcasting) return false;
             MessageQueue.AntennaInfo antennaInfo;
             if (!messaging.GetAntennaInfo(entityId, out antennaInfo) || antennaInfo.Antenna != antenna)
             {
@@ -430,7 +478,7 @@ namespace Automata.Mining
                 messaging.Subscribe(entityId, Channel.TASKS_COMPLETED);
                 messaging.Subscribe(entityId, Channel.TASKS_ABORTED);
                 messaging.Subscribe(entityId, Channel.JOB_KEEPALIVE);
-                Log.Info("MS {0}: on the virtual network through antenna '{1}' ({2:F0} m)", entityId, antenna.CustomName, antenna.Radius);
+                Log.Info("MS {0}: on the virtual network through antenna '{1}' ({2:F0} m)", entityId, antenna.CustomName, AntennaUtil.Range(antenna));
             }
             return true;
         }

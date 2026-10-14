@@ -202,6 +202,9 @@ namespace Automata
         public const ushort NETWORK_CHANNEL = 21843;
         public Digi.NetworkLib.Network Net { get; private set; }
 
+        // Chat commands (/automata ...), clients only
+        private readonly AutomataSessionCommandHandler commands = new AutomataSessionCommandHandler();
+
         public static ServerConfig GetConfig() => _serverConfig;
         public static MessageQueue GetMessageQueue() => _messageQueue;
 
@@ -210,6 +213,7 @@ namespace Automata
             Instance = this;
             Net = new Digi.NetworkLib.Network(NETWORK_CHANNEL, MOD_NAME);
             Util.NicknameControl.Register();
+            if (!MyAPIGateway.Utilities.IsDedicated) MyAPIGateway.Utilities.MessageEntered += commands.MessageEntered;
             // Localization settings
             // LoadLangOverrides();
             // MyAPIGateway.Gui.GuiControlRemoved += GuiControlRemoved;
@@ -392,12 +396,25 @@ namespace Automata
         }
 
 
+        public override void SaveData()
+        {
+            try
+            {
+                if (MyAPIGateway.Multiplayer == null || MyAPIGateway.Multiplayer.IsServer) Pathfinding.PathfindingManager.Instance?.SaveData();
+            }
+            catch (Exception ex)
+            {
+                MyLog.Default.WriteLine($"Automata: SaveData exception: {ex}");
+            }
+        }
+
         protected override void UnloadData()
         {
             try
             {
                 Pointer.ScoutPointer.Unload();
                 Util.NicknameControl.Unregister();
+                if (MyAPIGateway.Utilities != null) MyAPIGateway.Utilities.MessageEntered -= commands.MessageEntered;
                 itemsIndexed = false;   // statics outlive the session (next world in the same game process)
                 Pathfinding.PathfindingManager.Unload();
                 Construction.BuildPlanner.ClearFrames();

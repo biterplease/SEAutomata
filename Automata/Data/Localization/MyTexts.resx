@@ -1890,6 +1890,15 @@ Every section below can be unfolded whatever the profile.</value>
   <data name="Automata {0} - Commands: {1} {2}" xml:space="preserve">
     <value>Automata {0} - Commands: {1} {2}</value>
   </data>
+  <data name="Usage: /automata debugdraw [dronenav] [droneobs] [ccobs] [park] [off] (none: all)" xml:space="preserve">
+    <value>Usage: /automata debugdraw [dronenav] [droneobs] [ccobs] [park] [off] (none: all)</value>
+  </data>
+  <data name="Debug draw on within {0} m: {1} drone route(s), {2} drone area(s), {3} construction area(s), {4} parking area(s)." xml:space="preserve">
+    <value>Debug draw on within {0} m: {1} drone route(s), {2} drone area(s), {3} construction area(s), {4} parking area(s).</value>
+  </data>
+  <data name="Debug draw off within {0} m: {1} drone route(s), {2} drone area(s), {3} construction area(s), {4} parking area(s)." xml:space="preserve">
+    <value>Debug draw off within {0} m: {1} drone route(s), {2} drone area(s), {3} construction area(s), {4} parking area(s).</value>
+  </data>
 
   <!-- Logistics/DockSite.cs -->
   <data name="{0} port(s) ({1} small), no gravity" xml:space="preserve">
@@ -2505,8 +2514,8 @@ Off: they park on any friendly grid, then on voxel.</value>
   <data name="Show parking area" xml:space="preserve">
     <value>Show parking area</value>
   </data>
-  <data name="Draws the area for you (switches itself off after a minute)." xml:space="preserve">
-    <value>Draws the area for you (switches itself off after a minute).</value>
+  <data name="Draws the area for you. Switches off after a short time." xml:space="preserve">
+    <value>Draws the area for you. Switches off after a short time.</value>
   </data>
   <data name="Parking" xml:space="preserve">
     <value>Parking</value>

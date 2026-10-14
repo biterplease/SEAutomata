@@ -58,7 +58,7 @@ namespace Automata.Drone
         private static readonly MyStringId StrERRORStopped = MyStringId.GetOrCompute("ERROR: {0}: stopped");
         private static readonly MyStringId StrSystemsRestored = MyStringId.GetOrCompute("Systems restored");
         private static readonly MyStringId StrWarningThrustersLostLeft = MyStringId.GetOrCompute("Warning: thrusters lost ({0} left)");
-        private static readonly MyStringId StrNoHomeConnectorAndNo = MyStringId.GetOrCompute("No home connector and no landing gear: it can't park (set a home connector or fit a landing gear)");
+        private static readonly MyStringId StrNoHomeConnectorAndNo = MyStringId.GetOrCompute("No home connector and no landing gear: it rests docked at the nearest free connector");
         private static readonly MyStringId StrWarning = MyStringId.GetOrCompute("Warning: {0}");
         private static readonly MyStringId StrMiningNeedsManagedByOrchestrator = MyStringId.GetOrCompute("Mining needs 'Managed by orchestrator' (stand-alone drones don't mine)");
         private static readonly MyStringId StrMiningDroneProfileWithoutA = MyStringId.GetOrCompute("Mining drone profile without a drill");
@@ -319,7 +319,6 @@ namespace Automata.Drone
         private const double LOOSE_ORIENT_GATE = 0.17;   // rad (~10°): same
         private const double FINAL_SLOW_ZONE = 3.0;      // m: FinalSpeed only this close (a braking curve beyond)
         private const double MAX_DESCENT_SPEED = 10.0;   // m/s along gravity
-        private const double ACCEL_FRACTION    = 0.5;    // share of available accel used to change the command
         // Orders of a job (construction order: work sites, routes to them, docks): the stop is planned with less of the
         // available accel than the command may change by (a reserve for lag, a heavier load, a thruster that gives less),
         // with a margin of distance, a ramp that keeps the last metres slow, and a full-power brake when it runs past the curve
@@ -329,6 +328,7 @@ namespace Automata.Drone
         private const double JOB_BRAKE_OVER    = 0.4;    // m/s over the curve: the command may then change by EMERGENCY_FRACTION
         private const double EMERGENCY_FRACTION = 0.9;   // share of available accel for the command while over the curve
         private bool overCurve;                          // set by ComputeApproachVelocity, read by RateLimitCommand
+        private double diagAlong, diagGate;              // last speed profile / gate (stall diagnostics)
         // Space, a watched route leg whose direction no working camera looks along: the drone turns to face it before it
         // picks up speed (a stretch nothing sees is assumed clear: leaving a dock sideways to the cameras, it flew into the station)
         private const double FACE_SEEN_MIN = 30;         // m of sight along the leg wanted before it moves (short legs: their length)
@@ -475,13 +475,16 @@ namespace Automata.Drone
                     {
                         ComputeApproachVelocity(o, orientationError);   // only for its leg bookkeeping (legPassed, legDir...: the chaining)
                         EconomyTranslate(o);
+                        pushBlockedTicks = 0;
                     }
                     else
                     {
                         // Shared site: holding still for another drone (UpdateSharedSite10), the order waits
                         Vector3D v = RateLimitCommand(siteYielding ? flightState.FrameVelocity : ComputeApproachVelocity(o, orientationError));
                         UpdateTranslation(ref v);
+                        WatchPush(v - flightState.FrameVelocity);
                     }
+                    KeepPhysicsAwake();
                     if (!siteYielding) AdvanceFlightPhase(o, orientationError);
 
                     Vector3D rWorld = Vector3D.TransformNormal(o.ReferenceOffset.ToVector3D(), flightState.WorldMatrix);
@@ -543,6 +546,7 @@ namespace Automata.Drone
                     UpdateConnectorPower();
                     CheckLegStart();
                     UpdateRouteWatch();
+                    RecordFlight10();
                     UpdateRecovery10();
                     UpdateDocking();
                     UpdateConstruction10();
@@ -592,6 +596,7 @@ namespace Automata.Drone
                     UpdateMass();                   // cargo can change while working; idle / docked drones are re-measured at pre-flight
                 if (!isParked)
                     combinedThrustProfile = CalculateThrustProfile(shipController, physicalMass, allThrusters);
+                if (settings.IsEnabled) UpdatePowerGuard();   // out in the field without power to fly: stopped, checked at a low rate
                 MonitorPower();                     // levels for the header always; acts only with the AI on
                 FlushJobReports();                  // outcomes of orchestrator jobs not heard yet
                 SendJobKeepalive();                 // still on a construction / mining job: its announcer keeps it
@@ -1082,7 +1087,7 @@ namespace Automata.Drone
                         var antenna = (IMyRadioAntenna)fatBlock;
                         if (antenna.EnableBroadcasting && antenna.IsWorking)
                         {
-                            if (primaryAntenna == null || antenna.Radius > primaryAntenna.Radius)
+                            if (primaryAntenna == null || AntennaUtil.Range(antenna) > AntennaUtil.Range(primaryAntenna))
                                 primaryAntenna = antenna;
                         }
                     }
@@ -1162,7 +1167,7 @@ namespace Automata.Drone
                 currentState = State.Error;
                 return false;
             }
-            if (initialized && IsServer && currentState == State.Error && !routeError)
+            if (initialized && IsServer && currentState == State.Error && !routeError && !Grounded)
             {
                 Report(StrSystemsRestored);
                 SetState(IsParkedNow() ? State.Docked : State.Standby);
@@ -1485,8 +1490,8 @@ namespace Automata.Drone
                     Vector3DData here = Vector3DData.FromVector3D(WorldToAnchorPoint(ref m, ReferencePoint(o)));
                     o.TransitStartLocal = here;
                     if (!o.UseApproachLine) o.ApproachFromLocal = here;
-                    o.Phase = o.UseApproachLine ? FlightPhase.Transit : FlightPhase.Approach;
-                    o.Captured = false;
+                    o.Phase = o.UseApproachLine && !o.DirectApproach ? FlightPhase.Transit : FlightPhase.Approach;
+                    o.Captured = o.DirectApproach;
                     RefreshAnchoredOrder(o);
                 }
             }
@@ -1937,7 +1942,9 @@ namespace Automata.Drone
         {
             CaptureFlightState();            // idle drones don't refresh it every frame
             WakeFrameUpdates();
-            commandedVelocity = flightState.LinearVelocity;
+            // A replan mid-flight keeps the command: started again from the real speed each time, a brake that the
+            // replans (every second or so while parts of the route are out of view) kept cutting short got only half way
+            if (!replanning) commandedVelocity = flightState.LinearVelocity;
             nextLeg = null;
             nextLegRequested = false;
             queuedLegs.Clear();
@@ -1947,6 +1954,8 @@ namespace Automata.Drone
             legPassed = false;
             dockingHomeId = 0;
             arrivalReported = false;
+            pushBlockedTicks = 0;
+            physicsWakes = 0;
         }
 
         // Anchored orders: rebuild world fields from the anchor frame. Also sets Frame/RelativeVelocity.
@@ -2035,7 +2044,7 @@ namespace Automata.Drone
                     if (!request)
                     {
                         double v = Math.Max(0, Vector3D.Dot(flightState.RelativeVelocity, legDir));
-                        double brakeDist = v * v / (2 * AvailableAccel(-legDir) * (ReferenceEquals(o, constructionOrder) ? JOB_BRAKE : TRANS_BRAKE));
+                        double brakeDist = v * v / (2 * PlanBrake(-legDir, ReferenceEquals(o, constructionOrder) ? JOB_BRAKE : TRANS_BRAKE));
                         request = legRemaining < brakeDist * 1.5 + 20.0;
                     }
                     if (request)
@@ -2064,11 +2073,10 @@ namespace Automata.Drone
         private void UpdateTranslation(ref Vector3D desiredVelocity)
         {
             if (shipController == null) return;
-            if (!thrustOverridesActive)
-            {
-                shipController.DampenersOverride = false;
-                ResetIntegralTerms();
-            }
+            if (!thrustOverridesActive) ResetIntegralTerms();
+            // Every tick, not only at the start: dampeners switched back on (a cockpit, a script, a reload) fire the
+            // thrusters left at override 0 against every small command - the last metres then never closed
+            if (shipController.DampenersOverride) shipController.DampenersOverride = false;
             Vector3D velErr = desiredVelocity - flightState.LinearVelocity;
             double eF = Vector3D.Dot(velErr, flightState.WorldMatrix.Forward);
             double eU = Vector3D.Dot(velErr, flightState.WorldMatrix.Up);
@@ -2076,9 +2084,17 @@ namespace Automata.Drone
 
             UpdateIntegralTerms(eF, eU, eR);
 
-            double forceFwdBack   = (-Vector3D.Dot(flightState.Gravity, flightState.WorldMatrix.Forward) + Kp * eF + integralForward) * physicalMass;
-            double forceUpDown    = (-Vector3D.Dot(flightState.Gravity, flightState.WorldMatrix.Up)      + Kp * eU + integralUp)      * physicalMass;
-            double forceLeftRight = (-Vector3D.Dot(flightState.Gravity, flightState.WorldMatrix.Right)   + Kp * eR + integralRight)   * physicalMass;
+            // The acceleration asked (holding the weight aside): at most the Max thrust setting allows, except while over
+            // the braking curve (an overshoot: what it has)
+            double aF = Kp * eF + integralForward, aU = Kp * eU + integralUp, aR = Kp * eR + integralRight;
+            if (!overCurve)
+            {
+                double aLen = Math.Sqrt(aF * aF + aU * aU + aR * aR), cap = AccelCap;
+                if (aLen > cap) { double k = cap / aLen; aF *= k; aU *= k; aR *= k; }
+            }
+            double forceFwdBack   = (-Vector3D.Dot(flightState.Gravity, flightState.WorldMatrix.Forward) + aF) * physicalMass;
+            double forceUpDown    = (-Vector3D.Dot(flightState.Gravity, flightState.WorldMatrix.Up)      + aU) * physicalMass;
+            double forceLeftRight = (-Vector3D.Dot(flightState.Gravity, flightState.WorldMatrix.Right)   + aR) * physicalMass;
 
             ApplyAxisForce(forceUpDown,    Base6Directions.Direction.Up,      Base6Directions.Direction.Down,
                 EffectiveMax(Base6Directions.Direction.Up),      EffectiveMax(Base6Directions.Direction.Down));
@@ -2105,6 +2121,56 @@ namespace Automata.Drone
             if (s == double.MaxValue) s = 0.1;
             return MathHelperD.Clamp(s, 0.1, 50.0);
         }
+
+        #region Max thrust (setting): the share of the strongest face's thrust used to accelerate and brake
+        // LCD header: the name and, per face, the thrust the setting lets it use (the full ratings are in the terminal)
+        private void RefreshThrustTable()
+        {
+            if (display == null || block == null) return;
+            display.SetName(Nicknames.Of(block));
+            double strongest = 0;
+            for (int i = 0; i < 6; i++) strongest = Math.Max(strongest, ProfileMax(i));
+            double cap = strongest * ThrustFraction;
+            Func<Base6Directions.Direction, string> f = d => DroneStatusDisplay.Force(Math.Min(ProfileMax((int)d), cap));
+            display.SetThrustTable(f(Base6Directions.Direction.Forward) + ", " + f(Base6Directions.Direction.Backward),
+                                   f(Base6Directions.Direction.Left) + ", " + f(Base6Directions.Direction.Right),
+                                   f(Base6Directions.Direction.Up) + ", " + f(Base6Directions.Direction.Down));
+        }
+
+        private const double MAX_THRUST_MIN_FRACTION = 0.01;   // 0 % on the slider still lets it move (1 %)
+        private const double BRAKE_OF_CAP = 0.8;               // stops are planned with this much of the cap (the rest corrects)
+
+        private double ThrustFraction
+        {
+            get { return settings != null ? MathHelperD.Clamp(settings.MaxThrustPercent / 100.0, MAX_THRUST_MIN_FRACTION, 1.0) : 0.5; }
+        }
+
+        // Thrust of the strongest face (N), learnt gains included
+        private double StrongestFaceThrust()
+        {
+            double best = 0;
+            for (int i = 0; i < 6; i++) best = Math.Max(best, EffectiveMax((Base6Directions.Direction)i));
+            return best;
+        }
+
+        /// <summary>Acceleration the setting allows (m/s², gravity aside): Max thrust % of the strongest face, over the mass.</summary>
+        private double AccelCap
+        {
+            get { return physicalMass > 0 ? Math.Max(0.05, ThrustFraction * StrongestFaceThrust() / physicalMass) : 0.1; }
+        }
+
+        /// <summary>What the drone may use along u: what it has there, at most the setting's cap.</summary>
+        private double UsableAccel(Vector3D u)
+        {
+            return Math.Min(AvailableAccel(u), AccelCap);
+        }
+
+        /// <summary>The deceleration a stop is planned with along u: 'frac' of what it has there, at most BRAKE_OF_CAP of the cap.</summary>
+        private double PlanBrake(Vector3D u, double frac)
+        {
+            return Math.Min(AvailableAccel(u) * frac, AccelCap * BRAKE_OF_CAP);
+        }
+        #endregion
         private static void GetLeg(FlightOrder o, out Vector3D a, out Vector3D t)
         {
             switch (o.Phase)
@@ -2176,7 +2242,7 @@ namespace Automata.Drone
             double finalSpeed = FinalSpeedFor(o);
             bool job = ReferenceEquals(o, constructionOrder);
             double brakeFrac = job ? JOB_BRAKE : TRANS_BRAKE;
-            double slowBrake = len > 1e-3 ? AvailableAccel(-d) * brakeFrac * 0.5 : 1.0;
+            double slowBrake = len > 1e-3 ? PlanBrake(-d, brakeFrac) * 0.5 : 1.0;
             double maxSpeed = stopping && remaining < FINAL_LEG
                 ? Math.Min(ApproachSpeed, Math.Sqrt(finalSpeed * finalSpeed + 2 * slowBrake * Math.Max(0, remaining - FINAL_SLOW_ZONE)))
                 : MaxSpeed;
@@ -2185,7 +2251,7 @@ namespace Automata.Drone
             overCurve = false;
             if (len > 1e-3)
             {
-                double brake = AvailableAccel(-d) * brakeFrac;
+                double brake = PlanBrake(-d, brakeFrac);
                 double closing = Math.Max(0, Vector3D.Dot(flightState.RelativeVelocity, d));
                 double usable  = Math.Max(0, remaining - closing / Kp - (job && stopping ? closing * JOB_STOP_LAG : 0));   // distance eaten by controller lag
                 if (stopping)
@@ -2206,6 +2272,7 @@ namespace Automata.Drone
                     if (down > 1e-3) along = Math.Min(along, MAX_DESCENT_SPEED / down);
                 }
                 if (o.SpeedCap > 0) along = Math.Min(along, o.SpeedCap);       // the whole order (a bore cuts its way)
+                along = Math.Min(along, laneSpeedCap);                          // a flight lane: stoppable behind the drone ahead
             }
 
             // Don't advance while far off the line, or on the final leg while still turning
@@ -2236,7 +2303,7 @@ namespace Automata.Drone
             if (xt > 1e-3)
             {
                 Vector3D xDir = crossTrack / xt;
-                double xBrake = AvailableAccel(-xDir) * brakeFrac;
+                double xBrake = PlanBrake(-xDir, brakeFrac);
                 vCross = xDir * Math.Min(maxSpeed, Math.Min((strict ? XT_GAIN_STRICT : XT_GAIN) * xt, Math.Sqrt(2 * xBrake * xt)));
             }
             if (xtIntegralOrder != o) { xtIntegral = Vector3D.Zero; xtIntegralOrder = o; }
@@ -2251,8 +2318,11 @@ namespace Automata.Drone
             }
             else xtIntegral *= 0.9;
             Vector3D desired = d * (along * gate) + vCross;
+            diagAlong = along;
+            diagGate = gate;
             // The speed settings bound the whole vector (along + across + integral), not each part on its own
             double vCap = o.SpeedCap > 0 ? Math.Min(MaxSpeed, o.SpeedCap) : MaxSpeed;
+            vCap = Math.Min(vCap, laneSpeedCap);
             double dl = desired.Length();
             if (dl > vCap) desired *= vCap / dl;
             SampleSpeedLimit(profile > maxSpeed + 0.05 && gate > 0.5, maxSpeed, stopping && remaining < FINAL_LEG, finalSpeed);
@@ -2261,6 +2331,124 @@ namespace Automata.Drone
             // Anchored orders fly in the anchor's moving frame: add its velocity as feed-forward.
             return frameVel + desired - Vector3D.Cross(flightState.AngularVelocity, rWorld);
         }
+        #region Physics wake
+        // Havok puts a body that has been (nearly) still for a moment to sleep, and the game applies thruster force
+        // only to awake bodies (MyThrusterBlockThrustComponent: AddForce activeOnly). It wakes the grid itself only when
+        // an override value changes or the grid already moves - neither happens under a steady small command (settled
+        // at an approach point, after a shared-site hold, the last metres): the drone then sat still with its thrusters
+        // "on" (0.01 m/s for minutes; the push watch read it as pressed against something). Woken here every tick it
+        // asks for thrust or torque.
+        private int physicsWakes;   // per order, for the log
+
+        private void KeepPhysicsAwake()
+        {
+            bool asking = gyroOverrideActive;
+            for (int i = 0; i < 6 && !asking; i++) asking = groupThrottle[i] > 0;
+            if (!asking) return;
+            bool woke = false;
+            for (int i = -1; i < droneGrids.Count; i++)
+            {
+                var g = i < 0 ? block.CubeGrid : droneGrids[i];
+                if (g == null || g.Physics == null || g.Physics.IsActive) continue;
+                g.Physics.Activate();
+                woke = true;
+            }
+            if (woke && physicsWakes++ == 0)
+                Log.Debug("Drone {0}: grid physics asleep under thrust: woken (speed {1:F2} m/s)", Entity.EntityId, flightState.LinearVelocity.Length());
+        }
+        #endregion
+
+        #region Push watch (pressed against something)
+        // The command asks to move and the drone barely does: the hull is pressed against something (a block, terrain,
+        // another drone) - or held by a lock. Measured on the command, so it also sees the small pushes of the last
+        // metres, which the thrust-gain obstruction flag (10 % throttle and more) never does. Jobs react to it
+        // (NavigateToolTo: back out, another face).
+        private const double PUSH_MIN_SPEED = 0.2;        // m/s asked, at least
+        private const double PUSH_MOVED_SHARE = 0.25;     // moving at less than this share of it along the command
+        private const int PUSH_BLOCKED_TICKS = 4 * 60;    // for this long: blocked
+        private int pushBlockedTicks;
+        private Vector3D pushBlockedDir;                   // world: the way it pushes (and can't go)
+        private double pushAsked, pushMoved;              // m/s, last sample (stall log)
+
+        private void WatchPush(Vector3D cmdRel)
+        {
+            double c = cmdRel.Length();
+            pushAsked = c;
+            if (siteYielding || boring || c < PUSH_MIN_SPEED) { pushMoved = 0; pushBlockedTicks = 0; return; }   // bores cut their way
+            Vector3D dir = cmdRel / c;
+            pushMoved = Vector3D.Dot(flightState.RelativeVelocity, dir);
+            if (pushMoved >= c * PUSH_MOVED_SHARE) { pushBlockedTicks = 0; return; }
+            pushBlockedDir = pushBlockedTicks == 0 ? dir : Vector3D.Normalize(pushBlockedDir * 0.95 + dir * 0.05);
+            if (++pushBlockedTicks == PUSH_BLOCKED_TICKS)
+            {
+                MatrixD wm = flightState.WorldMatrix;
+                Log.Debug("Drone {0}: pressed against something: asks {1:F2} m/s (F {2:F2} U {3:F2} R {4:F2}), moves {5:F2} m/s that way for {6} s; "
+                          + "thrust obstructed {7}, gear locked {8}, connector locked {9}; {10}",
+                          Entity.EntityId, c, Vector3D.Dot(dir, wm.Forward), Vector3D.Dot(dir, wm.Up), Vector3D.Dot(dir, wm.Right), pushMoved,
+                          PUSH_BLOCKED_TICKS / 60, thrustObstructedDir >= 0 ? ((Base6Directions.Direction)thrustObstructedDir).ToString() : "no",
+                          AnyGearLocked(), DockedConnector() != null || AnyConnectorLocked(), ThrustAndContactDiag());
+            }
+        }
+
+        /// <summary>Pressed against something for PUSH_BLOCKED_TICKS (and still): 'away' the way back out (world).</summary>
+        private bool PushBlocked(out Vector3D away)
+        {
+            away = -pushBlockedDir;
+            return pushBlockedTicks >= PUSH_BLOCKED_TICKS && pushBlockedDir.LengthSquared() > 0.5;
+        }
+
+        /// <summary>
+        /// Stall / push diagnostics: per face the thrust the game actually applies (IMyThrust.CurrentThrust, N) against
+        /// the override asked, and whatever the hull box (+0.3 m) touches now. Thrust applied and no motion: something
+        /// holds the drone; no thrust applied: the game ignores the override.
+        /// </summary>
+        private string ThrustAndContactDiag()
+        {
+            var sb = new System.Text.StringBuilder("thrust applied/asked");
+            for (int d = 0; d < 6; d++)
+            {
+                double applied = 0, asked = 0;
+                var list = allThrusters[d];
+                for (int i = 0; i < list.Count; i++)
+                {
+                    var t = list[i];
+                    if (t == null || t.Closed) continue;
+                    applied += t.CurrentThrust;
+                    asked += t.ThrustOverride;
+                }
+                if (applied < 1 && asked < 1) continue;
+                sb.Append(' ').Append(((Base6Directions.Direction)d).ToString()[0]).Append(' ')
+                  .Append(DroneStatusDisplay.Force(applied).Trim()).Append('/').Append(DroneStatusDisplay.Force(asked).Trim());
+            }
+            sb.AppendFormat(", physics {0}", block.CubeGrid.Physics == null ? "none" : block.CubeGrid.Physics.IsActive ? "awake" : "asleep");
+            var pm = Pathfinding.PathfindingManager.Instance;
+            if (pm != null && localHullBox.Max.X >= localHullBox.Min.X)
+            {
+                PathQuery q;
+                BuildPathQuery(out q);
+                q.SeeAll = true;
+                var box = new MyOrientedBoundingBoxD(HullCentreWorld, localHullBox.HalfExtents + new Vector3D(0.3),
+                                                     Quaternion.CreateFromRotationMatrix(flightState.WorldMatrix));
+                pm.BeginPlan();
+                if (!pm.BoxFree(ref q, ref box) && pm.LastHitBlock != null)
+                    sb.AppendFormat(", hull (+0.3 m) touches {0} on '{1}'", pm.LastHitBlock.BlockDefinition.Id.SubtypeName, pm.LastHitBlock.CubeGrid.DisplayName);
+                else sb.Append(", hull (+0.3 m) touches nothing");
+            }
+            return sb.ToString();
+        }
+
+        private bool AnyGearLocked()
+        {
+            for (int i = 0; i < landingGears.Count; i++) if (landingGears[i].IsLocked) return true;
+            return false;
+        }
+
+        private bool AnyConnectorLocked()
+        {
+            for (int i = 0; i < connectors.Count; i++) if (connectors[i].IsConnected) return true;
+            return false;
+        }
+        #endregion
         #region Speed-limit watch
         // Share of recent flight (~30 s time constant) spent held at a speed setting: a timeout then says so (terminal,
         // LCD, broadcast controller). The settings are always obeyed, even if a task times out because of them.
@@ -2295,9 +2483,41 @@ namespace Automata.Drone
             if (nextLeg == null || o.Phase != FlightPhase.Approach || o.Behavior == WaypointBehavior.FullStop) return 0;
             double v = Math.Max(0, o.ExitSpeed);
             if (o.Behavior == WaypointBehavior.SlowApproach) v = Math.Min(v, ApproachSpeed);
+            Vector3D a, t;
+            GetLeg(o, out a, out t);
+            v = Math.Min(v, TurnPassSpeed(a, o.Target.ToVector3D(), nextLeg.Target.ToVector3D()));   // the bend into the next leg
             v = Math.Min(v, StoppableSpeed(o));
             return Math.Min(v, MaxSpeed);
         }
+
+        #region Bends: the speed a waypoint is passed at, from the drone's thrust
+        // Share of the usable acceleration (Max thrust) planned for turning: the rest holds the line and brakes
+        private const double TURN_ACCEL_SHARE = 0.5;
+        private const double TURN_MIN_DEGREES = 2;   // straighter: no limit
+
+        /// <summary>
+        /// The fastest the drone can pass 'w' coming from 'a' and going on to 'b' and still follow the bend: the bend as a
+        /// circle through the corner whose chord is the shorter leg (r = chord / (2 sin(turn / 2)): a rounded corner's
+        /// chords give its arc's radius), v = sqrt(a_side x r), a_side = TURN_ACCEL_SHARE of the usable acceleration
+        /// towards the inside of the bend. double.MaxValue for a straight pass.
+        /// </summary>
+        private double TurnPassSpeed(Vector3D a, Vector3D w, Vector3D b)
+        {
+            Vector3D din = w - a, dout = b - w;
+            double lin = din.Length(), lout = dout.Length();
+            if (lin < 1e-3 || lout < 1e-3) return double.MaxValue;
+            din /= lin;
+            dout /= lout;
+            double turn = Math.Acos(MathHelperD.Clamp(Vector3D.Dot(din, dout), -1, 1));
+            if (MathHelperD.ToDegrees(turn) < TURN_MIN_DEGREES) return double.MaxValue;
+            Vector3D inward = dout - din;
+            if (inward.LengthSquared() < 1e-9) return double.MaxValue;
+            inward.Normalize();
+            double radius = Math.Min(lin, lout) / (2 * Math.Sin(turn * 0.5));
+            double side = UsableAccel(inward) * TURN_ACCEL_SHARE;
+            return Math.Sqrt(Math.Max(0, side * radius));
+        }
+        #endregion
 
         private const int STOP_LOOKAHEAD_LEGS = 12;
         private readonly List<FlightOrder> stopChain = new List<FlightOrder>();
@@ -2323,10 +2543,11 @@ namespace Automata.Drone
                 {
                     pass = Math.Max(0, leg.ExitSpeed);
                     if (leg.Behavior == WaypointBehavior.SlowApproach) pass = Math.Min(pass, ApproachSpeed);
+                    pass = Math.Min(pass, TurnPassSpeed(from, leg.Target.ToVector3D(), stopChain[i + 1].Target.ToVector3D()));
                     pass = Math.Min(pass, vNext);
                 }
                 double cap = leg.SpeedCap > 0 ? leg.SpeedCap : MaxSpeed;
-                double brake = len > 1e-3 ? AvailableAccel(-d / len) * (ReferenceEquals(o, constructionOrder) ? JOB_BRAKE : TRANS_BRAKE) : 1;
+                double brake = len > 1e-3 ? PlanBrake(-d / len, ReferenceEquals(o, constructionOrder) ? JOB_BRAKE : TRANS_BRAKE) : 1;
                 vNext = Math.Min(cap, Math.Sqrt(pass * pass + 2 * brake * len));
             }
             stopChain.Clear();
@@ -2338,7 +2559,9 @@ namespace Automata.Drone
             double len = delta.Length();
             if (len > 1e-6)
             {
-                double maxStep = AvailableAccel(delta / len) * (overCurve ? EMERGENCY_FRACTION : ACCEL_FRACTION) / TimeUtil.TICKS_PER_SECOND;
+                // Max thrust setting: the command changes at most at the usable acceleration; over the braking curve (it would
+                // overshoot) the emergency share of what it has
+                double maxStep = (overCurve ? AvailableAccel(delta / len) * EMERGENCY_FRACTION : UsableAccel(delta / len)) / TimeUtil.TICKS_PER_SECOND;
                 if (len > maxStep) delta *= maxStep / len;
             }
             commandedVelocity += delta;
@@ -2437,7 +2660,12 @@ namespace Automata.Drone
             {
                 // Next to no effect: something is in the way (or pushing back), not a weak thruster group.
                 // Learning from this would cripple the drone for the rest of the flight.
-                if (++obstructedTicks[active] > GAIN_OBSTRUCTED_TICKS) thrustObstructedDir = active;
+                if (++obstructedTicks[active] > GAIN_OBSTRUCTED_TICKS && thrustObstructedDir != active)
+                {
+                    thrustObstructedDir = active;
+                    Log.Debug("Drone {0}: thrust obstructed: {1} group at {2:P0} throttle gives {3:F2} m/s² of the {4:F2} expected",
+                              Entity.EntityId, (Base6Directions.Direction)active, groupThrottle[active], measured, expected);
+                }
                 return;
             }
             obstructedTicks[active] = 0;
@@ -2648,6 +2876,21 @@ namespace Automata.Drone
         public const float MAX_SPEED_MIN = 0f, MAX_SPEED_MAX = 1000f;
         public const float APPROACH_SPEED_MIN = 0f, APPROACH_SPEED_MAX = 100f;
         public const float SAFE_SPEED_MIN = 0f, SAFE_SPEED_MAX = 50f;
+
+        public const float MAX_THRUST_MIN = 0f, MAX_THRUST_MAX = 100f;
+
+        public float Terminal_MaxThrustPercent
+        {
+            get { return settings != null ? settings.MaxThrustPercent : 50f; }
+            set
+            {
+                if (settings == null) return;
+                settings.MaxThrustPercent = MathHelper.Clamp(value, MAX_THRUST_MIN, MAX_THRUST_MAX);
+                SaveSettings();
+                SyncSetting(DroneSettingKey.MaxThrustPercent);
+                RefreshThrustTable();
+            }
+        }
 
         public float Terminal_MaxSpeed
         {

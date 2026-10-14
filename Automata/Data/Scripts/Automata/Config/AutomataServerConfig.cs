@@ -163,7 +163,7 @@ namespace Automata.Config
             /// <summary>
             /// A job task fails after this many seconds (navigation: this long without getting closer). Any mode.
             /// </summary>
-            public int TaskTimeoutSeconds { get; internal set; } = 30;
+            public int TaskTimeoutSeconds { get; internal set; } = 60;
             /// <summary>Combat handover: enemies the AI Defensive block reports farther than this (m) from the drone are ignored (vanilla block limit 2000; modded blocks can see further).</summary>
             public int CombatMaxDetectionRange { get; internal set; } = 2000;
             /// <summary>
@@ -196,6 +196,16 @@ namespace Automata.Config
             /// Minimum time between "Add by name" searches, per drone (seconds).
             /// </summary>
             public int ConnectorNameSearchIntervalSeconds { get; internal set; } = 10;
+            /// <summary>
+            /// Weld work sites: where the drone's bounding box doesn't fit the way in, check the drone's real shape (its
+            /// blocks, merged into a few boxes) - a welder snout reaches between built neighbours the box can't.
+            /// </summary>
+            public bool WeldUseDroneShape { get; internal set; } = true;
+            /// <summary>
+            /// Weld work sites: built blocks of the target grid in the way are checked against their real shape (rays
+            /// against the physics: slopes, panels) instead of as full cubes.
+            /// </summary>
+            public bool WeldUseNeighbourShapes { get; internal set; } = true;
         }
 
         public class ConstructionComputerConfig{
@@ -478,6 +488,14 @@ namespace Automata.Config
             Pathfinding.ArcMinDistance = MathHelper.Clamp(ini.Get("Pathfinding", "ArcMinDistance").ToDouble(Pathfinding.ArcMinDistance), 50.0, 100000.0);
             Pathfinding.ArcStep = MathHelper.Clamp(ini.Get("Pathfinding", "ArcStep").ToDouble(Pathfinding.ArcStep), 25.0, 10000.0);
             Pathfinding.CruiseAltitude = MathHelper.Clamp(ini.Get("Pathfinding", "CruiseAltitude").ToDouble(Pathfinding.CruiseAltitude), 0.0, 1000.0);
+            Pathfinding.UsePathMemory = ini.Get("Pathfinding", "UsePathMemory").ToBoolean(Pathfinding.UsePathMemory);
+            Pathfinding.PathMemoryMaxNodes = MathHelper.Clamp(ini.Get("Pathfinding", "PathMemoryMaxNodes").ToInt32(Pathfinding.PathMemoryMaxNodes), 100, 100000);
+            Pathfinding.PathMemoryMaxAgeHours = MathHelper.Clamp(ini.Get("Pathfinding", "PathMemoryMaxAgeHours").ToDouble(Pathfinding.PathMemoryMaxAgeHours), 1.0, 8760.0);
+            Pathfinding.AllowLazyTheta = ini.Get("Pathfinding", "AllowLazyTheta").ToBoolean(Pathfinding.AllowLazyTheta);
+            Pathfinding.ThetaSearchRadius = MathHelper.Clamp(ini.Get("Pathfinding", "ThetaSearchRadius").ToDouble(Pathfinding.ThetaSearchRadius), 50.0, 2000.0);
+            Pathfinding.ThetaMaxExpansions = MathHelper.Clamp(ini.Get("Pathfinding", "ThetaMaxExpansions").ToInt32(Pathfinding.ThetaMaxExpansions), 100, 100000);
+            Pathfinding.ThetaMaxMs = MathHelper.Clamp(ini.Get("Pathfinding", "ThetaMaxMs").ToDouble(Pathfinding.ThetaMaxMs), 1.0, 500.0);
+            Pathfinding.FlightLaneExpirationMinutes = MathHelper.Clamp(ini.Get("Pathfinding", "FlightLaneExpirationMinutes").ToDouble(Pathfinding.FlightLaneExpirationMinutes), 5.0, 525600.0);
             Pathfinding.ArcSag = MathHelper.Clamp(ini.Get("Pathfinding", "ArcSag").ToDouble(Pathfinding.ArcSag), 1.0, 500.0);
             Pathfinding.DockClearance = MathHelper.Clamp(ini.Get("Pathfinding", "DockClearance").ToDouble(Pathfinding.DockClearance), 0.1, 3.0);
             Pathfinding.DockClearanceMin = MathHelper.Clamp(ini.Get("Pathfinding", "DockClearanceMin").ToDouble(Pathfinding.DockClearanceMin), 0.05, 3.0);
@@ -522,6 +540,8 @@ namespace Automata.Config
             Drone.ConnectorScanRadius = MathHelper.Clamp(ini.Get("Drone", "ConnectorScanRadius").ToDouble(Drone.ConnectorScanRadius), 100.0, 5000.0);
             Drone.ConnectorNameSearchRadius = MathHelper.Clamp(ini.Get("Drone", "ConnectorNameSearchRadius").ToDouble(Drone.ConnectorNameSearchRadius), Drone.ConnectorScanRadius, 50000.0);
             Drone.ConnectorNameSearchIntervalSeconds = MathHelper.Clamp(ini.Get("Drone", "ConnectorNameSearchIntervalSeconds").ToInt32(Drone.ConnectorNameSearchIntervalSeconds), 1, 3600);
+            Drone.WeldUseDroneShape = ini.Get("Drone", "WeldUseDroneShape").ToBoolean(Drone.WeldUseDroneShape);
+            Drone.WeldUseNeighbourShapes = ini.Get("Drone", "WeldUseNeighbourShapes").ToBoolean(Drone.WeldUseNeighbourShapes);
 
             // Parse ConstructionComputer section (stand-alone drone construction)
             ConstructionComputer.DroneMaxJobsPerScan = MathHelper.Clamp(ini.Get("ConstructionComputer", "DroneMaxJobsPerScan").ToInt32(ConstructionComputer.DroneMaxJobsPerScan), 1, 1000);

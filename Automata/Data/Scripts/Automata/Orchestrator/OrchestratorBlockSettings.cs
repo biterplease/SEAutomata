@@ -30,6 +30,17 @@ namespace Automata.Orchestrator
         /// <summary>The name its logs (and other blocks' logs) show; empty: the block's name.</summary>
         [ProtoMember(12)] public string Nickname = "";
         [ProtoMember(13)] public Util.LcdStyle Lcd = new Util.LcdStyle();
+
+        // Flight lanes (TODO/20, section 6). Written by the server: the network's lanes ("number|text") and the geometry of
+        // the lane pair a player asked to see. Written by a player: one command at a time ("id|delete|7", resume, clear, draw).
+        [ProtoMember(14)] public System.Collections.Generic.List<string> Lanes = new System.Collections.Generic.List<string>();
+        [ProtoMember(15)] public string LaneCommand = "";
+        [ProtoMember(16)] public int LaneDrawNumber;
+        [ProtoMember(17)] public System.Collections.Generic.List<double> LaneDrawAB = new System.Collections.Generic.List<double>();
+        [ProtoMember(18)] public System.Collections.Generic.List<double> LaneDrawBA = new System.Collections.Generic.List<double>();
+        [ProtoMember(19)] public bool LaneDrawPending;
+        [ProtoMember(20)] public string LaneDrawNameAB = "";
+        [ProtoMember(21)] public string LaneDrawNameBA = "";
     }
 
     /// <summary>Where the parking protocol puts drones: its area first, or the orchestrator's grid. Values are saved.</summary>

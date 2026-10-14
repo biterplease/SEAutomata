@@ -93,10 +93,26 @@ namespace Automata.Drone
 
         private bool IsParkedOnGears() { return ParkMode && AnyLandingGearLocked() && !AnyConnectorsConnected(); }
 
-        /// <summary>At rest: docked at home, or (park mode) parked on its gears.</summary>
-        private bool IsAtRest() { return IsDockedAtHome() || IsParkedOnGears() || HoveringAtDeparture(); }
+        /// <summary>
+        /// No home connector and no landing gear (combat drones / scouts with a departure spot aside): it rests docked at
+        /// any free connector it fits, the nearest (GoCharge's search) - "return home" used to fail for it every time.
+        /// </summary>
+        private bool RestsAtAnyConnector
+        {
+            get { return settings != null && settings.HomeConnectorId == 0 && landingGears.Count == 0 && !ReturnsToDeparture; }
+        }
 
-        private bool IsGoingToRest { get { return IsGoingHome || parkPhase != ParkPhase.None || (goingToDeparture && activeFlightOrder != null); } }
+        /// <summary>At rest: docked at home, or (park mode) parked on its gears.</summary>
+        private bool IsAtRest() { return IsDockedAtHome() || IsParkedOnGears() || HoveringAtDeparture() || (RestsAtAnyConnector && AnyConnectorsConnected()); }
+
+        private bool IsGoingToRest
+        {
+            get
+            {
+                return IsGoingHome || parkPhase != ParkPhase.None || (goingToDeparture && activeFlightOrder != null)
+                    || (RestsAtAnyConnector && dockingHomeId != 0);   // docking at the nearest free connector to rest
+            }
+        }
 
         /// <summary>Home connector, or (park mode) a connector to refuel at when low, else a parking spot.</summary>
         private bool GoRest()
@@ -106,6 +122,7 @@ namespace Automata.Drone
             if (!ParkMode)
             {
                 if (ReturnsToDeparture) return GoDeparture();   // combat / scout, no connector, no gear: back over where it left from
+                if (RestsAtAnyConnector) return GoCharge();     // no home, no gear: the nearest free connector it fits
                 return GoHome();
             }
             if ((needsBatteryRecharge || needsHydrogenRefuel) && GoCharge()) return true;

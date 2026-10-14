@@ -23,25 +23,23 @@ namespace Automata.Config
     public class PathfindingConfig : IPathfindingConfig
     {
         /// <summary>
-        /// Sensors are simulated by making the drone aware of its surroundings within 50m of the sensor.
-        /// If this is true, and the ship has no sensor, it will not be able to detect obstacles.
-        /// Disable if your server does not allow sensors (simulation still takes place).
+        /// Sensors are simulated: a working sensor makes the drone aware of its surroundings within SimulatedSensorRange
+        /// (100 m by default). If this is true and the ship has no sensor, it detects nothing close by except what its
+        /// cameras see. Disable if your server does not allow sensors (the drone then senses all around as if it had one).
         /// </summary>
         public bool requireSensorsForPathfinding { get; internal set; } = true;
         public bool RequireSensorsForPathfinding() => requireSensorsForPathfinding;
         /// <summary>
-        /// Camera raycasting is simulated, with a range of 200m. Each drone requires 6 cameras
-        /// (one in each direction) to be able to raycast. Note that the camera raycast is never invoked,
-        /// a more efficient method is used.
-        /// Disable if you don't want cameras on drones.
+        /// Camera raycasting is simulated, with a range of CameraRange (1500 m by default) over a 90° square cone
+        /// along each working camera's facing (six cameras, one per side, cover every direction). The camera raycast
+        /// is never invoked; a more efficient method is used. Disable if you don't want cameras on drones.
         /// </summary>
         public bool requireCamerasForPathfinding { get; internal set; } = true;
         public bool RequireCamerasForPathfinding() => requireCamerasForPathfinding;
         /// <summary>
-        /// Max distance the camera raycast can go. It is adjusted for the length of the trip; the
-        /// max value will only be used in long trips.
+        /// How far a simulated camera sees (ini: CameraRange).
         /// </summary>
-        public float maxSimulatedCameraRaycastMeters { get; internal set; } = 1000.0f;
+        public float maxSimulatedCameraRaycastMeters { get; internal set; } = 1500.0f;
         public float MaxSimulatedCameraRaycastMeters() => maxSimulatedCameraRaycastMeters;
         /// <summary>
         /// This adds a small cost to pathfinding in planets, usually for longer trips. If enabled,
@@ -103,7 +101,7 @@ namespace Automata.Config
         public float RaycastCooldownSeconds() => raycastCooldownSeconds;
 
         /// <summary>m all around a drone with a working sensor (or any drone, when sensors aren't required).</summary>
-        public double SimulatedSensorRange { get; internal set; } = 50.0;
+        public double SimulatedSensorRange { get; internal set; } = 100.0;
         /// <summary>Look-ahead rays per tick shared by all drones (5 per check).</summary>
         public int RaysPerTick { get; internal set; } = 60;
         /// <summary>m kept between the hull and obstacles by route checks (ray bundle margin, turn room).</summary>
@@ -126,5 +124,21 @@ namespace Automata.Config
         /// <summary>m above the terrain long flights in gravity cruise at (routes longer than ArcMinDistance): take-off
         /// straight up to it, landing straight down from it.</summary>
         public double CruiseAltitude { get; internal set; } = 40;
+        /// <summary>Shared memory of the links drones have flown (planner stage 2), saved with the world.</summary>
+        public bool UsePathMemory { get; internal set; } = true;
+        /// <summary>Most remembered points; the least recently used go first.</summary>
+        public int PathMemoryMaxNodes { get; internal set; } = 4000;
+        /// <summary>Hours a remembered link may go unused before it is dropped.</summary>
+        public double PathMemoryMaxAgeHours { get; internal set; } = 24;
+        /// <summary>Lazy Theta* search (planner stage 3) where the straight line and the memory find nothing.</summary>
+        public bool AllowLazyTheta { get; internal set; } = true;
+        /// <summary>m: the search covers about this far around the stretch that failed.</summary>
+        public double ThetaSearchRadius { get; internal set; } = 300;
+        /// <summary>Most cells one search expands.</summary>
+        public int ThetaMaxExpansions { get; internal set; } = 3000;
+        /// <summary>Most milliseconds one search may take.</summary>
+        public double ThetaMaxMs { get; internal set; } = 15;
+        /// <summary>Minutes a flight lane may go unused before it is dropped.</summary>
+        public double FlightLaneExpirationMinutes { get; internal set; } = 240;
     }
 }

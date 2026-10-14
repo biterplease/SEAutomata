@@ -73,7 +73,7 @@ namespace Automata.Construction
                             WorkModes modes, Color grindColor, Color weldIgnoreColor, List<IMyCubeGrid> exclude, int maxJobs,
                             List<ConstructionTarget> result, Func<IMyCubeGrid, string> refuseGrid = null,
                             WorkPriority priority = WorkPriority.RepairProjectedUnbuilt, List<IMyCubeGrid> extraRoots = null,
-                            bool shares = false)
+                            bool shares = false, int predictLine = 0)
         {
             if (rootGrid == null || maxJobs <= 0) return 0;
             bool weldBuilt = (modes & (WorkModes.WeldUnfinishedBlocks | WorkModes.RepairDamagedBlocks)) != 0;
@@ -113,9 +113,11 @@ namespace Automata.Construction
             // the others; the computer publishes jobs of every kind at once. Without (stand-alone drone): strict order.
             _shares = shares;
             if (shares) SharesOf(priority, pool, _poolCap);
+            _predictProjectors.Clear();
+            _lineTaken.Clear();
             double scanStart = Util.PerfStats.Start();
             var gridText = new System.Text.StringBuilder();
-            int gridsScanned = 0, refused = 0, projectionsSeen = 0, projectionsIdle = 0, unbuildable = 0, obstructed = 0, walledIn = 0;
+            int gridsScanned = 0, refused = 0, projectionsSeen = 0, projectionsIdle = 0, unbuildable = 0, obstructed = 0, walledIn = 0, predicted = 0;
 
             for (int g = 0; g < _areaGrids.Count; g++)
             {
@@ -165,7 +167,7 @@ namespace Automata.Construction
                         if (!projector.IsWorking || !projector.IsProjecting) continue;
                         var projected = projector.ProjectedGrid;
                         if (projected == null || !projected.WorldAABB.Intersects(new BoundingSphereD(areaCenter, areaRadius))) continue;
-                        // Only blocks buildable right now are looked at (no planning ahead). The projector counts them itself
+                        // Only blocks buildable right now become targets (a plan adds the rest of their line). The projector counts them itself
                         // (CanBuild without the physics test, rechecked by the game at most every 2 s after a block is added /
                         // removed on its grid, at once on an offset change): none, the projection is ignored; else the scan
                         // stops once that many were found in the area. A count up to 2 s old: one scan finds fewer, the next
@@ -173,8 +175,10 @@ namespace Automata.Construction
                         int buildable = projector.BuildableBlocksCount;
                         if (buildable <= 0) { projectionsIdle++; continue; }
                         projectionsSeen++;
+                        if (predictLine > 0 && buildable <= PREDICT_BUILDABLE_MAX) _predictProjectors.Add(projector.EntityId);
                         _projectedBlocks.Clear();
                         CollectBlocks(projected, ref areaMatrix, ref half, _projectedBlocks);
+                        _seeds.Clear();
                         int found = 0;
                         for (int i = 0; i < _projectedBlocks.Count && found < buildable; i++)
                         {
@@ -187,12 +191,17 @@ namespace Automata.Construction
                             // Buildable right now (cell free, attached to built blocks): the cheap test first, it drops most
                             if (projector.CanBuild(b, false) != BuildCheckResult.OK) { unbuildable++; continue; }
                             found++;
+                            _seeds.Add(b);
                             PhysicalExtent(b, grid, out cell, out min, out max);
                             if (!HasFreeFace(grid, min, max, ref gravityUp)) { walledIn++; continue; }
                             // Not obstructed (physics test): only the few left
                             if (projector.CanBuild(b, true) != BuildCheckResult.OK) { obstructed++; continue; }
                             AddCandidate(b, projector, grid, Orchestrator.JobType.Weld, center, key, pool, WorkCategory.Projected);
                         }
+                        // Whole-projection build order (construction computers): planned once, extended from new seeds
+                        if (predictLine > 0 && _seeds.Count > 0)
+                            PlanProjection(projector, ref areaObb, ref areaMatrix, ref half, areaCenter, areaRadius, weldIgnoreColor, gravityUp, predictLine);
+                        _seeds.Clear();
                         _projectedBlocks.Clear();
                     }
                 }
@@ -224,6 +233,7 @@ namespace Automata.Construction
             }
             _planItems.Clear();
             _planGrids.Clear();
+            if (predictLine > 0) PlanOrder();
 
             // Weld priority: the categories in their order, each in build order (a stable pass per rank)
             // (shares: first each kind up to its part of maxJobs, then what is left in priority order)
@@ -242,16 +252,46 @@ namespace Automata.Construction
                     _outDone.Add(_planOrder[k]);
                     ConstructionTarget target;
                     Vector3D topUp = TopOf(c.Physical, gravityUp, areaMatrix.Up);
-                    if (!CreateTarget(ref c, ref areaCenter, ref gravityUp, ref topUp, out target)) { noFace++; continue; }   // no free face: unreachable
+                    // A projection down to its last one or two buildable blocks: the line of blocks they open up goes with them
+                    int line = 0;
+                    ProjectionPlan plan;
+                    bool planned = c.Projector != null && predictLine > 0 && _plans.TryGetValue(c.Projector.EntityId, out plan) && plan.Planned(c.Block);
+                    if (planned) line = PlanLine(ref c, ref areaObb, areaCenter, areaRadius, weldIgnoreColor, Math.Min(predictLine, maxJobs - count - 1));
+                    else if (c.Projector != null && _predictProjectors.Contains(c.Projector.EntityId))
+                        line = TraceLine(ref c, ref areaObb, areaCenter, areaRadius, weldIgnoreColor, Math.Min(predictLine, maxJobs - count - 1));
+                    if (!CreateTarget(ref c, ref areaCenter, ref gravityUp, ref topUp, out target, line > 0 ? _rejectLineFace : null)) { noFace++; continue; }   // no free face: unreachable
+                    int at = result.Count;
                     result.Add(target);
                     _outCount[kind]++;
                     count++;
+                    int added = 0;
+                    for (int l = 0; l < line; l++)
+                    {
+                        var lc = new Candidate { Block = _lineBest[l], Projector = c.Projector, Physical = c.Physical, Type = Orchestrator.JobType.Weld,
+                                                 Center = _lineCenters[l], SortKey = c.SortKey, Category = WorkCategory.Projected };
+                        ConstructionTarget lt;
+                        if (!CreateTarget(ref lc, ref areaCenter, ref gravityUp, ref topUp, out lt, _rejectLineFace)) break;   // no face: the line ends here
+                        lt.Predicted = true;
+                        result.Add(lt);
+                        added++;
+                        count++;
+                    }
+                    if (added > 0)
+                    {
+                        target.Line = added;
+                        result[at] = target;
+                        predicted += added;
+                        if (!planned)
+                            Log.Debug("Scan {0}: projection {1} nearly stalled: line of {2} block(s) predicted from {3} at {4}",
+                                      entityId, c.Projector.CustomName, added, target.BlockName, target.Cell);
+                    }
+                    _lineBoxes.Clear();
                 }
             _outDone.Clear();
             Log.Debug("Scan {0}: {1} grids{2}; {3} skipped; {4} projections in the area ({13} with nothing buildable, ignored); {5} candidates (pool {6}), "
-                      + "skipped: {7} walled in, {8} projected not buildable yet, {14} projected obstructed, {9} without a face; {10} targets (max {11}); {12:F2} ms",
+                      + "skipped: {7} walled in, {8} projected not buildable yet, {14} projected obstructed, {9} without a face; {10} targets (max {11}, {15} predicted); {12:F2} ms",
                       entityId, gridsScanned, gridText, refused, projectionsSeen, _candidates.Count, pool, walledIn, unbuildable, noFace,
-                      count, maxJobs, Util.PerfStats.Since(scanStart), projectionsIdle, obstructed);
+                      count, maxJobs, Util.PerfStats.Since(scanStart), projectionsIdle, obstructed, predicted);
             _planOrder.Clear();
             _candidates.Clear();
             return count;
@@ -400,7 +440,253 @@ namespace Automata.Construction
             _cellBlocks.Clear();
         }
 
-        private bool CreateTarget(ref Candidate c, ref Vector3D areaCenter, ref Vector3D gravityUp, ref Vector3D topUp, out ConstructionTarget target)
+        #region Projection plans (construction computers): the whole projection as lines, see ProjectionPlan
+        private const int PLAN_FORGET_TICKS = 2 * 60 * 60;   // a projection not scanned this long: its plan goes
+        private readonly Dictionary<long, ProjectionPlan> _plans = new Dictionary<long, ProjectionPlan>();   // by projector
+        private readonly List<IMySlimBlock> _seeds = new List<IMySlimBlock>();          // this projector, this scan: buildable now
+        private readonly List<IMySlimBlock> _planEligible = new List<IMySlimBlock>(), _planBuilt = new List<IMySlimBlock>();
+        private readonly List<long> _planForget = new List<long>();
+        private readonly List<int> _reorderAt = new List<int>(), _reorderIdx = new List<int>();
+        private readonly List<long> _reorderKey = new List<long>();
+
+        /// <summary>
+        /// The projector's plan: made when there is none or the projection / area changed (from the area's projected
+        /// blocks in _projectedBlocks), then extended from this scan's buildable blocks (_seeds) it doesn't cover yet,
+        /// nearest the area centre first.
+        /// </summary>
+        private void PlanProjection(IMyProjector projector, ref MyOrientedBoundingBoxD areaObb, ref MatrixD areaMatrix, ref Vector3D half,
+                                    Vector3D areaCenter, double areaRadius, Color weldIgnoreColor, Vector3D gravityUp, int maxLen)
+        {
+            int now = MyAPIGateway.Session.GameplayFrameCounter;
+            var projected = projector.ProjectedGrid;
+            var physical = projector.CubeGrid;
+            // Small grids plan in 3x3x3 units of the physical grid (its axes); large grids in the projected grid's cells
+            bool units = physical.GridSizeEnum == VRage.Game.MyCubeSize.Small;
+            Vector3D up = gravityUp.LengthSquared() > 0.5 ? gravityUp : areaMatrix.Up;
+            int upAxis = ProjectionPlan.UpAxisOf(units ? physical : projected, up);
+            double t = Util.PerfStats.Start();
+            // Seeds nearest the area centre first (the first also centres a new small-grid unit lattice)
+            for (int i = 1; i < _seeds.Count; i++)
+            {
+                var s = _seeds[i];
+                double d = SeedDistance(s, areaCenter);
+                int j = i;
+                while (j > 0 && SeedDistance(_seeds[j - 1], areaCenter) > d) { _seeds[j] = _seeds[j - 1]; j--; }
+                _seeds[j] = s;
+            }
+            ProjectionPlan plan;
+            bool fresh = !_plans.TryGetValue(projector.EntityId, out plan) || plan.ProjectedId != projected.EntityId
+                         || plan.Offset != projector.ProjectionOffset || plan.Rotation != projector.ProjectionRotation
+                         || plan.MaxLen != maxLen || plan.UpAxis != upAxis
+                         || Vector3D.DistanceSquared(plan.AreaCenter, areaCenter) > 1 || Vector3D.DistanceSquared(plan.AreaHalf, half) > 0.01;
+            if (fresh)
+            {
+                _planEligible.Clear();
+                _planBuilt.Clear();
+                Vector3I cell, min, max;
+                for (int i = 0; i < _projectedBlocks.Count; i++)
+                {
+                    var b = _projectedBlocks[i];
+                    if (ColorUtil.SameColor(b, weldIgnoreColor)) continue;
+                    Vector3D center;
+                    if (!IntersectsArea(b, ref areaObb, areaCenter, areaRadius, out center)) continue;
+                    PhysicalExtent(b, physical, out cell, out min, out max);
+                    (physical.CubeExists(cell) ? _planBuilt : _planEligible).Add(b);
+                }
+                Vector3I unitSeed = Vector3I.Zero;
+                if (units)
+                {
+                    Vector3I sc, smin, smax;
+                    PhysicalExtent(_seeds[0], physical, out sc, out smin, out smax);
+                    unitSeed = BuildPlanner.EnsureUnitFrame(physical, sc, up);   // the drones' unit boxes (TryUnitBox) match the plan's
+                }
+                plan = new ProjectionPlan(projector, _planEligible, _planBuilt, unitSeed)
+                {
+                    ProjectedId = projected.EntityId, Offset = projector.ProjectionOffset, Rotation = projector.ProjectionRotation,
+                    AreaCenter = areaCenter, AreaHalf = half, MaxLen = maxLen, UpAxis = upAxis,
+                };
+                _plans[projector.EntityId] = plan;
+                _planEligible.Clear();
+                _planBuilt.Clear();
+            }
+            plan.LastUsed = now;
+
+            // New seeds
+            int before = plan.PlannedCount, lines = plan.LineCount;
+            for (int i = 0; i < _seeds.Count; i++) plan.PlanFrom(_seeds[i]);
+            if (fresh || plan.PlannedCount != before)
+                Log.Debug("Scan {0}: projection {1}: plan {2}: {3} of {4} block(s) to build in {5} line(s) (+{6}; blocks per stage: {7}){9}, {8:F1} ms",
+                          entityId, projector.CustomName, fresh ? "made" : "extended", plan.PlannedCount, plan.EligibleCount, plan.LineCount,
+                          plan.LineCount - lines, plan.StageSummary(), Util.PerfStats.Since(t), units ? ", in 3x3x3 units" : "");
+
+            // Projections no longer scanned
+            _planForget.Clear();
+            foreach (var kv in _plans) if (now - kv.Value.LastUsed > PLAN_FORGET_TICKS) _planForget.Add(kv.Key);
+            for (int i = 0; i < _planForget.Count; i++) _plans.Remove(_planForget[i]);
+            _planForget.Clear();
+        }
+
+        private static double SeedDistance(IMySlimBlock b, Vector3D areaCenter)
+        {
+            return Vector3D.DistanceSquared(Vector3D.Transform((Vector3D)(b.Min + b.Max) * (b.CubeGrid.GridSize * 0.5), b.CubeGrid.WorldMatrix), areaCenter);
+        }
+
+        // Build order: the planned projected blocks take the places the planner gave them, in plan order among themselves
+        private void PlanOrder()
+        {
+            _reorderAt.Clear();
+            _reorderIdx.Clear();
+            _reorderKey.Clear();
+            for (int k = 0; k < _planOrder.Count; k++)
+            {
+                var c = _candidates[_planOrder[k]];
+                ProjectionPlan plan;
+                if (c.Projector == null || !_plans.TryGetValue(c.Projector.EntityId, out plan)) continue;
+                long key = plan.Order(c.Block);
+                if (key < 0) continue;
+                _reorderAt.Add(k);
+                int i = _reorderIdx.Count;
+                _reorderIdx.Add(_planOrder[k]);
+                _reorderKey.Add(key);
+                while (i > 0 && _reorderKey[i - 1] > key)
+                {
+                    _reorderKey[i] = _reorderKey[i - 1];
+                    _reorderIdx[i] = _reorderIdx[i - 1];
+                    i--;
+                }
+                _reorderKey[i] = key;
+                _reorderIdx[i] = _planOrder[k];
+            }
+            for (int i = 0; i < _reorderAt.Count; i++) _planOrder[_reorderAt[i]] = _reorderIdx[i];
+            _reorderAt.Clear();
+            _reorderIdx.Clear();
+            _reorderKey.Clear();
+        }
+
+        // The rest of the planned block's line (in the area, not the weld-ignore color, not in another line this scan)
+        private int PlanLine(ref Candidate seed, ref MyOrientedBoundingBoxD areaObb, Vector3D areaCenter, double areaRadius,
+                             Color weldIgnoreColor, int maxLen)
+        {
+            _lineBest.Clear();
+            _lineCenters.Clear();
+            _lineBoxes.Clear();
+            if (maxLen <= 0) return 0;
+            _line.Clear();
+            _plans[seed.Projector.EntityId].Rest(seed.Block, _line, maxLen);
+            for (int i = 0; i < _line.Count; i++)
+            {
+                var b = _line[i];
+                Vector3D center;
+                if (_lineTaken.Contains(b) || ColorUtil.SameColor(b, weldIgnoreColor) || !IntersectsArea(b, ref areaObb, areaCenter, areaRadius, out center)) break;
+                _lineBest.Add(b);
+                _lineCenters.Add(center);
+            }
+            _line.Clear();
+            return FinishLine(ref seed);
+        }
+        #endregion
+
+        #region Projection kickstart: a line of blocks ahead
+        // A projection grows from its frontier: only blocks attached to built ones can be built, so a scan finds one or two
+        // at a time and each makes a tiny job. With this few buildable, the line through one of them along a grid axis
+        // (the direction with the most blocks) goes in its job too: each block, once built, is what the next attaches to.
+        private const int PREDICT_BUILDABLE_MAX = 2;
+        private readonly HashSet<long> _predictProjectors = new HashSet<long>();   // this scan: projectors to predict for
+        private readonly HashSet<IMySlimBlock> _lineTaken = new HashSet<IMySlimBlock>();   // this scan: blocks in a line already
+        private readonly List<IMySlimBlock> _line = new List<IMySlimBlock>();
+        private readonly List<IMySlimBlock> _lineBest = new List<IMySlimBlock>();
+        private readonly List<Vector3D> _lineCenters = new List<Vector3D>(), _lineCentersTry = new List<Vector3D>();
+        private readonly List<IMySlimBlock> _lineNeighbours = new List<IMySlimBlock>();
+        private readonly List<BoundingBoxI> _lineBoxes = new List<BoundingBoxI>();   // the seed's and the line's cells, physical grid
+        private Func<Vector3I, Vector3I, bool> _rejectLineFace;
+
+        /// <summary>
+        /// From the buildable projected block 'seed': along each of the 6 axes of the projected grid, the projected blocks
+        /// in a row past it (in the area, not the weld-ignore color, cell free but not attached yet, and joined to the one
+        /// before by mount points); the longest row, at most 'maxLen', ends up in _lineBest (centres in _lineCenters).
+        /// Returns its length. _lineBoxes: the seed's and the row's cells in the projector's grid (no tool face there).
+        /// </summary>
+        private int TraceLine(ref Candidate seed, ref MyOrientedBoundingBoxD areaObb, Vector3D areaCenter, double areaRadius,
+                              Color weldIgnoreColor, int maxLen)
+        {
+            _lineBest.Clear();
+            _lineCenters.Clear();
+            _lineBoxes.Clear();
+            if (maxLen <= 0 || seed.Projector == null) return 0;
+            var projector = seed.Projector;
+            var projected = seed.Block.CubeGrid;
+            for (int dir = 0; dir < 6; dir++)
+            {
+                Vector3I d = Base6Directions.GetIntVector((Base6Directions.Direction)dir);
+                bool positive = d.X + d.Y + d.Z > 0;
+                _line.Clear();
+                _lineCentersTry.Clear();
+                var prev = seed.Block;
+                Vector3I cell = prev.Position;
+                while (_line.Count < maxLen)
+                {
+                    // The cell just past the previous block's far side, on the seed's row
+                    Vector3I far = positive ? prev.Max : prev.Min;
+                    int ahead = (far.X - cell.X) * d.X + (far.Y - cell.Y) * d.Y + (far.Z - cell.Z) * d.Z;
+                    cell += d * (ahead + 1);
+                    var next = projected.GetCubeBlock(cell);
+                    if (next == null || next == prev || _lineTaken.Contains(next)) break;
+                    if (ColorUtil.SameColor(next, weldIgnoreColor)) break;
+                    Vector3D center;
+                    if (!IntersectsArea(next, ref areaObb, areaCenter, areaRadius, out center)) break;
+                    _lineNeighbours.Clear();
+                    prev.GetNeighbours(_lineNeighbours);
+                    if (!_lineNeighbours.Contains(next)) break;   // mount points don't meet: it wouldn't attach to the one before
+                    // Free and only waiting for something to attach to (built, blocked, or buildable already: not ahead)
+                    if (projector.CanBuild(next, false) != BuildCheckResult.NotConnected) break;
+                    _line.Add(next);
+                    _lineCentersTry.Add(center);
+                    prev = next;
+                }
+                if (_line.Count > _lineBest.Count)
+                {
+                    _lineBest.Clear();
+                    _lineBest.AddRange(_line);
+                    _lineCenters.Clear();
+                    _lineCenters.AddRange(_lineCentersTry);
+                }
+            }
+            _line.Clear();
+            _lineCentersTry.Clear();
+            _lineNeighbours.Clear();
+            return FinishLine(ref seed);
+        }
+
+        // The line in _lineBest is taken: its cells (and the seed's) in _lineBoxes, for the face test. Its length.
+        private int FinishLine(ref Candidate seed)
+        {
+            if (_lineBest.Count == 0) return 0;
+            var physical = seed.Projector.CubeGrid;
+            Vector3I c0, min, max;
+            PhysicalExtent(seed.Block, physical, out c0, out min, out max);
+            _lineBoxes.Add(new BoundingBoxI(min, max));
+            for (int i = 0; i < _lineBest.Count; i++)
+            {
+                _lineTaken.Add(_lineBest[i]);
+                PhysicalExtent(_lineBest[i], physical, out c0, out min, out max);
+                _lineBoxes.Add(new BoundingBoxI(min, max));
+            }
+            if (_rejectLineFace == null) _rejectLineFace = RejectLineFace;
+            return _lineBest.Count;
+        }
+
+        // ChooseFace: no tool face looking into a cell of the line (a block built there first, or the hull in the way of the next)
+        private bool RejectLineFace(Vector3I faceCell, Vector3I normal)
+        {
+            Vector3I p = faceCell + normal;
+            for (int i = 0; i < _lineBoxes.Count; i++)
+                if (_lineBoxes[i].Contains(p) != ContainmentType.Disjoint) return true;
+            return false;
+        }
+        #endregion
+
+        private bool CreateTarget(ref Candidate c, ref Vector3D areaCenter, ref Vector3D gravityUp, ref Vector3D topUp, out ConstructionTarget target,
+                                  Func<Vector3I, Vector3I, bool> rejectFace = null)
         {
             target = default(ConstructionTarget);
             var b = c.Block;
@@ -410,7 +696,7 @@ namespace Automata.Construction
             PhysicalExtent(b, physical, out cell, out min, out max);
 
             Vector3I faceCell, normal;
-            if (!ChooseFace(physical, min, max, areaCenter, gravityUp, 1, null, out faceCell, out normal, false, null, topUp)) return false;
+            if (!ChooseFace(physical, min, max, areaCenter, gravityUp, 1, null, out faceCell, out normal, false, rejectFace, topUp)) return false;
 
             _missingCache.Clear();
             if (c.Type == Orchestrator.JobType.Weld)
@@ -1048,5 +1334,10 @@ namespace Automata.Construction
         /// from the sides (tool facing forward / back / left / right: a level drone turns about the vertical) and from
         /// below (tool facing up). Shares of 1: free outer faces of each kind, the chosen face counting double.</summary>
         public float AccessTop, AccessSide, AccessBottom;
+        /// <summary>Projections: not buildable yet, predicted to open up once the blocks before it in the scan's list are
+        /// built (a line traced from a nearly stalled projection's last buildable block).</summary>
+        public bool Predicted;
+        /// <summary>The seed of such a line: the number of predicted blocks right after it in the list.</summary>
+        public int Line;
     }
 }

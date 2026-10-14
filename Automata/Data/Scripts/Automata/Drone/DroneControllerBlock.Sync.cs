@@ -68,6 +68,7 @@ namespace Automata.Drone
         Nickname,                 // Text
         ObservationGps,           // Number: on / off, Text: "name\nx;y;z" (the GPS point, invariant culture)
         EconomyFlight,
+        MaxThrustPercent,
     }
 
     /// <summary>Things a player can order the drone to do from the terminal.</summary>
@@ -179,6 +180,7 @@ namespace Automata.Drone
                 case DroneSettingKey.Enabled:                     p.Number = s.IsEnabled ? 1 : 0; break;
                 case DroneSettingKey.OperationModeValue:          p.Number = (double)s.OperationMode; break;
                 case DroneSettingKey.MaxSpeed:                    p.Number = s.MaxSpeed; break;
+                case DroneSettingKey.MaxThrustPercent:            p.Number = s.MaxThrustPercent; break;
                 case DroneSettingKey.ApproachSpeed:               p.Number = s.ApproachSpeed; break;
                 case DroneSettingKey.SafeSpeed:                   p.Number = s.SafeSpeed; break;
                 case DroneSettingKey.MaxLoadGravity:              p.Number = s.MaxLoadGravity; break;
@@ -280,6 +282,7 @@ namespace Automata.Drone
                 case DroneSettingKey.Enabled:                     Terminal_Enabled = flag; break;
                 case DroneSettingKey.OperationModeValue:          Terminal_OperationModeValue = (long)p.Number; break;
                 case DroneSettingKey.MaxSpeed:                    Terminal_MaxSpeed = f; break;
+                case DroneSettingKey.MaxThrustPercent:            Terminal_MaxThrustPercent = f; break;
                 case DroneSettingKey.ApproachSpeed:               Terminal_ApproachSpeed = f; break;
                 case DroneSettingKey.SafeSpeed:                   Terminal_SafeSpeed = f; break;
                 case DroneSettingKey.MaxLoadGravity:              Terminal_MaxLoadGravity = f; break;

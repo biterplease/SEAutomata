@@ -69,6 +69,9 @@ Job announcements are queued (de-duplicated per announcer + job id) and auctione
   and mine are pooled too (`AssignGrind` / `AssignMine`, up to `MAX_POOLED_DRONES` 10). A job bigger than one trip of
   every drone that bid waits up to `AUCTION_POOL_TICKS` (15 s) for more bids (`BidsCoverOneTrip`), then is split over
   all usable bids, even a single block. Mining amount is an estimate: several miners, sites offset by `MINER_SPACING`.
+  Sequential weld jobs (2026-10-13, `JobAnnouncement` / `Auction.Sequential`: a construction computer's projection line, each
+  block attached to the one before): no pooling wait, and the best-ranked drone with a useful trip share gets every trip
+  (up to 64), one after another - other drones would only wait on its blocks and crowd it.
 - Bid window: server config `BidCollectionWindowTicks` (default 300 = 5 s; was the hard-coded `AUCTION_WINDOW_TICKS`).
 - `JOB_WITHDRAWN` (JobStatusReport: announcer, job, reason): an announcer takes a job back (mining order removed). The
   queue entry / running auction is dropped, the key forgotten, and a `JobAnnouncementFailed` with announcer 0 and the

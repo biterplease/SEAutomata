@@ -63,6 +63,33 @@ namespace Automata.Inventory
             return typeId != null && typeId.StartsWith(PREFIX, StringComparison.Ordinal) ? typeId.Substring(PREFIX.Length) : typeId;
         }
 
+        /// <summary>
+        /// The key's text, if this session knows it. A key read back from a save or a message is only its hash: its
+        /// text is known once something in this session computed the same string (MyStringHash.String throws otherwise).
+        /// </summary>
+        public static bool TryText(MyStringHash key, out string text)
+        {
+            try { text = key.String; return true; }
+            catch (KeyNotFoundException) { text = null; return false; }
+        }
+
+        /// <summary>The key's text for logs and displays: "#hash" for a key this session doesn't know.</summary>
+        public static string Name(MyStringHash key)
+        {
+            string text;
+            return TryText(key, out text) ? text : "#" + key.GetHashCode();
+        }
+
+        /// <summary>True when every key of 'items' is known in this session (see TryText).</summary>
+        public static bool AllKnown(DiscreteInventory items)
+        {
+            if (items == null) return true;
+            string text;
+            foreach (var item in items.GetAllItems())
+                if (!TryText(item.Key, out text)) return false;
+            return true;
+        }
+
         public static bool IsComponent(MyStringHash key)
         {
             return key.String.IndexOf('/') < 0;

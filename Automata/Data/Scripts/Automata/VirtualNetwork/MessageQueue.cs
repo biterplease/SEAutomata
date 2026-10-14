@@ -103,7 +103,7 @@ namespace Automata.VirtualNetwork
 
             public bool IsValid()
             {
-                return Antenna != null &&
+                return AntennaUtil.Alive(Antenna) &&
                        Antenna.IsFunctional &&
                        Antenna.Enabled &&
                        Antenna.EnableBroadcasting &&
@@ -116,16 +116,16 @@ namespace Automata.VirtualNetwork
                 BlockType = blockType;
                 IsStatic = isStatic;
                 Position = antenna.GetPosition();
-                TransmitRange = antenna.Radius;
+                TransmitRange = AntennaUtil.Range(antenna);
                 LastUpdate = DateTime.UtcNow;
                 Antenna = antenna;
             }
             /// <summary>Position and range as they are now (the antenna moves with its grid, the player changes its range).</summary>
             public void RefreshLive()
             {
-                if (Antenna == null || Antenna.Closed) return;
+                if (!AntennaUtil.Alive(Antenna)) return;
                 Position = Antenna.GetPosition();
-                TransmitRange = Antenna.Radius;
+                TransmitRange = AntennaUtil.Range(Antenna);
                 OwnerId = Antenna.OwnerId;
                 LastUpdate = DateTime.UtcNow;
             }
@@ -364,7 +364,7 @@ namespace Automata.VirtualNetwork
             if (Log.DebugEnabled)
                 Log.Debug("VNet: {0} {1} #{2} from {3} ({4:F0} m) to {5}: {6} recipient(s) of {7} registered ({8} other type, {9} not listening, {10} invalid, {11} not shared, {12} out of range)",
                           message.Channel, message.Payload != null ? message.Payload.GetType().Name : "null", message.MessageId, message.SenderId,
-                          senderAntenna != null ? senderAntenna.Radius : 0f, message.RecipientBlockType, validRecipients.Count, registered,
+                          senderAntenna != null ? AntennaUtil.Range(senderAntenna) : 0f, message.RecipientBlockType, validRecipients.Count, registered,
                           otherType, notListening, invalid, notShared, outOfRange);
             if (validRecipients.Count == 0)
             {
@@ -467,7 +467,7 @@ namespace Automata.VirtualNetwork
             // Use DistanceSquared to avoid sqrt
             var antennaPos = antenna.GetPosition();
             double distanceToConterPartSquared = Vector3D.DistanceSquared(antennaPos, counterPartInfo.Position);
-            double antennaRangeSquared = Math.Pow(antenna.Radius, 2);
+            double antennaRangeSquared = Math.Pow(AntennaUtil.Range(antenna), 2);
 
             if (checkBothRanges)
             {
@@ -508,7 +508,7 @@ namespace Automata.VirtualNetwork
         /// <param name="recipients"></param>
         public void GetRecipientsInRange(long senderEntityId, IMyRadioAntenna senderAntenna, List<AntennaInfo> recipients, uint userFlags = 0)
         {
-            BoundingBoxD antennaAABB = CreateSphereAABB(senderAntenna.GetPosition(), senderAntenna.Radius);
+            BoundingBoxD antennaAABB = CreateSphereAABB(senderAntenna.GetPosition(), AntennaUtil.Range(senderAntenna));
             antennaTree.OverlapAllBoundingBox(ref antennaAABB, recipients, userFlags, true);
             recipients.RemoveAll(r => r.IAIEntityId == senderEntityId);
         }
@@ -523,7 +523,7 @@ namespace Automata.VirtualNetwork
         /// <param name="callback"></param>
         public void GetRecipientsInRange(long senderEntityId, IMyRadioAntenna senderAntenna, Action<AntennaInfo> callback)
         {
-            BoundingSphereD antennaSphere = new BoundingSphereD(senderAntenna.GetPosition(), senderAntenna.Radius);
+            BoundingSphereD antennaSphere = new BoundingSphereD(senderAntenna.GetPosition(), AntennaUtil.Range(senderAntenna));
             antennaTree.OverlapAllBoundingSphere<AntennaInfo>(ref antennaSphere, recipient =>
             {
                 if (recipient.IAIEntityId != senderEntityId)
@@ -544,7 +544,7 @@ namespace Automata.VirtualNetwork
             iaiEntityIdToProxy[iaiEntityId] = proxyId;
             proxyToEntityId[proxyId] = iaiEntityId;
             Log.Debug("VNet: {0} {1} registered: antenna '{2}' ({3:F0} m){4}, {5} registered", iaiBlockType, iaiEntityId, antenna.CustomName,
-                      antenna.Radius, isStatic ? ", static" : "", iaiEntityIdToProxy.Count);
+                      AntennaUtil.Range(antenna), isStatic ? ", static" : "", iaiEntityIdToProxy.Count);
         }
 
         private bool RemoveAntennaProxy(int proxyId)
@@ -587,7 +587,7 @@ namespace Automata.VirtualNetwork
             AntennaInfo antennaInfo = antennaTree.GetUserData<AntennaInfo>(proxyId);
 
             var newPos = antenna.GetPosition();
-            var newRadius = antenna.Radius;
+            var newRadius = AntennaUtil.Range(antenna);
             var oldPos = antennaInfo.Position;
             antennaInfo.Position = newPos;
             antennaInfo.TransmitRange = newRadius;

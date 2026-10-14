@@ -67,7 +67,8 @@ namespace Automata.Drone
             get { return Automata.Config.ServerConfig.Instance.Drone.DebugDrawTimeoutSeconds * 60; }
         }
 
-        private static void RequestClientSettings()
+        /// <summary>Clients: asks the server once per session for its settings (debug draw timeout). Also /automata debugdraw.</summary>
+        internal static void RequestClientSettings()
         {
             if (IsServer || clientSettingsRequested || Net == null) return;
             clientSettingsRequested = true;

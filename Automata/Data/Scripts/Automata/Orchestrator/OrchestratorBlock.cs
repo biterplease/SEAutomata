@@ -218,7 +218,7 @@ namespace Automata.Orchestrator
         {
             base.UpdateBeforeSimulation10();
             if (!ready) return;
-            if (MyAPIGateway.Multiplayer.IsServer) UpdateAI();
+            if (MyAPIGateway.Multiplayer.IsServer) { UpdateAI(); UpdateLanes10(); }
             if (++infoCounter >= 10)
             {
                 infoCounter = 0;
@@ -461,7 +461,7 @@ namespace Automata.Orchestrator
                 {
                     if (a.Closed || !a.IsWorking || !a.EnableBroadcasting) continue;
                     if (!Drone.AnchorDirectory.IsAllowed(block.OwnerId, a.OwnerId)) continue;
-                    if (Vector3D.DistanceSquared(a.GetPosition(), position) > (double)a.Radius * a.Radius) continue;
+                    if (Vector3D.DistanceSquared(a.GetPosition(), position) > (double)AntennaUtil.Range(a) * AntennaUtil.Range(a)) continue;
                     antenna = a.CustomName;
                     break;
                 }
@@ -495,7 +495,7 @@ namespace Automata.Orchestrator
                     pendingState = null;
                 }
                 if (commissionedTicks == 0) commissionedTicks = DateTime.UtcNow.Ticks;   // new (or saved before this existed)
-                if (ownAntenna == null || now - lastCapabilities >= CAPABILITY_TICKS)
+                if (!AntennaUtil.Alive(ownAntenna) || now - lastCapabilities >= CAPABILITY_TICKS)   // removed: the next one at once
                 {
                     lastCapabilities = now;
                     FindAntenna();
@@ -601,7 +601,7 @@ namespace Automata.Orchestrator
             MyAPIGateway.GridGroups.GetGroup(block.CubeGrid, GridLinkTypeEnum.Mechanical, grids);
             for (int g = 0; g < grids.Count; g++)
                 foreach (var a in grids[g].GetFatBlocks<IMyRadioAntenna>())
-                    if (a.IsFunctional && a.Enabled && a.EnableBroadcasting && (ownAntenna == null || a.Radius > ownAntenna.Radius))
+                    if (a.IsFunctional && a.Enabled && a.EnableBroadcasting && (ownAntenna == null || AntennaUtil.Range(a) > AntennaUtil.Range(ownAntenna)))
                         ownAntenna = a;
             if (ownAntenna != before)
                 Log.Debug("Orchestrator {0}: antenna {1} ({2} grid(s) searched)", entityId,
@@ -610,7 +610,7 @@ namespace Automata.Orchestrator
 
         private bool EnsureAntenna()
         {
-            if (ownAntenna == null || ownAntenna.Closed || !ownAntenna.IsWorking || !ownAntenna.EnableBroadcasting) return false;
+            if (!AntennaUtil.Alive(ownAntenna) || !ownAntenna.IsWorking || !ownAntenna.EnableBroadcasting) return false;
             MessageQueue.AntennaInfo info;
             if (!messaging.GetAntennaInfo(entityId, out info) || info.Antenna != ownAntenna)
             {
@@ -623,7 +623,7 @@ namespace Automata.Orchestrator
                 messaging.Subscribe(entityId, Channel.TASKS_ABORTED);
                 messaging.Subscribe(entityId, Channel.JOB_WITHDRAWN);
                 messaging.Subscribe(entityId, Channel.JOB_KEEPALIVE);   // its own (player) jobs' drones
-                Log.Info("Orchestrator {0}: listening on antenna '{1}' ({2:F0} m)", entityId, ownAntenna.CustomName, ownAntenna.Radius);
+                Log.Info("Orchestrator {0}: listening on antenna '{1}' ({2:F0} m)", entityId, ownAntenna.CustomName, AntennaUtil.Range(ownAntenna));
             }
             return true;
         }
@@ -739,6 +739,7 @@ namespace Automata.Orchestrator
                 ToolFaceWeights = ja.ToolFaceWeights,
                 OnlyDroneEntityId = PlayerJobDrone(key),
                 WeldCategory = ja.Type == JobType.Weld ? ja.WeldCategory : JobTypeExtensions.WELD_ANY,
+                Sequential = ja.Sequential,
             };
             var open = new OpenAuction
             {
@@ -928,7 +929,8 @@ namespace Automata.Orchestrator
                 bool expired = now - open.Started >= AUCTION_LIFETIME_SECONDS * 60;   // frames, like the no-bid timeout
                 // Pooling: a job bigger than one trip of every drone that bid so far waits a little longer for more drones
                 int window = config != null ? config.OrchestratorServerSettings.BidCollectionWindowTicks : 300;
-                bool pooling = now - open.Started < Math.Max(AUCTION_POOL_TICKS, window) && !BidsCoverOneTrip(open);
+                // (not a sequential job: one drone does every trip anyway)
+                bool pooling = now - open.Started < Math.Max(AUCTION_POOL_TICKS, window) && !open.Auction.Sequential && !BidsCoverOneTrip(open);
                 if (now - open.Started >= window && !pooling)
                 {
                     Dictionary<long, List<Task>> assignments;
@@ -2002,7 +2004,7 @@ namespace Automata.Orchestrator
             foreach (var item in items.GetAllItems())
             {
                 if (sb.Length > 0) sb.Append(", ");
-                sb.Append(item.Value).Append(' ').Append(item.Key.String);
+                sb.Append(item.Value).Append(' ').Append(Inventory.ItemKeys.Name(item.Key));
             }
             return sb.ToString();
         }
@@ -2034,7 +2036,7 @@ namespace Automata.Orchestrator
             var sb = info;
             sb.Clear();
             sb.AppendLoc(StrInfoStatus, status).Append('\n');
-            if (ownAntenna != null) sb.AppendLoc(StrInfoAntenna, ownAntenna.CustomName, ownAntenna.Radius).Append('\n');
+            if (AntennaUtil.Alive(ownAntenna)) sb.AppendLoc(StrInfoAntenna, ownAntenna.CustomName, AntennaUtil.Range(ownAntenna)).Append('\n');
             else sb.AppendLoc(StrInfoNoAntenna).Append('\n');
             sb.AppendLoc(StrInfoQueued, jobQueue.Count, auctions.Count).Append('\n');
             sb.AppendLoc(StrInfoAssigned, assignedCount, failedCount, droppedCount).Append('\n');
@@ -2074,9 +2076,21 @@ namespace Automata.Orchestrator
             double requiredMass = (double)bidRound.TotalMass;
             if (requiredMass <= 0.0) requiredMass = (double)requiredInventory.TotalInventoryMass(AutomataSession.Instance);
 
+            // Sequential (a projection line, each block attached to the one before): more drones at once would only wait
+            // on the first one's blocks and get in its way. The best-ranked drone that takes a useful share does every trip.
+            if (bidRound.Sequential)
+            {
+                Bid only = null;
+                for (int i = 0; i < winningDrones.Count && only == null; i++)
+                    if (winningDrones[i] != null && winningDrones[i].IOLocationData != null
+                        && DroneTripShare(winningDrones[i], requiredVolume, requiredMass) >= MIN_TRIP_SHARE) only = winningDrones[i];
+                if (only == null) return assignments;
+                winningDrones = new List<Bid> { only };
+            }
+
             double remaining = 1.0;   // share of the job not assigned yet
             int droneIndex = 0;
-            int maxIterations = winningDrones.Count * 16;
+            int maxIterations = bidRound.Sequential ? 64 : winningDrones.Count * 16;
 
             while (remaining > 0.0005 && maxIterations > 0)
             {

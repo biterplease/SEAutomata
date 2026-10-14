@@ -329,6 +329,10 @@ namespace Automata.Orchestrator
         MissingEquipment,
         /// <summary>Beacon / connector / grid not found, or not the drone owner's or their faction's.</summary>
         TargetNotFound,
+        /// <summary>Weld: a projected block that can't be placed yet (nothing built it attaches to).</summary>
+        NotAttached,
+        /// <summary>Weld: the cargo has none of what the block still needs (a projected block: its first component).</summary>
+        NoPartsAboard,
     }
 
     /// <summary>

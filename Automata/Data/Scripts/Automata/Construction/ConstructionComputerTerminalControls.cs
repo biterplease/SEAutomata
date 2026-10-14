@@ -200,7 +200,7 @@ namespace Automata.Construction
             AreaOffset(2, MyStrings.OffsetForward, MyStrings.BLANK);
             Slider("ScanInterval", MyStrings.ScanInterval, MyStrings.BLANK, 10, 600, MyStrings.Seconds,
                    l => l.Terminal_ScanInterval, (l, v) => l.Terminal_ScanInterval = (int)v);
-            Slider("BlocksPerJob", MyStrings.BlocksPerJob, MyStrings.BLANK, 1, 50, MyStringId.NullOrEmpty,
+            Slider("BlocksPerJob", MyStrings.BlocksPerJob, MyStrings.BLANK, 1, 100, MyStringId.NullOrEmpty,
                    l => l.Terminal_BlocksPerJob, (l, v) => l.Terminal_BlocksPerJob = (int)v);
             NicknameControl.Add<IMyProgrammableBlock, ConstructionComputerBlock>(IdPrefix + "Nick", GetBlock, l => l.Nickname, (l, v) => l.Terminal_Nickname = v);
             LcdTagControl.Add(IdPrefix + "LcdTag", GetBlock, l => l.Terminal_LcdTag, (l, v) => l.Terminal_LcdTag = v, "[ConstructionComputer]");

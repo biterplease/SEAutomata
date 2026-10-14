@@ -24,7 +24,7 @@ namespace Automata.Drone
     {
         private static readonly MyStringId StrNoRouteRepositioning = MyStringId.GetOrCompute("No route: repositioning {0:F0} m and planning again ({1}/{2})");
         private static readonly MyStringId StrNoRouteAfterRepositions = MyStringId.GetOrCompute("no route after {0} repositions");
-        private static readonly MyStringId StrDroneNoRouteStopped = MyStringId.GetOrCompute("Drone {0}: no route after {1} repositions, stopped. Stop or Go home to resume.");
+        private static readonly MyStringId StrDroneNoRouteStopped = MyStringId.GetOrCompute("Drone {0}: no route after {1} repositions, stopped; trying again in {2} s.");
 
         private const int RECOVER_MAX = 3;
         private const double RECOVER_EXCLUDE_MIN = 10;   // m: no spot this close to a place already tried from (or the hull radius x 1.5)
@@ -39,6 +39,12 @@ namespace Automata.Drone
         private double recoverArrive;
         private string routeErrorPending;                // repositions used up: error state at the next update
         private bool routeError;                         // in State.Error for want of a route (kept until Stop / Go home / recall)
+        private bool routeErrorByDrone;                  // ...because other drones were in the way: tried again by itself
+        private int routeErrorFrame;
+        #region Timing
+        private const int ROUTE_ERROR_DRONE_RETRY_TICKS = 5 * 60;    // in error because of drones in the way: free again after this
+        private const int ROUTE_ERROR_RETRY_TICKS = 15 * 60;         // any other route error: tried again after this (was: until a player acted)
+        #endregion
 
         private void RecoverSucceeded()
         {
@@ -69,6 +75,7 @@ namespace Automata.Drone
             if (recoverAttempts >= RECOVER_MAX)
             {
                 routeErrorPending = Loc.F(StrNoRouteAfterRepositions, RECOVER_MAX);
+                routeErrorByDrone = IsOtherDrone(pm.LastBlocker);
                 return false;
             }
             if (recoverAttempts == 0) recoverVisited.Clear();
@@ -106,6 +113,7 @@ namespace Automata.Drone
             }
             recoverCandidates.Clear();
             routeErrorPending = Loc.F(StrNoRouteAfterRepositions, recoverAttempts);   // nowhere left to go
+            routeErrorByDrone = IsOtherDrone(pm.LastBlocker);
             return false;
         }
 
@@ -143,6 +151,16 @@ namespace Automata.Drone
         /// <summary>UpdateBeforeSimulation10, AI on: at the reposition spot, plan again; repositions used up: error.</summary>
         private void UpdateRecovery10()
         {
+            // Stopped because other drones were in the way: they move on, so it doesn't wait for a player. A drone in
+            // error holds still where it is, often where the others need to pass: it is free again after a while (no job:
+            // it bids, goes home, clears its cargo...), and plans with the traffic as it is then
+            if (routeError && currentState == State.Error
+                && Sandbox.ModAPI.MyAPIGateway.Session.GameplayFrameCounter - routeErrorFrame > RouteRetryTicks)
+            {
+                Log.Debug("Drone {0}: stopped for want of a route{1}: trying again", Entity.EntityId, routeErrorByDrone ? " because of other drones" : "");
+                ClearRouteError();
+                return;
+            }
             if (routeErrorPending != null)
             {
                 string why = routeErrorPending;
@@ -160,16 +178,20 @@ namespace Automata.Drone
             if (!Replan()) RouteStopped(Loc.T(StrNoRouteAheadStopped));
         }
 
+        private int RouteRetryTicks { get { return routeErrorByDrone ? ROUTE_ERROR_DRONE_RETRY_TICKS : ROUTE_ERROR_RETRY_TICKS; } }
+
         private void EnterRouteError(string why)
         {
             if (currentState == State.Error) return;
             routeError = true;
+            routeErrorFrame = Sandbox.ModAPI.MyAPIGateway.Session.GameplayFrameCounter;
+            why += (routeErrorByDrone ? " (other drones in the way" : " (") + (routeErrorByDrone ? ": " : "") + "trying again in " + RouteRetryTicks / 60 + " s)";
             recoverReplanPending = false;
             recoverAttempts = 0;
             recoverVisited.Clear();
             errorReason = why;
             Report(StrERRORStopped, why);
-            Broadcast(Loc.F(StrDroneNoRouteStopped, Nicknames.Of(Entity), RECOVER_MAX));
+            Broadcast(Loc.F(StrDroneNoRouteStopped, Nicknames.Of(Entity), RECOVER_MAX, RouteRetryTicks / 60));
             StopJob(why);
             ClearFlightOrder();
             ClearAllThrustOverrides();
@@ -187,6 +209,7 @@ namespace Automata.Drone
             routeErrorPending = null;
             if (!routeError) return;
             routeError = false;
+            routeErrorByDrone = false;
             errorReason = null;
             if (currentState == State.Error) SetState(IsParkedNow() ? State.Docked : State.Standby);
             UpdateAlert();

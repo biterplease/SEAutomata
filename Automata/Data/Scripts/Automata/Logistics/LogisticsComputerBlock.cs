@@ -370,7 +370,7 @@ namespace Automata.Logistics
                     var radio = fat as IMyRadioAntenna;
                     if (radio != null)
                     {
-                        if (radio.Enabled && radio.EnableBroadcasting && (antenna == null || radio.Radius > antenna.Radius)) antenna = radio;
+                        if (radio.Enabled && radio.EnableBroadcasting && (antenna == null || AntennaUtil.Range(radio) > AntennaUtil.Range(antenna))) antenna = radio;
                         continue;
                     }
                     var connector = fat as IMyShipConnector;
@@ -483,7 +483,7 @@ namespace Automata.Logistics
 
         private bool EnsureAntenna()
         {
-            if (antenna == null || antenna.Closed || !antenna.IsWorking || !antenna.EnableBroadcasting) return false;
+            if (!AntennaUtil.Alive(antenna) || !antenna.IsWorking || !antenna.EnableBroadcasting) return false;
             MessageQueue.AntennaInfo antennaInfo;
             if (!messaging.GetAntennaInfo(entityId, out antennaInfo) || antennaInfo.Antenna != antenna)
             {
@@ -495,7 +495,7 @@ namespace Automata.Logistics
                 messaging.Subscribe(entityId, Channel.TASKS_COMPLETED);
                 messaging.Subscribe(entityId, Channel.TASKS_ABORTED);
                 messaging.Subscribe(entityId, Channel.JOB_KEEPALIVE);
-                Log.Info("LC {0}: on the virtual network through antenna '{1}' ({2:F0} m)", entityId, antenna.CustomName, antenna.Radius);
+                Log.Info("LC {0}: on the virtual network through antenna '{1}' ({2:F0} m)", entityId, antenna.CustomName, AntennaUtil.Range(antenna));
             }
             return true;
         }
@@ -538,7 +538,9 @@ namespace Automata.Logistics
         #region Request / Push
         private void CheckQuotas(int now)
         {
-            var have = primary.GetCurrentInventory();
+            // Quotas count everything the network holds (ice in its generators, uranium in its reactors too); supply
+            // bids only what a drone may take (GetCurrentInventory)
+            var have = primary.GetHeldInventory();
             if (Has(OperationMode.Request) && minimums.Count > 0)
             {
                 var missing = new DiscreteInventory();
@@ -751,7 +753,8 @@ namespace Automata.Logistics
         private DiscreteInventory SupplyFrom(int n, DiscreteInventory wanted, out bool all)
         {
             var network = networks[n];
-            var have = network.GetCurrentInventory();
+            var have = network.GetCurrentInventory();   // what a drone may take
+            var held = network.GetHeldInventory();      // all of it (the minimum quota counts this)
             var supply = new DiscreteInventory();
             all = true;
             kv.Clear();
@@ -760,7 +763,8 @@ namespace Automata.Logistics
             {
                 int keep = 0;
                 if (network == primary) minimums.TryGetValue(kv[i].Key, out keep);
-                int spare = have.GetItemCount(kv[i].Key) - keep - Promised(kv[i].Key, networkKeys[n]);
+                // Above the minimum (counted on everything held) and within what may be taken
+                int spare = Math.Min(have.GetItemCount(kv[i].Key), held.GetItemCount(kv[i].Key) - keep) - Promised(kv[i].Key, networkKeys[n]);
                 int give = Math.Min(kv[i].Value, Math.Max(0, spare));
                 if (give < kv[i].Value) all = false;
                 if (give > 0) supply.AddItem(kv[i].Key, give);
@@ -888,7 +892,7 @@ namespace Automata.Logistics
         private bool WantsOre(DiscreteInventory ores)
         {
             if (primary == null) return false;
-            var have = primary.GetCurrentInventory();
+            var have = primary.GetHeldInventory();
             kv.Clear();
             ores.GetAllItems(kv);
             bool wants = true;
@@ -911,7 +915,7 @@ namespace Automata.Logistics
             all = true;
             double room = (double)network.GetRemainingCargoVolume() - PromisedVolume(networkKeys[n]);
             if (room <= 0) { all = false; return null; }
-            var have = network.GetCurrentInventory();
+            var have = network.GetHeldInventory();
             var accept = new DiscreteInventory();
             var lookup = AutomataSession.componentLookup;
             kv.Clear();
@@ -1150,7 +1154,7 @@ namespace Automata.Logistics
             foreach (var item in items.GetAllItems())
             {
                 if (sb.Length > 0) sb.Append(", ");
-                sb.Append(item.Value).Append(' ').Append(item.Key.String);
+                sb.Append(item.Value).Append(' ').Append(Inventory.ItemKeys.Name(item.Key));
             }
             return sb.ToString();
         }
@@ -1180,7 +1184,7 @@ namespace Automata.Logistics
             info.Append('\n');
             info.AppendLoc(StrInfoNetworks, networks.Count).Append('\n');
             for (int i = 0; i < networks.Count; i++) info.Append(" ").Append(DescribeNetwork(i)).Append('\n');
-            var have = primary != null ? primary.GetCurrentInventory() : null;
+            var have = primary != null ? primary.GetHeldInventory() : null;
             foreach (var m in minimums)
                 info.AppendLoc(StrInfoMin, Nicknames.Item(m.Key), m.Value, have != null ? have.GetItemCount(m.Key) : 0).Append('\n');
             foreach (var m in maximums)
@@ -1493,7 +1497,7 @@ namespace Automata.Logistics
             var all = new DiscreteInventory();
             for (int i = 0; i < networks.Count; i++)
             {
-                var inv = networks[i].GetCurrentInventory();
+                var inv = networks[i].GetHeldInventory();
                 if (inv != null) all.AddItems(inv);
             }
             headerItems.Clear();

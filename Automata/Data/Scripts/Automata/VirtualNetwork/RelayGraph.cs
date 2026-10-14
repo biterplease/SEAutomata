@@ -7,6 +7,7 @@ using VRage.ModAPI;
 using VRageMath;
 
 using Automata.Util.Logging;
+using Automata.Util;
 
 namespace Automata.VirtualNetwork
 {
@@ -143,7 +144,7 @@ namespace Automata.VirtualNetwork
                     {
                         var ra = ni.Radios[a];
                         Vector3D pa = ra.GetPosition();
-                        double r2 = (double)ra.Radius * ra.Radius;
+                        double r2 = (double)AntennaUtil.Range(ra) * AntennaUtil.Range(ra);
                         for (int b = 0; b < nj.Radios.Count; b++)
                         {
                             var rb = nj.Radios[b];
@@ -256,7 +257,7 @@ namespace Automata.VirtualNetwork
                 {
                     var r = n.Radios[a];
                     if (!Drone.AnchorDirectory.IsAllowed(owner, r.OwnerId)) continue;
-                    if (Vector3D.DistanceSquared(r.GetPosition(), position) > (double)r.Radius * r.Radius) continue;
+                    if (Vector3D.DistanceSquared(r.GetPosition(), position) > (double)AntennaUtil.Range(r) * AntennaUtil.Range(r)) continue;
                     if (i != target && !ReachSet(i, owner).Contains(target)) continue;
                     via = string.Format("'{0}' on '{1}'", r.CustomName, n.Name);
                     return true;

@@ -199,6 +199,9 @@ namespace Automata.VirtualNetwork
         [ProtoMember(18)] public List<float> ToolFaceWeights;
         /// <summary>Weld jobs: which weld (JobTypeExtensions.WELD_*: repair, projected, unbuilt; 0 unknown). Welder profiles rank by it.</summary>
         [ProtoMember(19)] public byte WeldCategory;
+        /// <summary>The blocks are built one after another (a projection line: each attaches to the one before): every
+        /// trip goes to one drone, in turn, instead of several drones at once.</summary>
+        [ProtoMember(20)] public bool Sequential;
 
         /// <summary>Summary fields from the job's first work site and total inventory.</summary>
         public static JobAnnouncement FromJob(Orchestrator.Job job, AutomataEntityType entityType, bool isStaticGrid)
@@ -277,6 +280,8 @@ namespace Automata.VirtualNetwork
         [ProtoMember(22)] public long OnlyDroneEntityId;
         /// <summary>Weld jobs: which weld (JobTypeExtensions.WELD_*; 0 unknown).</summary>
         [ProtoMember(23)] public byte WeldCategory;
+        /// <summary>See JobAnnouncement.Sequential.</summary>
+        [ProtoMember(24)] public bool Sequential;
     }
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class Bid : IMessagePayload

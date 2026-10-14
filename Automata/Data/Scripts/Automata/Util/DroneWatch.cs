@@ -17,6 +17,7 @@ namespace Automata.Util
     public sealed class DroneWatch
     {
         private static readonly MyStringId StrNotHeard = MyStringId.GetOrCompute("Drone {0} has not been heard of for {1}s!");
+        private static readonly MyStringId StrLostInLane = MyStringId.GetOrCompute("{0}: lost in lane {1}");
         private static readonly MyStringId StrHeardAgain = MyStringId.GetOrCompute("Drone {0} heard again");
 
         public const int SILENT_TICKS = 60 * 60;
@@ -64,7 +65,10 @@ namespace Automata.Util
                 if (silent > FORGET_TICKS) { scratch.Add(kv.Key); continue; }
                 if (e.Warned || silent < SILENT_TICKS) continue;
                 e.Warned = true;
-                string text = Loc.F(StrNotHeard, Nicknames.Of(kv.Key), SILENT_TICKS / 60);
+                // Last seen flying a lane: said so (and the lane is suspended)
+                var lanes = Pathfinding.PathfindingManager.Instance != null ? Pathfinding.PathfindingManager.Instance.Lanes : null;
+                string lane = lanes != null ? lanes.Lost(kv.Key, now) : null;
+                string text = lane != null ? Loc.F(StrLostInLane, Nicknames.Of(kv.Key), lane) : Loc.F(StrNotHeard, Nicknames.Of(kv.Key), SILENT_TICKS / 60);
                 string via = "broadcast off";
                 bool sent = broadcast && block != null && BroadcastControllerSender.Send(block, text, out via);
                 Log.Info(logPrefix + ": {1} (job {2}){3}", blockId, text, e.JobId, sent ? ", broadcast via " + via : " (" + via + ")");

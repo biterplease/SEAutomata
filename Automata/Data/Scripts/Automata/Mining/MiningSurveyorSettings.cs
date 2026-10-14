@@ -30,6 +30,8 @@ namespace Automata.Mining
         [ProtoMember(10)] public int RetryRequest;
         /// <summary>"Show known deposits" (terminal): bumped by the button, the server acts on a change.</summary>
         [ProtoMember(11)] public int ShowDepositsRequest;
+        /// <summary>"Delete known deposits" (terminal): bumped by the button, the server acts on a change.</summary>
+        [ProtoMember(14)] public int DeleteDepositsRequest;
         /// <summary>The name its logs (and other blocks' logs) show; empty: the block's name.</summary>
         [ProtoMember(12)] public string Nickname = "";
         [ProtoMember(13)] public Util.LcdStyle Lcd = new Util.LcdStyle();

@@ -119,6 +119,36 @@ namespace Automata.Construction
         }
 
         /// <summary>
+        /// Small grids: the seed cell of the weld frame's unit alignment (units are the 3x3x3 boxes centred on seed + 3k).
+        /// No frame yet (no scan of built blocks): one is made from 'seed' and 'top' (world up), so the projection plan's
+        /// units, the planner's later scans and the drones' unit work sites (TryUnitBox) all use the same boxes.
+        /// </summary>
+        public static Vector3I EnsureUnitFrame(IMyCubeGrid grid, Vector3I seed, Vector3D top)
+        {
+            int now = MyAPIGateway.Session != null ? MyAPIGateway.Session.GameplayFrameCounter : 0;
+            long key = FrameKey(grid.EntityId, false);
+            Frame f;
+            if (frames.TryGetValue(key, out f) && now - f.LastUsed < FRAME_KEEP_TICKS && f.Side == 3)
+            {
+                f.LastUsed = now;
+                frames[key] = f;
+                return f.Seed;
+            }
+            Vector3D t = Vector3D.TransformNormal(top, grid.WorldMatrixNormalizedInv);
+            int v = Math.Abs(t.X) >= Math.Abs(t.Y) && Math.Abs(t.X) >= Math.Abs(t.Z) ? 0 : Math.Abs(t.Y) >= Math.Abs(t.Z) ? 1 : 2;
+            int h1 = v == 0 ? 1 : 0, h2 = v == 2 ? 1 : 2;
+            frames[key] = new Frame { VAxis = v, VSign = Get(t, v) >= 0 ? 1 : -1, LAxis = h1, SAxis = h2, Side = 3, Seed = seed, LastUsed = now };
+            return seed;
+        }
+
+        /// <summary>Small grids: the unit (lattice coordinates) of 'cell' in the alignment of 'seed' (EnsureUnitFrame).</summary>
+        public static Vector3I UnitOf(Vector3I cell, Vector3I seed)
+        {
+            Vector3I r = cell - seed;
+            return new Vector3I(FloorDiv(r.X + 1, 3), FloorDiv(r.Y + 1, 3), FloorDiv(r.Z + 1, 3));
+        }
+
+        /// <summary>
         /// The work unit (cells, inclusive) 'cell' of 'grid' belongs to in the weld frame the last scan of that grid used;
         /// false when there is none (no scan yet, or a large grid: units are single cells there).
         /// </summary>
