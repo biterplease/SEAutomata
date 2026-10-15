@@ -317,12 +317,14 @@ namespace Automata.Drone
             "Name",
             "ShowOnHUD",
             "CustomData",
+            "Control",
         };
         private static readonly HashSet<string> defaultActionIdsToKeep = new HashSet<string>
         {
             "ShowOnHUD",
             "ShowOnHUD_On",
             "ShowOnHUD_Off",
+            "Control",
         };
         private static readonly HashSet<string> defaultExplicitRemoveControls = new HashSet<string>
         {
@@ -857,6 +859,19 @@ namespace Automata.Drone
                 c.Getter = (b) => GetBlock(b)?.Terminal_TaskTimeoutSeconds ?? 30f;
                 c.Setter = (b, v) => { var l = GetBlock(b); if (l != null) l.Terminal_TaskTimeoutSeconds = v; };
                 c.Writer = (b, sb) => { var l = GetBlock(b); if (l != null) sb.AppendLoc(MyStrings.Seconds, (int)l.Terminal_TaskTimeoutSeconds); };
+                c.SupportsMultipleBlocks = true;
+                MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+            }
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSlider, IMyRemoteControl>(IdPrefix + "Slider_LocalJobRadius");
+                c.Title = MyStrings.LocalJobRadius;
+                c.Tooltip = MyStrings.LocalJobRadiusTip;
+                c.Visible = CustomVisibleCondition;
+                c.Enabled = JobsCondition;
+                c.SetLimits(DroneControllerBlock.LOCAL_JOB_RADIUS_MIN, DroneControllerBlock.LOCAL_JOB_RADIUS_MAX);
+                c.Getter = (b) => GetBlock(b)?.Terminal_LocalJobRadius ?? 15000f;
+                c.Setter = (b, v) => { var l = GetBlock(b); if (l != null) l.Terminal_LocalJobRadius = v; };
+                c.Writer = (b, sb) => { var l = GetBlock(b); if (l != null) sb.AppendLoc(MyStrings.Metres, l.Terminal_LocalJobRadius.ToString("F0")); };
                 c.SupportsMultipleBlocks = true;
                 MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
             }

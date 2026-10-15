@@ -33,3 +33,7 @@ Because the `MessageQueue` runs in real-time, it must stay in sync across all cl
   auction.
 - Removed unused config keys: `[MessageQueue] SchedulerMessageThrottlingTicks`, `DroneMessageThrottlingTicks`
   (never read; drones / computers read their channels every update).
+
+## Relay graph and laser antennas (2026-10-14)
+- `RelayGraph`: nodes are logical grid groups with a working broadcasting radio antenna or a connected laser antenna; radio edges by range (directed), laser edges both ways at any distance. A laser edge needs the game's own link (`IMyLaserAntenna.Other`, set while Connected; the target coordinates only when neither end reports it) and owners allowed for each other. Messages beyond the sender's radio range go out when the relay graph reaches the recipient (`MessageQueue.IsInCommunicationRange`); a player is covered by any of their radio antennas whose node reaches the base. Log: "VNet relay: N node(s), M edge(s), L connected laser antenna(s), E laser edge(s)".
+- Limitation: every Automata block registers through a working, broadcasting **radio** antenna on its own mechanical group; a base with only a laser antenna can relay for others but its blocks are not on the network.

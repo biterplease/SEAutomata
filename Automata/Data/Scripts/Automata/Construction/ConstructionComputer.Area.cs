@@ -118,6 +118,7 @@ namespace Automata.Construction
             double scanStart = Util.PerfStats.Start();
             var gridText = new System.Text.StringBuilder();
             int gridsScanned = 0, refused = 0, projectionsSeen = 0, projectionsIdle = 0, unbuildable = 0, obstructed = 0, walledIn = 0, predicted = 0;
+            _weldThroughCount = 0;
 
             for (int g = 0; g < _areaGrids.Count; g++)
             {
@@ -153,7 +154,8 @@ namespace Automata.Construction
                         double key = SortKeyOf(center, ref areaCenter, ref areaInv, WorkPriorities.Rank(priority, category));
                         if (!WouldKeep(key, category, pool)) continue;
                         // Walled in (inside a solid chunk): unreachable, and must not take a slot
-                        if (!HasFreeFace(grid, b.Min, b.Max, ref gravityUp)) { walledIn++; continue; }
+                        if (!HasFreeFace(grid, b.Min, b.Max, ref gravityUp)
+                            && (type != Orchestrator.JobType.Weld || !HasWeldThroughFace(grid, b.Min, b.Max, ref gravityUp))) { walledIn++; continue; }
                         AddCandidate(b, null, grid, type, center, key, pool, category);
                     }
                     _areaBlocks.Clear();
@@ -193,7 +195,7 @@ namespace Automata.Construction
                             found++;
                             _seeds.Add(b);
                             PhysicalExtent(b, grid, out cell, out min, out max);
-                            if (!HasFreeFace(grid, min, max, ref gravityUp)) { walledIn++; continue; }
+                            if (!HasFreeFace(grid, min, max, ref gravityUp) && !HasWeldThroughFace(grid, min, max, ref gravityUp)) { walledIn++; continue; }
                             // Not obstructed (physics test): only the few left
                             if (projector.CanBuild(b, true) != BuildCheckResult.OK) { obstructed++; continue; }
                             AddCandidate(b, projector, grid, Orchestrator.JobType.Weld, center, key, pool, WorkCategory.Projected);
@@ -289,9 +291,9 @@ namespace Automata.Construction
                 }
             _outDone.Clear();
             Log.Debug("Scan {0}: {1} grids{2}; {3} skipped; {4} projections in the area ({13} with nothing buildable, ignored); {5} candidates (pool {6}), "
-                      + "skipped: {7} walled in, {8} projected not buildable yet, {14} projected obstructed, {9} without a face; {10} targets (max {11}, {15} predicted); {12:F2} ms",
+                      + "skipped: {7} walled in, {8} projected not buildable yet, {14} projected obstructed, {9} without a face; {10} targets (max {11}, {15} predicted, {16} welded through a neighbour); {12:F2} ms",
                       entityId, gridsScanned, gridText, refused, projectionsSeen, _candidates.Count, pool, walledIn, unbuildable, noFace,
-                      count, maxJobs, Util.PerfStats.Since(scanStart), projectionsIdle, obstructed, predicted);
+                      count, maxJobs, Util.PerfStats.Since(scanStart), projectionsIdle, obstructed, predicted, _weldThroughCount);
             _planOrder.Clear();
             _candidates.Clear();
             return count;
@@ -696,7 +698,14 @@ namespace Automata.Construction
             PhysicalExtent(b, physical, out cell, out min, out max);
 
             Vector3I faceCell, normal;
-            if (!ChooseFace(physical, min, max, areaCenter, gravityUp, 1, null, out faceCell, out normal, false, rejectFace, topUp)) return false;
+            if (!ChooseFace(physical, min, max, areaCenter, gravityUp, 1, null, out faceCell, out normal, false, rejectFace, topUp))
+            {
+                // Covered all round: a face past a neighbour the welder reaches through (WeldThrough)
+                if (c.Type != Orchestrator.JobType.Weld
+                    || !ChooseFace(physical, min, max, areaCenter, gravityUp, 1, null, out faceCell, out normal, false, rejectFace, topUp,
+                                   (fc, fn) => WeldThroughFace(physical, fc, fn))) return false;
+                _weldThroughCount++;
+            }
 
             _missingCache.Clear();
             if (c.Type == Orchestrator.JobType.Weld)
@@ -948,13 +957,14 @@ namespace Automata.Construction
         /// <param name="normal">Unit axis of 'grid', pointing out of the face towards the tool.</param>
         /// <param name="lineMustBeClear">Faces with a built block anywhere on the line out ('clearCells') don't count.</param>
         /// <param name="reject">Faces (cell, normal) the caller rules out.</param>
+        /// <param name="passable">Covered faces (cell, normal) that count anyway: the tool works through what covers them.</param>
         private const double TOP_FACE_WEIGHT = 2.0;
         private const double BOTTOM_FACE_PENALTY = 1.5;   // the underside only when no other face does
 
         public static bool ChooseFace(IMyCubeGrid grid, Vector3I min, Vector3I max, Vector3D areaCenter, Vector3D gravityUp,
                                       int clearCells, Func<Vector3D, double> extraCost, out Vector3I faceCell, out Vector3I normal,
                                       bool lineMustBeClear = false, Func<Vector3I, Vector3I, bool> reject = null,
-                                      Vector3D topUp = default(Vector3D))
+                                      Vector3D topUp = default(Vector3D), Func<Vector3I, Vector3I, bool> passable = null)
         {
             faceCell = min;
             normal = Vector3I.Zero;
@@ -1007,7 +1017,8 @@ namespace Automata.Construction
                     for (c.Y = lo.Y; c.Y <= hi.Y; c.Y++)
                         for (c.Z = lo.Z; c.Z <= hi.Z; c.Z++)
                         {
-                            if (grid.CubeExists(c + d)) continue;               // covered: not a face
+                            // Covered: not a face - unless the caller lets the tool work through what covers it (WeldThrough)
+                            if (grid.CubeExists(c + d) && (passable == null || !passable(c, d))) continue;
                             if (reject != null && reject(c, d)) continue;       // ruled out by the caller (e.g. another grid in front)
                             double score = sideScore;
                             bool lineBlocked = false;

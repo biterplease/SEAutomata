@@ -68,6 +68,9 @@ namespace Automata.Drone
         private const double ECO_BURST_ON = 2;           // m: slack (distance to the handover point less the stopping distance) below which the brake fires...
         private const double ECO_BURST_OFF = 20;         // ...and above which it stops: it arrives within this of the handover point
         private const double ECO_BURST_ACCEL = 0.95;     // share of the group's full acceleration the stopping distance is figured with
+        private const int ECO_REST_TICKS = 10;           // coasting, pointed and still: the flight tick runs once per this many ticks
+        private const double ECO_REST_ALIGN = 0.035;     // rad (~2°): pointed enough to rest
+        private const double ECO_REST_SPIN = 0.01;       // rad/s: still enough to rest
 
         private FlightOrder ecoOrder;
         private EcoPhase ecoPhase;
@@ -90,6 +93,9 @@ namespace Automata.Drone
         private double ecoTilt;                          // rad: the tilt limit of this flight
         private Vector3D ecoThrust;                      // N: the thrust vector wanted this tick (gravity)
         private int ecoLostTicks;
+        private FlightOrder ecoRestOrder;                // coasting: the order whose flight tick rests...
+        private int ecoRestUntil;                        // ...until this frame (EcoMaybeRest)
+        private bool flightTickSkipped;                  // ticks were skipped (coast rest, dampener hold): per-tick differences restart
 
         // Economy flight owns the thrusters from the first burn to the handover: no replan may cut in
         private bool EconomyFlying()
@@ -429,6 +435,37 @@ namespace Automata.Drone
         private bool EconomyHoldsRoute()
         {
             return EconomyFlying() && (ecoPhase == EcoPhase.Flip || ecoPhase == EcoPhase.Brake || ecoPhase == EcoPhase.Trim);
+        }
+
+        /// <summary>
+        /// Coasting needs nothing every tick (thrusters at zero, the attitude held): after a coast tick, the flight tick
+        /// rests for ECO_REST_TICKS when the drone is pointed and still and nothing can come due before the next look (flip,
+        /// the check before it, handover: two rests' travel of margin). The gyros hold the attitude meanwhile (zero rates,
+        /// override on). A new order (replan), another phase, the AI off or an error end the rest at once (EcoResting); the
+        /// course check (NeedsTrim) runs on each coast tick, at most ECO_REST_TICKS apart.
+        /// </summary>
+        private void EcoMaybeRest(FlightOrder o, double orientationError)
+        {
+            if (ecoPhase != EcoPhase.Coast || !ReferenceEquals(ecoOrder, o)) return;
+            if (orientationError > ECO_REST_ALIGN || flightState.AngularVelocity.LengthSquared() > ECO_REST_SPIN * ECO_REST_SPIN) return;
+            Vector3D d, crossTrack, vLat;
+            double len, remaining, vAlong;
+            if (!EcoLeg(o, out d, out len, out remaining, out crossTrack, out vAlong, out vLat)) return;
+            double vHand = Math.Min(MaxSpeed, Math.Max(ExitSpeedFor(o), ECO_HAND_SPEED));
+            double ahead = Math.Max(0, vAlong) * ECO_REST_TICKS / 60.0 * 2;
+            if (FlipDue(remaining - ahead, vAlong, vHand)) return;
+            if (!ecoPreflipAsked && routeUnseen > 0 && FlipDue(remaining - Math.Max(0, vAlong) * ECO_PREFLIP_SECONDS - ahead, vAlong, vHand)) return;
+            Vector3D hold = Vector3D.Zero;
+            ApplyGyroscopesCommand(ref hold);
+            ecoRestOrder = o;
+            ecoRestUntil = Sandbox.ModAPI.MyAPIGateway.Session.GameplayFrameCounter + ECO_REST_TICKS;
+        }
+
+        /// <summary>True while a coast's flight tick rests (EcoMaybeRest).</summary>
+        private bool EcoResting()
+        {
+            return ecoRestOrder != null && ReferenceEquals(ecoRestOrder, activeFlightOrder) && ecoPhase == EcoPhase.Coast
+                && Sandbox.ModAPI.MyAPIGateway.Session.GameplayFrameCounter < ecoRestUntil;
         }
 
         // Will the drone be further than the corridor from the line, now or at the leg's end, if it coasts on?

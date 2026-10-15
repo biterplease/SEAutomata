@@ -21,25 +21,26 @@ namespace Automata.Orchestrator
         #region UI strings
         private static readonly MyStringId StrBlocksMetres = MyStringId.GetOrCompute("{0} blocks ({1} m)");
         private static readonly MyStringId StrDroneStagingArea = MyStringId.GetOrCompute("Use parking protocol");
-        private static readonly MyStringId StrDroneStagingAreaTip = MyStringId.GetOrCompute("Drones managed by this orchestrator with no home connector park on their landing gears as chosen below.\nOff: they park on any friendly grid, then on voxel.");
+        private static readonly MyStringId StrDroneStagingAreaTip = MyStringId.GetOrCompute("Drones with landing gears park on grids instead of connector.");
         private static readonly MyStringId StrStagingDraw = MyStringId.GetOrCompute("Show parking area");
         private static readonly MyStringId StrStagingDrawTip = MyStringId.GetOrCompute("Draws the area for you. Switches off after a short time.");
         private static readonly MyStringId StrParking = MyStringId.GetOrCompute("Parking");
-        private static readonly MyStringId StrParkingTip = MyStringId.GetOrCompute("Park on grid: anywhere on this orchestrator's grid (then any friendly grid, then voxel).\nParking area: in the area set below (then this grid, any friendly grid, voxel).\nVoxel: on rock near this orchestrator - ground, cliff, cave, asteroid - away from grids (voxel only).");
+        private static readonly MyStringId StrParkingTip = MyStringId.GetOrCompute("Park on grid: anywhere this orchestrator's grid.\nParking area: in the area set below.\nVoxel: on rock near this orchestrator.");
         private static readonly MyStringId StrParkOnGrid = MyStringId.GetOrCompute("Park on grid");
         private static readonly MyStringId StrParkingArea = MyStringId.GetOrCompute("Parking area");
         private static readonly MyStringId StrVoxel = MyStringId.GetOrCompute("Voxel");
         private static readonly MyStringId StrLanes = MyStringId.GetOrCompute("Active lanes");
-        private static readonly MyStringId StrLanesTip = MyStringId.GetOrCompute("Flight lanes of this network's drones: one row per pair (one lane each way). Made after the first flight between two bases with a Logistics Computer, or a base and an asteroid. Select one to delete, resume or see it.");
+        private static readonly MyStringId StrLanesTip = MyStringId.GetOrCompute("Flight lanes of this network's drones.");
         private static readonly MyStringId StrLaneDelete = MyStringId.GetOrCompute("Delete lane");
-        private static readonly MyStringId StrLaneDeleteTip = MyStringId.GetOrCompute("Removes the selected lane pair. The same two places get no new lane until it would have expired (FlightLaneExpirationMinutes).");
         private static readonly MyStringId StrLaneResume = MyStringId.GetOrCompute("Resume lane");
-        private static readonly MyStringId StrLaneResumeTip = MyStringId.GetOrCompute("A suspended lane (after a crash, a near miss, a drone holding in it or failed checks) is used again once it has been checked again.");
         private static readonly MyStringId StrLaneVisualize = MyStringId.GetOrCompute("Show lane");
-        private static readonly MyStringId StrLaneVisualizeTip = MyStringId.GetOrCompute("Draws the selected lane pair for you: dashes crawl the way each lane is flown (blue one way, orange the other; faint while it is still being checked). Its names show at the ends. Switches itself off after the server's debug drawing time.");
+        private static readonly MyStringId StrLaneVisualizeTip = MyStringId.GetOrCompute("Draws selected lane pair.");
         private static readonly MyStringId StrLanesClear = MyStringId.GetOrCompute("Clear all lanes");
         private static readonly MyStringId StrLanesClearArmed = MyStringId.GetOrCompute("Press again to clear all");
-        private static readonly MyStringId StrLanesClearTip = MyStringId.GetOrCompute("Removes every lane of this network (press twice within 5 s). The same places get no new lanes for a while."); 
+        private static readonly MyStringId StrDesignatorCamera = MyStringId.GetOrCompute("Designator camera");
+        private static readonly MyStringId StrDesignatorLcdTag = MyStringId.GetOrCompute("Designator LCD tag");
+        private static readonly MyStringId StrDesignatorLcdTagTip = MyStringId.GetOrCompute("Place this tag on an LCD, select the Automata Log app to see designator output.");
+        private static readonly MyStringId StrDesignatorCameraTip = MyStringId.GetOrCompute("Camera the \"Designator:\" toolbar actions aim with (15 km). On this grid, or via rotor / hinge / piston.");
         #endregion
 
         public static ServerConfig.OrchestratorBlockConfig BlockConfig = ServerConfig.Instance.OrchestratorServerSettings;
@@ -58,6 +59,48 @@ namespace Automata.Orchestrator
                                            l => l.Terminal_UseBroadcastController, (l, v) => l.Terminal_UseBroadcastController = v);
             CreateStagingControls();
             CreateLaneControls();
+            CreateDesignatorControls();
+        }
+
+        static void CreateDesignatorControls()
+        {
+            var sep = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSeparator, IMyProgrammableBlock>("");
+            sep.Visible = Visible;
+            Add(sep);
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlListbox, IMyProgrammableBlock>(IdPrefix + "DesignatorCamera");
+                c.Title = StrDesignatorCamera;
+                c.Tooltip = StrDesignatorCameraTip;
+                c.Visible = Visible;
+                c.SupportsMultipleBlocks = false;
+                c.Multiselect = false;
+                c.VisibleRowsCount = 4;
+                c.ListContent = (b, items, selected) => { var l = GetBlock(b); if (l != null) l.Terminal_CameraList(items, selected); };
+                c.ItemSelected = (b, selected) => { var l = GetBlock(b); if (l != null) l.Terminal_SelectCamera(selected); };
+                Add(c);
+            }
+            LcdTagControl.Add(IdPrefix + "DesignatorLcdTag", GetBlock, l => l.Terminal_DesignatorLcdTag, (l, v) => l.Terminal_DesignatorLcdTag = v,
+                              "[Designator]", StrDesignatorLcdTag, StrDesignatorLcdTagTip);
+            DesignatorAction("Tag", "TAG", Pointer.DesignatorOrder.Tag, "Textures\\GUI\\Icons\\Actions\\Start.dds");
+            DesignatorAction("Spot", "SPOT", Pointer.DesignatorOrder.Spot, "Textures\\GUI\\Icons\\Actions\\Start.dds");
+            DesignatorAction("Area", "AREA", Pointer.DesignatorOrder.Area, "Textures\\GUI\\Icons\\Actions\\Start.dds");
+            DesignatorAction("Engage", "ENGAGE", Pointer.DesignatorOrder.Engage, "Textures\\GUI\\Icons\\Actions\\Start.dds");
+            DesignatorAction("Escort", "ESCORT", Pointer.DesignatorOrder.Escort, "Textures\\GUI\\Icons\\Actions\\Start.dds");
+            DesignatorAction("Recall", "RECALL", Pointer.DesignatorOrder.Recall, "Textures\\GUI\\Icons\\Actions\\Reverse.dds");
+            DesignatorAction("Clear", "CLEAR", Pointer.DesignatorOrder.Clear, "Textures\\GUI\\Icons\\Actions\\Decrease.dds");
+        }
+
+        // Toolbar only ("Designator: TAG" ...): pressed by a player, done by the server with the designator camera
+        static void DesignatorAction(string id, string name, Pointer.DesignatorOrder order, string icon)
+        {
+            var a = MyAPIGateway.TerminalControls.CreateAction<IMyProgrammableBlock>(IdPrefix + "Designator" + id);
+            a.Name = new System.Text.StringBuilder("Designator: " + name);
+            a.Icon = icon;
+            a.ValidForGroups = false;
+            a.Enabled = Visible;   // orchestrators only
+            a.Action = b => { var l = GetBlock(b); if (l != null) l.Terminal_Designate(order); };
+            a.Writer = (b, sb) => sb.Append(name);
+            MyAPIGateway.TerminalControls.AddAction<IMyProgrammableBlock>(a);
         }
 
         static IMyTerminalControlButton laneClearButton;
@@ -100,12 +143,12 @@ namespace Automata.Orchestrator
                 Add(c);
             }
             LaneButton("LaneVisualize", StrLaneVisualize, StrLaneVisualizeTip, l => l.Terminal_VisualizeLane());
-            LaneButton("LaneDelete", StrLaneDelete, StrLaneDeleteTip, l => l.Terminal_DeleteLane());
-            LaneButton("LaneResume", StrLaneResume, StrLaneResumeTip, l => l.Terminal_ResumeLane());
+            LaneButton("LaneDelete", StrLaneDelete, MyStrings.BLANK, l => l.Terminal_DeleteLane());
+            LaneButton("LaneResume", StrLaneResume, MyStrings.BLANK, l => l.Terminal_ResumeLane());
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlButton, IMyProgrammableBlock>(IdPrefix + "LanesClear");
                 c.Title = StrLanesClear;
-                c.Tooltip = StrLanesClearTip;
+                c.Tooltip = MyStrings.BLANK;
                 c.SupportsMultipleBlocks = false;
                 c.Visible = Visible;
                 c.Action = b =>

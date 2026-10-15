@@ -21,6 +21,27 @@ Terminal lists, saved in `LogisticsComputerSettings.Quotas` as "item:min:max" (`
 
 Every conveyor network of the grid group (mechanical) is mapped. A bid comes from the network that gives the most (supply) / takes the most (room) and names one of its free standard connectors (`IOLocationData`); promises are tracked per network (key: its lowest block entity id). Small connectors are not ports (warning in the info panel and log).
 
+## Mapping and totals (2026-10-15)
+- `MapNetworks`: one representative per network (its first block; connectors are taken first, so a connector when the
+  network has one). Each inventory block joins the first network whose representative reaches it
+  (`rep.IsConnectedTo(block)`; the game searches the whole conveyor graph from the representative, so the old
+  member-by-member BFS found nothing more), else it starts a new network. N x networks calls instead of ~N^2; the debug
+  log counts them.
+- `ConveyorNetwork.Attach` (after mapping; `Detach` before re-mapping and on Close): per inventory a cached
+  `DiscreteInventory`, re-read only after `MyInventoryBase.ContentsChanged` (whitelisted via `VRage.Game.Entity`) or the
+  full re-read every 60 s (`FULL_RESYNC_TICKS`: paths that raise no event, damaged / repaired cargo). `UpdateInventories`
+  (every 5 s) then sums the caches only when something changed; cargo volumes are read every call. Not attached (the
+  drone's home network): every inventory read on each call, as before. The unused pending / reserved bid bookkeeping
+  (`CanFulfillRequest`, `Reserve*`, `Release*` ...) was removed: promises are the LC's `commitments`.
+- `DiscreteInventory.AddItems(IMyInventory)` reuses one item buffer (main thread only).
+- Rescan triggers (`LogisticsComputerBlock.Triggers.cs`, after BuildInfo's conveyor overlay): every grid of the base
+  (not only the LC's) is subscribed after each rescan, plus its mechanical group and its sorters. Dirty on: a block
+  added / removed that has an inventory, carries conveyors (conveyor, tube, sorter), is an antenna or a rotor / piston /
+  hinge base (armor and the rest ignored); such a block turning functional / broken (`OnBlockIntegrityChanged`, only the
+  flip, remembered per block); grid split / merge; mechanical group grid added / removed / released; sorter
+  `IsWorkingChanged`. Connector lock / unlock is ignored (drones dock all the time). Still at most every 5 s, and the
+  periodic rescan stays; the rescan log names the reason.
+
 ## 1. Conveyor Network Mapping
 - **Definition**: A "Conveyor Network" is a group of inventory-holding blocks (Cargo Container, Connector, Collector, Refineries, Assemblers, Reactors) that can physically exchange items.
 - **Connectivity Logic**: 

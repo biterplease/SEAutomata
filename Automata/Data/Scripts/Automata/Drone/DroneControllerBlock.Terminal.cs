@@ -263,6 +263,25 @@ namespace Automata.Drone
         }
         #endregion
 
+        #region Local-job radius
+        public const float LOCAL_JOB_RADIUS_MIN = 1f, LOCAL_JOB_RADIUS_MAX = 30000f;
+
+        /// <summary>m from its base within which the drone bids on jobs.</summary>
+        public float Terminal_LocalJobRadius
+        {
+            get { return settings != null ? settings.LocalJobRadius : 15000f; }
+            set
+            {
+                if (settings == null) return;
+                float v = VRageMath.MathHelper.Clamp((float)Math.Round(value), LOCAL_JOB_RADIUS_MIN, LOCAL_JOB_RADIUS_MAX);
+                if (v == settings.LocalJobRadius) return;
+                settings.LocalJobRadius = v;
+                SaveSettings();
+                SyncSetting(DroneSettingKey.LocalJobRadius);
+            }
+        }
+        #endregion
+
         #region Min altitude
         public const float MIN_ALTITUDE_MAX = 1000f;
 

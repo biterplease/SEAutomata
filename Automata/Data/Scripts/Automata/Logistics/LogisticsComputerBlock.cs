@@ -35,7 +35,7 @@ namespace Automata.Logistics
     /// cargo room and a port), where requested items are delivered and surplus is collected from.
     /// </summary>
     [MyEntityComponentDescriptor(typeof(MyObjectBuilder_MyProgrammableBlock), false, "AutomataLargeLogisticsComputer")]
-    public class LogisticsComputerBlock : SettingsBlockLogic, INicknamed
+    public partial class LogisticsComputerBlock : SettingsBlockLogic, INicknamed
     {
         #region UI strings
         private static readonly MyStringId StrHeaderTitle = MyStringId.GetOrCompute("LC {0}");
@@ -116,7 +116,6 @@ namespace Automata.Logistics
         private LogisticsComputerSettings settings = new LogisticsComputerSettings();
         private long entityId;
         private MessageQueue messaging;
-        private IMyCubeGrid subscribedGrid;
         private bool ready;
         private readonly StringBuilder info = new StringBuilder();
 
@@ -190,9 +189,7 @@ namespace Automata.Logistics
             LogisticsComputerTerminalControls.DoOnce(ModContext);
             LoadFromStorage();
             block.AppendingCustomInfo += AppendInfo;
-            subscribedGrid = block.CubeGrid;
-            subscribedGrid.OnBlockAdded += OnGridChanged;
-            subscribedGrid.OnBlockRemoved += OnGridChanged;
+            SubscribeBase();   // the LC's grid until the first rescan (Triggers.cs)
             ready = true;
             NeedsUpdate |= MyEntityUpdateEnum.EACH_100TH_FRAME;
             Log.Info("LC {0}: '{1}' on '{2}': {3} Min/Max entries, modes {4}", entityId, block.CustomName, block.CubeGrid.DisplayName,
@@ -216,22 +213,14 @@ namespace Automata.Logistics
             }
         }
 
-        private void OnGridChanged(IMySlimBlock b)
-        {
-            dirty = true;
-        }
-
         public override void Close()
         {
             try
             {
                 if (block != null) block.AppendingCustomInfo -= AppendInfo;
-                if (subscribedGrid != null)
-                {
-                    subscribedGrid.OnBlockAdded -= OnGridChanged;
-                    subscribedGrid.OnBlockRemoved -= OnGridChanged;
-                }
+                UnsubscribeBase();
                 if (messaging != null) { messaging.RemoveAntenna(entityId); messaging.UnsubscribeAll(entityId); }
+                for (int i = 0; i < networks.Count; i++) networks[i].Detach();   // inventory content subscriptions
                 Log.Debug("LC {0}: closed", entityId);
             }
             catch (Exception ex)
@@ -312,6 +301,7 @@ namespace Automata.Logistics
                 Rescan();
                 lastScan = now;
                 dirty = false;
+                dirtyWhy = null;
                 lastInventory = int.MinValue / 2;
             }
             if (!EnsureAntenna()) { status = Loc.T(StrNoAntennaFunctionalOnBroadcasting); return; }
@@ -355,6 +345,7 @@ namespace Automata.Logistics
             inventoryBlocks.Clear();
             ownConnectors.Clear();
             smallConnectors.Clear();
+            sorters.Clear();
             antenna = null;
             // The base: this grid and the large grids mechanically joined to it (rotors, pistons, hinges). Small grids in the
             // group (drones sitting on landing gear, small sub-grids) are not part of it: their connectors and cargo would show
@@ -366,6 +357,8 @@ namespace Automata.Logistics
             {
                 foreach (var fat in grids[g].GetFatBlocks<IMyTerminalBlock>())
                 {
+                    var sorter = fat as IMyConveyorSorter;
+                    if (sorter != null) sorters.Add(sorter);   // on / off changes the networks (Triggers.cs), functional or not
                     if (fat == null || !fat.IsFunctional) continue;
                     var radio = fat as IMyRadioAntenna;
                     if (radio != null)
@@ -393,51 +386,64 @@ namespace Automata.Logistics
                     Log.Debug("LC {0}: small connector(s) '{1}': ports for combat drones, ore scouts and ore haulers only", entityId, small);
             }
             MapNetworks();
-            var names = new List<string>();
-            for (int g = 0; g < grids.Count; g++) names.Add(grids[g].DisplayName + (grids[g].GridSizeEnum == VRage.Game.MyCubeSize.Large ? " (large)" : " (small)"));
-            Log.Debug("LC {0}: rescan: {1} grid(s) [{2}], {3} inventory blocks, {4} network(s), antenna {5}", entityId, grids.Count,
-                      string.Join(", ", names), inventoryBlocks.Count, networks.Count, antenna != null ? "'" + antenna.CustomName + "'" : "none");
+            SubscribeBase();
+            if (Log.DebugEnabled)
+            {
+                var names = new List<string>();
+                for (int g = 0; g < grids.Count; g++) names.Add(grids[g].DisplayName + (grids[g].GridSizeEnum == VRage.Game.MyCubeSize.Large ? " (large)" : " (small)"));
+                Log.Debug("LC {0}: rescan ({6}): {1} grid(s) [{2}], {3} inventory blocks, {4} network(s), antenna {5}", entityId, grids.Count,
+                          string.Join(", ", names), inventoryBlocks.Count, networks.Count, antenna != null ? "'" + antenna.CustomName + "'" : "none",
+                          dirtyWhy ?? (dirty ? "changes" : "periodic"));
+            }
         }
 
-        // Inventory blocks grouped by conveyor connectivity (IMyInventory.IsConnectedTo), connectors first
+        // Inventory blocks grouped by conveyor connectivity, connectors first. One representative per network (its first
+        // block - a connector when it has one): a block joins the first network whose representative reaches it
+        // (IMyInventory.IsConnectedTo), else it starts a new one. IsConnectedTo already searches the whole conveyor graph
+        // from the representative, so testing it against every member (as before) found nothing more: N x networks
+        // calls instead of ~N^2.
         private void MapNetworks()
         {
+            for (int i = 0; i < networks.Count; i++) networks[i].Detach();
             networks.Clear();
             networkKeys.Clear();
             primary = null;
-            var unvisited = new List<IMyCubeBlock>();
-            for (int i = 0; i < inventoryBlocks.Count; i++) if (inventoryBlocks[i] is IMyShipConnector) unvisited.Add(inventoryBlocks[i]);
-            for (int i = 0; i < inventoryBlocks.Count; i++) if (!(inventoryBlocks[i] is IMyShipConnector)) unvisited.Add(inventoryBlocks[i]);
-            var queue = new Queue<IMyCubeBlock>();
-            while (unvisited.Count > 0)
+            var ordered = new List<IMyCubeBlock>(inventoryBlocks.Count);
+            for (int i = 0; i < inventoryBlocks.Count; i++) if (inventoryBlocks[i] is IMyShipConnector) ordered.Add(inventoryBlocks[i]);
+            for (int i = 0; i < inventoryBlocks.Count; i++) if (!(inventoryBlocks[i] is IMyShipConnector)) ordered.Add(inventoryBlocks[i]);
+            var reps = new List<IMyInventory>();
+            int calls = 0;
+            for (int b = 0; b < ordered.Count; b++)
             {
-                var network = new ConveyorNetwork();
-                network.ConveyorNetworkId = IdGenerator.GenerateId(ref networkCounter, entityId);
-                network.Nickname = Loc.F(StrNetworkName, networks.Count + 1);
-                long key = long.MaxValue;
-                queue.Enqueue(unvisited[0]);
-                unvisited.RemoveAt(0);
-                while (queue.Count > 0)
-                {
-                    var current = queue.Dequeue();
-                    ConveyorNetwork.CategorizeBlock(network, current);
-                    if (current.EntityId < key) key = current.EntityId;
-                    var inv = current.GetInventory(0);
-                    if (inv == null) continue;
-                    for (int j = unvisited.Count - 1; j >= 0; j--)
+                var blk = ordered[b];
+                var inv = blk.GetInventory(0);
+                int found = -1;
+                if (inv != null)
+                    for (int n = 0; n < reps.Count && found < 0; n++)
                     {
-                        var other = unvisited[j].GetInventory(0);
-                        if (other != null && inv.IsConnectedTo(other))
-                        {
-                            queue.Enqueue(unvisited[j]);
-                            unvisited.RemoveAt(j);
-                        }
+                        if (reps[n] == null) continue;
+                        calls++;
+                        if (reps[n].IsConnectedTo(inv)) found = n;
                     }
+                if (found < 0)
+                {
+                    var network = new ConveyorNetwork();
+                    network.ConveyorNetworkId = IdGenerator.GenerateId(ref networkCounter, entityId);
+                    network.Nickname = Loc.F(StrNetworkName, networks.Count + 1);
+                    networks.Add(network);
+                    networkKeys.Add(long.MaxValue);
+                    reps.Add(inv);
+                    found = networks.Count - 1;
                 }
-                networks.Add(network);
-                networkKeys.Add(key);
+                ConveyorNetwork.CategorizeBlock(networks[found], blk);
+                if (blk.EntityId < networkKeys[found]) networkKeys[found] = blk.EntityId;
             }
-            for (int i = 0; i < networks.Count; i++) Log.Debug("LC {0}: {1}", entityId, DescribeNetwork(i));
+            for (int i = 0; i < networks.Count; i++) networks[i].Attach();
+            if (Log.DebugEnabled)
+            {
+                Log.Debug("LC {0}: {1} inventory blocks mapped with {2} connectivity checks", entityId, ordered.Count, calls);
+                for (int i = 0; i < networks.Count; i++) Log.Debug("LC {0}: {1}", entityId, DescribeNetwork(i));
+            }
         }
 
         // The main network: has a free port; the most cargo room

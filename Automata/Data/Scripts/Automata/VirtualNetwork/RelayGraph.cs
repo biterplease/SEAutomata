@@ -78,9 +78,9 @@ namespace Automata.VirtualNetwork
             Rebuild();
             watch.Stop();
             Version++;
-            int edges = 0;
-            for (int i = 0; i < nodes.Count; i++) edges += nodes[i].Out.Count;
-            string summary = string.Format("{0} node(s), {1} edge(s)", nodes.Count, edges);
+            int edges = 0, lasers = 0;
+            for (int i = 0; i < nodes.Count; i++) { edges += nodes[i].Out.Count; lasers += nodes[i].Lasers.Count; }
+            string summary = string.Format("{0} node(s), {1} edge(s), {2} connected laser antenna(s), {3} laser edge(s)", nodes.Count, edges, lasers, laserEdges);
             if (summary != lastSummary && Log.DebugEnabled)
             {
                 lastSummary = summary;
@@ -88,8 +88,11 @@ namespace Automata.VirtualNetwork
             }
         }
 
+        private int laserEdges;   // last rebuild (log)
+
         private void Rebuild()
         {
+            laserEdges = 0;
             nodes.Clear();
             gridNode.Clear();
             groupNode.Clear();
@@ -153,17 +156,25 @@ namespace Automata.VirtualNetwork
                             AddEdge(ni, j, ra.OwnerId, rb.OwnerId);
                         }
                     }
-                    // Laser: connected to a laser of j (the link works both ways: j adds its own edge back)
+                    // Laser: connected to a laser of j (the link works both ways: j adds its own edge back). The game's own
+                    // link (IMyLaserAntenna.Other, set while connected) decides; the target coordinates (the other laser's
+                    // head) only when neither end reports it
                     for (int a = 0; a < ni.Lasers.Count; a++)
                     {
                         var la = ni.Lasers[a];
+                        var oa = la.Other;
                         for (int b = 0; b < nj.Lasers.Count; b++)
                         {
                             var lb = nj.Lasers[b];
-                            if (Vector3D.DistanceSquared(la.TargetCoords, lb.GetPosition()) > LASER_MATCH * LASER_MATCH
-                                && Vector3D.DistanceSquared(lb.TargetCoords, la.GetPosition()) > LASER_MATCH * LASER_MATCH) continue;
+                            var ob = lb.Other;
+                            bool linked = oa != null || ob != null
+                                ? oa == lb || ob == la
+                                : Vector3D.DistanceSquared(la.TargetCoords, lb.GetPosition()) <= LASER_MATCH * LASER_MATCH
+                                  || Vector3D.DistanceSquared(lb.TargetCoords, la.GetPosition()) <= LASER_MATCH * LASER_MATCH;
+                            if (!linked) continue;
                             if (!Drone.AnchorDirectory.IsAllowed(la.OwnerId, lb.OwnerId)) continue;
                             AddEdge(ni, j, la.OwnerId, lb.OwnerId);
+                            laserEdges++;
                         }
                     }
                 }

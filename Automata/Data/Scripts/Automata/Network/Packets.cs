@@ -26,6 +26,7 @@ namespace Digi.NetworkLib
     [ProtoInclude(22, typeof(Automata.Util.LcdFeedPacket))]
     [ProtoInclude(23, typeof(Automata.Util.LcdSubscribePacket))]
     [ProtoInclude(24, typeof(Automata.Util.LcdAttachPacket))]
+    [ProtoInclude(25, typeof(Automata.Pointer.DesignatorCameraPacket))]
     public abstract partial class PacketBase
     {
     }

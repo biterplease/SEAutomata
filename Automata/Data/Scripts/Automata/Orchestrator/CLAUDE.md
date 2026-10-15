@@ -51,11 +51,11 @@ Job announcements are queued (de-duplicated per announcer + job id) and auctione
 ## Since then (2026-10-02)
 - Orchestrators listen to each other's auctions (they carry `AnnouncerEntityId`): the lower entity id keeps a job, the other drops it quietly.
 - Drone outcome reports (`JobStatusReport`) are counted; an aborted job is taken again soon. Bids whose `EntityId` isn't the sender are ignored.
-- Every job is a dual award (drone + LC, two LCs for logistics): grind and MineOre without an LC bid are not awarded. MineOre: the drone needs a drill and an ore detector; the LC needs a refinery for the ore (or "accept ore from mining without a refinery") and the ore / ingot below Max. Won LCs keep their reservation until the drone reports.
+- Every job is a dual award (drone + LC, two LCs for logistics): grind and MineOre without an LC bid are not awarded. MineOre: the drone needs a drill and an ore detector; the LC needs a refinery for the ore (or "Accept ores/ice") and the ore / ingot below Max. Won LCs keep their reservation until the drone reports.
 - Behavior profiles: a drone whose profile the job type prefers ranks above all others (cargo drones for logistics). Full protocol: `TODO/10-handshake.md`.
 
 ## Designator jobs (2026-10-05)
-- Jobs a player orders with a target designator are named `Designator...`: `DesignatorScoutPoint`, `DesignatorScoutArea` (industrial: ore scouts only), `DesignatorEngage`, `DesignatorEscort` (hostile: combat drones with the three AI blocks only, `HasDefenseSystems`). Single award (drone only), the player's tasks + ReturnHome, confirmed within `ConfirmTimeoutSeconds` or cancelled (`OrchestratorBlock.PlayerJobs.cs`). Combat orders show no GPS marker (the target moves).
+- Jobs a player orders with a target designator are named `Designator...`: `DesignatorScoutPoint` (industrial spot check: any drone with an ore detector, ore scouts rank first), `DesignatorScoutArea` (industrial area sweep: ore scouts only), `DesignatorEngage`, `DesignatorEscort` (hostile: combat drones with the three AI blocks only, `HasDefenseSystems`). Single award (drone only), the player's tasks + ReturnHome, confirmed within `ConfirmTimeoutSeconds` or cancelled (`OrchestratorBlock.PlayerJobs.cs`). Combat orders show no GPS marker (the target moves).
 - "Use broadcast controller" (terminal, next to the LCD tag; every Automata block has it): an accepted designator order goes out as a chat line through a working Broadcast Controller of the owner / faction on the orchestrator's construct (`Util/BroadcastControllerSender`, the mod API's `IMyChatBroadcastControllerComponent.SendMessage(string)`); its Broadcast target decides who reads it. Nothing else is sent yet.
 
 ## Audit fixes (2026-10-06)
@@ -121,3 +121,24 @@ Designator recall (green): the aimed drone's grid first (as before); none of the
 
 ## Drone keepalives (2026-10-11)
 Subscribes to JOB_KEEPALIVE; keepalives for its own jobs (designator orders) feed `droneWatch` (`Util.DroneWatch`, also in CC / MS / LC) and the active gauge. 60 s unheard: "Drone NAME has not been heard of for 60s!" (event, log, broadcast controller when on). Final reports end the watch.
+
+## Camera designator (2026-10-15, `OrchestratorBlock.Designator.cs`)
+Toolbar actions "Designator: TAG / SPOT / AREA / ENGAGE / ESCORT / RECALL / CLEAR" (PB actions, orchestrators only): the client
+sends `DesignatorCameraPacket` (orchestrator id, `DesignatorOrder`); the server (`ScoutPointer.CameraReceived`, terminal
+access checked) raycasts from the **Designator camera** (listbox, `settings.DesignatorCameraId`, proto 22: cameras of
+the orchestrator's mechanical group, friendly; working at use time) along its forward, `CAMERA_RANGE` 15 km, hits on
+the camera's own mechanical group skipped, and runs the hand-held order path (`ScoutPointer.Order`) with no shooter
+(no self-escort). TAG picks the hostile memory for a combat drone, else the industrial one. Taken by this orchestrator
+when it runs, else the nearest running one covering the camera. Refusals go to its event log.
+"Designator: CLEAR" (`DesignatorOrder.Clear`, no camera needed): `ScoutPointer.ClearTagsFor(owner)` forgets every tag
+memory of players allowed with the orchestrator's owner (what its designator LCDs count); event-log line with the count.
+Tag memories also expire `TAG_MEMORY_MINUTES` (10) after the last tag (no longer extended by orders).
+**Designator LCD tag** (`settings.DesignatorLcdTag`, proto 23, default "[Designator]"): a second LCD feed of the block
+(`BlockLcd(1)`; `LcdFeeder` channel 1: feed id = entity id ^ salt, so both feeds of one block stay apart), the
+orchestrator's LCD style. Header: "Designator <nick>", TAGS, Industrial / Combat counts (`ScoutPointer.TagSummary`:
+tag memories of players allowed with the owner), last tagged drone. Log (`designatorLog`): one entry per confirmed order
+(`CheckOrder` -> `LogDesignatorOrder`, the winning drones from `PlayerJob.Drone`): one drone `SPOT  : <drone> at GPS:x:y:z`
+/ `ESCORT: <drone> escorting <target>`; several: `SPOT  : GPS:x:y:z` (`ESCORT: Escorting <target>`) and one indented line
+per drone. Targets that are Automata drones show their nickname (`ScoutPointer.TargetName`).
+Hand-held designators: `HANDHELD_RANGE` 5 km (client ray; server refuses hits farther than 5.1 km from the player).
+Blueprints: industrial = HandDrill cost (any assembler / survival kit); hostile = HandDrill3 chain cost, full Assembler only.

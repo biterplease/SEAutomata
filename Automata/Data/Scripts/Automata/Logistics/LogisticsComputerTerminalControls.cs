@@ -40,8 +40,8 @@ namespace Automata.Logistics
         private static readonly MyStringId StrModePushTip = MyStringId.GetOrCompute("Items above their Max are announced as surplus.");
         private static readonly MyStringId StrModeRequest = MyStringId.GetOrCompute("Request (below Min)");
         private static readonly MyStringId StrModeRequestTip = MyStringId.GetOrCompute("Items below their Min are requested.");
-        private static readonly MyStringId StrAcceptOreWithoutRefinery = MyStringId.GetOrCompute("Accept ore from mining without a refinery");
-        private static readonly MyStringId StrAcceptOreWithoutRefineryTip = MyStringId.GetOrCompute("Bid volume for mined ore even when no refinery here refines it.");
+        private static readonly MyStringId StrAcceptOreWithoutRefinery = MyStringId.GetOrCompute("Accept ores/ice");
+        private static readonly MyStringId StrAcceptOreWithoutRefineryTip = MyStringId.GetOrCompute("Bid volume for ore/ice without refineries or O2/H2 generators");
         private static readonly MyStringId StrQuotaEditAndAdd = MyStringId.GetOrCompute("Edit and add");
         private static readonly MyStringId StrQuotaEdit = MyStringId.GetOrCompute("Edit");
         private static readonly MyStringId StrQuotaRemove = MyStringId.GetOrCompute("Remove");

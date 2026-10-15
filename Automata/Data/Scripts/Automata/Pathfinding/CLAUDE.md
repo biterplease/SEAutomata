@@ -60,7 +60,10 @@ wired** (`AllowAStar` only logs a warning); the legacy planners (`AStarPathfinde
 - `SegmentBlocked`: one oriented box per <= 20 m chunk, hull cross-section + berth across the travel direction, from
   the hull centre at `skipStart` to b (+ hull front + berth with `extendPastEnd`), limited to what the drone sees.
   Near the start / end only blocks the hull itself touches count (leaving / arriving at tight spots) unless
-  `PathQuery.StrictEnds`. `hit` = nearest face of the first block along the leg. Asteroids: the old 5-ray bundle.
+  `PathQuery.StrictEnds`. A block the hull box already overlaps where it starts (attitude held) whose centre is not
+  ahead along the leg doesn't count either (leaving it; a wedged drone was blocked every way, away included;
+  `StartContactsLeft` counts them). `hit` = nearest face of the first block along the leg. Asteroids: the old 5-ray bundle.
+- `HullFitsOriented(q, centre, frame, margin)`: the exact box (grown by margin) instead of the any-attitude sphere.
 - `HullSpaceFree` / `TurnRoomFree`: sphere vs block boxes (seen blocks only); asteroids near: 14 rays.
 - `PathQuery.Berth` (0 = ObstacleClearance), `IgnoreGrid/IgnoreMin/IgnoreMax` (the target block), `StrictEnds`.
 - Work-site way in (`WorkSite`): target block ignored, 1 m berth, strict ends, hull front stopped 0.25 m off the face
@@ -138,3 +141,15 @@ wired** (`AllowAStar` only logs a warning); the legacy planners (`AStarPathfinde
 
 ## Real-shape refinement (2026-10-14)
 `PathQuery.RealShapeGrid`: in `SegmentBlocked`, a block of that grid in the way by its cell box is checked with rays against the grid's physics across the swept box's cross-section (`RealShapeClear`); clear unless a ray hits inside the block's cells. Budget `RealShapeRayBudget` (caller sets / resets), stats `RealShapeClears` / `RealShapeRays`. Used by weld work sites only.
+
+## Held attitudes in Lazy Theta* (2026-10-14)
+`ThetaStage`: the any-attitude search (hull sphere) gets half the budget (`THETA_FREE_SHARE`). Nothing: `HeldCandidates`
+- the drone's attitude as it is, then 90° turns about its axes (each distinct box shape along the current axes once,
+least turned first, at most 6; in gravity only ups within the pitch limit, 0.7 without one; a turned one only where
+`TurnSweepFree` at the start) - each searched with the hull box in that attitude (`Probe`: `BoxFree` of the box grown
+by the brick / quarter cell), sharing the rest of the budget (as it is: half of it). Found: `q.Controller` keeps that
+attitude, `q.HoldAttitude` set (AssignAttitudes: every leg keeps it), log "found a way holding the drone's attitude".
+What the drone sees stays its real attitude (`q.Eyes` / `EyesOf`). Stage name "theta, held attitude".
+- `RealShapeClear` rays end at the sweep's end (`t1`: the hull front's farthest reach), not past the block: a weld
+  through a neighbour is not blocked by its collision beyond where the hull stops.
+- Turned held attitudes need `TurnSweepFree` with the full berth at the start; none when `q.NoHeldTurn` (near docks).

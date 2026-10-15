@@ -420,7 +420,18 @@ namespace Automata.Drone
                     if (gyroOverrideActive) ReleaseGyroscopes();
                     return;
                 }
+                // Economy flight coasting (EcoMaybeRest) or holding on the dampeners (Hold.cs): the flight tick rests
+                if (EcoResting() || DampenerHolding()) { flightTickSkipped = true; return; }
                 CaptureFlightState();
+                if (flightTickSkipped)
+                {
+                    // Back from a rest: the per-tick differences (thrust gains, gyro α) and the rate-limited command start
+                    // from now, not from ticks ago
+                    flightTickSkipped = false;
+                    lastLinearVelocity = flightState.LinearVelocity;
+                    lastAngularVelocity = flightState.AngularVelocity;
+                    commandedVelocity = flightState.LinearVelocity;
+                }
                 if (activeFlightOrder != null && !RefreshAnchoredOrder(activeFlightOrder))
                 {
                     Report(StrNavAnchorLostOrderCancelled);
@@ -501,6 +512,8 @@ namespace Automata.Drone
                         SetState(State.Standby);
                     }
                     UpdateLegChaining(o);
+                    if (ecoActive && ReferenceEquals(activeFlightOrder, o)) EcoMaybeRest(o, orientationError);
+                    else if (!ecoActive) MaybeDampenerHold(o, orientationError);
                 }
                 else if (thrustOverridesActive)
                 {
@@ -536,8 +549,9 @@ namespace Automata.Drone
                 }
                 if (preflightStage == 0)
                     isParked = IsParkedNow();
-                if (!frameUpdatesOn)
-                    CaptureFlightState();          // keep a recent snapshot for UI / monitoring while idle
+                if (!frameUpdatesOn || EcoResting() || holdActive)
+                    CaptureFlightState();          // keep a recent snapshot for UI / monitoring while idle (or resting / holding)
+                CheckHoldDrift();
                 if (settings.IsEnabled)
                 {
                     // Gears are off in flight (switched on only for a park landing)
@@ -547,6 +561,7 @@ namespace Automata.Drone
                     CheckLegStart();
                     UpdateRouteWatch();
                     RecordFlight10();
+                    RecordTrail10();
                     UpdateRecovery10();
                     UpdateDocking();
                     UpdateConstruction10();
@@ -828,6 +843,9 @@ namespace Automata.Drone
             settings.CombatHandoverDistance = MathHelper.Clamp(settings.CombatHandoverDistance, COMBAT_HANDOVER_MIN, COMBAT_HANDOVER_MAX);
             settings.AutoLaunchRadius = MathHelper.Clamp(settings.AutoLaunchRadius, 0f, AUTO_LAUNCH_RADIUS_MAX);
             settings.EscortFollowDistance = MathHelper.Clamp(settings.EscortFollowDistance, ESCORT_FOLLOW_MIN, ESCORT_FOLLOW_MAX);
+            // Saved before the setting existed: 0 (ProtoBuf default) -> the default radius
+            if (settings.LocalJobRadius <= 0) settings.LocalJobRadius = 15000f;
+            settings.LocalJobRadius = MathHelper.Clamp(settings.LocalJobRadius, LOCAL_JOB_RADIUS_MIN, LOCAL_JOB_RADIUS_MAX);
             // Stone is ignored by default (once: a player who takes it off the list keeps it off)
             if (!settings.StoneIgnoreDefaulted)
             {

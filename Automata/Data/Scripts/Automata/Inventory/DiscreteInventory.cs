@@ -371,16 +371,20 @@ namespace Automata.Inventory
             }
         }
 
+        private static readonly List<VRage.Game.ModAPI.Ingame.MyInventoryItem> itemBuffer = new List<VRage.Game.ModAPI.Ingame.MyInventoryItem>();
+
         public void AddItems(IMyInventory sourceInventory)
         {
             if (sourceInventory == null)
             {
                 return;
             }
-            List<VRage.Game.ModAPI.Ingame.MyInventoryItem> items = new List<VRage.Game.ModAPI.Ingame.MyInventoryItem>();
+            var items = itemBuffer;   // main thread only; reused (no list per read)
+            items.Clear();
             sourceInventory.GetItems(items);
-            foreach (VRage.Game.ModAPI.Ingame.MyInventoryItem item in items)
+            for (int i = 0; i < items.Count; i++)
             {
+                var item = items[i];
                 int amount = (int)item.Amount;
                 if (amount <= 0)
                 {
@@ -391,6 +395,7 @@ namespace Automata.Inventory
                 Items.TryGetValue(subtypeHash, out cur);
                 Items[subtypeHash] = cur + amount;
             }
+            items.Clear();
         }
 
         /// <summary>

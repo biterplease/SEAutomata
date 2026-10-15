@@ -457,5 +457,10 @@ namespace Automata.VirtualNetwork
         [ProtoMember(11)] public double OreKg;
         /// <summary>Weld jobs: which weld (JobTypeExtensions.WELD_*; 0 unknown).</summary>
         [ProtoMember(12)] public byte WeldCategory;
+        /// <summary>Blocks of its share the drone found no way to: grid ids, with UnreachableCells (same order); null: none.</summary>
+        [ProtoMember(13)] public List<long> UnreachableGrids;
+        [ProtoMember(14)] public List<Vector3IData> UnreachableCells;
+        /// <summary>The drone reports its unreachable blocks (an empty list: none): the computer holds those back, not the whole job.</summary>
+        [ProtoMember(15)] public bool PerBlock;
     }
 }

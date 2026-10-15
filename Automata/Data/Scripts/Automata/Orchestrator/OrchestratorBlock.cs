@@ -273,6 +273,7 @@ namespace Automata.Orchestrator
         private void UpdateLcd()
         {
             Prune(MyAPIGateway.Session.GameplayFrameCounter);
+            UpdateDesignatorLcd();
             if (!lcd.Wanted(block, settings.LcdTag)) return;   // nobody looks at an LCD: nothing more is built
             if (Terminal_LcdStyle.ShowHeader) BuildHeader(); else header.Clear();
             lcd.Publish(Terminal_LcdStyle, header, log);
@@ -949,7 +950,7 @@ namespace Automata.Orchestrator
                         Log.Info("Orchestrator {0}: auction {1} (job {2}, {3}) won by drone {4}: {5}", entityId, open.Auction.AuctionId,
                                  open.Auction.JobId, LabelOf(open.Auction), droneId, why);
                         knownJobs[open.JobKey] = now + JOB_MEMORY_TICKS;   // assigned: its repeats are ignored (the drones report back)
-                        PlayerJobAssigned(open.JobKey, now);
+                        PlayerJobAssigned(open.JobKey, now, droneId);
                         closing.Add(open.Auction.AuctionId);
                         continue;
                     }
@@ -1449,7 +1450,7 @@ namespace Automata.Orchestrator
                                       out long droneId, out uint droneBid, out string why)
         {
             assignments = null; droneId = 0; droneBid = 0;
-            string profile = ProfileName(RequiredProfile(open.Auction.JobType));
+            string profile = DesignatorTakerName(open.Auction.JobType);
             var drone = BestDrone(drones, open.Auction.PositionData.ToVector3D(), open.Auction.JobType);
             if (drone == null) { why = Loc.F(StrNoProfileBid, profile); return false; }
             var tasks = new List<Task>(open.Job.Tasks ?? new List<Task>());

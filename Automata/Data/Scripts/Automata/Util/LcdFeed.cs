@@ -118,15 +118,20 @@ namespace Automata.Util
         private byte[] lastBytes;
 
         public IMyTerminalBlock Owner { get { return owner; } }
-        public long OwnerId { get { return owner != null ? owner.EntityId : 0; } }
+        /// <summary>The feed's id (packets, client maps): the block's entity id, mixed with the channel for a block's second
+        /// feed (the orchestrator's designator LCDs), so both feeds of one block stay apart.</summary>
+        public long OwnerId { get { return owner != null ? owner.EntityId ^ feedSalt : 0; } }
+        private long feedSalt;
         public string Tag { get { return tag; } }
         public bool OwnGridOnly { get { return ownGridOnly; } }
 
-        /// <summary>The block, its LCD tag and which grids its LCDs may be on (own grid only, or its whole construct). Server only.</summary>
-        public void Bind(IMyTerminalBlock block, string lcdTag, bool ownGrid)
+        /// <summary>The block, its LCD tag and which grids its LCDs may be on (own grid only, or its whole construct); 'channel':
+        /// 0 the block's feed, 1.. another feed of the same block. Server only.</summary>
+        public void Bind(IMyTerminalBlock block, string lcdTag, bool ownGrid, int channel = 0)
         {
             if (MyAPIGateway.Multiplayer == null || !MyAPIGateway.Multiplayer.IsServer) return;
             owner = block;
+            feedSalt = channel == 0 ? 0 : unchecked((long)(0x9E3779B97F4A7C15UL * (ulong)channel));
             tag = lcdTag ?? "";
             ownGridOnly = ownGrid;
             if (!registered)

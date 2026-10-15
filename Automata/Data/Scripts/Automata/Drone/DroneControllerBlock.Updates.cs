@@ -52,6 +52,7 @@ namespace Automata.Drone
                 if (grids.Contains(g)) continue;
                 g.OnBlockAdded -= onBlockChanged;
                 g.OnBlockRemoved -= onBlockChanged;
+                g.OnBlockIntegrityChanged -= onBlockDamaged;   // was left subscribed on grids that left the group
                 subscribedGrids.RemoveAt(i);
             }
             for (int i = 0; i < grids.Count; i++)

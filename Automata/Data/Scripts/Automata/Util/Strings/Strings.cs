@@ -54,6 +54,8 @@ namespace Automata.Util.Strings
         public static readonly MyStringId BlockMetres = MyStringId.GetOrCompute("{0} block ({1} m)");
         public static readonly MyStringId BlocksMetres = MyStringId.GetOrCompute("{0} blocks ({1} m)");
         public static readonly MyStringId TaskTimeoutTip = MyStringId.GetOrCompute("Seconds before a job task gives up and the drone moves on.");
+        public static readonly MyStringId LocalJobRadius = MyStringId.GetOrCompute("Local-job radius");
+        public static readonly MyStringId LocalJobRadiusTip = MyStringId.GetOrCompute("Drone will only bid on jobs within this distance.");
         public static readonly MyStringId MaxThrust = MyStringId.GetOrCompute("Max thrust");
         public static readonly MyStringId MaxThrustTip = MyStringId.GetOrCompute("Max thrust % used accelerating and braking.");
         public static readonly MyStringId MaxSpeed = MyStringId.GetOrCompute("Max speed");

@@ -92,7 +92,7 @@ The behaviour profile tells Orchestrators what this drone *prefers* to do. A dro
 | Grinder drone | Grind jobs | |
 | Welder + grinder drone | Weld and grind jobs | |
 | Mining drone | Mining jobs | Needs a drill and an ore detector. |
-| Ore scout | Industrial designator scouting | The **only** drones that take scouting jobs. Needs an ore detector. Can dock with small connectors. |
+| Ore scout | Industrial designator scouting | The **only** drones that take area sweeps, and the first choice for spot checks (any drone with an ore detector can take those). Needs an ore detector. Can dock with small connectors. |
 | Combat drone | Hostile designator engage / escort | The **only** drones that take combat jobs. Needs AI Defensive, AI Flight and AI Offensive blocks. Can dock with small connectors. |
 | Farming drone, Rover | | Not implemented yet. |
 
@@ -133,11 +133,15 @@ The operation mode can only be changed while the drone's AI is off.
 
 ### Economy Flight
 
-A checkbox in the drone's **Flight** section, off by default. In space, legs of 1 km or more are flown to save fuel: the drone turns its strongest thruster group along the way, burns up to a cruise speed, coasts with every thruster off, turns around and burns to brake. The last 150 m of each leg are flown normally. Short legs, work, docking and anything that changes the route mid-leg fall back to normal flight. Planetary gravity (quad-copter flight) is not done yet.
+A checkbox in the drone's **Flight** section, off by default. In space, legs of 1 km or more are flown to save fuel: the drone turns its strongest thruster group along the way, burns up to a cruise speed, coasts with every thruster off, turns around and burns to brake. Only that one group ever fires: burns and the brake tilt it a little to steer, and a drift of more than 50 m off the line (or on course to miss it by that much) makes the drone work out a new course to the leg's end and correct it with a short burn of the same group. The last 150 m of each leg are flown normally. Short legs, work, docking and anything that changes the route mid-leg fall back to normal flight. In natural gravity, legs of 500 m or more are flown like a quad-copter: only the lift group (Up or Down) fires, and the drone tilts it, within the Align to P-Gravity limits, to move, and keeps heading for a point on the line ahead of it, so a drone pushed off course turns back towards the leg's end. It needs a lift group that carries 1.3 times the drone's weight. The last 100 m of each leg are flown normally. Coasting, the drone turns its camera along the way; its cruise speed is capped so the brake fits inside what it sees ahead, and the rest of the route is checked again before it turns round.
+
+### Flight lanes
+
+Drones managed by an Orchestrator fly busy routes in lanes, like air corridors. After the first flight between two bases that each have a Logistics Computer, or between a base and an asteroid or a planet ore hotspot (known deposits within 500 m of each other), the server makes a lane pair along the flown way. Other routes get lanes once they are busy: 6 trips between the same two ends within 30 minutes (the nearest static grid, or the spot itself): one lane each way, each offset to the right of its direction, so drones going opposite ways never meet head-on. A lane is only used once its tubes have been checked where the first drone's sensors saw them; lanes end short of bases and above work areas, and are lifted where they would cross another one. In a lane a drone keeps a gap it can stop in behind the drone ahead, even if that one brakes as hard as it can. A crash or loss in a lane, two drones too close, a drone holding in it or a check failing twice suspends the lane; a drone with a broadcast controller says "NAME: crashed in lane L7 Home Base → Asteroid 4821". The Orchestrator's terminal lists the lanes (**Active lanes**) to show, delete, resume or clear them all. Unused lanes are dropped after FlightLaneExpirationMinutes.
 
 ### When a drone finds no route
 
-On a trip home, to a dock or to a waypoint (or when the route ahead gets blocked), a drone that finds no way flies to a free spot close by, a different one each time, and plans again from there. After 3 tries it stops in an error state and broadcasts it. Press **Stop** or **Go home**, or recall it with the designator, once the way is clear.
+When a straight line (with a few detours) finds no way, the planner tries the ways drones have already flown (a memory shared by all drones and saved with the world), then a Lazy Theta* search around the obstacle (out of asteroid pockets and caves, through cluttered bases). If none of that finds a way, on a trip home, to a dock or to a waypoint (or when the route ahead gets blocked), a drone flies to a free spot close by, a different one each time, and plans again from there. After 3 tries it stops in an error state and broadcasts it. Press **Stop** or **Go home**, or recall it with the designator, once the way is clear.
 
 ### Which jobs a drone bids on
 
@@ -147,7 +151,7 @@ On a trip home, to a dock or to a waypoint (or when the route ahead gets blocked
 | Grind | A grinder and cargo room for the salvage |
 | Item delivery / pickup | Cargo room and a standard connector (ore haulers: ore and ice only) |
 | Mining | A drill, an ore detector and free cargo; the ore must not be on its ignore list |
-| Scouting (industrial designator) | Ore scout profile and an ore detector |
+| Scouting (industrial designator) | Spot check: an ore detector. Area sweep: Ore scout profile and an ore detector |
 | Engage / escort (hostile designator) | Combat drone profile and the three AI blocks |
 
 On top of that, the drone must be able to fly where the job is (atmosphere or space), have power, and not be busy. Its **Max load** settings decide how much it agrees to carry.
@@ -177,7 +181,7 @@ By default a new computer has both Provide modes on.
 2. Tick the work modes you want.
 3. Set item limits in the **Min / Max** lists: select an item in the top list, edit the entry as `item:min:max` (for example `SteelPlate:100:5000` or `Ingot/Iron:0:20000`, where 0 means "not set"), then press **Edit and add**. You can also type an entry and press **Add manually**.
 4. Mins only do something with **Request** on, Maxes only with **Push** on (the computer warns you otherwise).
-5. For mining: by default it only accepts ore its working refineries can process. Tick **Accept ore from mining without a refinery** to use it as plain ore storage. Ice goes to grids with an O2/H2 generator.
+5. For mining: by default it only accepts ore its working refineries can process. Tick **Accept ores/ice** to use it as plain ore storage. Ice goes to grids with an O2/H2 generator.
 
 A typical setup: the main base on **Provide for logistics + Provide for construction**, and an outpost on **Request** with Mins for the components it needs, or a mining outpost on **Push** with Maxes on its ore.
 
@@ -261,7 +265,7 @@ Without a Logistics Computer to take the ore, no mining job is given out: your d
 
 ## Manual jobs with the target designators
 
-The two designators are hand-held tools. Press **Reload** to cycle modes, **Fire** to point. You must be within antenna range of one of your Orchestrators, and the drones you want to use must be **Managed by Orchestrator**. The designator's lights and sounds tell you whether the order was sent (yellow), accepted by a drone (green / blue), or refused (red). If no suitable drone takes the order within about 10 seconds, it is cancelled.
+The two designators are hand-held tools. Press **Reload** to cycle modes, **Fire** to point. You must be within antenna range of one of your Orchestrators, and the drones you want to use must be **Managed by Orchestrator**. The designator's lights and sounds tell you whether the order was sent (yellow), accepted by a drone (green / blue), or refused (red). If no suitable drone takes the order within about 10 seconds, it is cancelled. Their reach is 5 km. The Industrial Target Designator is made at the survival kit and any assembler; the Hostile Target Designator only at the full Assembler.
 
 Both designators share two extra modes:
 
@@ -270,7 +274,7 @@ Both designators share two extra modes:
 
 ### Scouting (Industrial Target Designator)
 
-Only drones with the **Ore scout** profile and an ore detector take scouting jobs.
+Spot checks go to any drone with an ore detector (Ore scouts first). Area sweeps go only to drones with the **Ore scout** profile and an ore detector. Tag mode accepts any of your drones with an ore detector; a sweep uses only the tagged Ore scouts.
 
 - **Spot check**: point at the ground or an asteroid. A scout flies there, scans for ore and comes back. With several tagged scouts, they spread around the spot.
 - **Area sweep**: point at an area. A scout sweeps it (low passes over a planet; on an asteroid, 8 low orbits over the spot in random directions, close to the surface, with height and spacing set by the scout's ore detector range). With several tagged scouts, the area is split between them. A waypoint the scout can't reach is skipped (up to 3 in a row), and in space scouts wait longer before giving up on a stalled leg.
@@ -285,6 +289,18 @@ Only drones with the **Combat drone** profile and AI Defensive, AI Flight and AI
 - **Escort**: point at one of your own moving grids or characters. The drone follows above it at the **follow distance**, fights any enemy that comes close, then resumes following. Point at the ground right next to yourself to have it escort you.
 
 Combat drones come home on their own when power or hydrogen runs low, when their AI Defensive block decides to flee, or when an AI block is lost. You can tune all of this in the drone's **Combat** section.
+
+### From a camera (Orchestrator toolbar)
+
+An Orchestrator can give the same orders without a hand-held designator, pointed with a camera:
+
+1. Place a camera (large or small grid) on the Orchestrator's grid, or on a part connected to it by a rotor, hinge or piston (a turret, for example with a Custom Turret Controller). Grids joined only by a connector or a magnetic plate don't count.
+2. In the Orchestrator's terminal, pick it as **Designator camera**.
+3. Put the Orchestrator's **Designator: TAG / SPOT / AREA / ENGAGE / ESCORT / RECALL / CLEAR** actions on a toolbar, aim the camera, and press one.
+
+The camera's reach is 15 km, and nobody needs to look through it. The orders work as with the hand-held designators, except escorting yourself: on a moving grid the drones are already with you. Refused orders show in the Orchestrator's log.
+
+**Designator LCD tag** (default `[Designator]`): put it in an LCD's name and select the **Automata Log** app to see the tag counts, the last tagged target and each order with its drones. CLEAR forgets all tags; tags also expire 10 minutes after the last one.
 
 ## Server settings
 
@@ -303,7 +319,14 @@ How drones plan their routes and see obstacles. These are the main CPU settings 
 | Setting | Default | What it does |
 | --- | --- | --- |
 | AllowDirectPathfinding | true | The drones' route planner. Off: drones fly straight lines to their targets without checking for obstacles. Leave it on. |
-| AllowAStar | false | *Not available yet.* Turning it on only logs a warning. |
+| AllowLazyTheta | true | Route planner stage 3: when the straight line (with a few detours) and the route memory find no way, a Lazy Theta* search looks for one around the obstacle (out of asteroid pockets and caves, through cluttered bases). Off: those routes fail and the drone repositions. (Replaces AllowAStar, which is no longer read.) |
+| ThetaSearchRadius | 300 | Metres the search covers around the stretch that failed (50 to 2000). Further goals are searched for part of the way. |
+| ThetaMaxExpansions | 3000 | Most cells one search looks at (100 to 100000). |
+| ThetaMaxMs | 15 | Most milliseconds one search may take (1 to 500). |
+| UsePathMemory | true | Route planner stage 2: the server remembers where drones have flown (shared by all drones, saved with the world) and plans through those known-free ways when the straight line fails. |
+| PathMemoryMaxNodes | 4000 | Most remembered points (100 to 100000); the least recently used are forgotten first. |
+| PathMemoryMaxAgeHours | 24 | Hours a remembered way may go unused before it is forgotten (1 to 8760). |
+| FlightLaneExpirationMinutes | 240 | Minutes a flight lane may go unused before it is dropped (5 to 525600). Lanes are always on. |
 | AllowSensors, AllowObstacleAvoidance, AllowSimpleRepositioning, AllowDStarLite, UseGravityAwarePathing, RepositionStep | | *Not used yet.* |
 | UsePlanetAwarePathfinding | true | On planets, long routes follow the planet's curve and climb over terrain. Off: straight lines, which can run into hills and mountains. |
 | MinWaypointDistance, MaxWaypointDistance | 5, 15 | *Not used yet.* |
@@ -311,10 +334,10 @@ How drones plan their routes and see obstacles. These are the main CPU settings 
 | MinAltitudeBuffer | 20 | Metres kept above the highest terrain when a route climbs over a hill (the drone's own **Min altitude** is used when higher). 0 to 1000. |
 | MaxPathNodes | 1000 | Most points in one route (at least 100). Very long planet routes use wider steps to stay within it. |
 | MaxPathfindingTimeMs | 50 | *Not used yet.* |
-| RequireCamerasForPathfinding | true | On: drones only see far-off obstacles through working, switched-on cameras, each looking along its facing (six cameras cover every direction). Off: every drone sees as if it had cameras all around. |
-| RequireSensorsForPathfinding | true | On: drones only see close obstacles all around them through a working, switched-on sensor block (the sensor's own range settings don't matter). Drones without one get a warning before take-off. Off: every drone has that close-range sight. |
-| CameraRange | 1000 | How far a camera sees, in metres (10 to 5000). |
-| SimulatedSensorRange | 50 | How far a sensor sees, in metres (1 to 500). |
+| RequireCamerasForPathfinding | true | On: drones only see far-off obstacles through working, switched-on cameras, each looking along its facing from where it is mounted (six cameras cover every direction). Off: every drone sees as if it had one camera on the front of its hull, looking forward. |
+| RequireSensorsForPathfinding | true | On: drones only see close obstacles within range of a working, switched-on sensor block, around where that sensor is mounted (the sensor's own range settings don't matter): a long ship with one sensor at an end only senses around that end. Drones without one get a warning in their header. Off: every drone senses that range all around its hull. |
+| CameraRange | 1500 | How far a camera sees, in metres (10 to 5000). |
+| SimulatedSensorRange | 100 | How far a sensor sees, in metres (1 to 500). |
 | RaysPerTick | 60 | Obstacle checks per tick, shared by all drones on the server (5 to 1000). Lower uses less CPU, but drones notice obstacles later when many are flying. |
 | AllowRepathing | true | Something blocks the route: the drone plans a way around it. Off: the drone stops and the task fails. |
 | ObstacleClearance | 3 | Metres kept between the hull and obstacles when routes are checked (0 to 20). Higher is safer, but tight spaces may become unreachable. |
@@ -331,7 +354,7 @@ How drones plan their routes and see obstacles. These are the main CPU settings 
 | Setting | Default | What it does |
 | --- | --- | --- |
 | TaskTimeoutSeconds | 30 | The highest **Task timeout** a player can set on a drone (10 to 600). A task that stops making progress for that long fails. |
-| DebugDrawTimeoutSeconds | 3600 | The observation area and navigation target overlays switch themselves off after this many seconds (10 to 3600). |
+| DebugDrawTimeoutSeconds | 3600 | The debug overlays (drone observation area and navigation targets, construction computer area, orchestrator parking area and lanes, `/automata debugdraw`) switch themselves off after this many seconds (10 to 3600). |
 | DefaultMonitorHydrogen, DefaultMonitorBattery, DefaultHydrogenRefuelThreshold, DefaultHydrogenOperationalThreshold, DefaultBatteryRefuelThreshold, DefaultBatteryOperationalThreshold, MinPowerThreshold, MaxPowerThreshold | | *Not used yet.* Each drone uses its own terminal settings. |
 | ComponentCheckIntervalSeconds | 600 | How often a drone re-checks all of its own blocks (60 to 86400). Adding or removing blocks triggers a check anyway. |
 | ConnectorScanIntervalSeconds | 60 | How often a drone's home connector / beacon lists may refresh on their own. |
@@ -341,6 +364,8 @@ How drones plan their routes and see obstacles. These are the main CPU settings 
 | ConnectorScanRadius | 1000 | Radius of the automatic connector / beacon lists, in metres (100 to 5000). |
 | ConnectorNameSearchRadius | 15000 | Radius of **Add to list** (search by name), and the farthest a home connector or beacon may be from the drone, in metres. |
 | ConnectorNameSearchIntervalSeconds | 10 | Shortest time between two name searches on one drone. |
+| WeldUseDroneShape | true | Weld jobs: where the drone's bounding box doesn't fit the way in to a block, its real shape is checked (its blocks merged into a few boxes), so a welder snout can reach between built neighbours. |
+| WeldUseNeighbourShapes | true | Weld jobs: built blocks next to the target that are in the way are checked against their real shape (slopes, panels), not as full cubes. |
 | CombatMaxDetectionRange | 2000 | Enemies the AI Defensive block reports farther away than this (metres) are ignored (100 to 50000). The vanilla block sees 2000 m; raise it only for modded AI blocks. |
 
 ### [ConstructionComputer]

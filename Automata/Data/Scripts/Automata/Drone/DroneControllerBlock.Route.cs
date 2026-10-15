@@ -172,6 +172,11 @@ namespace Automata.Drone
             BuildPathQuery(out q);
             pm.BeginPlan();
             if (!looseGoal && !pm.HullFits(ref q, goal)) return false;   // the goal itself is taken: moving won't help
+            // Wedged in (the hull doesn't fit here in any attitude: it got in through precise checks): back the way it
+            // came first; escape spots around a tight spot rarely fit
+            bool tight = !pm.HullFits(ref q, start);
+            if (tight && TryRetrace(start, goal, points, count, avoidObservationArea, areaOnlyFromOutside, startForward, startUp, looseGoal, pm, ref q))
+                return true;
             EscapeCandidates(start, ref q);
             Vector3D hit;
             VRage.ModAPI.IMyEntity e;
@@ -180,7 +185,7 @@ namespace Automata.Drone
             {
                 Vector3D s = escapeSpots[i];
                 pm.BeginPlan();
-                if (!pm.HullFits(ref q, s) || pm.SegmentBlocked(ref q, start, s, 0.5, out hit, out e)) continue;
+                if (!EscapeSpotFits(pm, ref q, s, startForward, startUp) || pm.SegmentBlocked(ref q, start, s, 0.5, out hit, out e)) continue;
                 if (q.GravityUp.LengthSquared() > 0.5
                     && PathfindingManager.HeightAboveTerrain(s) < PathfindingManager.HullHalfSizeAlong(ref q, ref q.Controller, q.GravityUp) + 1) continue;
                 planned++;   // a full route from there: the expensive part, a few at most
@@ -198,7 +203,10 @@ namespace Automata.Drone
             }
             if (points.Count > count) points.RemoveRange(count, points.Count - count);
             escapeSpots.Clear();
-            Log.Debug("Drone {0}: no way from here or from {1} spots around it", Entity.EntityId, escapeWhy.Count);
+            Log.Debug("Drone {0}: no way from here or from {1} spots around it{2}", Entity.EntityId, escapeWhy.Count,
+                      tight ? " (the hull doesn't fit here in every attitude)" : "");
+            if (!tight && TryRetrace(start, goal, points, count, avoidObservationArea, areaOnlyFromOutside, startForward, startUp, looseGoal, pm, ref q))
+                return true;
             // Stuck (a dock / home trip, a NavigateTo, a replan): fly to a spot nearby and plan again there
             return TryRecoverRoute(start, goal, points, count, startForward, startUp, pm, ref q);
         }
@@ -284,6 +292,7 @@ namespace Automata.Drone
                 RefreshDroneGrids();
                 BuildPathQuery(out q);
                 q.LooseGoal = looseGoal;
+                q.NoHeldTurn = NearDockArea(start);
                 pm.BeginPlan();
             }
             Vector3D from = start;
@@ -961,7 +970,12 @@ namespace Automata.Drone
             // turn point can be 0.5 m off it): nothing past the end counts (the corridor / turn checks cleared that
             // spot), or the station itself blocked the leg and the drone replanned until it gave up
             if (routeOwner == RouteOwner.Docking && dockingOrder != null) looseEnd = true;
-            bool blocked = scene ? pm.SegmentBlocked(ref q, ref q.Controller, from, to, 0.5, out hit, out hitEntity, !looseEnd)
+            // Checked in the leg's own attitude (the one the planner checked it with: a held attitude turned to at the
+            // start of the route isn't the drone's yet when the leg starts)
+            MatrixD legAtt = q.Controller;
+            if (o.Orientation == FlightOrientationMode.Explicit && o.Forward.ToVector3D().LengthSquared() > 0.5 && o.Up.ToVector3D().LengthSquared() > 0.5)
+                legAtt = MatrixD.CreateWorld(Vector3D.Zero, Vector3D.Normalize(o.Forward.ToVector3D()), Vector3D.Normalize(o.Up.ToVector3D()));
+            bool blocked = scene ? pm.SegmentBlocked(ref q, ref legAtt, from, to, 0.5, out hit, out hitEntity, !looseEnd)
                                  : pm.LegRaysBlocked(ref q, from, to, out hit, out hitEntity);
             // Terrain under the leg (planets are no ray / scene obstacles), its end excepted
             // Taking off from the ground (or a bore hole): the first stretch is exempt as well

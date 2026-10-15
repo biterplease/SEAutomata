@@ -626,12 +626,22 @@ namespace Automata.Drone
             backOutSpeedCap = 0;
             // Docked elsewhere: out of that dock first (straight out, or its corridor), then the route
             if (docked != null) backOuts = DeparturePoints(docked, ref start, dockRoutePoints);
-            else ClimbOut(ref start, DroneRadius(), dockRoutePoints);   // in a bore hole: out of it first
+            else
+            {
+                TakeContactBackOut(ref start, dockRoutePoints);         // pressed against something on the way: away from it first
+                ClimbOut(ref start, DroneRadius(), dockRoutePoints);   // in a bore hole: out of it first
+                backOuts = dockRoutePoints.Count;                      // (those legs hold the attitude, like FlyRoute's)
+            }
             undockLegs = docked != null ? backOuts : 2;
             // The 4th endpoint: the route ends up to 50 m out from the turn point; in from there at Approach speed
             Vector3D staging = DockStagingPoint(hullAtApproach, dockCorridor ? corridorExitDir : aH);
             bool staged = Vector3D.DistanceSquared(staging, hullAtApproach) > 4;
-            if (!PlanPath(start, staged ? staging : hullAtApproach, dockRoutePoints, areaDetour, false))
+            dockAreaSet = true;   // planned near the platform: no attitude turns there (NearDockArea)
+            dockAreaCentre = target.GetPosition();
+            bool planned;
+            try { planned = PlanPath(start, staged ? staging : hullAtApproach, dockRoutePoints, areaDetour, false); }
+            finally { dockAreaSet = false; }
+            if (!planned)
             {
                 Report(StrDockNoRouteTo, target.CustomName);
                 return false;

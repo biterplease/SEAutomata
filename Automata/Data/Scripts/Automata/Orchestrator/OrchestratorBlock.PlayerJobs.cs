@@ -33,6 +33,7 @@ namespace Automata.Orchestrator
     {
         #region UI strings
         private static readonly MyStringId StrOreScout = MyStringId.GetOrCompute("ore scout");
+        private static readonly MyStringId StrOreDetectorDrone = MyStringId.GetOrCompute("drone with an ore detector");
         private static readonly MyStringId StrCombatDrone = MyStringId.GetOrCompute("combat drone");
         private static readonly MyStringId StrOreHauler = MyStringId.GetOrCompute("ore hauler");
         private static readonly MyStringId StrMiningDrone = MyStringId.GetOrCompute("mining drone");
@@ -58,6 +59,7 @@ namespace Automata.Orchestrator
             public DateTime ExpiresAt;     // not assigned by then: cancelled
             public bool Assigned;
             public long RequiredDrone;     // a tagged drone's order: only it may take the job (0: any of the profile)
+            public long Drone;             // the drone that won it (designator LCDs)
         }
 
         private sealed class PlayerOrder
@@ -82,18 +84,24 @@ namespace Automata.Orchestrator
 
         /// <summary>
         /// The behaviour profile a job type requires of its drone (the player designates the drones for it). None:
-        /// any capable drone. Scout jobs: ore scouts; combat jobs (engage / escort): combat drones.
+        /// any capable drone. Area sweeps: ore scouts; spot checks: any drone with an ore detector (CanScoutOre, checked
+        /// with the capabilities; ore scouts still rank first: PreferredProfile); combat jobs (engage / escort): combat drones.
         /// </summary>
         private static Drone.BehaviourProfile RequiredProfile(JobType type)
         {
             switch (type)
             {
-                case JobType.DesignatorScoutPoint:
                 case JobType.DesignatorScoutArea: return Drone.BehaviourProfile.IsOreScout;
                 case JobType.DesignatorEngage:
                 case JobType.DesignatorEscort:    return Drone.BehaviourProfile.IsCombatDrone;
                 default:                          return Drone.BehaviourProfile.None;
             }
+        }
+
+        // Who may take a designator job, for the log / feedback ("no {0} bid")
+        private static string DesignatorTakerName(JobType type)
+        {
+            return type == JobType.DesignatorScoutPoint ? Loc.T(StrOreDetectorDrone) : ProfileName(RequiredProfile(type));
         }
 
         private static string ProfileName(Drone.BehaviourProfile p)
@@ -202,11 +210,12 @@ namespace Automata.Orchestrator
         private const int PLAYER_JOB_MEMORY_TICKS = 2 * 60 * 3600;
         #endregion
 
-        private void PlayerJobAssigned(KeyValuePair<long, uint> key, int now)
+        private void PlayerJobAssigned(KeyValuePair<long, uint> key, int now, long droneId)
         {
             PlayerJob pj;
             if (key.Key != entityId || !playerJobs.TryGetValue(key.Value, out pj) || pj.Assigned) return;
             pj.Assigned = true;
+            pj.Drone = droneId;
             knownJobs[key] = now + PLAYER_JOB_MEMORY_TICKS;
             PlayerOrder order;
             if (playerOrders.TryGetValue(pj.OrderId, out order))
@@ -271,6 +280,7 @@ namespace Automata.Orchestrator
             ScoutPointer.Feedback(order.Identity, order.Type == JobType.DesignatorScoutArea || order.Type == JobType.DesignatorEscort
                                                   ? DesignatorSignal.ConfirmedBlue : DesignatorSignal.ConfirmedGreen);
             BroadcastAccepted(order);
+            LogDesignatorOrder(order);
             Log.Info("Orchestrator {0}: player order {1} confirmed ({2} job(s), {3} cancelled)", entityId, order.OrderId, order.Assigned, order.Cancelled);
         }
 

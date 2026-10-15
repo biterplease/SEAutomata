@@ -27,9 +27,9 @@ function Write-Step([string]$Message)
 }
 
 $source = Join-Path $PSScriptRoot 'Automata'
-if (-not (Test-Path -LiteralPath (Join-Path $source 'modinfo.sbm')))
+if (-not (Test-Path -LiteralPath (Join-Path $source 'modinfo.sbmi')))
 {
-    throw "Mod sources not found in '$source' (modinfo.sbm is missing)."
+    throw "Mod sources not found in '$source' (modinfo.sbmi is missing)."
 }
 Write-Step "Deploy started: $source -> $Target"
 
@@ -60,7 +60,7 @@ Write-Step 'Old deployed copy deleted'
 # 2. Copy
 New-Item -ItemType Directory -Path $Target -Force | Out-Null
 
-foreach ($name in 'modinfo.sbm', 'Automata.ini', 'CREDITS.txt')
+foreach ($name in 'modinfo.sbmi', 'Automata.ini', 'CREDITS.txt', 'thumb.png')
 {
     $path = Join-Path $source $name
     if (Test-Path -LiteralPath $path) { Copy-Item -LiteralPath $path -Destination $Target -Force }

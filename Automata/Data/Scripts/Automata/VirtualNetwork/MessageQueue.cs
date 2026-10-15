@@ -193,7 +193,7 @@ namespace Automata.VirtualNetwork
         /// <summary>
         /// IsValid() was true when added to the DAABBTree. Should still be checked once the AntennaInfo is retrieved.
         /// </summary>
-        public const uint FLAG_IS_VALID = 1 << 4;
+        public const uint FLAG_IS_VALID = 1 << 6;   // was 1 << 4, the mining surveyor's type bit (2026-10-15)
         private readonly MyDynamicAABBTreeD antennaTree = new MyDynamicAABBTreeD();
         /// <summary>The antenna network (relays through bases and drones, laser links), rebuilt every few seconds.</summary>
         public readonly RelayGraph Relays = new RelayGraph();

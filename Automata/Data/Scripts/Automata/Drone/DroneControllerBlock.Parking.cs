@@ -122,7 +122,7 @@ namespace Automata.Drone
             if (!ParkMode)
             {
                 if (ReturnsToDeparture) return GoDeparture();   // combat / scout, no connector, no gear: back over where it left from
-                if (RestsAtAnyConnector) return GoCharge();     // no home, no gear: the nearest free connector it fits
+                if (RestsAtAnyConnector) return GoCharge(true); // no home, no gear: a free connector where it left from (else the nearest)
                 return GoHome();
             }
             if ((needsBatteryRecharge || needsHydrogenRefuel) && GoCharge()) return true;
@@ -144,19 +144,21 @@ namespace Automata.Drone
             }
         }
 
-        // Where the park search looks: around the departure spot when the drone goes back there, else around the drone
+        // Where the park search looks: around where it left from (no home connector), else around the drone
         private Vector3D ParkSearchCentre
         {
-            get { return ReturnsToDeparture ? settings.DepartureSpot.ToVector3D() : flightState.Position; }
+            get { return settings != null && !HasHomeConnector && settings.HasDeparture ? settings.DepartureSpot.ToVector3D() : flightState.Position; }
         }
 
-        // Pre-flight, letting go (connector / gears): this is where it came from (no home connector only)
+        // Pre-flight, letting go (connector / gears): this is where it came from, and the grid it was on (no home connector only)
         private void RememberDeparture()
         {
             if (settings == null || HasHomeConnector) return;
             CaptureFlightState();
+            RefreshDroneGrids();
             settings.DepartureSpot = Vector3DData.FromVector3D(flightState.Position);
             settings.HasDeparture = true;
+            settings.DepartureGridId = DepartureGridNow();
             SaveSettings();
         }
 
@@ -212,6 +214,8 @@ namespace Automata.Drone
             {
                 found = orch != null && orch.UsesParkingArea && FindStagingSpot(pm, ref q, orch, out ps);
                 if (!found && orch != null && orch.ParkingGrid != null) found = FindFriendlyGridSpot(pm, ref q, orch.ParkingGrid, out ps);
+                var departed = DepartureGrid();   // the grid it left from: back there
+                if (!found && departed != null && departed.IsStatic) found = FindFriendlyGridSpot(pm, ref q, departed, out ps);
                 if (!found) found = FindFriendlyGridSpot(pm, ref q, null, out ps);
                 if (!found) found = FindVoxelSpot(pm, ref q, ParkSearchCentre, out ps);
             }
@@ -1034,14 +1038,17 @@ namespace Automata.Drone
         private readonly List<IMyShipConnector> chargeCandidates = new List<IMyShipConnector>();
 
         /// <summary>Park mode, low: the nearest free friendly connector the drone can dock at, to refuel there.</summary>
-        private bool GoCharge()
+        // 'rest': to rest after work (no home connector, no gear): a free connector of the grid it left from first, then
+        // the nearest to where it left from; otherwise (recharge on the way) the nearest to the drone
+        private bool GoCharge(bool rest = false)
         {
             if (AnyConnectorsConnected()) return true;   // already at one: refuelling there
             CaptureFlightState();
             var faces = DockFaces();
             var smallFaces = DockFaces(true);
             if (faces.Count == 0 && smallFaces.Count == 0) return false;
-            Vector3D here = flightState.Position;
+            Vector3D here = rest && settings.HasDeparture ? settings.DepartureSpot.ToVector3D() : flightState.Position;
+            var departed = rest ? DepartureGrid() : null;
             Vector3D g = flightState.InGravity ? flightState.Gravity : Vector3D.Zero;
             nearEntities.Clear();
             var sphere = new BoundingSphereD(here, CHARGE_SEARCH_RADIUS);
@@ -1065,7 +1072,11 @@ namespace Automata.Drone
                 }
             }
             nearEntities.Clear();
-            chargeCandidates.Sort((a, b) => Vector3D.DistanceSquared(a.GetPosition(), here).CompareTo(Vector3D.DistanceSquared(b.GetPosition(), here)));
+            chargeCandidates.Sort((a, b) =>
+            {
+                if (departed != null && (a.CubeGrid == departed) != (b.CubeGrid == departed)) return a.CubeGrid == departed ? -1 : 1;
+                return Vector3D.DistanceSquared(a.GetPosition(), here).CompareTo(Vector3D.DistanceSquared(b.GetPosition(), here));
+            });
             for (int i = 0; i < chargeCandidates.Count && i < 5; i++)
             {
                 if (DockAtConnector(chargeCandidates[i]))

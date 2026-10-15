@@ -73,8 +73,6 @@ namespace Automata.Drone
 
         private ConstructionComputer constructionComputer;           // embedded, BuiltInToDrone
         private readonly ConveyorNetwork homeNetwork = new ConveyorNetwork();
-        private long homeNetworkLastUpdateFrame = 0;
-        private int homeNetworkUpdateIntervalTicks = 600; // 10 seconds
         private readonly List<ConstructionTarget> scannedTargets = new List<ConstructionTarget>();
         private readonly List<IMyCubeGrid> droneGrids = new List<IMyCubeGrid>();
         private readonly List<IMyCubeGrid> homeGrids = new List<IMyCubeGrid>();

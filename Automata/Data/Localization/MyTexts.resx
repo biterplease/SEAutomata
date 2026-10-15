@@ -1468,6 +1468,24 @@
   <data name="Seconds before a job task gives up and the drone moves on." xml:space="preserve">
     <value>Seconds before a job task gives up and the drone moves on.</value>
   </data>
+  <data name="Designator camera" xml:space="preserve">
+    <value>Designator camera</value>
+  </data>
+  <data name="Camera the &quot;Designator:&quot; toolbar actions aim with (15 km). On this grid, or via rotor / hinge / piston." xml:space="preserve">
+    <value>Camera the "Designator:" toolbar actions aim with (15 km). On this grid, or via rotor / hinge / piston.</value>
+  </data>
+  <data name="Designator LCD tag" xml:space="preserve">
+    <value>Designator LCD tag</value>
+  </data>
+  <data name="Place this tag on an LCD, select the Automata Log app to see designator output." xml:space="preserve">
+    <value>Place this tag on an LCD, select the Automata Log app to see designator output.</value>
+  </data>
+  <data name="Local-job radius" xml:space="preserve">
+    <value>Local-job radius</value>
+  </data>
+  <data name="Drone will only bid on jobs within this distance." xml:space="preserve">
+    <value>Drone will only bid on jobs within this distance.</value>
+  </data>
   <data name="Cruise speed limit for any flight." xml:space="preserve">
     <value>Cruise speed limit for any flight.</value>
   </data>
@@ -2049,8 +2067,8 @@ Every section below can be unfolded whatever the profile.</value>
   <data name="Items below their Min are requested." xml:space="preserve">
     <value>Items below their Min are requested.</value>
   </data>
-  <data name="Accept ore from mining without a refinery" xml:space="preserve">
-    <value>Accept ore from mining without a refinery</value>
+  <data name="Accept ores/ice" xml:space="preserve">
+    <value>Accept ores/ice</value>
   </data>
   <data name="With Provide for logistics: bid room for mined ore even when no refinery here takes it (ore storage). Off: only ore a working refinery here can process." xml:space="preserve">
     <value>With Provide for logistics: bid room for mined ore even when no refinery here takes it (ore storage). Off: only ore a working refinery here can process.</value>
@@ -2507,9 +2525,8 @@ Every section below can be unfolded whatever the profile.</value>
   <data name="Use parking protocol" xml:space="preserve">
     <value>Use parking protocol</value>
   </data>
-  <data name="Drones managed by this orchestrator with no home connector park on their landing gears as chosen below.&#xA;Off: they park on any friendly grid, then on voxel." xml:space="preserve">
-    <value>Drones managed by this orchestrator with no home connector park on their landing gears as chosen below.
-Off: they park on any friendly grid, then on voxel.</value>
+  <data name="Drones with landing gears park on grids instead of connector." xml:space="preserve">
+    <value>Drones with landing gears park on grids instead of connector.</value>
   </data>
   <data name="Show parking area" xml:space="preserve">
     <value>Show parking area</value>
@@ -2520,10 +2537,10 @@ Off: they park on any friendly grid, then on voxel.</value>
   <data name="Parking" xml:space="preserve">
     <value>Parking</value>
   </data>
-  <data name="Park on grid: anywhere on this orchestrator's grid (then any friendly grid, then voxel).&#xA;Parking area: in the area set below (then this grid, any friendly grid, voxel).&#xA;Voxel: on rock near this orchestrator - ground, cliff, cave, asteroid - away from grids (voxel only)." xml:space="preserve">
-    <value>Park on grid: anywhere on this orchestrator's grid (then any friendly grid, then voxel).
-Parking area: in the area set below (then this grid, any friendly grid, voxel).
-Voxel: on rock near this orchestrator - ground, cliff, cave, asteroid - away from grids (voxel only).</value>
+  <data name="Park on grid: anywhere this orchestrator's grid.&#xA;Parking area: in the area set below.&#xA;Voxel: on rock near this orchestrator." xml:space="preserve">
+    <value>Park on grid: anywhere this orchestrator's grid.
+Parking area: in the area set below.
+Voxel: on rock near this orchestrator.</value>
   </data>
   <data name="Park on grid" xml:space="preserve">
     <value>Park on grid</value>

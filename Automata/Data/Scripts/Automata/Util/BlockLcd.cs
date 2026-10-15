@@ -86,11 +86,17 @@ namespace Automata.Util
 
         private readonly LcdFeeder feeder = new LcdFeeder();
         private readonly List<string> logLines = new List<string>();
+        private readonly int channel;
+
+        public BlockLcd() : this(0) { }
+
+        /// <summary>'channel': 0 the block's LCDs; 1.. a second set of LCDs of the same block (its own tag and content).</summary>
+        public BlockLcd(int channel) { this.channel = channel; }
 
         /// <summary>Server, every update: true when a client is looking at one of the block's LCDs (then build the header and call <see cref="Publish"/>).</summary>
         public bool Wanted(IMyTerminalBlock owner, string tag)
         {
-            feeder.Bind(owner, tag, false);
+            feeder.Bind(owner, tag, false, channel);
             return feeder.HasViewers;
         }
 

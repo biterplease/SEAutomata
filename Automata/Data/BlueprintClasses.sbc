@@ -1,14 +1,13 @@
 <?xml version="1.0"?>
 <!-- Automata target designators: which production tab they appear in (as vanilla BlueprintClasses.sbc).
-     Offensive = WEAPON (weapons tabs), Industrial = TOOL (tools tabs). -->
+     Offensive = WEAPON (weapons tabs), Industrial = TOOL (tools tabs).
+     Hostile: the full assembler only (like the level 2 hand drill); industrial: everywhere (like the basic hand drill). -->
 <Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
   <BlueprintClassEntries>
     <!-- survival kit -->
-    <Entry Class="BasicWeapons" BlueprintSubtypeId="Blueprint_AutomataHostileTargetDesignator" />
     <Entry Class="BasicTools" BlueprintSubtypeId="Blueprint_AutomataIndustrialTargetDesignator" />
 
     <!-- basic assembler -->
-    <Entry Class="SimpleWeapons" BlueprintSubtypeId="Blueprint_AutomataHostileTargetDesignator" />
     <Entry Class="Tools" BlueprintSubtypeId="Blueprint_AutomataIndustrialTargetDesignator" />
 
     <!-- assembler -->

@@ -293,5 +293,15 @@ namespace Automata.Drone
                 /// <summary>Share (%) of the strongest face's thrust used to accelerate and brake (not to hold the weight).</summary>
                 [ProtoMember(76, IsRequired = true)]
                 public float MaxThrustPercent = 50f;
+
+                /// <summary>m: the drone bids only on jobs this close to its base (home connector, else where it last left
+                /// from, else where it is). 1 to 30 000.</summary>
+                [ProtoMember(77, IsRequired = true)]
+                public float LocalJobRadius = 15000f;
+
+                /// <summary>No home connector: the grid it last took off from (docked / parked on), or the nearest friendly
+                /// static grid when it left from voxel; 0 = none. It rests there again after a job.</summary>
+                [ProtoMember(78)]
+                public long DepartureGridId;
         }
 }

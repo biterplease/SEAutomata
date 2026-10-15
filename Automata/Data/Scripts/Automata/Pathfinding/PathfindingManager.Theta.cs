@@ -64,16 +64,132 @@ namespace Automata.Pathfinding
 
         public bool ThetaAvailable { get { return config.AllowLazyTheta; } }
 
+        // Held attitudes (the hull box as it is, or turned 90° about its axes) when the any-attitude search finds nothing
+        private const double THETA_FREE_SHARE = 0.5;     // of the time / expansion budget for the any-attitude search
+        private const int THETA_HELD_MAX = 6;            // attitudes tried: as it is first, then the least turned
+        private bool thetaHeld;                          // the search in progress holds q.Controller's attitude
+        private Quaternion thetaRot;
+        private Vector3D thetaBoxHalf;                   // the hull's half size + the berth (held attitude)
+        private readonly List<MatrixD> thetaHeldFrames = new List<MatrixD>();
+        private readonly List<Vector3D> thetaHeldKeys = new List<Vector3D>();
+
         /// <summary>
         /// A way from 'start' to 'goal' found by the search, as points (start and goal included) in 'points'. False:
-        /// none ('why').
+        /// none ('why'). First with the hull in any attitude (the sphere round it; half the budget). Nothing: the
+        /// drone's box is rarely a cube - in its own attitude, then turned 90° about one axis or two, it may fit where
+        /// the sphere doesn't (a bay, between beams). Those searches share the rest of the budget, its own attitude
+        /// first; another attitude only where it can turn to it at the start. Found that way: q.Controller has that
+        /// attitude and q.HoldAttitude is set (the whole route keeps it).
         /// </summary>
         private bool ThetaStage(ref PathQuery q, Vector3D start, Vector3D goal, out string why)
+        {
+            var total = System.Diagnostics.Stopwatch.StartNew();
+            double ms = config.ThetaMaxMs;
+            int exp = config.ThetaMaxExpansions;
+            bool canHold = q.HullCentred && q.LocalHull.Max.X >= q.LocalHull.Min.X;
+            thetaHeld = false;
+            if (ThetaSearch(ref q, start, goal, canHold ? ms * THETA_FREE_SHARE : ms,
+                            canHold ? Math.Max(16, (int)(exp * THETA_FREE_SHARE)) : exp, out why)) return true;
+            if (!canHold) return false;
+            HeldCandidates(ref q, start);
+            if (q.NoHeldTurn && thetaHeldFrames.Count > 1) thetaHeldFrames.RemoveRange(1, thetaHeldFrames.Count - 1);   // near a dock: as it is only
+            MatrixD controller = q.Controller;
+            bool eyesSet = q.EyesSet;
+            MatrixD eyes = q.Eyes;
+            if (!eyesSet) { q.Eyes = controller; q.EyesSet = true; }
+            string last = null;
+            int tried = 0;
+            for (int i = 0; i < thetaHeldFrames.Count; i++)
+            {
+                double left = ms - total.Elapsed.TotalMilliseconds;
+                if (left < 0.25) break;
+                int remaining = thetaHeldFrames.Count - i;
+                double share = i == 0 && remaining > 1 ? left * 0.5 : left / remaining;   // its own attitude: half of what is left
+                MatrixD f = thetaHeldFrames[i];
+                f.Translation = controller.Translation;
+                q.Controller = f;
+                thetaHeld = true;
+                thetaRot = Quaternion.CreateFromRotationMatrix(f);
+                thetaBoxHalf = q.LocalHull.HalfExtents + new Vector3D(Berth(ref q));
+                string w;
+                bool ok = ThetaSearch(ref q, start, goal, share, Math.Max(16, (int)(exp * share / ms)), out w);
+                thetaHeld = false;
+                tried++;
+                if (ok)
+                {
+                    q.HoldAttitude = true;
+                    Log.Debug("Pathfinding: Lazy Theta* found a way holding the drone's attitude{0} (any-attitude search: {1})",
+                              i == 0 ? " as it is" : string.Format(", turned {0:F0}° at the start", TurnDegrees(ref controller, ref f)), why);
+                    why = null;
+                    return true;
+                }
+                last = w;
+            }
+            q.Controller = controller;
+            q.EyesSet = eyesSet;
+            q.Eyes = eyes;
+            why += string.Format("; held attitudes: {0} of {1} tried{2}", tried, thetaHeldFrames.Count, last != null ? " (last: " + last + ")" : "");
+            return false;
+        }
+
+        private static double TurnDegrees(ref MatrixD a, ref MatrixD b)
+        {
+            double c = (Vector3D.Dot(a.Forward, b.Forward) + Vector3D.Dot(a.Up, b.Up) + Vector3D.Dot(a.Right, b.Right) - 1) * 0.5;
+            return MathHelperD.ToDegrees(Math.Acos(MathHelperD.Clamp(c, -1, 1)));
+        }
+
+        // The attitudes to hold: as it is first, then 90° turns about its axes (each distinct box shape once, the least
+        // turned), in gravity only those whose up stays within the pitch limit (0.7 without one); a turned one only
+        // where the drone has room to turn to it at the start
+        private void HeldCandidates(ref PathQuery q, Vector3D start)
+        {
+            thetaHeldFrames.Clear();
+            thetaHeldKeys.Clear();
+            MatrixD c = q.Controller;
+            c.Translation = Vector3D.Zero;
+            Vector3D h = q.LocalHull.HalfExtents;
+            bool inGravity = q.GravityUp.LengthSquared() > 0.5;
+            double minUp = q.MaxPitch >= 0 ? Math.Cos(q.MaxPitch) : 0.7;
+            Vector3D[] axes = { c.Right, c.Up, c.Backward, c.Left, c.Down, c.Forward };
+            var scored = new List<KeyValuePair<double, MatrixD>>();
+            for (int fi = 0; fi < 6; fi++)
+                for (int ui = 0; ui < 6; ui++)
+                {
+                    if (fi % 3 == ui % 3) continue;   // up must be across forward
+                    MatrixD f = MatrixD.CreateWorld(Vector3D.Zero, axes[fi], axes[ui]);
+                    double score = Vector3D.Dot(f.Forward, c.Forward) + Vector3D.Dot(f.Up, c.Up);
+                    bool same = score > 1.999;
+                    if (!same && inGravity && Vector3D.Dot(f.Up, q.GravityUp) < minUp) continue;
+                    scored.Add(new KeyValuePair<double, MatrixD>(score, f));
+                }
+            scored.Sort((x, y) => y.Key.CompareTo(x.Key));   // as it is first, then the least turned
+            for (int i = 0; i < scored.Count && thetaHeldFrames.Count < THETA_HELD_MAX; i++)
+            {
+                MatrixD f = scored[i].Value;
+                // The box's size along the current axes: one shape per turn that changes it
+                Vector3D key = new Vector3D(Extent(ref f, ref h, c.Right), Extent(ref f, ref h, c.Up), Extent(ref f, ref h, c.Backward));
+                bool dup = false;
+                for (int k = 0; k < thetaHeldKeys.Count && !dup; k++) dup = Vector3D.DistanceSquared(thetaHeldKeys[k], key) < 0.01;
+                if (dup) continue;
+                // A turn only with the full clearance around it (a bare fit turned into dock platforms)
+                if (thetaHeldFrames.Count > 0 && !TurnSweepFree(ref q, start, ref f, Berth(ref q))) continue;
+                thetaHeldKeys.Add(key);
+                thetaHeldFrames.Add(f);
+            }
+        }
+
+        // Half size along world axis 'w' of the hull box (half extents 'h') in attitude 'f'
+        private static double Extent(ref MatrixD f, ref Vector3D h, Vector3D w)
+        {
+            return Math.Abs(Vector3D.Dot(f.Right, w)) * h.X + Math.Abs(Vector3D.Dot(f.Up, w)) * h.Y + Math.Abs(Vector3D.Dot(f.Backward, w)) * h.Z;
+        }
+
+        private bool ThetaSearch(ref PathQuery q, Vector3D start, Vector3D goal, double maxMs, int maxExpansions, out string why)
         {
             why = null;
             var sw = System.Diagnostics.Stopwatch.StartNew();
             thetaProbes = thetaLos = 0;
-            thetaHull = HullRadius(ref q) + Berth(ref q);
+            thetaHull = thetaHeld ? thetaBoxHalf.Length() : HullRadius(ref q) + Berth(ref q);
             thetaCell = Math.Max(THETA_CELL_MIN, HullRadius(ref q) * THETA_CELL_HULL);
             double radius = config.ThetaSearchRadius;
             Vector3D target = goal;
@@ -129,14 +245,14 @@ namespace Automata.Pathfinding
             s.G = 0;
             s.Parent = s;
 
-            var open = new FastPriorityQueue<ThetaNode>(config.ThetaMaxExpansions * 16 + 64);
+            var open = new FastPriorityQueue<ThetaNode>(maxExpansions * 16 + 64);
             open.Enqueue(s, THETA_WEIGHT * Vector3D.Distance(start, target));
             int expansions = 0;
             ThetaNode reached = null;
             while (open.Count > 0)
             {
-                if (expansions >= config.ThetaMaxExpansions) { why = "expansion budget"; break; }
-                if (sw.Elapsed.TotalMilliseconds > config.ThetaMaxMs) { why = "time budget"; break; }
+                if (expansions >= maxExpansions) { why = "expansion budget"; break; }
+                if (sw.Elapsed.TotalMilliseconds > maxMs) { why = "time budget"; break; }
                 var cur = open.Dequeue();
                 if (cur.Closed) continue;
                 expansions++;
@@ -325,7 +441,14 @@ namespace Automata.Pathfinding
             double reach = (level == 0 ? size * 0.25 : size * 0.8660254) + thetaHull;
             bool seen = Seen(ref q, centre);
             st = CellState.Free;
-            if (!HullSpaceFree(ref q, centre, reach)) st = CellState.Mixed;
+            if (thetaHeld)
+            {
+                // The hull box in the held attitude, anywhere in the brick / near the cell's centre
+                double grow = reach - thetaHull;
+                var box = new MyOrientedBoundingBoxD(centre, thetaBoxHalf + new Vector3D(grow), thetaRot);
+                if (!BoxFree(ref q, ref box)) st = CellState.Mixed;
+            }
+            else if (!HullSpaceFree(ref q, centre, reach)) st = CellState.Mixed;
             if (seen && thetaAsteroids.Count > 0)
             {
                 var vox = VoxelState(min - new Vector3D(thetaHull), min + new Vector3D(size + thetaHull));

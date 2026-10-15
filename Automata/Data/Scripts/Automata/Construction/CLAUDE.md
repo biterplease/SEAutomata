@@ -64,3 +64,18 @@ Projection plans (2026-10-13, CC only, `ProjectionPlan.cs`): each projector gets
 "Work priority" is now "Weld priority". Construction computer: every kind with work is published at once. `ScanArea(..., shares: true)` keeps a pool part per kind (repair / projected / unbuilt / grind, 3 : 2 : 1 by rank, grind 3) and outputs each kind up to its part of maxJobs before the rest in rank order. `ShareSlots` splits `MaxPublishedJobs` over the kinds with work by the same weights (Sainte-Laguë: 10 slots, three kinds = 5 / 3 / 2), capped by what each kind can fill; published jobs count against their kind. Stand-alone drones: strict order as before. Job announcements carry `WeldCategory` (JobTypeExtensions.WELD_*); every CC log / event names the job "Weld:Repair" / "Weld:Projected" / "Weld:Unbuilt" (`LabelOf`).
 
 Small-grid projections (2026-10-14): the plan's nodes are 3x3x3 units of the physical grid instead of blocks (`ProjectionPlan` nodes: large = one block in projected cells, small = a unit with every projected block in it, in unit lattice coordinates on the physical grid's axes). The lattice is the BuildPlanner's weld frame (`BuildPlanner.EnsureUnitFrame`: made from the plan's first seed when the grid has none, `UnitOf`), so drones' `TryUnitBox` boxes are the plan's units. Same stages (trunk, planes, layers, rest) over units; two units join when some block of one is a mount neighbour of some block of the other; lines are cut by block count (BlocksPerJob - 1). A unit's blocks are ordered from the side it grows from (seed block / nearest the unit before). `Rest` of a block in a unit: every other unbuilt block of its unit, then the next units.
+
+## Per-block unreachable holds (2026-10-14)
+
+Drones report the blocks they found no way to (`JobStatusReport.UnreachableGrids` / `UnreachableCells`, `PerBlock`).
+At close those get `UNREACHABLE_COOLDOWN` (5 min) doubled per report in a row (`unreachableStrikes`, up to 30 min);
+the rest of an aborted job gets the short abort cooldown. Old drones (no `PerBlock`): an "Unreachable" reason still
+holds the whole job 5 min. Retry jobs clears holds and strikes. (Was: a job whose way home failed held every block
+5 min; jobs with unreachable blocks ending on another reason - "NotAttached" - came back after 60 s, over and over.)
+
+## Weld through (2026-10-14, `ConstructionComputer.WeldThrough.cs`)
+Ship welders need no line of sight. A face covered by a built neighbour counts for welds when the neighbour's
+collision leaves >= `WELD_THROUGH_MIN_FREE` (0.75 m) of its cell free from the outer side (3 x 3 physics rays through
+the cell, shortest run; cached 5 s) and the cell beyond is free. Scan: such blocks aren't "walled in"; `CreateTarget`
+falls back to such a face (`ChooseFace(..., passable)`); log "N welded through a neighbour". Whether the drone's
+sphere reaches from there, its site check decides (real shapes); no fit: Unreachable, held per block.

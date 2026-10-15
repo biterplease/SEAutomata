@@ -59,6 +59,16 @@ namespace Automata.Pathfinding
         // ObservedRange: the all-around part (sensors / instruments not required), worked out once per query
         internal bool ViewKnown;
         internal double View;
+        /// <summary>
+        /// Set by Lazy Theta* when only a held attitude found a way (Controller then has that attitude): every leg of
+        /// the route keeps it (AssignAttitudes), the turn to it is at the start.
+        /// </summary>
+        public bool HoldAttitude;
+        /// <summary>Near a dock (docking / undocking): Lazy Theta* may hold the drone's attitude, never turn it to another.</summary>
+        public bool NoHeldTurn;
+        // What the drone sees from (its real attitude) when Controller was turned to a held attitude
+        internal bool EyesSet;
+        internal MatrixD Eyes;
     }
 
     public enum RouteResult : byte
@@ -182,8 +192,14 @@ namespace Automata.Pathfinding
         /// <summary>The hull box at 'centre' (hull centre, world) in the exact attitude 'frame' (rotation only): blocks and drones clear.</summary>
         public bool HullFitsOriented(ref PathQuery q, Vector3D centre, ref MatrixD frame)
         {
+            return HullFitsOriented(ref q, centre, ref frame, 0);
+        }
+
+        /// <summary>Same, the box grown by 'margin' m on every side.</summary>
+        public bool HullFitsOriented(ref PathQuery q, Vector3D centre, ref MatrixD frame, double margin)
+        {
             if (q.LocalHull.Max.X < q.LocalHull.Min.X) return HullSpaceFree(ref q, centre, HullRadius(ref q));
-            var box = new MyOrientedBoundingBoxD(centre, q.LocalHull.HalfExtents, Quaternion.CreateFromRotationMatrix(frame));
+            var box = new MyOrientedBoundingBoxD(centre, q.LocalHull.HalfExtents + new Vector3D(margin), Quaternion.CreateFromRotationMatrix(frame));
             return BoxFree(ref q, ref box);
         }
 
@@ -313,7 +329,7 @@ namespace Automata.Pathfinding
             }
             else
             {
-                MatrixD c = q.Controller;
+                MatrixD c = EyesOf(ref q);
                 Vector3D apex = c.Translation;
                 if (q.LocalHull.Max.X >= q.LocalHull.Min.X)
                     apex = Vector3D.Transform(q.LocalHull.Center + new Vector3D(0, 0, -q.LocalHull.HalfExtents.Z), c);   // the front of the hull (forward = -Z)
@@ -355,7 +371,7 @@ namespace Automata.Pathfinding
         private void HullSpan(ref PathQuery q, Vector3D a, Vector3D dir, double len, double r)
         {
             if (q.LocalHull.Max.X < q.LocalHull.Min.X) { SphereSpan(a, dir, len, q.Controller.Translation, r + 2.5); return; }
-            MatrixD inv = MatrixD.Invert(q.Controller);
+            MatrixD inv = MatrixD.Invert(EyesOf(ref q));
             Vector3D la = Vector3D.Transform(a, inv), ld = Vector3D.TransformNormal(dir, inv);
             Vector3D min = q.LocalHull.Min - new Vector3D(r), max = q.LocalHull.Max + new Vector3D(r);
             double t0 = double.MinValue, t1 = double.MaxValue;
@@ -433,6 +449,9 @@ namespace Automata.Pathfinding
         /// <summary>
         /// Anything in the way of the hull flying a -> b, as far as the drone at q.Controller can see?
         /// </summary>
+        /// <summary>Blocks the hull already overlapped at a segment's start that it moved away from (diagnostics).</summary>
+        public int StartContactsLeft;
+
         public bool SegmentBlocked(ref PathQuery q, Vector3D a, Vector3D b, double skipStart, out Vector3D hit, out IMyEntity hitEntity)
         {
             return SegmentBlocked(ref q, ref q.Controller, a, b, skipStart, out hit, out hitEntity);
@@ -479,6 +498,10 @@ namespace Automata.Pathfinding
             if (t1 <= t0) return false;
             double startZone = q.StrictEnds ? double.MinValue : t0 + halfAlong + berth;
             double endZone = extendPastEnd && !q.StrictEnds ? len - halfAlong - berth : double.MaxValue;
+
+            // The hull where it is now (its centre at a0, held attitude): what it already overlaps behind / beside it
+            // doesn't block the way away from it (a drone wedged in: its box over a block's cells blocked every way out)
+            var startHull = new MyOrientedBoundingBoxD(a0, halfBox, Quaternion.CreateFromRotationMatrix(attitude));
 
             // Box axes: X = side2, Y = side1, Z = -dir
             MatrixD axes = MatrixD.CreateWorld(Vector3D.Zero, dir, side1);
@@ -532,9 +555,16 @@ namespace Automata.Pathfinding
                         // Where the drone already is / where it arrives: only what the hull itself touches
                         bool endsZone = near < startZone || far > endZone;
                         if (endsZone && !tl.Intersects(ref box)) continue;
+                        // Already overlapping it where the drone is, and not moving into it (its centre not ahead):
+                        // leaving isn't blocked by it. Not at work site way-ins (StrictEnds).
+                        if (!q.StrictEnds && near < startZone && centreAlong <= 0)
+                        {
+                            MyOrientedBoundingBoxD sl = ToLocal(ref startHull, ref inv);
+                            if (sl.Intersects(ref box)) { StartContactsLeft++; continue; }
+                        }
                         double t = Math.Max(near, t0);
                         if (t < best && q.RealShapeGrid != null && grid == q.RealShapeGrid
-                            && (realShapeCleared.Contains(slim) || RealShapeClear(grid, ref box, ref inv, a0, dir, near - 0.5, far + 0.5,
+                            && (realShapeCleared.Contains(slim) || RealShapeClear(grid, ref box, ref inv, a0, dir, near - 0.5, Math.Min(far + 0.5, t1),
                                               side1, endsZone ? s1 : s1 + berth, side2, endsZone ? s2 : s2 + berth)))
                         {
                             if (realShapeCleared.Add(slim)) RealShapeClears++;   // (a block spans several chunks: once)
@@ -780,7 +810,7 @@ namespace Automata.Pathfinding
                 if (q.LocalHull.Max.X < q.LocalHull.Min.X) { if (Vector3D.Distance(p, q.Controller.Translation) <= sensorRange + 2.5) return true; }
                 else
                 {
-                    MatrixD inv = MatrixD.Invert(q.Controller);
+                    MatrixD inv = MatrixD.Invert(EyesOf(ref q));
                     var lp = Vector3D.Transform(p, inv);
                     var grown = new BoundingBoxD(q.LocalHull.Min - new Vector3D(sensorRange), q.LocalHull.Max + new Vector3D(sensorRange));
                     if (grown.Contains(lp) != ContainmentType.Disjoint) return true;
@@ -797,10 +827,16 @@ namespace Automata.Pathfinding
                     }
                 return false;
             }
-            MatrixD c = q.Controller;
+            MatrixD c = EyesOf(ref q);
             Vector3D apex = c.Translation;
             if (q.LocalHull.Max.X >= q.LocalHull.Min.X) apex = Vector3D.Transform(q.LocalHull.Center + new Vector3D(0, 0, -q.LocalHull.HalfExtents.Z), c);
             return InCone(p, apex, c.Forward, c.Right, c.Up, camRange);
+        }
+
+        // Where the drone sees from: its real attitude (Controller may have been turned to a held attitude)
+        private static MatrixD EyesOf(ref PathQuery q)
+        {
+            return q.EyesSet ? q.Eyes : q.Controller;
         }
 
         private static bool InCone(Vector3D p, Vector3D apex, Vector3D f, Vector3D r, Vector3D u, double range)
@@ -1179,7 +1215,7 @@ namespace Automata.Pathfinding
             if (!ok && ThetaAvailable)
             {
                 ok = ThetaStage(ref q, start, goal, out why3);
-                if (ok) { shaped = false; stage = "theta"; }
+                if (ok) { shaped = false; stage = q.HoldAttitude ? "theta, held attitude" : "theta"; }
                 t3 = watch.Elapsed.TotalMilliseconds;
             }
             if (!ok)
@@ -1659,6 +1695,13 @@ namespace Automata.Pathfinding
                 Vector3D g = planet != null ? Vector3D.Normalize(a - planet.PositionComp.GetPosition()) : q.GravityUp;
                 Vector3D f, u;
                 bool aligned = false;
+                if (q.HoldAttitude)
+                {
+                    // Only that attitude found a way (Lazy Theta*, held): every leg keeps it
+                    forwards.Add(planned.Forward);
+                    ups.Add(planned.Up);
+                    continue;
+                }
                 if (q.AlignToRoute && !BudgetSpent && AlignedFrame(ref q, ref g, b - a, fwd, up, inGravity, out f, out u))
                 {
                     if (Vector3D.Dot(f, fwd) >= 0.996 && Vector3D.Dot(u, up) >= 0.996) { f = fwd; u = up; aligned = true; }   // no turn

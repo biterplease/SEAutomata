@@ -124,6 +124,8 @@ namespace Automata.Construction
             public int DronesOut;     // awarded: drones that have not reported their share yet
             public bool Announced;    // the last announcement reached someone
             public string LastResult;
+            public bool PerBlock;     // a drone reported its unreachable blocks: those are held back, not the whole job
+            public readonly HashSet<KeyValuePair<long, Vector3I>> Unreachable = new HashSet<KeyValuePair<long, Vector3I>>();
         }
         private readonly List<Message<JobAnnouncementFailed>> failureInbox = new List<Message<JobAnnouncementFailed>>();
         private ConstructionComputerState pendingState;
@@ -137,6 +139,7 @@ namespace Automata.Construction
         // Blocks of a job a drone gave up on: not put in a new job before this frame (an unreachable block used to come
         // straight back as a new job id, past the orchestrator's retry memory, and kept the only grinder busy)
         private readonly Dictionary<KeyValuePair<long, Vector3I>, int> blockCooldown = new Dictionary<KeyValuePair<long, Vector3I>, int>();
+        private readonly Dictionary<KeyValuePair<long, Vector3I>, int> unreachableStrikes = new Dictionary<KeyValuePair<long, Vector3I>, int>();
         #region Timing
         private static int AbortCooldownTicks()
         {
@@ -144,6 +147,7 @@ namespace Automata.Construction
             return config != null ? config.OrchestratorServerSettings.BidBlacklistCooldownTicks : 3600;
         }
         private const int UNREACHABLE_COOLDOWN_TICKS = 5 * 60 * 60;   // after "Unreachable"
+        private const int UNREACHABLE_COOLDOWN_MAX_TICKS = 30 * 60 * 60;   // a block reported unreachable again and again: doubled each time up to this
         // after any other abort / decline: BidBlacklistCooldownTicks (server config, 3600 = 60 s)
         #endregion
 
@@ -355,6 +359,7 @@ namespace Automata.Construction
             lastScan = int.MinValue / 2;
             forceFullScan = true;
             blockCooldown.Clear();   // blocks held back after aborts come back too
+            unreachableStrikes.Clear();
             AddEvent(Loc.F(StrRetryEvent, n));
             Log.Info("CC {0}: retry requested: {1} unassigned job(s) announced again, area rescanned", entityId, n);
         }
@@ -879,20 +884,40 @@ namespace Automata.Construction
                         // Several drones on one job: it closes when the last one reports (one drone's abort doesn't free
                         // blocks the others are still on)
                         if (r.Outcome != JobOutcome.Completed) { job.Failures++; job.LastFailure = r.Reason; }
+                        // Its unreachable blocks (newer drones): those held back long, the rest of an abort briefly
+                        if (r.PerBlock)
+                        {
+                            job.PerBlock = true;
+                            if (r.UnreachableGrids != null && r.UnreachableCells != null)
+                                for (int u = 0; u < r.UnreachableGrids.Count && u < r.UnreachableCells.Count; u++)
+                                {
+                                    var key = new KeyValuePair<long, Vector3I>(r.UnreachableGrids[u], r.UnreachableCells[u].ToVector3I());
+                                    if (job.Blocks.Contains(key)) job.Unreachable.Add(key);
+                                }
+                        }
                         bool close = job.DronesOut <= 0;
                         AddEvent(string.IsNullOrEmpty(r.Reason) ? Loc.F(StrJobDroneOutcome, LabelOf(job), Nicknames.Of(r.DroneEntityId), r.Outcome)
                                                                  : Loc.F(StrJobDroneOutcomeReason, LabelOf(job), Nicknames.Of(r.DroneEntityId), r.Outcome, r.Reason));
                         Log.Debug("CC {0}: job {1}: drone {2} {3} ({4}), {5}/{6} block(s); {7}", entityId, job.JobId, r.DroneEntityId, r.Outcome,
                                   r.Reason, r.BlocksDone, r.BlocksTotal, close ? "closed, blocks back to the pool" : job.DronesOut + " drone(s) still out");
                         if (!close) continue;
+                        if (job.Unreachable.Count > 0) HoldUnreachable(job, now);
                         if (job.Failures == 0) doneCount++;
                         else
                         {
-                            bool unreachable = job.LastFailure != null && job.LastFailure.IndexOf("Unreachable", StringComparison.OrdinalIgnoreCase) >= 0;
+                            // Older drones say only why the job ended: an "Unreachable" holds every block of it (the way home
+                            // failing too, though its blocks were fine)
+                            bool unreachable = !job.PerBlock && job.LastFailure != null && job.LastFailure.IndexOf("Unreachable", StringComparison.OrdinalIgnoreCase) >= 0;
                             int until = now + (unreachable ? UNREACHABLE_COOLDOWN_TICKS : AbortCooldownTicks());
-                            foreach (var k in job.Blocks) blockCooldown[k] = until;
-                            Log.Debug("CC {0}: job {1}: {2} block(s) held back {3} s before a new job", entityId, job.JobId, job.Blocks.Count,
-                                      (until - now) / 60);
+                            int held = 0;
+                            foreach (var k in job.Blocks)
+                            {
+                                if (job.Unreachable.Contains(k)) continue;
+                                blockCooldown[k] = until;
+                                held++;
+                            }
+                            if (held > 0)
+                                Log.Debug("CC {0}: job {1}: {2} block(s) held back {3} s before a new job", entityId, job.JobId, held, (until - now) / 60);
                         }
                         foreach (var k in job.Blocks) scanCache.Touch(k.Key);   // its grids are looked at again whatever the events said
                         jobs.RemoveAt(j);
@@ -906,6 +931,25 @@ namespace Automata.Construction
                 RebuildInJobs();
                 lastScan = int.MinValue / 2;   // what is left becomes new jobs now
             }
+        }
+
+        // Blocks a drone found no way to: held back UNREACHABLE_COOLDOWN, doubled for each report in a row (the drones
+        // stop trying what nobody reaches, a new scan / Retry / an area change brings them back sooner)
+        private void HoldUnreachable(OpenJob job, int now)
+        {
+            if (unreachableStrikes.Count > 4096) unreachableStrikes.Clear();
+            int longest = 0;
+            foreach (var k in job.Unreachable)
+            {
+                int strikes;
+                unreachableStrikes.TryGetValue(k, out strikes);
+                strikes = Math.Min(strikes + 1, 8);
+                unreachableStrikes[k] = strikes;
+                long ticks = Math.Min((long)UNREACHABLE_COOLDOWN_TICKS << (strikes - 1), UNREACHABLE_COOLDOWN_MAX_TICKS);
+                blockCooldown[k] = now + (int)ticks;
+                longest = Math.Max(longest, (int)ticks);
+            }
+            Log.Debug("CC {0}: job {1}: {2} unreachable block(s) held back up to {3} s", entityId, job.JobId, job.Unreachable.Count, longest / 60);
         }
 
         // Drones still working on an awarded job: its expiry starts again (a dead / destroyed / lost drone stops sending)

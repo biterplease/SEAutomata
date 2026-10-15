@@ -6,6 +6,8 @@ using VRage.Game.ModAPI;
 using ProtoBuf;
 using System;
 
+using VRage.Game.Entity;
+
 using Automata.Util;
 using Automata.Inventory;
 
@@ -65,11 +67,6 @@ namespace Automata.Logistics
         private readonly DiscreteInventory _inventoryCache = new DiscreteInventory();
         private readonly DiscreteInventory currentInventory = new DiscreteInventory();
         private readonly DiscreteInventory heldInventory = new DiscreteInventory();   // all of it, pullable or not
-        private readonly Dictionary<uint, DiscreteInventory> pendingInventoryByBidRoundBidId = new Dictionary<uint, DiscreteInventory>();
-        private readonly Dictionary<uint, DiscreteInventory> reservedInventoryByBidRoundWinningBidId = new Dictionary<uint, DiscreteInventory>();
-        private readonly Dictionary<uint, MyFixedPoint> pendingVolumeByBidRoundBidId = new Dictionary<uint, MyFixedPoint>();
-        private readonly Dictionary<uint, MyFixedPoint> reservedVolumeByBidRoundWinningBidId = new Dictionary<uint, MyFixedPoint>();
-        private readonly object _inventoryLock = new object();
         private readonly List<IOLocationData> ioLocationData = new List<IOLocationData>();
         public uint ConveyorNetworkId;
         public List<IMyShipConnector> connectors;
@@ -125,34 +122,74 @@ namespace Automata.Logistics
             gasTanks.Clear();
         }
 
-        public void UpdateInventories()
+        #region Inventory totals
+        // Event-driven totals (Logistics Computer networks, after Attach): one cached DiscreteInventory per inventory,
+        // read again only when the game reports its contents changed (MyInventoryBase.ContentsChanged), plus a full
+        // re-read every FULL_RESYNC_TICKS (paths that raise no event, a functional change, a missed subscription). Not
+        // attached (the drone's home network): every inventory is read on each UpdateInventories.
+        private const int FULL_RESYNC_TICKS = 60 * 60;
+
+        private sealed class TrackedInventory
         {
-            var currentFrame = _sessionDelegate.GameplayFrameCounter;
-            // if (currentFrame == _lastInventoryUpdateFrame)
-            // {
-            //     return;
-            // }
-            _isUpdating = true;
-            MyFixedPoint cargoMaxVolume = MyFixedPoint.Zero;
-            MyFixedPoint cargoCurrentVolume = MyFixedPoint.Zero;
-            List<IMyCubeBlock> containers = new List<IMyCubeBlock>();
-            foreach (IMyCargoContainer b in cargoContainers)
+            public IMyCubeBlock Block;
+            public int Index;
+            public bool Pullable;
+            public MyInventoryBase Inventory;
+            public readonly DiscreteInventory Items = new DiscreteInventory();
+            public bool Dirty = true;
+            public Action<MyInventoryBase> OnChanged;
+        }
+
+        private readonly List<TrackedInventory> tracked = new List<TrackedInventory>();
+        private readonly List<IMyCubeBlock> containerScratch = new List<IMyCubeBlock>();
+        private bool attached;
+        private bool totalsDirty = true;
+        private long lastFullResync = long.MinValue / 2;
+
+        /// <summary>Contents tracked by events (Attach).</summary>
+        public bool Attached { get { return attached; } }
+
+        /// <summary>
+        /// Subscribes to the contents of every inventory of the network (after the blocks are sorted in). The owner calls
+        /// Detach before dropping the network or mapping again.
+        /// </summary>
+        public void Attach()
+        {
+            Detach();
+            CollectContainers(containerScratch, false);
+            for (int c = 0; c < containerScratch.Count; c++)
             {
-                if (b == null || !b.IsFunctional)
+                var block = containerScratch[c];
+                if (block == null || block.Closed || !block.HasInventory) continue;
+                for (int i = 0; i < block.InventoryCount; i++)
                 {
-                    continue;
-                }
-                containers.Add(b);
-                IMyInventory cargoInv = b.GetInventory();
-                if (cargoInv != null)
-                {
-                    cargoMaxVolume += cargoInv.MaxVolume;
-                    cargoCurrentVolume += cargoInv.CurrentVolume;
+                    var inv = block.GetInventory(i) as MyInventoryBase;
+                    if (inv == null) continue;
+                    var t = new TrackedInventory { Block = block, Index = i, Pullable = IsPullable(block, i), Inventory = inv };
+                    t.OnChanged = changed => { t.Dirty = true; totalsDirty = true; };
+                    inv.ContentsChanged += t.OnChanged;
+                    tracked.Add(t);
                 }
             }
-            // Every block of the network that holds items is accounted for (held); only the inventories a drone may
-            // take from count as stock to supply (IsPullable): never ice out of O2/H2 generators, a refinery's or an
-            // assembler's input, a reactor's fuel, a tank's bottles
+            containerScratch.Clear();
+            attached = true;
+            totalsDirty = true;
+        }
+
+        /// <summary>Drops the content subscriptions (Attach).</summary>
+        public void Detach()
+        {
+            for (int i = 0; i < tracked.Count; i++)
+                if (tracked[i].Inventory != null) tracked[i].Inventory.ContentsChanged -= tracked[i].OnChanged;
+            tracked.Clear();
+            attached = false;
+        }
+
+        // The network's item-holding blocks (cargo: functional only when 'functionalCargo')
+        private void CollectContainers(List<IMyCubeBlock> containers, bool functionalCargo)
+        {
+            containers.Clear();
+            foreach (IMyCargoContainer b in cargoContainers) if (b != null && (!functionalCargo || b.IsFunctional)) containers.Add(b);
             foreach (IMyShipConnector b in connectors) if (b != null) containers.Add(b);
             foreach (IMyCollector b in collectors) if (b != null) containers.Add(b);
             foreach (IMyAssembler b in assemblers) if (b != null) containers.Add(b);
@@ -160,36 +197,87 @@ namespace Automata.Logistics
             foreach (IMyReactor b in reactors) if (b != null) containers.Add(b);
             foreach (IMyGasGenerator b in gasGenerators) if (b != null) containers.Add(b);
             foreach (IMyGasTank b in gasTanks) if (b != null) containers.Add(b);
+        }
 
-            lock (_inventoryLock)
+        public void UpdateInventories()
+        {
+            var currentFrame = _sessionDelegate.GameplayFrameCounter;
+            _isUpdating = true;
+            // Cargo volumes: property reads, every call (a damaged / repaired container raises no content event)
+            MyFixedPoint cargoMaxVolume = MyFixedPoint.Zero;
+            MyFixedPoint cargoCurrentVolume = MyFixedPoint.Zero;
+            foreach (IMyCargoContainer b in cargoContainers)
             {
-                _maxVolume = cargoMaxVolume;
-                _currentVolume = cargoCurrentVolume;
-                _inventoryCache.Clear();
-                heldInventory.Clear();
-                foreach (IMyCubeBlock container in containers)
-                {
-                    if (container == null || container.Closed || !container.HasInventory) continue;
-                    for (int i = 0; i < container.InventoryCount; i++)
-                    {
-                        IMyInventory inv = container.GetInventory(i);
-                        if (inv == null) continue;
-                        heldInventory.AddItems(inv);
-                        if (IsPullable(container, i)) _inventoryCache.AddItems(inv);
-                    }
-                }
-                // Substract returns a new Inventory and does not mutate this; apply chain then copy into currentInventory.
-                var afterPending = DiscreteInventory.Substract(_inventoryCache, GetPendingInventory());
-                var afterReserved = DiscreteInventory.Substract(afterPending, GetReservedInventory());
-                currentInventory.Clear();
-                foreach (KVPair kv in afterReserved.GetAllItems())
-                {
-                    currentInventory.AddItem(kv.Key, kv.Value);
-                }
+                if (b == null || !b.IsFunctional) continue;
+                IMyInventory cargoInv = b.GetInventory();
+                if (cargoInv == null) continue;
+                cargoMaxVolume += cargoInv.MaxVolume;
+                cargoCurrentVolume += cargoInv.CurrentVolume;
             }
+            _maxVolume = cargoMaxVolume;
+            _currentVolume = cargoCurrentVolume;
+            // Every block of the network that holds items is accounted for (held); only the inventories a drone may
+            // take from count as stock to supply (IsPullable): never ice out of O2/H2 generators, a refinery's or an
+            // assembler's input, a reactor's fuel, a tank's bottles
+            if (attached) SumTracked(currentFrame); else ReadAll();
             _isUpdating = false;
             _lastInventoryUpdateFrame = currentFrame;
         }
+
+        // Attached: only the inventories that changed are read; the totals are summed from the per-inventory caches
+        private void SumTracked(long currentFrame)
+        {
+            if (currentFrame - lastFullResync >= FULL_RESYNC_TICKS)
+            {
+                lastFullResync = currentFrame;
+                for (int i = 0; i < tracked.Count; i++) tracked[i].Dirty = true;
+                totalsDirty = true;
+            }
+            if (!totalsDirty) return;
+            totalsDirty = false;
+            _inventoryCache.Clear();
+            heldInventory.Clear();
+            for (int i = 0; i < tracked.Count; i++)
+            {
+                var t = tracked[i];
+                if (t.Block == null || t.Block.Closed) continue;
+                if (t.Block is IMyCargoContainer && !t.Block.IsFunctional) { t.Dirty = true; continue; }   // as ReadAll: broken cargo doesn't count
+                if (t.Dirty)
+                {
+                    t.Items.Clear();
+                    t.Items.AddItems(t.Block.GetInventory(t.Index));
+                    t.Dirty = false;
+                }
+                heldInventory.AddItems(t.Items);
+                if (t.Pullable) _inventoryCache.AddItems(t.Items);
+            }
+            currentInventory.Clear();
+            currentInventory.AddItems(_inventoryCache);
+        }
+
+        // Not attached: every inventory read now
+        private void ReadAll()
+        {
+            CollectContainers(containerScratch, true);
+            _inventoryCache.Clear();
+            heldInventory.Clear();
+            for (int c = 0; c < containerScratch.Count; c++)
+            {
+                IMyCubeBlock container = containerScratch[c];
+                if (container == null || container.Closed || !container.HasInventory) continue;
+                for (int i = 0; i < container.InventoryCount; i++)
+                {
+                    IMyInventory inv = container.GetInventory(i);
+                    if (inv == null) continue;
+                    heldInventory.AddItems(inv);
+                    if (IsPullable(container, i)) _inventoryCache.AddItems(inv);
+                }
+            }
+            containerScratch.Clear();
+            currentInventory.Clear();
+            currentInventory.AddItems(_inventoryCache);
+        }
+        #endregion
 
         /// <summary>
         /// Returns the current inventory, should reflect the actual count of items.
@@ -219,43 +307,6 @@ namespace Automata.Logistics
             if (block is IMyCargoContainer || block is IMyShipConnector || block is IMyCollector) return inventoryIndex == 0;
             if (block is IMyAssembler || block is IMyRefinery) return inventoryIndex == 1;
             return false;
-        }
-
-        /// <summary>
-        /// Reserved inventory represents items that have been proposed as a bid, and the bid has been won.
-        /// </summary>
-        /// <returns></returns>
-        public DiscreteInventory GetReservedInventory()
-        {
-            DiscreteInventory reservedInventory = new DiscreteInventory();
-            foreach (KeyValuePair<uint, DiscreteInventory> kv in reservedInventoryByBidRoundWinningBidId)
-            {
-                reservedInventory.AddItems(kv.Value);
-            }
-            return reservedInventory;
-        }
-
-        /// <summary>
-        /// Pending inventory represents items that have been proposed as a bid, but not confirmed yet.
-        /// </summary>
-        /// <returns></returns>
-        public DiscreteInventory GetPendingInventory()
-        {
-            DiscreteInventory pendingInventory = new DiscreteInventory();
-            foreach (KeyValuePair<uint, DiscreteInventory> kv in pendingInventoryByBidRoundBidId)
-            {
-                pendingInventory.AddItems(kv.Value);
-            }
-            return pendingInventory;
-        }
-
-        /// <summary>
-        /// Returns the available inventory, showing current - reserved.
-        /// </summary>
-        /// <returns></returns>
-        public DiscreteInventory AvailableInventory()
-        {
-            return DiscreteInventory.Substract(currentInventory, GetReservedInventory());
         }
 
         /// <summary>
@@ -329,199 +380,6 @@ namespace Automata.Logistics
                 }
             }
             return false;
-        }
-
-        public InventoryFulfillmentData CanFulfillRequest(DiscreteInventory requestedInventory, uint bidRoundBidId)
-        {
-            lock (_inventoryLock)
-            {
-                if (AvailableInventory().ContainsAtLeast(requestedInventory))
-                {
-                    DiscreteInventory reservedInventory = new DiscreteInventory();
-                    DiscreteInventory.MoveItems(currentInventory, reservedInventory, requestedInventory);
-                    pendingInventoryByBidRoundBidId[bidRoundBidId] = reservedInventory;
-                    return new InventoryFulfillmentData
-                    {
-                        Inventory = requestedInventory,
-                        Fulfillment = InventoryFulfillment.SatisfyFully,
-                        IOBlockPositions = ioLocationData,
-                        ConveyorNetworkId = ConveyorNetworkId
-                    };
-                }
-                DiscreteInventory fulfillablePart;
-                AvailableInventory().FilterByKeys(requestedInventory, out fulfillablePart);
-                pendingInventoryByBidRoundBidId[bidRoundBidId] = fulfillablePart;
-                return new InventoryFulfillmentData
-                {
-                    Inventory = fulfillablePart,
-                    Fulfillment = InventoryFulfillment.SatisfyPartial,
-                    IOBlockPositions = FilterIOByType(ioLocationData, IOBlockType.ShipConnector),
-                    ConveyorNetworkId = ConveyorNetworkId
-                };
-            }
-        }
-        public VolumeAcceptanceData CanAcceptRequest(DiscreteInventory incomingInventory, uint bidRoundBidId)
-        {
-            lock (_inventoryLock)
-            {
-                MyFixedPoint incomingVolume = incomingInventory.TotalInventoryVolume();
-                MyFixedPoint remainingCargoVolume = GetRemainingCargoVolume();
-                if (incomingVolume <= remainingCargoVolume)
-                {
-                    pendingVolumeByBidRoundBidId[bidRoundBidId] = incomingVolume;
-                    return new VolumeAcceptanceData
-                    {
-                        Volume = incomingVolume,
-                        Fulfillment = InventoryFulfillment.AcceptAll,
-                        IOBlockPositions = ioLocationData
-                    };
-                }
-                MyFixedPoint fulfillableVolume = remainingCargoVolume - incomingVolume;
-                return new VolumeAcceptanceData
-                {
-                    Volume = fulfillableVolume,
-                    Fulfillment = InventoryFulfillment.AcceptPartial,
-                    IOBlockPositions = ioLocationData
-                };
-            }
-        }
-        /// <summary>
-        /// Drop a pending inventory entry, returning it to the current inventory.
-        /// This should be called when a bid is placed, but not won.
-        /// </summary>
-        /// <param name="bidRoundBidId"></param>
-        public void DropPendingInventoryEntry(uint bidRoundBidId)
-        {
-            lock (_inventoryLock)
-            {
-                DiscreteInventory pending;
-                if (!pendingInventoryByBidRoundBidId.TryGetValue(bidRoundBidId, out pending))
-                {
-                    return;
-                }
-                DiscreteInventory.MoveItems(pending, currentInventory, pending);
-                pendingInventoryByBidRoundBidId.Remove(bidRoundBidId);
-            }
-        }
-        /// <summary>
-        /// Cancel a reservation, returning the inventory to the current inventory.
-        /// This should be called when a winning bid is cancelled; maybe the drone was destroyed,
-        /// the inventory was destroyed or the player took the inventory.
-        /// </summary>
-        /// <param name="bidRoundBidId"></param>
-        public void CancelInventoryReservation(uint bidRoundBidId)
-        {
-            lock (_inventoryLock)
-            {
-                DiscreteInventory reserved;
-                if (!reservedInventoryByBidRoundWinningBidId.TryGetValue(bidRoundBidId, out reserved))
-                {
-                    return;
-                }
-                DiscreteInventory.MoveItems(reserved, currentInventory, reserved);
-                reservedInventoryByBidRoundWinningBidId.Remove(bidRoundBidId);
-            }
-        }
-
-        /// <summary>
-        /// Drop a pending volume entry, returning it to the current inventory.
-        /// This should be called when a volume-accepting bid is placed, but not won.
-        /// </summary>
-        /// <param name="bidRoundBidId"></param>
-        public void DropPendingVolumeEntry(uint bidRoundBidId)
-        {
-            lock (_inventoryLock)
-            {
-                MyFixedPoint pendingVolume;
-                if (!pendingVolumeByBidRoundBidId.TryGetValue(bidRoundBidId, out pendingVolume))
-                {
-                    return;
-                }
-                pendingVolumeByBidRoundBidId.Remove(bidRoundBidId);
-            }
-        }
-
-             /// <summary>
-        /// Cancel a reservation, returning the inventory to the current inventory.
-        /// This should be called when a winning bid is cancelled; maybe the drone was destroyed,
-        /// the inventory was destroyed or the player took the inventory.
-        /// </summary>
-        /// <param name="bidRoundBidId"></param>
-        public void CancelVolumeReservation(uint bidRoundBidId)
-        {
-            lock (_inventoryLock)
-            {
-                MyFixedPoint pendingVolume;
-                if (!reservedVolumeByBidRoundWinningBidId.TryGetValue(bidRoundBidId, out pendingVolume))
-                {
-                    return;
-                }
-                reservedVolumeByBidRoundWinningBidId.Remove(bidRoundBidId);
-            }
-        }
-
-        public void ReserveInventory(uint bidRoundBidId)
-        {
-            lock (_inventoryLock)
-            {
-                DiscreteInventory pendingToBeReserved;
-                if (!pendingInventoryByBidRoundBidId.TryGetValue(bidRoundBidId, out pendingToBeReserved))
-                {
-                    return;
-                }
-                reservedInventoryByBidRoundWinningBidId[bidRoundBidId] = pendingToBeReserved;
-                // remove from pending
-                pendingInventoryByBidRoundBidId.Remove(bidRoundBidId);
-            }
-        }
-
-        public void ReserveVolume(uint bidRoundBidId)
-        {
-            lock (_inventoryLock)
-            {
-                MyFixedPoint pendingVolume;
-                if (!pendingVolumeByBidRoundBidId.TryGetValue(bidRoundBidId, out pendingVolume))
-                {
-                    return;
-                }
-                reservedVolumeByBidRoundWinningBidId[bidRoundBidId] = pendingVolume;
-                pendingVolumeByBidRoundBidId.Remove(bidRoundBidId);
-            }
-        }
-
-
-        /// <summary>
-        /// Release the reserved inventory. Called when inventory is picked up.
-        /// </summary>
-        /// <param name="bidRoundBidId"></param>
-        public void ReleaseInventory(uint bidRoundBidId)
-        {
-            lock (_inventoryLock)
-            {
-                DiscreteInventory reserved;
-                if (!reservedInventoryByBidRoundWinningBidId.TryGetValue(bidRoundBidId, out reserved))
-                {
-                    return;
-                }
-                reservedInventoryByBidRoundWinningBidId.Remove(bidRoundBidId);
-            }
-        }
-
-       /// <summary>
-        /// Release the reserved volume. Called when incoming inventory is accepted.
-        /// </summary>
-        /// <param name="bidRoundBidId"></param>
-        public void ReleaseVolume(uint bidRoundBidId)
-        {
-            lock (_inventoryLock)
-            {
-                MyFixedPoint reservedVolume;
-                if (!reservedVolumeByBidRoundWinningBidId.TryGetValue(bidRoundBidId, out reservedVolume))
-                {
-                    return;
-                }
-                reservedInventoryByBidRoundWinningBidId.Remove(bidRoundBidId);
-            }
         }
 
         public void UpdateIOLocationData()

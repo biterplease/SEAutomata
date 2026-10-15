@@ -13,9 +13,16 @@ namespace Automata.Util
     {
         public static void Add<T>(string id, Func<IMyTerminalBlock, T> logic, Func<T, string> get, Action<T, string> set, string defaultTag) where T : class
         {
+            Add(id, logic, get, set, defaultTag, MyStrings.LCDScreenTag, Loc.Id(MyStrings.LCDScreenTagTip, defaultTag));
+        }
+
+        /// <summary>Same, with its own title and tooltip (a block's second LCD tag).</summary>
+        public static void Add<T>(string id, Func<IMyTerminalBlock, T> logic, Func<T, string> get, Action<T, string> set, string defaultTag,
+                                  MyStringId title, MyStringId tooltip) where T : class
+        {
             var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlTextbox, IMyProgrammableBlock>(id);
-            c.Title = MyStrings.LCDScreenTag;
-            c.Tooltip = Loc.Id(MyStrings.LCDScreenTagTip, defaultTag);
+            c.Title = title;
+            c.Tooltip = tooltip;
             c.SupportsMultipleBlocks = true;
             c.Visible = b => logic(b) != null;
             c.Getter = b => { var l = logic(b); return new StringBuilder(l != null ? get(l) : ""); };
