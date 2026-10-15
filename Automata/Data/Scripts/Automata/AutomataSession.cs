@@ -202,9 +202,6 @@ namespace Automata
         public const ushort NETWORK_CHANNEL = 21843;
         public Digi.NetworkLib.Network Net { get; private set; }
 
-        // Chat commands (/automata ...), clients only
-        private readonly AutomataSessionCommandHandler commands = new AutomataSessionCommandHandler();
-
         public static ServerConfig GetConfig() => _serverConfig;
         public static MessageQueue GetMessageQueue() => _messageQueue;
 
@@ -213,7 +210,6 @@ namespace Automata
             Instance = this;
             Net = new Digi.NetworkLib.Network(NETWORK_CHANNEL, MOD_NAME);
             Util.NicknameControl.Register();
-            if (!MyAPIGateway.Utilities.IsDedicated) MyAPIGateway.Utilities.MessageEntered += commands.MessageEntered;
             // Localization settings
             // LoadLangOverrides();
             // MyAPIGateway.Gui.GuiControlRemoved += GuiControlRemoved;
@@ -245,7 +241,7 @@ namespace Automata
                 MessageQueue.Init(_serverConfig.MessageQueue);
                 Log.Verbose("Message queue initialized.");
                 _messageQueue = MessageQueue.Instance;
-                // In-flight messages are saved by the blocks that sent them (their save data), not by the session
+                LoadMessages();   // in-flight messages of the last save (server)
                 Log.Info("Log level: {0}", _serverConfig.Logging.LogLevel.ToString());
 
                 _updateInterval = _serverConfig.Session.UpdateInterval;
@@ -400,11 +396,53 @@ namespace Automata
         {
             try
             {
-                if (MyAPIGateway.Multiplayer == null || MyAPIGateway.Multiplayer.IsServer) Pathfinding.PathfindingManager.Instance?.SaveData();
+                if (MyAPIGateway.Multiplayer == null || MyAPIGateway.Multiplayer.IsServer)
+                {
+                    Pathfinding.PathfindingManager.Instance?.SaveData();
+                    SaveMessages();
+                }
             }
             catch (Exception ex)
             {
                 MyLog.Default.WriteLine($"Automata: SaveData exception: {ex}");
+            }
+        }
+
+        // The virtual network's messages in flight (MessageQueue.Serialize / Deserialize): the only place they are encoded
+        private const string MESSAGES_FILE = "Automata_Messages.bin";
+
+        private void SaveMessages()
+        {
+            if (_messageQueue == null) return;
+            try
+            {
+                byte[] bytes = _messageQueue.Serialize();
+                using (var w = MyAPIGateway.Utilities.WriteBinaryFileInWorldStorage(MESSAGES_FILE, typeof(AutomataSession)))
+                {
+                    w.Write(bytes.Length);
+                    w.Write(bytes);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Messages in flight: save failed: {0}", ex.Message);
+            }
+        }
+
+        private void LoadMessages()
+        {
+            if (_messageQueue == null || (MyAPIGateway.Multiplayer != null && !MyAPIGateway.Multiplayer.IsServer)) return;
+            try
+            {
+                if (!MyAPIGateway.Utilities.FileExistsInWorldStorage(MESSAGES_FILE, typeof(AutomataSession))) return;
+                byte[] bytes;
+                using (var r = MyAPIGateway.Utilities.ReadBinaryFileInWorldStorage(MESSAGES_FILE, typeof(AutomataSession)))
+                    bytes = r.ReadBytes(r.ReadInt32());
+                _messageQueue.Deserialize(bytes);
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Messages in flight: load failed: {0}", ex.Message);
             }
         }
 
@@ -414,7 +452,6 @@ namespace Automata
             {
                 Pointer.ScoutPointer.Unload();
                 Util.NicknameControl.Unregister();
-                if (MyAPIGateway.Utilities != null) MyAPIGateway.Utilities.MessageEntered -= commands.MessageEntered;
                 itemsIndexed = false;   // statics outlive the session (next world in the same game process)
                 Pathfinding.PathfindingManager.Unload();
                 Construction.BuildPlanner.ClearFrames();

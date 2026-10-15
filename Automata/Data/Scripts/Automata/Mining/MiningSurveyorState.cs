@@ -20,7 +20,7 @@ namespace Automata.Mining
 
     /// <summary>
     /// Operating state: the deposits it knows and the ones found depleted lately. Ongoing work: what is left of each
-    /// order, its MineOre jobs (published / on hold / awarded). Outbox: its messages still in flight. (No inbox: survey
+    /// order, its MineOre jobs (published / on hold / awarded). (No inbox: survey
     /// data, awards, failures and drone reports are acted on when read.)
     /// </summary>
     [ProtoContract]
@@ -32,7 +32,7 @@ namespace Automata.Mining
         [ProtoMember(4)] public List<DepositState> Depleted = new List<DepositState>();
         [ProtoMember(5)] public List<OrderProgressState> Orders = new List<OrderProgressState>();
         [ProtoMember(6)] public List<MiningJobState> Jobs = new List<MiningJobState>();
-        [ProtoMember(7)] public List<MessageQueue.TimestampedMessage> Outbox = new List<MessageQueue.TimestampedMessage>();
+        // ProtoMember 7 was the messages in flight (saved by the message queue now)
         [ProtoMember(8)] public int Delivered;
         [ProtoMember(9)] public int Failed;
     }

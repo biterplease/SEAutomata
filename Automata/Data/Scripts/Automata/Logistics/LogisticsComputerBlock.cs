@@ -1228,12 +1228,11 @@ namespace Automata.Logistics
                 Request = CaptureJob(requestJob),
                 Push = CaptureJob(pushJob),
             };
-            if (messaging != null) messaging.CollectSent(entityId, s.Outbox);
             foreach (var c in commitments)
                 s.Commitments.Add(new CommitmentState { AuctionId = c.Key, Items = c.Value.Items, Volume = c.Value.Volume, AgeTicks = BlockSave.Age(c.Value.Frame),
                                                          Supply = c.Value.Supply, Network = c.Value.Network, Won = c.Value.Won, JobId = c.Value.JobId });
-            Log.Debug("LC {0}: state saved: request {1}, push {2}, {3} promise(s), {4} message(s) in flight", entityId,
-                      requestJob != null ? requestJob.JobId : 0, pushJob != null ? pushJob.JobId : 0, s.Commitments.Count, s.Outbox.Count);
+            Log.Debug("LC {0}: state saved: request {1}, push {2}, {3} promise(s)", entityId,
+                      requestJob != null ? requestJob.JobId : 0, pushJob != null ? pushJob.JobId : 0, s.Commitments.Count);
             return s;
         }
 
@@ -1292,9 +1291,8 @@ namespace Automata.Logistics
                     commitments[c.AuctionId] = new Commitment { Items = c.Items, Volume = c.Volume, Frame = BlockSave.FrameFromAge(c.AgeTicks),
                                                                 Supply = c.Supply, Network = c.Network, Won = c.Won, JobId = c.JobId };
                 }
-            int sent = messaging.RestoreSent(s.Outbox);
-            Log.Info("LC {0}: state restored: request {1}, push {2}, {3} promise(s), {4} message(s) back in flight", entityId,
-                     requestJob != null ? requestJob.JobId : 0, pushJob != null ? pushJob.JobId : 0, commitments.Count, sent);
+            Log.Info("LC {0}: state restored: request {1}, push {2}, {3} promise(s)", entityId,
+                     requestJob != null ? requestJob.JobId : 0, pushJob != null ? pushJob.JobId : 0, commitments.Count);
         }
         #endregion
 

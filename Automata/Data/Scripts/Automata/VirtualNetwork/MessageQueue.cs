@@ -16,50 +16,55 @@ namespace Automata.VirtualNetwork
     public sealed class MessageQueue
     {
         /// <summary>
-        /// For use during world save/reload.
+        /// What the world save holds (<see cref="Serialize"/> / <see cref="Deserialize"/>): the only place messages are encoded.
         /// </summary>
         [ProtoContract(SkipConstructor = true, UseProtoMembersOnly = true)]
         private class MessageQueueSnapshot
         {
             [ProtoMember(1)]
-            public List<TimestampedMessage> AllMessages;
+            public List<SavedMessage> Messages;
             /// <summary>When the snapshot was taken (TimeUtil ms): message times are moved on by the time the world was saved.</summary>
             [ProtoMember(2)]
             public ulong SavedAt;
             public MessageQueueSnapshot() { }
         }
-        /// <summary>A message in flight (also what a block saves of the messages it sent: see <see cref="CollectSent"/>).</summary>
-        [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
+        /// <summary>A message in the snapshot: <see cref="TimestampedMessage"/> with the payload encoded.</summary>
+        [ProtoContract(SkipConstructor = true, UseProtoMembersOnly = true)]
+        private class SavedMessage
+        {
+            [ProtoMember(1)] public byte[] Data;
+            [ProtoMember(3)] public HashSet<long> ValidRecipients;
+            [ProtoMember(4)] public ulong CreatedAt;
+            [ProtoMember(5)] public ulong SentAt;
+            [ProtoMember(6)] public long SenderId;
+            [ProtoMember(7)] public long SenderOwnerId;
+            [ProtoMember(8)] public uint MessageId;
+            [ProtoMember(10)] public Channel Channel;
+            [ProtoMember(11)] public IAIBlockType RecipientBlockType;
+            [ProtoMember(12)] public bool RequiresAck;
+            [ProtoMember(13)] public ushort PayloadTypeValue;
+            public SavedMessage() { }
+        }
+        /// <summary>
+        /// A message in flight. The payload is the sender's object itself, shared by every recipient (nothing is encoded
+        /// or copied on the way): payloads are read-only from the moment they are sent, on both sides (a sender builds a
+        /// new one to change it, a receiver copies what it wants to change).
+        /// </summary>
         public class TimestampedMessage
         {
-            [ProtoMember(1)]
-            public byte[] Data;
-            [ProtoMember(2)]
-            public string StringData;
+            public IMessagePayload Payload;
             /// <summary>
             /// EntityIds of IAI block that can receive this message.
             /// </summary>
-            [ProtoMember(3)]
             public HashSet<long> ValidRecipients = null;
-            [ProtoMember(4)]
             public ulong CreatedAt;
-            [ProtoMember(5)]
             public ulong SentAt;
-            [ProtoMember(6)]
             public long SenderId;
-            [ProtoMember(7)]
             public long SenderOwnerId;
-            [ProtoMember(8)]
             public uint MessageId;
-            [ProtoMember(9)]
-            public MessageSerializationMode SerializationMode;
-            [ProtoMember(10)]
             public Channel Channel;
-            [ProtoMember(11)]
             public IAIBlockType RecipientBlockType;
-            [ProtoMember(12)]
             public bool RequiresAck;
-            [ProtoMember(13)]
             public ushort PayloadTypeValue;
 
             public PayloadType PayloadType
@@ -168,8 +173,6 @@ namespace Automata.VirtualNetwork
 
 
 
-        private readonly MessageSerializationMode serializationMode;
-
         // Antenna cache - updated when entities register/update
 
         private readonly MyConcurrentDictionary<Channel, MyConcurrentQueue<TimestampedMessage>> _channelQueues;
@@ -242,7 +245,6 @@ namespace Automata.VirtualNetwork
             _config = config ?? new MessageQueueConfig();
             MyUtilitiesDelegate = myUtilitiesDelegate ?? new MyUtilitiesDelegate();
             InterlockedDelegate = interlockedDelegate ?? new InterlockedDelegate();
-            serializationMode = _config.SerializationMode();
             _messageExpiration = TimeUtil.TickToTimeSpan(_config.MessageRetentionTicks());
             _dlqMessageExpiration = TimeUtil.TickToTimeSpan(_config.DlqMessageRetentionTicks());
             _cleanupInterval = TimeUtil.TickToTimeSpan(_config.MessageCleanupIntervalTicks());
@@ -414,15 +416,11 @@ namespace Automata.VirtualNetwork
                 ValidRecipients = validRecipients,
                 SenderOwnerId = message.SenderOwnerId,
                 MessageId = message.MessageId,
-                SerializationMode = message.SerializationMode,
+                Payload = message.Payload,
                 RecipientBlockType = message.RecipientBlockType,
                 RequiresAck = message.RequiresAck,
                 PayloadType = GetPayloadType(message.Payload)
             };
-            if (serializationMode == MessageSerializationMode.ProtoBuf)
-                msg.Data = MyUtilitiesDelegate.SerializeToBinary<IMessagePayload>(message.Payload);
-            else
-                msg.StringData = MyUtilitiesDelegate.SerializeToXML(message.Payload);
 
             var channelLock = _channelLocks[message.Channel];
             lock (channelLock)
@@ -766,14 +764,16 @@ namespace Automata.VirtualNetwork
                     // Process messages using cached ValidRecipients
                     foreach (var message in tempMessages)
                     {
-                        T decoded;
-                        if (serializationMode == MessageSerializationMode.ProtoBuf)
-                            decoded = MyUtilitiesDelegate.SerializeFromBinary<T>(message.Data);
-                        else
-                            decoded = MyAPIGateway.Utilities.SerializeFromXML<T>(message.StringData);
                         if (message.RequiresAck)
                         {
                             AckMessage(message.SenderId, message.MessageId);
+                        }
+                        var decoded = message.Payload as T;   // the sender's object, shared: read-only
+                        if (decoded == null)
+                        {
+                            Log.Warning("VNet: {0} #{1} from {2}: payload is {3}, not {4}: dropped", channel, message.MessageId, message.SenderId,
+                                        message.Payload != null ? message.Payload.GetType().Name : "null", typeof(T).Name);
+                            continue;
                         }
                         long recipientId = message.ValidRecipients.Count == 1 ? message.ValidRecipients.First() : 0;
                         var outMsg = new Message<T>
@@ -786,7 +786,6 @@ namespace Automata.VirtualNetwork
                             SenderId = message.SenderId,
                             SenderOwnerId = message.SenderOwnerId,
                             Channel = message.Channel,
-                            SerializationMode = message.SerializationMode,
                             RequiresAck = message.RequiresAck,
 
                         };
@@ -980,116 +979,33 @@ namespace Automata.VirtualNetwork
             _isInitialized = false;
         }
 
-        public byte[] SerializeForSave()
+        /// <summary>
+        /// World save (session SaveData): every message in flight, any channel, the payloads encoded here and nowhere else.
+        /// Expired messages are dropped first.
+        /// </summary>
+        public byte[] Serialize()
         {
             CleanupStaleMessages();
-            return SerializeAllMessages();
-        }
-        /// <summary>
-        /// Serialize all in-flight messages across all channels for world save.
-        /// Thread-safe: locks each channel during collection.
-        /// </summary>
-        public byte[] SerializeAllMessages()
-        {
-            var allMessages = new List<TimestampedMessage>();
-
+            var saved = new List<SavedMessage>();
             foreach (var channel in _channelQueues.Keys.ToList())
             {
                 var channelLock = _channelLocks[channel];
                 lock (channelLock)
                 {
                     MyConcurrentQueue<TimestampedMessage> queue;
-                    if (!_channelQueues.TryGetValue(channel, out queue))
-                        continue;
-
-                    var tempMessages = new List<TimestampedMessage>();
-                    TimestampedMessage msg;
-
-                    // Dequeue all to collect
-                    while (queue.TryDequeue(out msg))
+                    if (!_channelQueues.TryGetValue(channel, out queue)) continue;
+                    foreach (var msg in queue)
                     {
-                        tempMessages.Add(msg);
-                    }
-
-                    // Add to snapshot
-                    allMessages.AddRange(tempMessages);
-
-                    // Re-enqueue all messages
-                    foreach (var message in tempMessages)
-                    {
-                        queue.Enqueue(message);
-                    }
-                }
-            }
-
-            var snapshot = new MessageQueueSnapshot { AllMessages = allMessages, SavedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow) };
-            Log.Debug("VNet: snapshot of {0} message(s) for the save", allMessages.Count);
-            return MyUtilitiesDelegate.SerializeToBinary<MessageQueueSnapshot>(snapshot);
-        }
-
-        /// <summary>
-        /// Deserialize and restore all in-flight messages on world load.
-        /// Restores messages to their channels and pending acknowledgments.
-        /// </summary>
-        public void DeserializeAllMessages(byte[] data)
-        {
-            if (data == null || data.Length == 0)
-                return;
-
-            var snapshot = MyUtilitiesDelegate.SerializeFromBinary<MessageQueueSnapshot>(data);
-            if (snapshot == null || snapshot.AllMessages == null)
-                return;
-            // The world sat saved for a while: messages keep the age they had at the save (else all would be expired)
-            ulong now = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow);
-            ulong shift = snapshot.SavedAt > 0 && now > snapshot.SavedAt ? now - snapshot.SavedAt : 0;
-            Log.Info("VNet: {0} message(s) restored from the save (times moved on {1:F0} s)", snapshot.AllMessages.Count, shift / 1000.0);
-
-            foreach (var msg in snapshot.AllMessages)
-            {
-                if (msg == null) continue;
-                msg.SentAt += shift;
-                msg.CreatedAt += shift;
-                var channelLock = _channelLocks[msg.Channel];
-                lock (channelLock)
-                {
-                    var queue = _channelQueues.GetOrAdd(msg.Channel, _ => new MyConcurrentQueue<TimestampedMessage>());
-                    queue.Enqueue(msg);
-                }
-
-                if (msg.RequiresAck)
-                {
-                    var pendingAcks = _pendingAcknowledgments.GetOrAdd(msg.SenderId, _ => new MyConcurrentHashSet<uint>());
-                    pendingAcks.Add(msg.MessageId);
-                }
-            }
-        }
-        /// <summary>
-        /// World save: copies of the messages 'senderId' sent that are still in flight (any channel, not expired), for
-        /// the sender's own save data. Times are ages (ms before now) in the copies' SentAt / CreatedAt.
-        /// </summary>
-        public void CollectSent(long senderId, List<TimestampedMessage> into)
-        {
-            ulong now = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow);
-            var currentTime = DateTime.UtcNow;
-            foreach (var kv in _channelQueues)
-            {
-                var channelLock = _channelLocks[kv.Key];
-                lock (channelLock)
-                {
-                    foreach (var msg in kv.Value)
-                    {
-                        if (msg == null || msg.SenderId != senderId || IsMessageExpired(currentTime, msg.SentAt, _messageExpiration)) continue;
-                        into.Add(new TimestampedMessage
+                        if (msg == null || msg.Payload == null) continue;
+                        saved.Add(new SavedMessage
                         {
-                            Data = msg.Data,
-                            StringData = msg.StringData,
-                            ValidRecipients = msg.ValidRecipients != null ? new HashSet<long>(msg.ValidRecipients) : null,
-                            CreatedAt = now > msg.CreatedAt ? now - msg.CreatedAt : 0,
-                            SentAt = now > msg.SentAt ? now - msg.SentAt : 0,
+                            Data = MyUtilitiesDelegate.SerializeToBinary<IMessagePayload>(msg.Payload),
+                            ValidRecipients = msg.ValidRecipients,
+                            CreatedAt = msg.CreatedAt,
+                            SentAt = msg.SentAt,
                             SenderId = msg.SenderId,
                             SenderOwnerId = msg.SenderOwnerId,
                             MessageId = msg.MessageId,
-                            SerializationMode = msg.SerializationMode,
                             Channel = msg.Channel,
                             RecipientBlockType = msg.RecipientBlockType,
                             RequiresAck = msg.RequiresAck,
@@ -1098,30 +1014,91 @@ namespace Automata.VirtualNetwork
                     }
                 }
             }
+            Log.Debug("VNet: snapshot of {0} message(s) for the save", saved.Count);
+            return MyUtilitiesDelegate.SerializeToBinary<MessageQueueSnapshot>(
+                new MessageQueueSnapshot { Messages = saved, SavedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow) });
         }
 
-        /// <summary>World load: a block's saved in-flight messages (<see cref="CollectSent"/>) back in their queues, with the age they had.</summary>
-        public int RestoreSent(List<TimestampedMessage> saved)
+        /// <summary>
+        /// World load (session start): the saved messages back in their channels, with the age they had at the save, and
+        /// the acknowledgments they wait for. Their senders register again a little later: a message whose sender is
+        /// not registered stays queued until it expires.
+        /// </summary>
+        public void Deserialize(byte[] data)
         {
-            if (saved == null || saved.Count == 0) return 0;
+            if (data == null || data.Length == 0) return;
+            var snapshot = MyUtilitiesDelegate.SerializeFromBinary<MessageQueueSnapshot>(data);
+            if (snapshot == null || snapshot.Messages == null) return;
+            // The world sat saved for a while: messages keep the age they had at the save (else all would be expired)
             ulong now = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow);
+            ulong shift = snapshot.SavedAt > 0 && now > snapshot.SavedAt ? now - snapshot.SavedAt : 0;
             int restored = 0;
-            for (int i = 0; i < saved.Count; i++)
+            foreach (var saved in snapshot.Messages)
             {
-                var msg = saved[i];
-                if (msg == null) continue;
-                msg.SentAt = now > msg.SentAt ? now - msg.SentAt : now;
-                msg.CreatedAt = now > msg.CreatedAt ? now - msg.CreatedAt : now;
-                if (msg.ValidRecipients == null) msg.ValidRecipients = new HashSet<long>();
+                if (saved == null) continue;
+                var payload = DecodePayload((PayloadType)saved.PayloadTypeValue, saved.Data);
+                if (payload == null)
+                {
+                    Log.Warning("VNet: saved message #{0} on {1} ({2}): payload could not be read, dropped", saved.MessageId, saved.Channel, (PayloadType)saved.PayloadTypeValue);
+                    continue;
+                }
+                var msg = new TimestampedMessage
+                {
+                    Payload = payload,
+                    ValidRecipients = saved.ValidRecipients ?? new HashSet<long>(),
+                    CreatedAt = saved.CreatedAt + shift,
+                    SentAt = saved.SentAt + shift,
+                    SenderId = saved.SenderId,
+                    SenderOwnerId = saved.SenderOwnerId,
+                    MessageId = saved.MessageId,
+                    Channel = saved.Channel,
+                    RecipientBlockType = saved.RecipientBlockType,
+                    RequiresAck = saved.RequiresAck,
+                    PayloadTypeValue = saved.PayloadTypeValue,
+                };
                 var channelLock = _channelLocks[msg.Channel];
                 lock (channelLock)
                 {
                     var queue = _channelQueues.GetOrAdd(msg.Channel, _ => new MyConcurrentQueue<TimestampedMessage>());
                     queue.Enqueue(msg);
                 }
+                // (Dead letters were returned unacknowledged: nothing waits for them)
+                if (msg.RequiresAck && msg.Channel != Channel.DEAD_LETTER_QUEUE)
+                {
+                    var pendingAcks = _pendingAcknowledgments.GetOrAdd(msg.SenderId, _ => new MyConcurrentHashSet<uint>());
+                    pendingAcks.Add(msg.MessageId);
+                }
                 restored++;
             }
-            return restored;
+            Log.Info("VNet: {0} message(s) restored from the save (times moved on {1:F0} s)", restored, shift / 1000.0);
+        }
+
+        // The payload class by its type tag (GetPayloadType's counterpart)
+        private IMessagePayload DecodePayload(PayloadType type, byte[] data)
+        {
+            if (data == null || data.Length == 0) return null;
+            try
+            {
+                switch (type)
+                {
+                    case PayloadType.RelayMessage: return MyUtilitiesDelegate.SerializeFromBinary<RelayMessage>(data);
+                    case PayloadType.TaskAssignment: return MyUtilitiesDelegate.SerializeFromBinary<TaskAssignment>(data);
+                    case PayloadType.TaskAborted: return MyUtilitiesDelegate.SerializeFromBinary<TaskAborted>(data);
+                    case PayloadType.JobAnnouncement: return MyUtilitiesDelegate.SerializeFromBinary<JobAnnouncement>(data);
+                    case PayloadType.MiningSurveyDataBroadcast: return MyUtilitiesDelegate.SerializeFromBinary<MiningSurveyDataBroadcast>(data);
+                    case PayloadType.Auction: return MyUtilitiesDelegate.SerializeFromBinary<Auction>(data);
+                    case PayloadType.Bid: return MyUtilitiesDelegate.SerializeFromBinary<Bid>(data);
+                    case PayloadType.AuctionWinnerAnnouncement: return MyUtilitiesDelegate.SerializeFromBinary<AuctionWinnerAnnouncement>(data);
+                    case PayloadType.JobAnnouncementFailed: return MyUtilitiesDelegate.SerializeFromBinary<JobAnnouncementFailed>(data);
+                    case PayloadType.JobStatusReport: return MyUtilitiesDelegate.SerializeFromBinary<JobStatusReport>(data);
+                    default: return null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning("VNet: payload {0} could not be decoded: {1}", type, ex.Message);
+                return null;
+            }
         }
 
         public void PrepareForShutdown()

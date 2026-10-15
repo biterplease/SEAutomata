@@ -1766,7 +1766,6 @@ namespace Automata.Orchestrator
             for (int i = 0; i < winnerOutbox.Count; i++) s.Winners.Add(winnerOutbox[i].Payload);
             for (int i = 0; i < failureOutbox.Count; i++) s.Failures.Add(failureOutbox[i].Payload);
             CapturePlayerJobs(s);
-            if (messaging != null) messaging.CollectSent(entityId, s.Outbox);
             Log.Debug("Orchestrator {0}: state saved: {1} queued, {2} auction(s), {3} known job(s), {4} unsent", entityId, s.Queue.Count,
                       s.Auctions.Count, s.KnownJobs.Count, s.Winners.Count + s.Failures.Count);
             return s;
@@ -1856,9 +1855,8 @@ namespace Automata.Orchestrator
                         Channel = Channel.JOB_ANNOUNCEMENT_FAILED,
                     });
                 }
-            int sent = messaging.RestoreSent(s.Outbox);
-            Log.Info("Orchestrator {0}: state restored: {1} queued, {2} auction(s), {3} known job(s), {4} unsent, {5} message(s) back in flight",
-                     entityId, jobQueue.Count, auctions.Count, knownJobs.Count, winnerOutbox.Count + failureOutbox.Count, sent);
+            Log.Info("Orchestrator {0}: state restored: {1} queued, {2} auction(s), {3} known job(s), {4} unsent",
+                     entityId, jobQueue.Count, auctions.Count, knownJobs.Count, winnerOutbox.Count + failureOutbox.Count);
         }
         #endregion
 

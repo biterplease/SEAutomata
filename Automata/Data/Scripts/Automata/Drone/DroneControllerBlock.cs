@@ -730,18 +730,11 @@ namespace Automata.Drone
                     data.Job = CaptureJobState();
                     data.Operating = CaptureOperatingState();
                     data.Combat = CaptureCombatState();
-                    var queue = AutomataSession.GetMessageQueue();
-                    if (queue != null)
-                    {
-                        data.Outbox = new List<MessageQueue.TimestampedMessage>();
-                        queue.CollectSent(_entityId, data.Outbox);
-                    }
                 }
                 else if (savedSave != null)
                 {
                     data.Job = savedSave.Job;
                     data.Operating = savedSave.Operating;
-                    data.Outbox = savedSave.Outbox;
                     data.Combat = savedSave.Combat;
                 }
             }
@@ -806,7 +799,7 @@ namespace Automata.Drone
                 {
                     var data = Util.BlockSave.FromText<DroneSaveData>(base64Data, Entity.EntityId);
                     settings = data != null && data.Settings != null ? data.Settings : new DroneControllerSettings();
-                    if (data != null && IsServer && (data.Job != null || data.Operating != null || data.Combat != null || (data.Outbox != null && data.Outbox.Count > 0))
+                    if (data != null && IsServer && (data.Job != null || data.Operating != null || data.Combat != null)
                         && Util.BlockSave.OwnState(data.EntityId, Entity.EntityId, "Drone"))
                     {
                         data.Settings = null;

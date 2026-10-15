@@ -19,7 +19,7 @@ namespace Automata.Orchestrator
     /// <summary>
     /// Inbox: job announcements waiting for an auction (Queue) and the bids collected by open auctions. Ongoing work:
     /// open auctions, jobs it knows (repeats ignored), counters. Outbox: winners / failures not delivered yet (Winners,
-    /// Failures) and its messages still in flight on the virtual network (Outbox).
+    /// Failures). (Messages in flight are the virtual network's: MessageQueue.Serialize.)
     /// </summary>
     [ProtoContract]
     public class OrchestratorState
@@ -34,7 +34,7 @@ namespace Automata.Orchestrator
         [ProtoMember(8)] public int Assigned;
         [ProtoMember(9)] public int Dropped;
         [ProtoMember(10)] public int Failed;
-        [ProtoMember(11)] public List<MessageQueue.TimestampedMessage> Outbox = new List<MessageQueue.TimestampedMessage>();
+        // ProtoMember 11 was the messages in flight (saved by the message queue now)
         [ProtoMember(12)] public int Completed;
         [ProtoMember(13)] public int Aborted;
         [ProtoMember(14)] public int PlayerJobCounter;

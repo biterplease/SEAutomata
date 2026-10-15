@@ -1045,7 +1045,6 @@ namespace Automata.Mining
                     DronesOut = job.DronesOut, Announced = job.Announced,
                 });
             }
-            if (messaging != null) messaging.CollectSent(entityId, s.Outbox);
             Log.Debug("MS {0}: state saved: {1} deposit(s), {2} depleted, {3} order(s), {4} job(s)", entityId, s.Deposits.Count, s.Depleted.Count, s.Orders.Count, s.Jobs.Count);
             return s;
         }
@@ -1092,9 +1091,8 @@ namespace Automata.Mining
                 }
             ordersDirty = true;   // progress of orders edited while saved is restarted
             gpsDirty = true;
-            int sent = messaging.RestoreSent(s.Outbox);
-            Log.Info("MS {0}: state restored: {1} deposit(s), {2} depleted, {3} order(s), {4} job(s), {5} message(s) back in flight", entityId,
-                     deposits.Count, depleted.Count, progress.Count, jobs.Count, sent);
+            Log.Info("MS {0}: state restored: {1} deposit(s), {2} depleted, {3} order(s), {4} job(s)", entityId,
+                     deposits.Count, depleted.Count, progress.Count, jobs.Count);
         }
         #endregion
 

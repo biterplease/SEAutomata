@@ -19,8 +19,7 @@ namespace Automata.Logistics
     }
 
     /// <summary>
-    /// Ongoing work: its open request / push jobs, the promises of its bids, id counters. Outbox: its messages still in
-    /// flight on the virtual network. (No inbox: what it reads is acted on at once.)
+    /// Ongoing work: its open request / push jobs, the promises of its bids, id counters. (No inbox: what it reads is acted on at once.)
     /// </summary>
     [ProtoContract]
     public class LogisticsComputerState
@@ -31,7 +30,7 @@ namespace Automata.Logistics
         [ProtoMember(4)] public LogisticsJobState Request;
         [ProtoMember(5)] public LogisticsJobState Push;
         [ProtoMember(6)] public List<CommitmentState> Commitments = new List<CommitmentState>();
-        [ProtoMember(7)] public List<MessageQueue.TimestampedMessage> Outbox = new List<MessageQueue.TimestampedMessage>();
+        // ProtoMember 7 was the messages in flight (saved by the message queue now)
     }
 
     [ProtoContract]

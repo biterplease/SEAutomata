@@ -1109,11 +1109,10 @@ namespace Automata.Construction
                 foreach (var k in job.Blocks) js.Blocks.Add(new BlockRefState { Grid = k.Key, X = k.Value.X, Y = k.Value.Y, Z = k.Value.Z });
                 s.Jobs.Add(js);
             }
-            if (messaging != null) messaging.CollectSent(entityId, s.Outbox);
             var frameGrids = new HashSet<long>(scannedGrids);
             for (int j = 0; j < jobs.Count; j++) foreach (var k in jobs[j].Blocks) frameGrids.Add(k.Key);
             BuildPlanner.ExportFrames(frameGrids, s.Frames);
-            Log.Debug("CC {0}: state saved: {1} job(s), {2} message(s) in flight, {3} sweep frame(s)", entityId, s.Jobs.Count, s.Outbox.Count, s.Frames.Count);
+            Log.Debug("CC {0}: state saved: {1} job(s), {2} sweep frame(s)", entityId, s.Jobs.Count, s.Frames.Count);
             return s;
         }
 
@@ -1163,8 +1162,7 @@ namespace Automata.Construction
                 }
             RebuildInJobs();
             BuildPlanner.ImportFrames(s.Frames);
-            int sent = messaging.RestoreSent(s.Outbox);
-            Log.Info("CC {0}: state restored: {1} job(s), {2} message(s) back in flight, {3} sweep frame(s)", entityId, jobs.Count, sent,
+            Log.Info("CC {0}: state restored: {1} job(s), {2} sweep frame(s)", entityId, jobs.Count,
                      s.Frames != null ? s.Frames.Count : 0);
         }
         #endregion

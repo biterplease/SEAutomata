@@ -314,10 +314,8 @@ namespace Automata.Drone
                     for (int i = 0; i < o.Frames.Count; i++) workedGrids.Add(o.Frames[i].Key < 0 ? ~o.Frames[i].Key : o.Frames[i].Key);
                 }
             }
-            var queue = AutomataSession.GetMessageQueue();
-            int sent = queue != null ? queue.RestoreSent(save.Outbox) : 0;
-            Log.Info("Drone {0}: save applied: work tilt {1:F0}°, {2} unreachable block(s), {3} sweep frame(s), {4} message(s) back in flight",
-                     Entity.EntityId, maxWorkTiltDegrees, unreachableBlocks.Count, o != null && o.Frames != null ? o.Frames.Count : 0, sent);
+            Log.Info("Drone {0}: save applied: work tilt {1:F0}°, {2} unreachable block(s), {3} sweep frame(s)",
+                     Entity.EntityId, maxWorkTiltDegrees, unreachableBlocks.Count, o != null && o.Frames != null ? o.Frames.Count : 0);
             if (save.Job != null) ResumeSavedJob(save.Job);
             if (save.Combat != null) ResumeCombat(save.Combat);
         }

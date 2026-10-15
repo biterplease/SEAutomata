@@ -18,8 +18,7 @@ namespace Automata.Construction
     }
 
     /// <summary>
-    /// Ongoing work: its cached jobs (blocks, announcement, awarded / on hold), counters. Outbox: its messages still in
-    /// flight. Operating state: the planner's sweep frames of the grids it scans (rescans keep their direction). (No
+    /// Ongoing work: its cached jobs (blocks, announcement, awarded / on hold), counters. Operating state: the planner's sweep frames of the grids it scans (rescans keep their direction). (No
     /// inbox: awards and failures are acted on when read.)
     /// </summary>
     [ProtoContract]
@@ -31,7 +30,7 @@ namespace Automata.Construction
         [ProtoMember(4)] public int Done;
         [ProtoMember(5)] public int Expired;
         [ProtoMember(6)] public int Failed;
-        [ProtoMember(7)] public List<MessageQueue.TimestampedMessage> Outbox = new List<MessageQueue.TimestampedMessage>();
+        // ProtoMember 7 was the messages in flight (saved by the message queue now)
         [ProtoMember(8)] public List<SweepFrameState> Frames = new List<SweepFrameState>();
     }
 

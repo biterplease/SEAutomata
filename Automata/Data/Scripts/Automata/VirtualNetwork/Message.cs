@@ -161,7 +161,6 @@ namespace Automata.VirtualNetwork
         public long SenderId;
         public long SenderOwnerId;
         public bool RequiresAck;
-        public MessageSerializationMode SerializationMode;
         public Channel Channel;
         public MessageQueue.IAIBlockType RecipientBlockType;
     }
@@ -221,7 +220,7 @@ namespace Automata.VirtualNetwork
                 IsStaticGrid = isStaticGrid,
                 IsInSpace = site.NaturalGravity < SPACE_GRAVITY,
                 IsInAtmosphere = site.NaturalGravity >= SPACE_GRAVITY,
-                Tasks = job.Tasks,
+                Tasks = job.Tasks != null ? new List<Orchestrator.Task>(job.Tasks) : null,   // payloads are shared by every recipient: own list
                 BlockCount = job.BlockCount,
                 WeldCategory = job.WeldCategory,
             };
@@ -238,7 +237,7 @@ namespace Automata.VirtualNetwork
                 JobType = Type,
                 CreatedTime = CreatedTime,
                 TotalInventory = ComponentsInventory,
-                Tasks = Tasks ?? new List<Orchestrator.Task>(),
+                Tasks = Tasks != null ? new List<Orchestrator.Task>(Tasks) : new List<Orchestrator.Task>(),   // the payload is shared: the job gets its own list
                 BlockCount = BlockCount,
                 WeldCategory = WeldCategory,
             };
