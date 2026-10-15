@@ -550,10 +550,7 @@ namespace Automata.Config
             ScoutPointer.CombatGpsColor = ParseColor(ini.Get("ScoutPointer", "CombatGpsColor").ToString(""), ScoutPointer.CombatGpsColor);
             ScoutPointer.ConfirmTimeoutSeconds = MathHelper.Clamp(ini.Get("ScoutPointer", "ConfirmTimeoutSeconds").ToInt32(ScoutPointer.ConfirmTimeoutSeconds), 3, 300);
 
-            // Parse DroneNetwork section
-            MessageQueue.networkUpdateRate = Math.Max(1.0f, ini.Get("MessageQueue", "NetworkUpdateRate").ToSingle(MessageQueue.networkUpdateRate));
-            MessageQueue.schedulerAntennaCacheUpdateIntervalTicks = Math.Max(60, ini.Get("MessageQueue", "SchedulerAntennaCacheUpdateIntervalTicks").ToInt32(MessageQueue.schedulerAntennaCacheUpdateIntervalTicks));
-            MessageQueue.schedulerMessageReadLimit = Math.Max(1, ini.Get("MessageQueue", "SchedulerMessageReadLimit").ToInt32(MessageQueue.schedulerMessageReadLimit));
+            // Parse MessageQueue section
             MessageQueue.messageRetentionTicks = Math.Max(600, ini.Get("MessageQueue", "MessageRetentionTicks").ToInt32(MessageQueue.messageRetentionTicks));
             MessageQueue.messageCleanupIntervalTicks = Math.Max(60, ini.Get("MessageQueue", "MessageCleanupIntervalTicks").ToInt32(MessageQueue.messageCleanupIntervalTicks));
 

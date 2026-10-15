@@ -107,7 +107,7 @@ namespace Automata.Util
                 Log.Warning("Net: {0} {1}: settings from {2} not readable ({3})", GetType().Name, Entity.EntityId, senderSteamId, ex.Message);
                 return;
             }
-            Log.Debug("Net: {0} {1}: settings received from {2}", GetType().Name, Entity.EntityId, senderSteamId);
+            if (Log.DebugEnabled) Log.Debug("Net: {0} {1}: settings received from {2}", GetType().Name, Entity.EntityId, senderSteamId);
             WriteStorage();
             OnSettingsChanged();
             if (block != null) block.RefreshCustomInfo();

@@ -239,6 +239,7 @@ namespace Automata
                 Log.Verbose("Server config loaded.");
                 Pathfinding.PathfindingManager.Load(_serverConfig.Pathfinding);
                 MessageQueue.Init(_serverConfig.MessageQueue);
+                messageQueueCleanupIntervalTicks = _serverConfig.MessageQueue.MessageCleanupIntervalTicks();
                 Log.Verbose("Message queue initialized.");
                 _messageQueue = MessageQueue.Instance;
                 LoadMessages();   // in-flight messages of the last save (server)

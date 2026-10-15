@@ -2,17 +2,27 @@ using ProtoBuf;
 using Sandbox.ModAPI;
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using VRage.Collections;
-using VRage.Game;
 using VRageMath;
 
 using Automata.Config;
+using Automata.Drone;
 using Automata.Util;
 using Automata.Util.Logging;
 
 namespace Automata.VirtualNetwork
 {
+    /// <summary>
+    /// The in-memory message bus of the mod (server only). No block registers with it and nothing is encoded:
+    ///  - A sender hands over its antenna's <see cref="AntennaReg"/> (position, range, grid, owner) with the message; the
+    ///    queue notes where and how far it was sent from. A reader hands over its own and the block type it reads as.
+    ///    Both go on to the <see cref="RelayGraph"/>, which keeps one entry per antenna id.
+    ///  - A message lives MessageRetentionTicks (default 10 s) in its channel's log. A reader keeps a cursor per channel
+    ///    (a sequence number): each read looks at what came after it, delivers what the reader may take - not its own,
+    ///    its block type, owner / faction shares with the sender, in range of the sender's recorded position (its radius,
+    ///    or the relay network) - and moves on. A message out of range when the reader gets to it is missed.
+    ///  - Whether anyone read a message is told by <see cref="Message{T}.Delivered"/> (senders that must be heard resend).
+    /// The payload is the sender's object, shared by every reader: read-only once sent (VirtualNetwork/CLAUDE.md).
+    /// </summary>
     public sealed class MessageQueue
     {
         /// <summary>
@@ -26,6 +36,9 @@ namespace Automata.VirtualNetwork
             /// <summary>When the snapshot was taken (TimeUtil ms): message times are moved on by the time the world was saved.</summary>
             [ProtoMember(2)]
             public ulong SavedAt;
+            /// <summary>The relay graph's antennas.</summary>
+            [ProtoMember(3)]
+            public List<AntennaReg> Antennas;
             public MessageQueueSnapshot() { }
         }
         /// <summary>A message in the snapshot: <see cref="TimestampedMessage"/> with the payload encoded.</summary>
@@ -33,7 +46,6 @@ namespace Automata.VirtualNetwork
         private class SavedMessage
         {
             [ProtoMember(1)] public byte[] Data;
-            [ProtoMember(3)] public HashSet<long> ValidRecipients;
             [ProtoMember(4)] public ulong CreatedAt;
             [ProtoMember(5)] public ulong SentAt;
             [ProtoMember(6)] public long SenderId;
@@ -41,22 +53,25 @@ namespace Automata.VirtualNetwork
             [ProtoMember(8)] public uint MessageId;
             [ProtoMember(10)] public Channel Channel;
             [ProtoMember(11)] public IAIBlockType RecipientBlockType;
-            [ProtoMember(12)] public bool RequiresAck;
             [ProtoMember(13)] public ushort PayloadTypeValue;
+            [ProtoMember(14)] public long SenderAntennaId;
+            [ProtoMember(15)] public Vector3DData SenderPosition;
+            [ProtoMember(16)] public double SenderRange;
+            [ProtoMember(17)] public long SenderGridId;
+            [ProtoMember(18)] public bool BothRanges;
+            [ProtoMember(19)] public int Deliveries;
             public SavedMessage() { }
         }
         /// <summary>
-        /// A message in flight. The payload is the sender's object itself, shared by every recipient (nothing is encoded
+        /// A message in flight. The payload is the sender's object itself, shared by every reader (nothing is encoded
         /// or copied on the way): payloads are read-only from the moment they are sent, on both sides (a sender builds a
         /// new one to change it, a receiver copies what it wants to change).
         /// </summary>
         public class TimestampedMessage
         {
+            /// <summary>Order of sending (readers' cursors).</summary>
+            public long Seq;
             public IMessagePayload Payload;
-            /// <summary>
-            /// EntityIds of IAI block that can receive this message.
-            /// </summary>
-            public HashSet<long> ValidRecipients = null;
             public ulong CreatedAt;
             public ulong SentAt;
             public long SenderId;
@@ -64,8 +79,17 @@ namespace Automata.VirtualNetwork
             public uint MessageId;
             public Channel Channel;
             public IAIBlockType RecipientBlockType;
-            public bool RequiresAck;
             public ushort PayloadTypeValue;
+            #region Where it was sent from
+            public long SenderAntennaId;
+            public Vector3D SenderPosition;
+            public double SenderRange;
+            public long SenderGridId;
+            /// <summary>Both antennas must reach each other (else only the sender's radius counts: a radio hears beyond its own).</summary>
+            public bool BothRanges;
+            #endregion
+            /// <summary>How many readers took it.</summary>
+            public int Deliveries;
 
             public PayloadType PayloadType
             {
@@ -89,142 +113,41 @@ namespace Automata.VirtualNetwork
             MiningSurveyor = 16,
         }
 
-        /// <summary>
-        /// Cached antenna info for an entity
-        /// </summary>
-        public class AntennaInfo
+        /// <summary>One channel: its messages in order of sending, and where each reader got to.</summary>
+        private sealed class ChannelLog
         {
-            public IMyRadioAntenna Antenna;
-            public Vector3D Position;
-            public double TransmitRange;
-            public long OwnerId;
-            /// <summary>
-            /// EntityId of the IAI block that sends or receives messages, not antenna.
-            /// </summary>
-            public long IAIEntityId;
-            public DateTime LastUpdate;
-            public IAIBlockType BlockType;
-            public bool IsStatic;
-
-            public bool IsValid()
-            {
-                return AntennaUtil.Alive(Antenna) &&
-                       Antenna.IsFunctional &&
-                       Antenna.Enabled &&
-                       Antenna.EnableBroadcasting &&
-                       Antenna.IsWorking;
-            }
-            public AntennaInfo(long iaiEntityId, IMyRadioAntenna antenna, IAIBlockType blockType = IAIBlockType.None, bool isStatic = false)
-            {
-                OwnerId = antenna.OwnerId;
-                IAIEntityId = iaiEntityId;
-                BlockType = blockType;
-                IsStatic = isStatic;
-                Position = antenna.GetPosition();
-                TransmitRange = AntennaUtil.Range(antenna);
-                LastUpdate = DateTime.UtcNow;
-                Antenna = antenna;
-            }
-            /// <summary>Position and range as they are now (the antenna moves with its grid, the player changes its range).</summary>
-            public void RefreshLive()
-            {
-                if (!AntennaUtil.Alive(Antenna)) return;
-                Position = Antenna.GetPosition();
-                TransmitRange = AntennaUtil.Range(Antenna);
-                OwnerId = Antenna.OwnerId;
-                LastUpdate = DateTime.UtcNow;
-            }
-
-            public uint ToFlags()
-            {
-                uint flags = 0;
-                if (IsStatic)
-                    flags |= FLAG_IS_STATIC;
-                if (IsValid())
-                    flags |= FLAG_IS_VALID;
-                flags |= MessageQueue.ToFlags(BlockType);
-                return flags;
-            }
-            public BoundingBoxD GetAABB()
-            {
-                return CreateSphereAABB(Position, TransmitRange);
-            }
+            public readonly object Lock = new object();
+            public readonly List<TimestampedMessage> Items = new List<TimestampedMessage>();
+            public readonly Dictionary<long, long> Cursors = new Dictionary<long, long>();
+            /// <summary>Seq and send time of the newest message ever appended (the early exits of a read).</summary>
+            public long LastSeq;
+            public ulong LastSentAt;
         }
 
-        public static uint ToFlags(IAIBlockType blockType)
-        {
-            uint flags = 0;
-            if ((IAIBlockType.Drone & blockType) > 0)
-                flags |= FLAG_BLOCK_TYPE_DRONE;
-            if ((IAIBlockType.LogisticsComputer & blockType) > 0)
-                flags |= FLAG_BLOCK_TYPE_LOGISTICS_COMPUTER;
-            if ((IAIBlockType.Orchestrator & blockType) > 0)
-                flags |= FLAG_BLOCK_TYPE_ORCHESTRATOR;
-            if ((IAIBlockType.ConstructionComputer & blockType) > 0)
-                flags |= FLAG_BLOCK_TYPE_CONSTRUCTION_COMPUTER;
-            if ((IAIBlockType.MiningSurveyor & blockType) > 0)
-                flags |= FLAG_BLOCK_TYPE_MINING_SURVEYOR;
-            return flags;
-        }
-
-
-
-
-
-
-
-        // Antenna cache - updated when entities register/update
-
-        private readonly MyConcurrentDictionary<Channel, MyConcurrentQueue<TimestampedMessage>> _channelQueues;
-        private readonly MyConcurrentDictionary<Channel, object> _channelLocks = new MyConcurrentDictionary<Channel, object>();
-        private readonly MyConcurrentDictionary<Channel, MyConcurrentHashSet<long>> _channelSubscribers;
-        private readonly MyConcurrentDictionary<long, DateTime> _lastReadTimes;
-        private readonly MyConcurrentDictionary<long, TimeSpan> _readThrottleIntervals;
-        private readonly MyConcurrentDictionary<ushort, MyConcurrentHashSet<long>> _messageAcknowledgments;
-        private readonly MyConcurrentDictionary<long, MyConcurrentHashSet<uint>> _pendingAcknowledgments;
-        private readonly IMyUtilitiesDelegate MyUtilitiesDelegate;
-        private readonly IInterlockedDelegate InterlockedDelegate;
-        private readonly object _exclusiveLock = new object();
-
-
-        public const uint FLAG_BLOCK_TYPE_DRONE = 1 << 0;
-        public const uint FLAG_BLOCK_TYPE_ORCHESTRATOR = 1 << 1;
-        public const uint FLAG_BLOCK_TYPE_LOGISTICS_COMPUTER = 1 << 2;
-        public const uint FLAG_BLOCK_TYPE_CONSTRUCTION_COMPUTER = 1 << 3;
-        public const uint FLAG_BLOCK_TYPE_MINING_SURVEYOR = 1 << 4;
-        public const uint FLAG_IS_STATIC = 1 << 5;
-        /// <summary>
-        /// IsValid() was true when added to the DAABBTree. Should still be checked once the AntennaInfo is retrieved.
-        /// </summary>
-        public const uint FLAG_IS_VALID = 1 << 6;   // was 1 << 4, the mining surveyor's type bit (2026-10-15)
-        private readonly MyDynamicAABBTreeD antennaTree = new MyDynamicAABBTreeD();
-        /// <summary>The antenna network (relays through bases and drones, laser links), rebuilt every few seconds.</summary>
+        private readonly ChannelLog[] _channels;
+        private long _seq;
+        /// <summary>The antenna network (relays through bases and drones, laser links).</summary>
         public readonly RelayGraph Relays = new RelayGraph();
-        private readonly TimeSpan _antennaTreeTimeout = TimeSpan.FromMinutes(30);
-        /// <summary>IAI EntityId to DAABBTree proxy.</summary>
-        private readonly MyConcurrentDictionary<long, int> iaiEntityIdToProxy = new MyConcurrentDictionary<long, int>();
-        /// <summary>Reverse lookup of proxy id to IAI entity.</summary>
-        private readonly MyConcurrentDictionary<int, long> proxyToEntityId = new MyConcurrentDictionary<int, long>();
-        // cleanup caches
-        private readonly HashSet<long> _cleanupBuffer = new HashSet<long>();
-        private readonly List<AntennaInfo> _allAntennas = new List<AntennaInfo>();
-        private readonly List<AntennaInfo> _recipientScan = new List<AntennaInfo>();
+        /// <summary>The message was sent and is still alive in the channel (readers can still take it).</summary>
+        public bool InFlight<T>(Message<T> message) where T : class, IMessagePayload
+        {
+            if (message == null || message.Receipt == null) return false;
+            ulong nowMs = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow);
+            return nowMs < message.Receipt.SentAt + (ulong)_messageExpiration.TotalMilliseconds;
+        }
 
+        /// <summary>Register (or refresh) an antenna in the relay graph. Static ones are only updated at its fallback rebuild.</summary>
+        public void RegisterAntenna(AntennaReg reg) { if (reg != null) Relays.Register(reg); }
+        private readonly Dictionary<KeyValuePair<long, long>, bool> _shareCache = new Dictionary<KeyValuePair<long, long>, bool>();
         private readonly TimeSpan _messageExpiration;
-        private readonly TimeSpan _dlqMessageExpiration;
         private readonly object _cleanupLock = new object();
-        private DateTime _lastCleanup = DateTime.UtcNow;
-        private readonly TimeSpan _cleanupInterval;
-        private int _messageCounter = 0;
         private static bool _isInitialized = false;
         private volatile bool _isShuttingDown = false;
-
-
-        /// <summary>
-        /// Cache from SenderOwnerId to Set{SenderReceiverId} to avoid calling the ownership api.
-        /// </summary>
-        private readonly MyConcurrentDictionary<long, MyConcurrentHashSet<long>> _sharingGroupCache = new MyConcurrentDictionary<long, MyConcurrentHashSet<long>>();
         private readonly IMessageQueueConfig _config;
+        private readonly IMyUtilitiesDelegate MyUtilitiesDelegate;
+
+        /// <summary>How long a message lives (ticks): a sender that must be heard sends again after this.</summary>
+        public int LifetimeTicks { get; private set; }
 
         private static MessageQueue _instance;
         private static readonly object _instanceLock = new object();
@@ -237,34 +160,20 @@ namespace Automata.VirtualNetwork
                 return _instance;
             }
         }
-        private MessageQueue(
-            IMessageQueueConfig config = null,
-            IMyUtilitiesDelegate myUtilitiesDelegate = null,
-            InterlockedDelegate interlockedDelegate = null)
+        private MessageQueue(IMessageQueueConfig config = null, IMyUtilitiesDelegate myUtilitiesDelegate = null)
         {
             _config = config ?? new MessageQueueConfig();
             MyUtilitiesDelegate = myUtilitiesDelegate ?? new MyUtilitiesDelegate();
-            InterlockedDelegate = interlockedDelegate ?? new InterlockedDelegate();
-            _messageExpiration = TimeUtil.TickToTimeSpan(_config.MessageRetentionTicks());
-            _dlqMessageExpiration = TimeUtil.TickToTimeSpan(_config.DlqMessageRetentionTicks());
-            _cleanupInterval = TimeUtil.TickToTimeSpan(_config.MessageCleanupIntervalTicks());
+            LifetimeTicks = _config.MessageRetentionTicks();
+            _messageExpiration = TimeUtil.TickToTimeSpan(LifetimeTicks);
 
-            _channelQueues = new MyConcurrentDictionary<Channel, MyConcurrentQueue<TimestampedMessage>>();
-            foreach (var channel in (Channel[])Enum.GetValues(typeof(Channel)))
-            {
-                _channelQueues.Add(channel, new MyConcurrentQueue<TimestampedMessage>());
-                _channelLocks.Add(channel, new object());
-            }
-            _channelSubscribers = new MyConcurrentDictionary<Channel, MyConcurrentHashSet<long>>();
-            _lastReadTimes = new MyConcurrentDictionary<long, DateTime>();
-            _readThrottleIntervals = new MyConcurrentDictionary<long, TimeSpan>();
-            _pendingAcknowledgments = new MyConcurrentDictionary<long, MyConcurrentHashSet<uint>>();
+            int max = 0;
+            foreach (var channel in (Channel[])Enum.GetValues(typeof(Channel))) max = Math.Max(max, (int)channel);
+            _channels = new ChannelLog[max + 1];
+            for (int i = 0; i < _channels.Length; i++) _channels[i] = new ChannelLog();
         }
 
-        public static void Init(
-             IMessageQueueConfig config = null,
-            IMyUtilitiesDelegate myUtilitiesDelegate = null,
-            InterlockedDelegate interlockedDelegate = null)
+        public static void Init(IMessageQueueConfig config = null, IMyUtilitiesDelegate myUtilitiesDelegate = null)
         {
             lock (_instanceLock)
             {
@@ -273,107 +182,64 @@ namespace Automata.VirtualNetwork
                     Log.Error("MessageQueue is already initialized.");
                     return;
                 }
-                _instance = new MessageQueue(config, myUtilitiesDelegate, interlockedDelegate);
+                _instance = new MessageQueue(config, myUtilitiesDelegate);
                 _isInitialized = true;
             }
         }
 
+        #region Sending
         /// <summary>
-        /// Internal channel broadcast: posts payload to all current subscribers of <paramref name="channelOrdinal"/>
-        /// without antenna range checks. Used for intra-scheduler routing (e.g. re-queuing a DroneReport).
+        /// Sends the message from 'sender' (the sender's antenna as it is now: see <see cref="AntennaReg.Sync"/>). Nobody
+        /// is looked up: readers in range take it while it lives. Returns None once it is in the channel; whether anyone
+        /// took it is <see cref="Message{T}.Delivered"/>, later.
         /// </summary>
-        public ErrorCode SendMessage<T>(Channel channel, Message<T> message, long senderId, bool requiresAck = false)
-            where T : class, IMessagePayload
-        {
-            if (_isShuttingDown)
-                return ErrorCode.ShutdownInProgress;
-
-            MyConcurrentHashSet<long> subscribers;
-            if (!_channelSubscribers.TryGetValue(channel, out subscribers) || subscribers.Count == 0)
-                return ErrorCode.NoSubscribers;
-
-            var validRecipients = new HashSet<long>(subscribers);
-            EnqueueMessage(ref message, validRecipients);
-            return ErrorCode.None;
-        }
-
-
-        /// <summary>
-        /// Send message to all valid recipients in range
-        /// </summary>
-        public ErrorCode BroadcastMessage<T>(
-            IMyRadioAntenna senderAntenna,
-            Message<T> message,
-            bool enforceCommsRange = false) where T : class, IMessagePayload
+        public ErrorCode BroadcastMessage<T>(AntennaReg sender, Message<T> message, bool enforceCommsRange = false) where T : class, IMessagePayload
         {
             if (_isShuttingDown)
                 return ErrorCode.ShutdownInProgress;
             if (message == null)
-            {
                 return ErrorCode.MessageIsNull;
-            }
             if (message.Channel == Channel.DIRECT_MESSAGE)
-            {
                 return ErrorCode.InvalidChannel;
-            }
+            if (sender == null || !sender.Working)
+                return ErrorCode.SenderAntennaNotRegistered;
 
-            // Check if there are any subscribers
-            MyConcurrentHashSet<long> subscribers;
-            if (!_channelSubscribers.TryGetValue(message.Channel, out subscribers) || subscribers.Count == 0)
+            Relays.Register(sender);
+            var log = _channels[(int)message.Channel];
+            var msg = new TimestampedMessage
             {
-                if (Log.DebugEnabled)
-                    Log.Debug("VNet: {0} #{1} from {2}: nobody subscribed to the channel", message.Channel, message.MessageId, message.SenderId);
-                return ErrorCode.NoSubscribers;
-            }
-
-            // Every registered block, live positions: drones move (their registered position / tree box would be
-            // stale), and the tree's user flags need ALL requested bits (a Drone | LogisticsComputer message matched none)
-            _recipientScan.Clear();
-            antennaTree.GetAll(_recipientScan, true);
-            var validRecipients = new HashSet<long>();
-            int registered = _recipientScan.Count, otherType = 0, invalid = 0, notShared = 0, outOfRange = 0, notListening = 0;
-            for (int i = 0; i < _recipientScan.Count; i++)
+                Channel = message.Channel,
+                CreatedAt = message.CreatedAt,
+                SentAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
+                SenderId = message.SenderId,
+                SenderOwnerId = message.SenderOwnerId,
+                MessageId = message.MessageId,
+                Payload = message.Payload,
+                RecipientBlockType = message.RecipientBlockType,
+                PayloadType = GetPayloadType(message.Payload),
+                SenderAntennaId = sender.AntennaId,
+                SenderPosition = sender.Pos,
+                SenderRange = sender.Range,
+                SenderGridId = sender.GridId,
+                BothRanges = enforceCommsRange,
+            };
+            lock (log.Lock)
             {
-                AntennaInfo recipient = _recipientScan[i];
-                if (recipient == null || recipient.IAIEntityId == message.SenderId) continue;
-                if (message.RecipientBlockType != IAIBlockType.None && (recipient.BlockType & message.RecipientBlockType) == 0)
-                {
-                    otherType++;
-                    continue;
-                }
-                // Only blocks listening on the channel: a registered block of the type that doesn't read it is no recipient
-                if (!subscribers.Contains(recipient.IAIEntityId))
-                {
-                    notListening++;
-                    continue;
-                }
-                if (!recipient.IsValid())
-                {
-                    invalid++;
-                    continue;
-                }
-                recipient.RefreshLive();
-                if (!CanShare(message.SenderOwnerId, recipient.OwnerId, recipient.Antenna))
-                {
-                    notShared++;
-                    continue;
-                }
-                if (IsInCommunicationRange(message.SenderId, senderAntenna, ref recipient, checkBothRanges: enforceCommsRange))
-                    validRecipients.Add(recipient.IAIEntityId);
-                else outOfRange++;
+                msg.Seq = ++_seq;
+                log.Items.Add(msg);
+                log.LastSeq = msg.Seq;
+                log.LastSentAt = msg.SentAt;
             }
-            _recipientScan.Clear();
-            if (Log.DebugEnabled)
-                Log.Debug("VNet: {0} {1} #{2} from {3} ({4:F0} m) to {5}: {6} recipient(s) of {7} registered ({8} other type, {9} not listening, {10} invalid, {11} not shared, {12} out of range)",
-                          message.Channel, message.Payload != null ? message.Payload.GetType().Name : "null", message.MessageId, message.SenderId,
-                          senderAntenna != null ? AntennaUtil.Range(senderAntenna) : 0f, message.RecipientBlockType, validRecipients.Count, registered,
-                          otherType, notListening, invalid, notShared, outOfRange);
-            if (validRecipients.Count == 0)
-            {
-                return ErrorCode.NoSubscribers;
-            }
-            EnqueueMessage(ref message, validRecipients);
+            message.Receipt = msg;
+            if (Log.DebugEnabled) Log.Debug("VNet: {0} {1} #{2} from {3} ({4:F0} m) to {5}", message.Channel, message.Payload != null ? message.Payload.GetType().Name : "null",
+                          message.MessageId, message.SenderId, sender.Range, message.RecipientBlockType);
             return ErrorCode.None;
+        }
+
+        /// <summary>For code that has the antenna block, not a registration (a throwaway one is made).</summary>
+        public ErrorCode BroadcastMessage<T>(IMyRadioAntenna antenna, Message<T> message, bool enforceCommsRange = false) where T : class, IMessagePayload
+        {
+            return BroadcastMessage(antenna != null ? AntennaReg.Make(antenna) : null, message, enforceCommsRange);
         }
 
         private static PayloadType GetPayloadType(IMessagePayload payload)
@@ -403,250 +269,17 @@ namespace Automata.VirtualNetwork
             return PayloadType.None;
         }
 
-        private void EnqueueMessage<T>(ref Message<T> message, HashSet<long> validRecipients = null) where T : class, IMessagePayload
-        {
-            if (_isShuttingDown)
-                return;
-            var msg = new TimestampedMessage
-            {
-                Channel = message.Channel,
-                CreatedAt = message.CreatedAt,
-                SentAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
-                SenderId = message.SenderId,
-                ValidRecipients = validRecipients,
-                SenderOwnerId = message.SenderOwnerId,
-                MessageId = message.MessageId,
-                Payload = message.Payload,
-                RecipientBlockType = message.RecipientBlockType,
-                RequiresAck = message.RequiresAck,
-                PayloadType = GetPayloadType(message.Payload)
-            };
+        #endregion
 
-            var channelLock = _channelLocks[message.Channel];
-            lock (channelLock)
-            {
-                var queue = _channelQueues.GetOrAdd(message.Channel, _ => new MyConcurrentQueue<TimestampedMessage>());
-                queue.Enqueue(msg);
-            }
-            if (msg.RequiresAck)
-            {
-                var pendingAcks = _pendingAcknowledgments.GetOrAdd(msg.SenderId, _ => new MyConcurrentHashSet<uint>());
-                pendingAcks.Add(msg.MessageId);
-            }
-        }
-
+        #region Reading
         /// <summary>
-        /// Checks if the antenna is in range.
-        /// Designed to simulate script IGC: : An antenna can RECEIVE messages even if it’s
-        /// transmit range is lower, but any messages it sends will not
-        /// make it to the destination.
-        /// When checkBothRanges is true, will check both antennas can reach each other.
+        /// Takes what came to 'readerId' (a block of type 'readerType', on the antenna 'reader': see <see cref="AntennaReg.Sync"/>)
+        /// on 'channel' since its last read, at most 'maxMessages'. A reader reads a channel with one payload filter.
         /// </summary>
-        /// <param name="entityId">IAI Block (Drone, Scheduler, LC) id of sender.</param>
-        /// <param name="antenna"></param>
-        /// <param name="recipientInfo"></param>
-        /// <param name="checkBothRanges">When true, will check both</param>
-        /// <returns></returns>
-        private bool IsInCommunicationRange(
-            long entityId,
-            IMyRadioAntenna antenna,
-            ref AntennaInfo counterPartInfo,
-            bool checkBothRanges = false
-           )
-        {
-            var recipient = counterPartInfo.Antenna;
-
-            if (recipient.EntityId == entityId)
-                return false;
-
-            if (!counterPartInfo.IsValid())
-                return false;
-
-            // Use DistanceSquared to avoid sqrt
-            var antennaPos = antenna.GetPosition();
-            double distanceToConterPartSquared = Vector3D.DistanceSquared(antennaPos, counterPartInfo.Position);
-            double antennaRangeSquared = Math.Pow(AntennaUtil.Range(antenna), 2);
-
-            if (checkBothRanges)
-            {
-                double recipientRangeSquared = Math.Pow(counterPartInfo.TransmitRange, 2);
-                if (distanceToConterPartSquared <= antennaRangeSquared && distanceToConterPartSquared <= recipientRangeSquared) return true;
-                return Relays.Reaches(antenna.CubeGrid, recipient.CubeGrid, antenna.OwnerId)
-                    && Relays.Reaches(recipient.CubeGrid, antenna.CubeGrid, recipient.OwnerId);
-            }
-
-            // Simulate IGC: : An antenna can RECEIVE messages even if it’s
-            // transmit range is lower, but any messages it sends will not
-            // make it to the destination.
-            if (distanceToConterPartSquared <= antennaRangeSquared) return true;
-            // Relayed: the same base (connected grids), or other bases / drones in between (TODO/13)
-            return Relays.Reaches(antenna.CubeGrid, recipient.CubeGrid, antenna.OwnerId);
-        }
-
-        public bool GetAntennaInfo(long entityId, out AntennaInfo antennaInfo)
-        {
-            int proxyId;
-            if (!iaiEntityIdToProxy.TryGetValue(entityId, out proxyId))
-            {
-                antennaInfo = null;
-                return false;
-            }
-            antennaInfo = antennaTree.GetUserData<AntennaInfo>(proxyId);
-            return true;
-        }
-
-        /// <summary>
-        /// Get recipients in range.
-        /// Filters out the sender from the result list.
-        /// Prefer this overload if you have userFlags.
-        /// </summary>
-        /// <param name="senderEntityId"></param>
-        /// <param name="senderAntenna"></param>
-        /// <param name="userFlags"></param>
-        /// <param name="recipients"></param>
-        public void GetRecipientsInRange(long senderEntityId, IMyRadioAntenna senderAntenna, List<AntennaInfo> recipients, uint userFlags = 0)
-        {
-            BoundingBoxD antennaAABB = CreateSphereAABB(senderAntenna.GetPosition(), AntennaUtil.Range(senderAntenna));
-            antennaTree.OverlapAllBoundingBox(ref antennaAABB, recipients, userFlags, true);
-            recipients.RemoveAll(r => r.IAIEntityId == senderEntityId);
-        }
-
-        /// <summary>
-        /// Get recipients in range. Filters out the sender.
-        /// Slightly faster overload since it does not populate a list, but action immediately with callback.
-        /// Prefer this overload if you have no user flags.
-        /// </summary>
-        /// <param name="senderEntityId"></param>
-        /// <param name="senderAntenna"></param>
-        /// <param name="callback"></param>
-        public void GetRecipientsInRange(long senderEntityId, IMyRadioAntenna senderAntenna, Action<AntennaInfo> callback)
-        {
-            BoundingSphereD antennaSphere = new BoundingSphereD(senderAntenna.GetPosition(), AntennaUtil.Range(senderAntenna));
-            antennaTree.OverlapAllBoundingSphere<AntennaInfo>(ref antennaSphere, recipient =>
-            {
-                if (recipient.IAIEntityId != senderEntityId)
-                {
-                    callback(recipient);
-                }
-            });
-        }
-
-        public void RegisterAntenna(long iaiEntityId, IAIBlockType iaiBlockType, IMyRadioAntenna antenna, bool isStatic = false)
-        {
-            if (antenna == null || iaiEntityIdToProxy.ContainsKey(iaiEntityId))
-                return;
-
-            AntennaInfo antennaInfo = new AntennaInfo(iaiEntityId, antenna, iaiBlockType, isStatic);
-            var aabb = antennaInfo.GetAABB();
-            int proxyId = antennaTree.AddProxy(ref aabb, antennaInfo, antennaInfo.ToFlags(), true);
-            iaiEntityIdToProxy[iaiEntityId] = proxyId;
-            proxyToEntityId[proxyId] = iaiEntityId;
-            Log.Debug("VNet: {0} {1} registered: antenna '{2}' ({3:F0} m){4}, {5} registered", iaiBlockType, iaiEntityId, antenna.CustomName,
-                      AntennaUtil.Range(antenna), isStatic ? ", static" : "", iaiEntityIdToProxy.Count);
-        }
-
-        private bool RemoveAntennaProxy(int proxyId)
-        {
-            long entityId;
-            if (!proxyToEntityId.TryGetValue(proxyId, out entityId))
-                return false;
-            antennaTree.RemoveProxy(proxyId);
-            proxyToEntityId.Remove(proxyId);
-            iaiEntityIdToProxy.Remove(entityId);
-            return true;
-        }
-
-        public bool RemoveAntenna(long iaiEntityId)
-        {
-            int proxyId;
-            if (!iaiEntityIdToProxy.TryGetValue(iaiEntityId, out proxyId))
-                return false;
-            antennaTree.RemoveProxy(proxyId);
-            iaiEntityIdToProxy.Remove(iaiEntityId);
-            proxyToEntityId.Remove(proxyId);
-            Log.Debug("VNet: {0} unregistered, {1} registered", iaiEntityId, iaiEntityIdToProxy.Count);
-            return true;
-        }
-        /// <summary>A block closed: off every channel (it is no recipient any more).</summary>
-        public void UnsubscribeAll(long subscriberId)
-        {
-            foreach (var channel in (Channel[])Enum.GetValues(typeof(Channel)))
-            {
-                MyConcurrentHashSet<long> subscribers;
-                if (_channelSubscribers.TryGetValue(channel, out subscribers)) subscribers.Remove(subscriberId);
-            }
-        }
-
-        public bool AntennaMoved(long iaiEntityId, IMyRadioAntenna antenna)
-        {
-            int proxyId;
-            if (!iaiEntityIdToProxy.TryGetValue(iaiEntityId, out proxyId))
-                return false;
-            AntennaInfo antennaInfo = antennaTree.GetUserData<AntennaInfo>(proxyId);
-
-            var newPos = antenna.GetPosition();
-            var newRadius = AntennaUtil.Range(antenna);
-            var oldPos = antennaInfo.Position;
-            antennaInfo.Position = newPos;
-            antennaInfo.TransmitRange = newRadius;
-            antennaInfo.LastUpdate = DateTime.UtcNow;
-
-            var aabb = antennaInfo.GetAABB();
-            antennaTree.MoveProxy(proxyId, ref aabb, oldPos - newPos);
-            return true;
-        }
-
-
-        public static BoundingBoxD CreateSphereAABB(Vector3D sphereCenter, double sphereRadius)
-        {
-            return new BoundingBoxD(
-                new Vector3D(sphereCenter.X - sphereRadius, sphereCenter.Y - sphereRadius, sphereCenter.Z - sphereRadius),
-                new Vector3D(sphereCenter.X + sphereRadius, sphereCenter.Y + sphereRadius, sphereCenter.Z + sphereRadius)
-            );
-        }
-        public static BoundingBoxD CreateSphereAABB(BoundingSphereD sphere)
-        {
-            return BoundingBoxD.CreateFromSphere(sphere);
-        }
-
-
-        /// <summary>
-        /// Check if two entities can share information based on ownership
-        /// </summary>
-        private bool CanShare(long senderOwnerId, long recipientOwnerId, IMyTerminalBlock recipientBlock)
-        {
-            if (senderOwnerId == recipientOwnerId) return true;
-
-            MyConcurrentHashSet<long> validRecipients;
-            if (_sharingGroupCache.TryGetValue(senderOwnerId, out validRecipients))
-            {
-                if (validRecipients.Contains(recipientOwnerId))
-                    return true;
-            }
-            else
-            {
-                validRecipients = new MyConcurrentHashSet<long>();
-                _sharingGroupCache[senderOwnerId] = validRecipients;
-            }
-            if (recipientBlock != null)
-            {
-                var relation = recipientBlock.GetUserRelationToOwner(senderOwnerId);
-                bool canShare = relation == MyRelationsBetweenPlayerAndBlock.Owner ||
-                       relation == MyRelationsBetweenPlayerAndBlock.FactionShare ||
-                       relation == MyRelationsBetweenPlayerAndBlock.Friends;
-                if (canShare)
-                    validRecipients.Add(recipientOwnerId);
-                return canShare;
-            }
-
-            return false;
-        }
-
-
-
         public ErrorCode ReadMessages<T>(
-            long subscriberId,
-            IMyRadioAntenna subscriberAntenna,
+            long readerId,
+            IAIBlockType readerType,
+            AntennaReg reader,
             Channel channel,
             List<Message<T>> outMessages,
             int maxMessages = 10,
@@ -656,322 +289,152 @@ namespace Automata.VirtualNetwork
         {
             if (_isShuttingDown)
                 return ErrorCode.ShutdownInProgress;
-            MyConcurrentHashSet<long> subscribers;
-            if (!_channelSubscribers.TryGetValue(channel, out subscribers) || !subscribers.Contains(subscriberId))
-                return ErrorCode.NotSubscribed;
-
-            int proxyId; // just a validation check, proxyId not used until the loops
-            if (!iaiEntityIdToProxy.TryGetValue(subscriberId, out proxyId))
-                return ErrorCode.SubscriberAntennaNotRegistered;
-
-            var subscriberInfo = antennaTree.GetUserData<AntennaInfo>(proxyId);
-            subscriberInfo.RefreshLive();   // moved since it registered (drones)
-
             if (clear)
                 outMessages.Clear();
+            if (maxMessages <= 0 || reader == null || !reader.Working)
+                return reader == null || !reader.Working ? ErrorCode.RecipientNotValid : ErrorCode.TryAgainLater;
 
-            var channelLock = _channelLocks[channel];
-            lock (channelLock)
+            var log = _channels[(int)channel];
+            ulong nowMs = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow);
+            ulong lifeMs = (ulong)_messageExpiration.TotalMilliseconds;
+            ulong cutoff = nowMs > lifeMs ? nowMs - lifeMs : 0;
+            int outOfRange = 0, taken = 0;
+            lock (log.Lock)
             {
-                MyConcurrentQueue<TimestampedMessage> queue;
-                if (_channelQueues.TryGetValue(channel, out queue))
+                long cursor;
+                log.Cursors.TryGetValue(readerId, out cursor);
+                // Early exits, before any work (no registration, no scan): the channel never had a message / nothing new since
+                // this reader's last read / everything new has expired already
+                if (log.LastSeq <= cursor) return ErrorCode.TryAgainLater;
+                if (log.LastSentAt < cutoff)
                 {
-                    var currentTime = DateTime.UtcNow;
-                    var messagesToReEnqueue = new List<TimestampedMessage>();
-                    var messagesForDLQ = new List<TimestampedMessage>();
-
-                    var tempMessages = new List<TimestampedMessage>();
-                    int messagesToProcess = 0;
-                    int senderProxyId;
-                    int dequeueScanCount = 0;
-                    const int maxDequeueScan = 512;
-                    // Collect all messages
-                    TimestampedMessage msg;
-                    int expired = 0, outOfRangeCount = 0;
-                    while (messagesToProcess < maxMessages && dequeueScanCount < maxDequeueScan && queue.TryDequeue(out msg))
-                    {
-                        dequeueScanCount++;
-                        if (IsMessageExpired(currentTime, msg.SentAt, _messageExpiration))
-                        {
-                            expired++;
-                            if (msg.RequiresAck)
-                            {
-                                // if requires ack and expired, need to return it via DLQ
-                                messagesForDLQ.Add(msg);
-                            }
-                            continue; // expired message is ignored, and dropped
-                        }
-                        bool isInternalMessage = !iaiEntityIdToProxy.TryGetValue(msg.SenderId, out senderProxyId) && msg.SenderOwnerId == 0;
-                        if (!isInternalMessage && !iaiEntityIdToProxy.ContainsKey(msg.SenderId))
-                        {
-                            // Sender not registered (yet: blocks re-register after a load; or gone): kept until it expires
-                            messagesToReEnqueue.Add(msg);
-                            continue;
-                        }
-
-                        if (msg.ValidRecipients.Contains(subscriberId))
-                        {
-                            bool inRange;
-                            if (isInternalMessage)
-                            {
-                                // Internal routing messages (SenderOwnerId==0, no antenna) bypass range checks.
-                                inRange = true;
-                            }
-                            else
-                            {
-                                var senderInfo = antennaTree.GetUserData<AntennaInfo>(senderProxyId);
-                                inRange = IsInCommunicationRange(msg.SenderId, senderInfo.Antenna, ref subscriberInfo, false);
-                            }
-
-                            if (inRange)
-                            {
-                                if (messageFilters != PayloadType.None && ((msg.PayloadType & messageFilters) == 0))
-                                {
-                                    messagesToReEnqueue.Add(msg);
-                                    continue;
-                                }
-                                ++messagesToProcess;
-                                tempMessages.Add(msg);
-                                if (channel != Channel.DIRECT_MESSAGE)
-                                {
-                                    // Delivered once per recipient (no replays while it lives); kept for the others
-                                    msg.ValidRecipients.Remove(subscriberId);
-                                    if (msg.ValidRecipients.Count > 0) messagesToReEnqueue.Add(msg);
-                                }
-                            }
-                            else
-                            {
-                                // caller is intended recipient, but out of range
-                                outOfRangeCount++;
-                                messagesToReEnqueue.Add(msg);
-                            }
-                        }
-                        else
-                        {
-                            // message not for caller, re-enqueue for other receivers
-                            messagesToReEnqueue.Add(msg);
-                        }
-                    }
-                    foreach (var message in messagesToReEnqueue)
-                        queue.Enqueue(message);
-
-                    foreach (var message in messagesForDLQ)
-                        ReturnUnackedMessage(message);
-                    if ((expired > 0 || outOfRangeCount > 0 || tempMessages.Count > 0) && Log.DebugEnabled)
-                        Log.Debug("VNet: {0} read {1}: {2} message(s), {3} out of range, {4} expired dropped, {5} queued", subscriberId, channel,
-                                  tempMessages.Count, outOfRangeCount, expired, queue.Count);
-
-                    // Process messages using cached ValidRecipients
-                    foreach (var message in tempMessages)
-                    {
-                        if (message.RequiresAck)
-                        {
-                            AckMessage(message.SenderId, message.MessageId);
-                        }
-                        var decoded = message.Payload as T;   // the sender's object, shared: read-only
-                        if (decoded == null)
-                        {
-                            Log.Warning("VNet: {0} #{1} from {2}: payload is {3}, not {4}: dropped", channel, message.MessageId, message.SenderId,
-                                        message.Payload != null ? message.Payload.GetType().Name : "null", typeof(T).Name);
-                            continue;
-                        }
-                        long recipientId = message.ValidRecipients.Count == 1 ? message.ValidRecipients.First() : 0;
-                        var outMsg = new Message<T>
-                        {
-                            Payload = decoded,
-                            MessageId = message.MessageId,
-                            CreatedAt = message.CreatedAt,
-                            SentAt = message.SentAt,
-                            RecipientBlockType = message.RecipientBlockType,
-                            SenderId = message.SenderId,
-                            SenderOwnerId = message.SenderOwnerId,
-                            Channel = message.Channel,
-                            RequiresAck = message.RequiresAck,
-
-                        };
-                        outMessages.Add(outMsg);
-                    }
+                    log.Cursors[readerId] = log.LastSeq;
+                    return ErrorCode.TryAgainLater;
                 }
-
+                Relays.Register(reader);
+                var items = log.Items;
+                for (int i = FirstAfter(items, cursor); i < items.Count && taken < maxMessages; i++)
+                {
+                    var m = items[i];
+                    cursor = m.Seq;
+                    if (m.SentAt < cutoff || m.SenderId == readerId) continue;
+                    if (m.RecipientBlockType != IAIBlockType.None && (m.RecipientBlockType & readerType) == 0) continue;
+                    if (messageFilters != PayloadType.None && (m.PayloadType & messageFilters) == 0) continue;
+                    if (!CanShare(m.SenderOwnerId, reader.OwnerId)) continue;
+                    if (!InRange(m, reader)) { outOfRange++; continue; }
+                    var payload = m.Payload as T;   // the sender's object, shared: read-only
+                    if (payload == null)
+                    {
+                        Log.Warning("VNet: {0} #{1} from {2}: payload is {3}, not {4}: dropped", channel, m.MessageId, m.SenderId,
+                                    m.Payload != null ? m.Payload.GetType().Name : "null", typeof(T).Name);
+                        continue;
+                    }
+                    m.Deliveries++;
+                    taken++;
+                    outMessages.Add(new Message<T>
+                    {
+                        Payload = payload,
+                        MessageId = m.MessageId,
+                        CreatedAt = m.CreatedAt,
+                        SentAt = m.SentAt,
+                        RecipientBlockType = m.RecipientBlockType,
+                        SenderId = m.SenderId,
+                        SenderOwnerId = m.SenderOwnerId,
+                        Channel = m.Channel,
+                    });
+                }
+                log.Cursors[readerId] = cursor;
             }
-
-            return ErrorCode.None;
+            if ((taken > 0 || outOfRange > 0) && Log.DebugEnabled) Log.Debug("VNet: {0} read {1}: {2} message(s), {3} out of range", readerId, channel, taken, outOfRange);
+            return taken > 0 ? ErrorCode.None : ErrorCode.TryAgainLater;
         }
 
-        public void Subscribe(long subscriberId, Channel channel)
+        // Index of the first message sent after 'cursor' (messages are in order of sending)
+        private static int FirstAfter(List<TimestampedMessage> items, long cursor)
         {
-            var subscribers = _channelSubscribers.GetOrAdd(channel, _ => new MyConcurrentHashSet<long>());
-            subscribers.Add(subscriberId);
-            _readThrottleIntervals.TryAdd(subscriberId, TimeSpan.FromMilliseconds(100));
-        }
-
-        public void Unsubscribe(long subscriberId, Channel channel)
-        {
-            MyConcurrentHashSet<long> subscribers;
-            if (_channelSubscribers.TryGetValue(channel, out subscribers))
-                subscribers.Remove(subscriberId);
-        }
-
-        private bool AckMessage(long senderId, uint messageId)
-        {
-            MyConcurrentHashSet<uint> pendingAcks;
-            if (_pendingAcknowledgments.TryGetValue(senderId, out pendingAcks))
+            int lo = 0, hi = items.Count;
+            while (lo < hi)
             {
-                pendingAcks.Remove(messageId);
-                return true;
+                int mid = (lo + hi) >> 1;
+                if (items[mid].Seq <= cursor) lo = mid + 1; else hi = mid;
             }
-            return false;
+            return lo;
         }
 
         /// <summary>
-        /// Sends unacked message back to the DEAD_LETTER_QUEUE, senders should be able to
-        /// capture these to know if the expected recipient never received the message.
+        /// Is the reader where the message went? Within the sender's radius (as sent: a radio is heard beyond its own
+        /// range, so only the sender's counts - or both, for messages sent with enforceCommsRange), else if the relay
+        /// network carries it.
         /// </summary>
-        /// <param name="message"></param>
-        /// <returns></returns>
-        private void ReturnUnackedMessage(TimestampedMessage msg, MyConcurrentQueue<TimestampedMessage> queue = null)
+        private bool InRange(TimestampedMessage m, AntennaReg reader)
         {
-            if (queue == null)
+            if (m.SenderAntennaId == reader.AntennaId) return true;   // one antenna, several blocks
+            double d2 = Vector3D.DistanceSquared(m.SenderPosition, reader.Pos);
+            bool direct = d2 <= m.SenderRange * m.SenderRange;
+            if (m.BothRanges)
             {
-                queue = _channelQueues.GetOrAdd(Channel.DEAD_LETTER_QUEUE, _ => new MyConcurrentQueue<TimestampedMessage>());
+                if (direct && d2 <= reader.Range * reader.Range) return true;
+                return Relays.Reaches(m.SenderGridId, reader.GridId, m.SenderOwnerId) && Relays.Reaches(reader.GridId, m.SenderGridId, reader.OwnerId);
             }
-            queue.Enqueue(msg);
-            // drop acknowledgement
-            if (msg.RequiresAck)
-            {
-                MyConcurrentHashSet<uint> pendingAcks;
-                if (_pendingAcknowledgments.TryGetValue(msg.SenderId, out pendingAcks))
-                {
-                    pendingAcks.Remove(msg.MessageId);
-                }
-            }
+            // Simulate IGC: an antenna can RECEIVE even if its transmit range is lower, but what it sends doesn't get there
+            if (direct) return true;
+            // Relayed: the same base (connected grids), or other bases / drones in between (TODO/13)
+            return Relays.Reaches(m.SenderGridId, reader.GridId, m.SenderOwnerId);
         }
 
+        // Owner or faction of the sender (cached; cleared with the cleanup)
+        private bool CanShare(long senderOwnerId, long readerOwnerId)
+        {
+            if (senderOwnerId == readerOwnerId) return true;
+            if (senderOwnerId == 0 || readerOwnerId == 0) return false;
+            var key = new KeyValuePair<long, long>(senderOwnerId, readerOwnerId);
+            bool ok;
+            if (!_shareCache.TryGetValue(key, out ok))
+            {
+                ok = AnchorDirectory.IsAllowed(senderOwnerId, readerOwnerId);
+                _shareCache[key] = ok;
+            }
+            return ok;
+        }
 
+        /// <summary>A block closed: its read positions dropped.</summary>
+        public void ReaderClosed(long readerId)
+        {
+            for (int i = 0; i < _channels.Length; i++)
+            {
+                var log = _channels[i];
+                lock (log.Lock) log.Cursors.Remove(readerId);
+            }
+        }
+        #endregion
+
+        #region Antennas
+        /// <summary>A block's antenna is off / gone: out of the relay network until it registers again (with its next send / read).</summary>
+        public void DeregisterAntenna(long antennaId)
+        {
+            Relays.Deregister(antennaId);
+        }
+        #endregion
+
+        #region Cleanup
         public void TryPerformCleanup()
         {
-            CleanupStaleMessages();
-            CleanupInvalidAntennas();
-        }
-
-        public int CleanupInvalidAntennas()
-        {
-            _cleanupBuffer.Clear();
-
-            antennaTree.GetAll(_allAntennas, clear: true);
-
-            foreach (var antennaInfo in _allAntennas)
+            ulong nowMs = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow);
+            ulong lifeMs = (ulong)_messageExpiration.TotalMilliseconds;
+            ulong cutoff = nowMs > lifeMs ? nowMs - lifeMs : 0;
+            for (int i = 0; i < _channels.Length; i++)
             {
-                bool shouldRemove = false;
-
-                // Null checks
-                if (antennaInfo?.Antenna == null)
-                    shouldRemove = true;
-                // Entity lifecycle checks
-                else if (antennaInfo.Antenna.Closed || antennaInfo.Antenna.MarkedForClose)
-                    shouldRemove = true;
-                // Functional checks
-                else if (!antennaInfo.IsValid())
-                    shouldRemove = true;
-                // Grid checks - grid was deleted/unloaded
-                else if (antennaInfo.Antenna.CubeGrid == null || antennaInfo.Antenna.CubeGrid.Closed)
-                    shouldRemove = true;
-                // Timeout check - hasn't been updated in a long time (optional)
-                else if ((DateTime.UtcNow - antennaInfo.LastUpdate).TotalMinutes > 30)
-                    shouldRemove = true;
-
-                if (shouldRemove)
-                    _cleanupBuffer.Add(antennaInfo.IAIEntityId);
-            }
-
-            foreach (long entityId in _cleanupBuffer)
-            {
-                RemoveAntenna(entityId);
-            }
-            if (_cleanupBuffer.Count > 10)
-            {
-                int root = antennaTree.GetRoot();
-                if (root != MyDynamicAABBTreeD.NullNode)
+                var log = _channels[i];
+                lock (log.Lock)
                 {
-                    antennaTree.Balance(root);
-                }
-
-            }
-            return _cleanupBuffer.Count;
-        }
-
-        /// <summary>Returns true when the message is older than <paramref name="expiration"/>.</summary>
-        private bool IsMessageExpired(DateTime currentTime, ulong sentAt, TimeSpan expiration)
-        {
-            return (currentTime - TimeUtil.TimestampToDateTime(sentAt)) > expiration;
-        }
-
-        private void CleanupStaleMessages()
-        {
-            var currentTime = DateTime.UtcNow;
-            var dlqMessages = new List<TimestampedMessage>();
-
-            // Process each channel
-            foreach (var channel in _channelQueues.Keys.ToList())
-            {
-                // Skip DLQ - we'll handle it specially at the end
-                if (channel == Channel.DEAD_LETTER_QUEUE)
-                    continue;
-
-                var channelLock = _channelLocks[channel];
-                lock (channelLock)
-                {
-
-                    MyConcurrentQueue<TimestampedMessage> existingQueue;
-                    if (!_channelQueues.TryGetValue(channel, out existingQueue))
-                        continue;
-
-                    // Create new queue and replace in dictionary
-                    var newQueue = new MyConcurrentQueue<TimestampedMessage>();
-                    _channelQueues[channel] = newQueue;
-
-                    // Process old queue offline
-                    TimestampedMessage message;
-                    while (existingQueue.TryDequeue(out message))
-                    {
-                        if (IsMessageExpired(currentTime, message.SentAt, _messageExpiration))
-                        {
-                            // Expired message
-                            if (message.RequiresAck)
-                            {
-                                // Requires ack - send to DLQ
-                                dlqMessages.Add(message);
-                            }
-                            // else: drop it (do nothing)
-                        }
-                        else
-                        {
-                            // Not expired - keep it
-                            newQueue.Enqueue(message);
-                        }
-                    }
+                    int n = 0;
+                    while (n < log.Items.Count && log.Items[n].SentAt < cutoff) n++;
+                    if (n > 0) log.Items.RemoveRange(0, n);
                 }
             }
-
-            dlqMessages = dlqMessages.FindAll(m => !IsMessageExpired(currentTime, m.SentAt, _dlqMessageExpiration));
-            // Handle DLQ messages
-            if (dlqMessages.Count > 0)
-            {
-                var dlqLock = _channelLocks[Channel.DEAD_LETTER_QUEUE];
-                lock (dlqLock)
-                {
-                    var dlqQueue = _channelQueues.GetOrAdd(
-                        Channel.DEAD_LETTER_QUEUE,
-                        _ => new MyConcurrentQueue<TimestampedMessage>()
-                    );
-
-                    foreach (var msg in dlqMessages)
-                    {
-                        ReturnUnackedMessage(msg, dlqQueue);
-                    }
-                }
-            }
+            _shareCache.Clear();
         }
+        #endregion
 
         public void Reset()
         {
@@ -979,28 +442,26 @@ namespace Automata.VirtualNetwork
             _isInitialized = false;
         }
 
+        #region Save
         /// <summary>
-        /// World save (session SaveData): every message in flight, any channel, the payloads encoded here and nowhere else.
-        /// Expired messages are dropped first.
+        /// World save (session SaveData): every message in flight, any channel, the payloads encoded here and nowhere else,
+        /// and the relay graph's antennas. Expired messages are dropped first.
         /// </summary>
         public byte[] Serialize()
         {
-            CleanupStaleMessages();
+            TryPerformCleanup();
             var saved = new List<SavedMessage>();
-            foreach (var channel in _channelQueues.Keys.ToList())
+            for (int i = 0; i < _channels.Length; i++)
             {
-                var channelLock = _channelLocks[channel];
-                lock (channelLock)
+                var log = _channels[i];
+                lock (log.Lock)
                 {
-                    MyConcurrentQueue<TimestampedMessage> queue;
-                    if (!_channelQueues.TryGetValue(channel, out queue)) continue;
-                    foreach (var msg in queue)
+                    foreach (var msg in log.Items)
                     {
                         if (msg == null || msg.Payload == null) continue;
                         saved.Add(new SavedMessage
                         {
                             Data = MyUtilitiesDelegate.SerializeToBinary<IMessagePayload>(msg.Payload),
-                            ValidRecipients = msg.ValidRecipients,
                             CreatedAt = msg.CreatedAt,
                             SentAt = msg.SentAt,
                             SenderId = msg.SenderId,
@@ -1008,27 +469,33 @@ namespace Automata.VirtualNetwork
                             MessageId = msg.MessageId,
                             Channel = msg.Channel,
                             RecipientBlockType = msg.RecipientBlockType,
-                            RequiresAck = msg.RequiresAck,
                             PayloadTypeValue = msg.PayloadTypeValue,
+                            SenderAntennaId = msg.SenderAntennaId,
+                            SenderPosition = Vector3DData.FromVector3D(msg.SenderPosition),
+                            SenderRange = msg.SenderRange,
+                            SenderGridId = msg.SenderGridId,
+                            BothRanges = msg.BothRanges,
+                            Deliveries = msg.Deliveries,
                         });
                     }
                 }
             }
-            Log.Debug("VNet: snapshot of {0} message(s) for the save", saved.Count);
+            if (Log.DebugEnabled) Log.Debug("VNet: snapshot of {0} message(s), {1} antenna(s) for the save", saved.Count, Relays.Count);
             return MyUtilitiesDelegate.SerializeToBinary<MessageQueueSnapshot>(
-                new MessageQueueSnapshot { Messages = saved, SavedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow) });
+                new MessageQueueSnapshot { Messages = saved, SavedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow), Antennas = Relays.Snapshot() });
         }
 
         /// <summary>
         /// World load (session start): the saved messages back in their channels, with the age they had at the save, and
-        /// the acknowledgments they wait for. Their senders register again a little later: a message whose sender is
-        /// not registered stays queued until it expires.
+        /// the relay graph's antennas (its world scan is due a minute later, not at once).
         /// </summary>
         public void Deserialize(byte[] data)
         {
             if (data == null || data.Length == 0) return;
             var snapshot = MyUtilitiesDelegate.SerializeFromBinary<MessageQueueSnapshot>(data);
-            if (snapshot == null || snapshot.Messages == null) return;
+            if (snapshot == null) return;
+            Relays.Restore(snapshot.Antennas, MyAPIGateway.Session.GameplayFrameCounter);
+            if (snapshot.Messages == null) return;
             // The world sat saved for a while: messages keep the age they had at the save (else all would be expired)
             ulong now = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow);
             ulong shift = snapshot.SavedAt > 0 && now > snapshot.SavedAt ? now - snapshot.SavedAt : 0;
@@ -1045,7 +512,6 @@ namespace Automata.VirtualNetwork
                 var msg = new TimestampedMessage
                 {
                     Payload = payload,
-                    ValidRecipients = saved.ValidRecipients ?? new HashSet<long>(),
                     CreatedAt = saved.CreatedAt + shift,
                     SentAt = saved.SentAt + shift,
                     SenderId = saved.SenderId,
@@ -1053,20 +519,21 @@ namespace Automata.VirtualNetwork
                     MessageId = saved.MessageId,
                     Channel = saved.Channel,
                     RecipientBlockType = saved.RecipientBlockType,
-                    RequiresAck = saved.RequiresAck,
                     PayloadTypeValue = saved.PayloadTypeValue,
+                    SenderAntennaId = saved.SenderAntennaId,
+                    SenderPosition = saved.SenderPosition.ToVector3D(),
+                    SenderRange = saved.SenderRange,
+                    SenderGridId = saved.SenderGridId,
+                    BothRanges = saved.BothRanges,
+                    Deliveries = saved.Deliveries,
                 };
-                var channelLock = _channelLocks[msg.Channel];
-                lock (channelLock)
+                var log = _channels[(int)msg.Channel];
+                lock (log.Lock)
                 {
-                    var queue = _channelQueues.GetOrAdd(msg.Channel, _ => new MyConcurrentQueue<TimestampedMessage>());
-                    queue.Enqueue(msg);
-                }
-                // (Dead letters were returned unacknowledged: nothing waits for them)
-                if (msg.RequiresAck && msg.Channel != Channel.DEAD_LETTER_QUEUE)
-                {
-                    var pendingAcks = _pendingAcknowledgments.GetOrAdd(msg.SenderId, _ => new MyConcurrentHashSet<uint>());
-                    pendingAcks.Add(msg.MessageId);
+                    msg.Seq = ++_seq;
+                    log.Items.Add(msg);
+                    log.LastSeq = msg.Seq;
+                    if (msg.SentAt > log.LastSentAt) log.LastSentAt = msg.SentAt;
                 }
                 restored++;
             }
@@ -1101,11 +568,12 @@ namespace Automata.VirtualNetwork
             }
         }
 
+        #endregion
+
         public void PrepareForShutdown()
         {
-            antennaTree.Clear();
+            Relays.Clear();
             _isShuttingDown = true;
         }
-
     }
 }

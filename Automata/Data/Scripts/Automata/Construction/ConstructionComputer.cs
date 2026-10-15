@@ -523,7 +523,6 @@ namespace Automata.Construction
                             CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
                             SenderId = entityId,
                             SenderOwnerId = block?.OwnerId ?? 0,
-                            RequiresAck = false,
                             RecipientBlockType = MessageQueue.IAIBlockType.Orchestrator,
                             Channel = Channel.CONSTRUCTION_COMPUTER_JOB_ANNOUNCEMENT,
                         };

@@ -667,7 +667,7 @@ namespace Automata.Drone
                         RestoreConnectors();
                     }
                     var queue = AutomataSession.GetMessageQueue();
-                    if (queue != null) { queue.RemoveAntenna(_entityId); queue.UnsubscribeAll(_entityId); }
+                    if (queue != null) queue.ReaderClosed(_entityId);
                 }
                 UnsubscribeGridEvents();
                 if (AutomataSession.Instance != null)
@@ -862,7 +862,7 @@ namespace Automata.Drone
             if (!initLogged)
             {
                 initLogged = true;
-                Log.Debug("initializing drone {0}", entity.EntityId);
+                if (Log.DebugEnabled) Log.Debug("initializing drone {0}", entity.EntityId);
             }
             if (initialized){
                 Report(StrDroneAlreadyInitialized, _entityId);
@@ -901,7 +901,7 @@ namespace Automata.Drone
                 if (errorReason != initLoggedReason)
                 {
                     initLoggedReason = errorReason;
-                    Log.Debug("Drone {0}: not ready, retrying every {1} s: {2}", entity.EntityId, INIT_RETRY_EVERY * 10 / 60.0, errorReason);
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: not ready, retrying every {1} s: {2}", entity.EntityId, INIT_RETRY_EVERY * 10 / 60.0, errorReason);
                 }
                 SetState(State.Error);
                 UpdateAlert();
@@ -910,16 +910,7 @@ namespace Automata.Drone
 
             // pathfindingManager = new PathfindingManager(AutomataSession.GetConfig().Pathfinding, pruningStructureDelegate, planetDelegate);
 
-            if (primaryAntenna != null && IsServer)   // the virtual network is simulated on the server only
-            {
-                AutomataSession.GetMessageQueue().RegisterAntenna(_entityId, MessageQueue.IAIBlockType.Drone, primaryAntenna, false);
-            }
-
-            if (settings.OperationMode == OperationMode.ManagedByOrchestrator && IsServer)
-            {
-                AutomataSession.GetMessageQueue().Subscribe(_entityId, Channel.ORCHESTRATOR_AUCTION_START);
-                AutomataSession.GetMessageQueue().Subscribe(_entityId, Channel.ORCHESTRATOR_AUCTION_WINNER_ANNOUNCEMENT);
-            }
+            if (IsServer) SyncAntennaReg(AutomataSession.GetMessageQueue());   // the virtual network is simulated on the server only
 
             UpdateMass();
             initialized = true;
@@ -1257,7 +1248,7 @@ namespace Automata.Drone
                 if (hull != lastHullLogged)   // rescans are frequent: only changes
                 {
                     lastHullLogged = hull;
-                    Log.Debug("Drone {0}: {1}", Entity.EntityId, hull);
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: {1}", Entity.EntityId, hull);
                 }
             }
 
@@ -1283,7 +1274,7 @@ namespace Automata.Drone
             if (flight != lastFlightLogged)   // rescans are frequent: only changes
             {
                 lastFlightLogged = flight;
-                Log.Debug("Drone {0}: flight {1}", Entity.EntityId, flight);
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: flight {1}", Entity.EntityId, flight);
             }
 
             return true;
@@ -2304,7 +2295,7 @@ namespace Automata.Drone
                 }
                 if (!faceSeen && faceTicks < FACE_HOLD_TICKS)
                 {
-                    if (faceTicks == 0) Log.Debug("Drone {0}: no camera looks along the leg ({1:F0} m): turning to face it first", Entity.EntityId, len);
+                    if (faceTicks == 0) if (Log.DebugEnabled) Log.Debug("Drone {0}: no camera looks along the leg ({1:F0} m): turning to face it first", Entity.EntityId, len);
                     faceTicks++;
                     gate = 0;
                 }
@@ -2365,7 +2356,7 @@ namespace Automata.Drone
                 woke = true;
             }
             if (woke && physicsWakes++ == 0)
-                Log.Debug("Drone {0}: grid physics asleep under thrust: woken (speed {1:F2} m/s)", Entity.EntityId, flightState.LinearVelocity.Length());
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: grid physics asleep under thrust: woken (speed {1:F2} m/s)", Entity.EntityId, flightState.LinearVelocity.Length());
         }
         #endregion
 
@@ -2393,7 +2384,7 @@ namespace Automata.Drone
             if (++pushBlockedTicks == PUSH_BLOCKED_TICKS)
             {
                 MatrixD wm = flightState.WorldMatrix;
-                Log.Debug("Drone {0}: pressed against something: asks {1:F2} m/s (F {2:F2} U {3:F2} R {4:F2}), moves {5:F2} m/s that way for {6} s; "
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: pressed against something: asks {1:F2} m/s (F {2:F2} U {3:F2} R {4:F2}), moves {5:F2} m/s that way for {6} s; "
                           + "thrust obstructed {7}, gear locked {8}, connector locked {9}; {10}",
                           Entity.EntityId, c, Vector3D.Dot(dir, wm.Forward), Vector3D.Dot(dir, wm.Up), Vector3D.Dot(dir, wm.Right), pushMoved,
                           PUSH_BLOCKED_TICKS / 60, thrustObstructedDir >= 0 ? ((Base6Directions.Direction)thrustObstructedDir).ToString() : "no",
@@ -2674,7 +2665,7 @@ namespace Automata.Drone
                 if (++obstructedTicks[active] > GAIN_OBSTRUCTED_TICKS && thrustObstructedDir != active)
                 {
                     thrustObstructedDir = active;
-                    Log.Debug("Drone {0}: thrust obstructed: {1} group at {2:P0} throttle gives {3:F2} m/s² of the {4:F2} expected",
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: thrust obstructed: {1} group at {2:P0} throttle gives {3:F2} m/s² of the {4:F2} expected",
                               Entity.EntityId, (Base6Directions.Direction)active, groupThrottle[active], measured, expected);
                 }
                 return;
@@ -2711,7 +2702,7 @@ namespace Automata.Drone
             if (!changed) return;
             for (int i = 0; i < 6; i++)
                 reportedThrustGain[i] = thrustGain[i];
-            Log.Debug("Drone {6}: thrust gain F{0:F2} B{1:F2} L{2:F2} R{3:F2} U{4:F2} D{5:F2}",
+            if (Log.DebugEnabled) Log.Debug("Drone {6}: thrust gain F{0:F2} B{1:F2} L{2:F2} R{3:F2} U{4:F2} D{5:F2}",
                 thrustGain[0], thrustGain[1], thrustGain[2], thrustGain[3], thrustGain[4], thrustGain[5], _entityId);
         }
         #endregion

@@ -268,7 +268,7 @@ namespace Automata.Drone
         private void SeeThreat(IMyEntity e, int now)
         {
             if (e.EntityId != threatId)
-                Log.Debug("Drone {0}: combat: threat {1} ({2}) at {3:F0} m", Entity.EntityId, e.EntityId, e.DisplayName,
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: combat: threat {1} ({2}) at {3:F0} m", Entity.EntityId, e.EntityId, e.DisplayName,
                           Vector3D.Distance(e.GetPosition(), flightState.Position));
             threatId = e.EntityId;
             threatPosition = e.GetPosition();
@@ -315,7 +315,7 @@ namespace Automata.Drone
                 combatBehaviourCheckFrame = now;
                 if (GetBehaviour(aiOffensive) || GetBehaviour(aiFlight) || GetBehaviour(aiDefensive))
                 {
-                    Log.Debug("Drone {0}: combat: AI behaviours switched off (idle)", Entity.EntityId);
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: combat: AI behaviours switched off (idle)", Entity.EntityId);
                     CombatBehavioursOff();
                 }
                 if (combatSearchLocked && IsParkedNow()) LockOffensiveSearch(false);
@@ -394,7 +394,7 @@ namespace Automata.Drone
             var wps = new System.Collections.Generic.List<Vector3D> { goal };
             if (FlyPlayerRoute(wps)) { combatRouteFails = 0; return; }
             combatRouteFails++;
-            Log.Debug("Drone {0}: combat: no route toward the threat ({1}/{2})", Entity.EntityId, combatRouteFails, COMBAT_ROUTE_FAILS_MAX);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: combat: no route toward the threat ({1}/{2})", Entity.EntityId, combatRouteFails, COMBAT_ROUTE_FAILS_MAX);
         }
 
         /// <summary>'p' at least 'clear' m above the closest planet's surface (along the local vertical); unchanged in space.</summary>
@@ -516,13 +516,13 @@ namespace Automata.Drone
             if (e != null)
             {
                 SeeThreat(e, now);
-                if (combatNoTargetSince >= 0) Log.Debug("Drone {0}: combat: target again", Entity.EntityId);
+                if (combatNoTargetSince >= 0) if (Log.DebugEnabled) Log.Debug("Drone {0}: combat: target again", Entity.EntityId);
                 combatNoTargetSince = -1;
             }
             else if (combatNoTargetSince < 0)
             {
                 combatNoTargetSince = now;
-                Log.Debug("Drone {0}: combat: no target, {1} s to return", Entity.EntityId, settings.CombatNoTargetSeconds);
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: combat: no target, {1} s to return", Entity.EntityId, settings.CombatNoTargetSeconds);
             }
             else if (now - combatNoTargetSince >= settings.CombatNoTargetSeconds * 60) { CombatStartRecover(now, Loc.T(StrNoTargets)); return; }
 
@@ -587,7 +587,7 @@ namespace Automata.Drone
         private void EndCombat(string why)
         {
             if (combatPhase != CombatPhase.Idle || combatSearchLocked || designatorCombat != DesignatorCombat.None)
-                Log.Debug("Drone {0}: combat: ended ({1}) in {2}{3}", Entity.EntityId, why, combatPhase,
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: combat: ended ({1}) in {2}{3}", Entity.EntityId, why, combatPhase,
                           designatorCombat != DesignatorCombat.None ? " (" + designatorCombat + " job)" : "");
             if (combatPhase == CombatPhase.Handover || IsCombatMode || designatorCombat != DesignatorCombat.None) CombatBehavioursOff();
             LockOffensiveSearch(false);
@@ -838,7 +838,7 @@ namespace Automata.Drone
             if (settings == null || !settings.UseBroadcastController) return;
             string via;
             bool sent = BroadcastControllerSender.Send(block, text, out via);
-            Log.Debug("Drone {0}: broadcast '{1}' {2}: {3}", Entity.EntityId, text, sent ? "sent via" : "not sent", via);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: broadcast '{1}' {2}: {3}", Entity.EntityId, text, sent ? "sent via" : "not sent", via);
         }
 
         // A GPS name for chat (no ':' allowed in it)
@@ -945,7 +945,7 @@ namespace Automata.Drone
             escortRoutedStation = station;
             var wps = new System.Collections.Generic.List<Vector3D> { station };
             if (!FlyPlayerRoute(wps))
-                Log.Debug("Drone {0}: escort: no route to the escort station, retrying", Entity.EntityId);
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: escort: no route to the escort station, retrying", Entity.EntityId);
         }
 
         // Station keeping on the escorted entity: a direct order whose target follows it every tick (RefreshFollowOrder)
@@ -958,7 +958,7 @@ namespace Automata.Drone
             o.LookAtPoint = Vector3DData.FromVector3D(t.WorldAABB.Center);
             followEntity = t;
             RefreshFollowOrder(o);
-            Log.Debug("Drone {0}: escort: station keeping on {1} ({2:F0} m above)", Entity.EntityId, t.DisplayName, offset.Length());
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: escort: station keeping on {1} ({2:F0} m above)", Entity.EntityId, t.DisplayName, offset.Length());
         }
 
         /// <summary>Every tick (RefreshAnchoredOrder): an escort order's target and frame velocity from the followed entity.</summary>

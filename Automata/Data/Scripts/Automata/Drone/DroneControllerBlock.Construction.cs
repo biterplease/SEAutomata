@@ -260,7 +260,7 @@ namespace Automata.Drone
                     s.SharedSite = jobSharedSite;
                 }
             }
-            Log.Debug("Drone {0}: state saved: job {1} at task {2}, pending bid {3}", Entity.EntityId, s.Job != null ? s.Job.JobId : 0,
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: state saved: job {1} at task {2}, pending bid {3}", Entity.EntityId, s.Job != null ? s.Job.JobId : 0,
                       s.TaskIndex, s.PendingBidAuctionId);
             return s;
         }
@@ -327,7 +327,7 @@ namespace Automata.Drone
             bidIdCounter = System.Math.Max(bidIdCounter, s.BidCounter);
             jobMessageCounter = System.Math.Max(jobMessageCounter, s.MessageCounter);
             if (s.UnsentReports != null)
-                for (int i = 0; i < s.UnsentReports.Count; i++) { unsentReports.Add(s.UnsentReports[i]); unsentReportTimes.Add(DateTime.UtcNow); }
+                for (int i = 0; i < s.UnsentReports.Count; i++) { unsentReports.Add(s.UnsentReports[i]); unsentReportTimes.Add(DateTime.UtcNow); unsentReportSent.Add(null); }
             if (s.PendingBidAuctionId != 0 && s.PendingBidSecondsLeft > 0 && currentJob == null)
             {
                 pendingBidAuctionId = s.PendingBidAuctionId;
@@ -405,7 +405,7 @@ namespace Automata.Drone
             for (int i = 0; i < scannedTargets.Count; i++) workedGrids.Add(scannedTargets[i].GridEntityId);
             int parked = SkipRecentlyUnreachable();
             count = scannedTargets.Count;
-            Log.Debug("Drone {0}: construction scan found {1} blocks{2}", Entity.EntityId, count,
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: construction scan found {1} blocks{2}", Entity.EntityId, count,
                       parked > 0 ? string.Format(" ({0} more unreachable lately, retried later)", parked) : "");
             if (count != lastReportedJobCount)
             {
@@ -528,7 +528,7 @@ namespace Automata.Drone
                 if (t.Kind != Orchestrator.TaskKind.Tool) continue;
                 if (n++ < 30) sb.Append(' ').Append(t.TargetBlock.ToVector3I().ToString()).Append(t.IsProjected ? "p" : "");
             }
-            Log.Debug("Drone {0}: trip: {1} {2} blocks (load limit {3:F0} kg, {4:F2} m3), in order:{5}{6}", Entity.EntityId, n, job.JobType,
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: trip: {1} {2} blocks (load limit {3:F0} kg, {4:F2} m3), in order:{5}{6}", Entity.EntityId, n, job.JobType,
                       maxMass, maxVolume, sb, n > 30 ? " ..." : "");
         }
 

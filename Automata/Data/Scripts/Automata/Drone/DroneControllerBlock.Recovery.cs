@@ -48,7 +48,7 @@ namespace Automata.Drone
 
         private void RecoverSucceeded()
         {
-            if (recoverAttempts > 0) Log.Debug("Drone {0}: route found after {1} reposition(s)", Entity.EntityId, recoverAttempts);
+            if (recoverAttempts > 0) if (Log.DebugEnabled) Log.Debug("Drone {0}: route found after {1} reposition(s)", Entity.EntityId, recoverAttempts);
             recoverAttempts = 0;
             recoverVisited.Clear();
             routeErrorPending = null;   // a stale "used up" from an earlier plan (a skipped waypoint)
@@ -157,7 +157,7 @@ namespace Automata.Drone
             if (routeError && currentState == State.Error
                 && Sandbox.ModAPI.MyAPIGateway.Session.GameplayFrameCounter - routeErrorFrame > RouteRetryTicks)
             {
-                Log.Debug("Drone {0}: stopped for want of a route{1}: trying again", Entity.EntityId, routeErrorByDrone ? " because of other drones" : "");
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: stopped for want of a route{1}: trying again", Entity.EntityId, routeErrorByDrone ? " because of other drones" : "");
                 ClearRouteError();
                 return;
             }
@@ -173,7 +173,7 @@ namespace Automata.Drone
             CaptureFlightState();
             if (Vector3D.DistanceSquared(HullCentreWorld, recoverSpot) > recoverArrive * recoverArrive) return;
             recoverReplanPending = false;
-            Log.Debug("Drone {0}: at the reposition spot ({1}/{2}): planning again", Entity.EntityId, recoverAttempts, RECOVER_MAX);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: at the reposition spot ({1}/{2}): planning again", Entity.EntityId, recoverAttempts, RECOVER_MAX);
             lastReplanFrame = Sandbox.ModAPI.MyAPIGateway.Session.GameplayFrameCounter;
             if (!Replan()) RouteStopped(Loc.T(StrNoRouteAheadStopped));
         }

@@ -30,6 +30,8 @@ namespace Automata.VirtualNetwork
         SubscriberAntennaNotRegistered = 4096,
         SenderAntennaNotRegistered = 8192,
         ShutdownInProgress = 16384,
+        /// <summary>ReadMessages: nothing to take now (early exit, no work done): ask again later.</summary>
+        TryAgainLater = 32768,
     }
 
     //public class MessageResponse
@@ -160,9 +162,12 @@ namespace Automata.VirtualNetwork
         /// <summary>IAI entity (Drone, Scheduler, LC) id of recipient.</summary>
         public long SenderId;
         public long SenderOwnerId;
-        public bool RequiresAck;
         public Channel Channel;
         public MessageQueue.IAIBlockType RecipientBlockType;
+        /// <summary>The queue's entry for this send (set by BroadcastMessage; not serialized).</summary>
+        public MessageQueue.TimestampedMessage Receipt;
+        /// <summary>At least one reader (in range) has taken it.</summary>
+        public bool Delivered { get { return Receipt != null && Receipt.Deliveries > 0; } }
     }
 
 
