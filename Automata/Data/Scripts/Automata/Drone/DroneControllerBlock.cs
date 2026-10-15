@@ -667,7 +667,7 @@ namespace Automata.Drone
                         RestoreConnectors();
                     }
                     var queue = AutomataSession.GetMessageQueue();
-                    if (queue != null) { queue.RemoveAntenna(_entityId); queue.UnsubscribeAll(_entityId); }
+                    if (queue != null) queue.ReaderClosed(_entityId);
                 }
                 UnsubscribeGridEvents();
                 if (AutomataSession.Instance != null)
@@ -910,16 +910,7 @@ namespace Automata.Drone
 
             // pathfindingManager = new PathfindingManager(AutomataSession.GetConfig().Pathfinding, pruningStructureDelegate, planetDelegate);
 
-            if (primaryAntenna != null && IsServer)   // the virtual network is simulated on the server only
-            {
-                AutomataSession.GetMessageQueue().RegisterAntenna(_entityId, MessageQueue.IAIBlockType.Drone, primaryAntenna, false);
-            }
-
-            if (settings.OperationMode == OperationMode.ManagedByOrchestrator && IsServer)
-            {
-                AutomataSession.GetMessageQueue().Subscribe(_entityId, Channel.ORCHESTRATOR_AUCTION_START);
-                AutomataSession.GetMessageQueue().Subscribe(_entityId, Channel.ORCHESTRATOR_AUCTION_WINNER_ANNOUNCEMENT);
-            }
+            if (IsServer) SyncAntennaReg(AutomataSession.GetMessageQueue());   // the virtual network is simulated on the server only
 
             UpdateMass();
             initialized = true;

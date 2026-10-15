@@ -6,7 +6,6 @@
         int SchedulerAntennaCacheUpdateIntervalTicks();
         int SchedulerMessageReadLimit();
         int MessageRetentionTicks();
-        int DlqMessageRetentionTicks();
         int MessageCleanupIntervalTicks();
 
     }
@@ -26,15 +25,10 @@
         public int schedulerMessageReadLimit { get; internal set; } = 50;
         public int SchedulerMessageReadLimit() => schedulerMessageReadLimit;
         /// <summary>
-        /// How long messages live in the message queue.
+        /// How long a message lives: readers that look within this time (and in range) get it.
         /// </summary>
-        public int messageRetentionTicks { get; internal set; } = 1800; // 30 seconds
+        public int messageRetentionTicks { get; internal set; } = 600; // 10 seconds
         public int MessageRetentionTicks() => messageRetentionTicks;
-        /// <summary>
-        /// If a message expires in the queue, it will be sent back to the sender on this long-lived queue.
-        /// </summary>
-        public int dlqMessageRetentionTicks { get; internal set; } = 36000; // 10 minutes
-        public int DlqMessageRetentionTicks() => dlqMessageRetentionTicks;
         public int messageCleanupIntervalTicks { get; internal set; } = 3600; // 1 min
         public int MessageCleanupIntervalTicks() => messageCleanupIntervalTicks;
 

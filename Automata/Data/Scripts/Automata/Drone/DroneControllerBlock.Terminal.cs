@@ -145,20 +145,10 @@ namespace Automata.Drone
             if (!IsServer || settings == null) return;
             var queue = AutomataSession.GetMessageQueue();
             Log.Debug("Drone {0}: mode {1} applied (AI {2}){3}", Entity.EntityId, settings.OperationMode, settings.IsEnabled ? "on" : "off",
-                      settings.OperationMode == OperationMode.ManagedByOrchestrator ? (primaryAntenna != null ? ", auctions subscribed, antenna '" + primaryAntenna.CustomName + "'" : ", auctions subscribed, NO antenna") : "");
+                      settings.OperationMode == OperationMode.ManagedByOrchestrator ? (primaryAntenna != null ? ", antenna '" + primaryAntenna.CustomName + "'" : ", NO antenna") : "");
             if (queue != null)
             {
-                if (settings.OperationMode == OperationMode.ManagedByOrchestrator)
-                {
-                    if (primaryAntenna != null) queue.RegisterAntenna(_entityId, MessageQueue.IAIBlockType.Drone, primaryAntenna, false);
-                    queue.Subscribe(_entityId, Channel.ORCHESTRATOR_AUCTION_START);
-                    queue.Subscribe(_entityId, Channel.ORCHESTRATOR_AUCTION_WINNER_ANNOUNCEMENT);
-                }
-                else
-                {
-                    queue.Unsubscribe(_entityId, Channel.ORCHESTRATOR_AUCTION_START);
-                    queue.Unsubscribe(_entityId, Channel.ORCHESTRATOR_AUCTION_WINNER_ANNOUNCEMENT);
-                }
+                if (settings.OperationMode == OperationMode.ManagedByOrchestrator) SyncAntennaReg(queue);
             }
             if (settings.OperationMode != OperationMode.StandAlone && cPhase != ConstructionPhase.Idle)
                 StopJob();

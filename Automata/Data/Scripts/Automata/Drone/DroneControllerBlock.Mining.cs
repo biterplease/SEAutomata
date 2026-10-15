@@ -819,21 +819,41 @@ namespace Automata.Drone
         }
         private bool noSurveyorLogged;
 
+        // The copy of the scans in the network (taken by a surveyor in range = those scans are dropped; else sent again once it has expired)
+        private Message<MiningSurveyDataBroadcast> surveySent;
+        private readonly List<SurveySweep> surveySentSweeps = new List<SurveySweep>();
+
         // UpdateBeforeSimulation100: waiting scans to the surveyors in range (dropped once one got them)
         private void PublishSurveys()
         {
-            if (surveyBuffer.Count == 0 || primaryAntenna == null) return;
+            if (surveyBuffer.Count == 0 || primaryAntenna == null) { surveySent = null; surveySentSweeps.Clear(); return; }
             if (!Mining.MiningSurveyorBlock.AnyFor(block.OwnerId))
             {
                 Log.Debug("Drone {0}: {1} held ore scan(s) dropped: no mining surveyor any more", _entityId, surveyBuffer.Count);
                 surveyBuffer.Clear();
+                surveySent = null;
+                surveySentSweeps.Clear();
                 return;
+            }
+            var queue = AutomataSession.GetMessageQueue();
+            if (queue == null) return;
+            if (surveySent != null)
+            {
+                if (surveySent.Delivered)
+                {
+                    for (int i = 0; i < surveySentSweeps.Count; i++) surveyBuffer.Remove(surveySentSweeps[i]);
+                    Log.Debug("Drone {0}: {1} ore scan(s) taken by the surveyors", _entityId, surveySentSweeps.Count);
+                    surveySent = null;
+                    surveySentSweeps.Clear();
+                    if (surveyBuffer.Count == 0) return;
+                }
+                else if (queue.InFlight(surveySent)) return;
+                else { surveySent = null; surveySentSweeps.Clear(); }
             }
             int now = MyAPIGateway.Session.GameplayFrameCounter;
             if (now - lastSurveyPublish < SURVEY_PUBLISH_TICKS) return;
             lastSurveyPublish = now;
-            var queue = AutomataSession.GetMessageQueue();
-            if (queue == null || !EnsureNetworkRegistration(queue)) return;
+            if (!EnsureNetworkRegistration(queue)) return;
             long nowTicks = DateTime.UtcNow.Ticks;
             var payload = new MiningSurveyDataBroadcast { DroneEntityId = _entityId };
             for (int i = 0; i < surveyBuffer.Count; i++)
@@ -841,33 +861,35 @@ namespace Automata.Drone
                 surveyBuffer[i].AgeSeconds = Math.Max(0, (nowTicks - surveyBuffer[i].ScannedUtcTicks) / (double)TimeSpan.TicksPerSecond);
                 payload.Sweeps.Add(surveyBuffer[i]);
             }
-            var error = queue.BroadcastMessage(primaryAntenna, new Message<MiningSurveyDataBroadcast>
+            var msg = new Message<MiningSurveyDataBroadcast>
             {
                 Payload = payload,
                 MessageId = IdGenerator.GenerateId(ref jobMessageCounter, _entityId),
                 CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
                 SenderId = _entityId,
                 SenderOwnerId = block.OwnerId,
-                RequiresAck = false,
                 RecipientBlockType = MessageQueue.IAIBlockType.MiningSurveyor,
                 Channel = Channel.MINING_DATA_FOUND_ANNOUNCEMENT,
-            });
-            if (error != ErrorCode.None) return;   // no surveyor in range: kept
+            };
+            if (queue.BroadcastMessage(antennaReg, msg) != ErrorCode.None) return;
+            surveySent = msg;
+            surveySentSweeps.Clear();
+            surveySentSweeps.AddRange(surveyBuffer);
             Log.Debug("Drone {0}: {1} ore scan(s) sent to the surveyors", _entityId, surveyBuffer.Count);
-            surveyBuffer.Clear();
         }
 
-        /// <summary>The drone's antenna registered on the virtual network (any mode: reports and surveys go out).</summary>
+        private AntennaReg antennaReg;
+
+        /// <summary>The drone's antenna registration, current and handed to the queue (null: no usable antenna). Any mode: reports and surveys go out.</summary>
+        private AntennaReg SyncAntennaReg(MessageQueue queue)
+        {
+            if (queue == null || primaryAntenna == null) return null;
+            return AntennaReg.Ensure(queue, ref antennaReg, primaryAntenna) ? antennaReg : null;
+        }
+
         private bool EnsureNetworkRegistration(MessageQueue queue)
         {
-            if (primaryAntenna == null) return false;
-            MessageQueue.AntennaInfo info;
-            if (!queue.GetAntennaInfo(_entityId, out info) || info.Antenna != primaryAntenna)
-            {
-                queue.RemoveAntenna(_entityId);
-                queue.RegisterAntenna(_entityId, MessageQueue.IAIBlockType.Drone, primaryAntenna, false);
-            }
-            return true;
+            return SyncAntennaReg(queue) != null;
         }
         #endregion
     }

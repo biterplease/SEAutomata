@@ -113,6 +113,7 @@ namespace Automata.Drone
         #endregion
         private readonly List<JobStatusReport> unsentReports = new List<JobStatusReport>();
         private readonly List<DateTime> unsentReportTimes = new List<DateTime>();
+        private readonly List<Message<JobStatusReport>> unsentReportSent = new List<Message<JobStatusReport>>();   // the copy in the network (null: none yet)
 
         // The drone's own setting, capped by the server's (which may have been lowered since it was set)
         private const int PROJECTED_APPEAR_TICKS = 10 * 60;   // welding a projected block that isn't there after this long: skipped
@@ -2657,22 +2658,14 @@ namespace Automata.Drone
             }
             var queue = AutomataSession.GetMessageQueue();
             if (queue == null || primaryAntenna == null) return;
-            // Registered with the virtual network (dropped while its antenna was off / out of date: register again)
-            VirtualNetwork.MessageQueue.AntennaInfo antennaInfo;
-            if (!queue.GetAntennaInfo(_entityId, out antennaInfo) || antennaInfo.Antenna != primaryAntenna)
-            {
-                queue.RemoveAntenna(_entityId);
-                queue.RegisterAntenna(_entityId, VirtualNetwork.MessageQueue.IAIBlockType.Drone, primaryAntenna, false);
-                queue.Subscribe(_entityId, Channel.ORCHESTRATOR_AUCTION_START);
-                queue.Subscribe(_entityId, Channel.ORCHESTRATOR_AUCTION_WINNER_ANNOUNCEMENT);
-            }
+            if (SyncAntennaReg(queue) == null) return;
             ReadAwards(queue);
             ReadAuctions(queue);
         }
 
         private void ReadAwards(MessageQueue queue)
         {
-            queue.ReadMessages(_entityId, primaryAntenna, Channel.ORCHESTRATOR_AUCTION_WINNER_ANNOUNCEMENT, awardInbox, 10, true,
+            queue.ReadMessages(_entityId, MessageQueue.IAIBlockType.Drone, antennaReg, Channel.ORCHESTRATOR_AUCTION_WINNER_ANNOUNCEMENT, awardInbox, 10, true,
                                PayloadType.AuctionWinnerAnnouncement);
             for (int i = 0; i < awardInbox.Count; i++)
             {
@@ -2798,7 +2791,7 @@ namespace Automata.Drone
 
         private void ReadAuctions(MessageQueue queue)
         {
-            queue.ReadMessages(_entityId, primaryAntenna, Channel.ORCHESTRATOR_AUCTION_START, auctionInbox, 10, true, PayloadType.Auction);
+            queue.ReadMessages(_entityId, MessageQueue.IAIBlockType.Drone, antennaReg, Channel.ORCHESTRATOR_AUCTION_START, auctionInbox, 10, true, PayloadType.Auction);
             int now = MyAPIGateway.Session.GameplayFrameCounter;
             ForgetOldAuctions(now);
             if (pendingBidAuctionId != 0)
@@ -2994,10 +2987,9 @@ namespace Automata.Drone
                 CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
                 SenderId = _entityId,
                 SenderOwnerId = block.OwnerId,
-                RequiresAck = false,
                 Channel = Channel.ORCHESTRATOR_AUCTION_BIDS,
             };
-            queue.BroadcastMessage(primaryAntenna, msg);
+            queue.BroadcastMessage(antennaReg, msg);
             Log.Debug("Drone {0}: bid on auction {1} (job {2}, {3})", _entityId, auction.AuctionId, auction.JobId, auction.JobType);
         }
 
@@ -3059,6 +3051,7 @@ namespace Automata.Drone
         {
             unsentReports.Add(r);
             unsentReportTimes.Add(DateTime.UtcNow);
+            unsentReportSent.Add(null);
             FlushJobReports();
         }
 
@@ -3077,7 +3070,7 @@ namespace Automata.Drone
             var queue = AutomataSession.GetMessageQueue();
             if (queue == null || !EnsureNetworkRegistration(queue)) return;
             lastKeepaliveFrame = now;
-            queue.BroadcastMessage(primaryAntenna, new Message<JobStatusReport>
+            queue.BroadcastMessage(antennaReg, new Message<JobStatusReport>
             {
                 Payload = new JobStatusReport
                 {
@@ -3089,14 +3082,14 @@ namespace Automata.Drone
                 CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
                 SenderId = _entityId,
                 SenderOwnerId = block.OwnerId,
-                RequiresAck = false,
                 RecipientBlockType = VirtualNetwork.MessageQueue.IAIBlockType.ConstructionComputer | VirtualNetwork.MessageQueue.IAIBlockType.MiningSurveyor
                                      | VirtualNetwork.MessageQueue.IAIBlockType.LogisticsComputer | VirtualNetwork.MessageQueue.IAIBlockType.Orchestrator,
                 Channel = Channel.JOB_KEEPALIVE,
             });
         }
 
-        // Sent until someone that listens is in range (the drone may finish out of range), at most JOB_REPORT_TTL_SECONDS
+        // Sent until someone that listens takes it (the drone may finish out of range: sent again each time the last copy
+        // has expired), at most JOB_REPORT_TTL_SECONDS
         private void FlushJobReports()
         {
             if (unsentReports.Count == 0 || !IsServer) return;
@@ -3104,31 +3097,41 @@ namespace Automata.Drone
             for (int i = unsentReports.Count - 1; i >= 0; i--)
             {
                 var r = unsentReports[i];
-                ErrorCode error = ErrorCode.NoSubscribers;
-                if (queue != null && EnsureNetworkRegistration(queue))
+                var sent = unsentReportSent[i];
+                if (sent != null && sent.Delivered)
                 {
-                    error = queue.BroadcastMessage(primaryAntenna, new Message<JobStatusReport>
-                    {
-                        Payload = r,
-                        MessageId = IdGenerator.GenerateId(ref jobMessageCounter, _entityId),
-                        CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
-                        SenderId = _entityId,
-                        SenderOwnerId = block.OwnerId,
-                        RequiresAck = false,
-                        RecipientBlockType = VirtualNetwork.MessageQueue.IAIBlockType.Orchestrator | VirtualNetwork.MessageQueue.IAIBlockType.ConstructionComputer
-                                             | VirtualNetwork.MessageQueue.IAIBlockType.LogisticsComputer | VirtualNetwork.MessageQueue.IAIBlockType.MiningSurveyor,
-                        Channel = r.Outcome == JobOutcome.Completed ? Channel.TASKS_COMPLETED : Channel.TASKS_ABORTED,
-                    });
+                    Log.Debug("Drone {0}: job {1} {2} report to {3}: delivered", _entityId, r.JobId, r.Outcome, r.AnnouncerEntityId);
+                    RemoveUnsentReport(i);
+                    continue;
                 }
-                bool old = (DateTime.UtcNow - unsentReportTimes[i]).TotalSeconds > JOB_REPORT_TTL_SECONDS;
-                if (error == ErrorCode.None || old)
+                if (queue != null && sent != null && queue.InFlight(sent)) continue;
+                if ((DateTime.UtcNow - unsentReportTimes[i]).TotalSeconds > JOB_REPORT_TTL_SECONDS)
                 {
-                    Log.Debug("Drone {0}: job {1} {2} report to {3}: {4}", _entityId, r.JobId, r.Outcome, r.AnnouncerEntityId,
-                              error == ErrorCode.None ? "sent" : "dropped (" + error + ")");
-                    unsentReports.RemoveAt(i);
-                    unsentReportTimes.RemoveAt(i);
+                    Log.Debug("Drone {0}: job {1} {2} report to {3}: dropped (nobody took it)", _entityId, r.JobId, r.Outcome, r.AnnouncerEntityId);
+                    RemoveUnsentReport(i);
+                    continue;
                 }
+                if (queue == null || !EnsureNetworkRegistration(queue)) continue;
+                var msg = new Message<JobStatusReport>
+                {
+                    Payload = r,
+                    MessageId = IdGenerator.GenerateId(ref jobMessageCounter, _entityId),
+                    CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
+                    SenderId = _entityId,
+                    SenderOwnerId = block.OwnerId,
+                    RecipientBlockType = VirtualNetwork.MessageQueue.IAIBlockType.Orchestrator | VirtualNetwork.MessageQueue.IAIBlockType.ConstructionComputer
+                                         | VirtualNetwork.MessageQueue.IAIBlockType.LogisticsComputer | VirtualNetwork.MessageQueue.IAIBlockType.MiningSurveyor,
+                    Channel = r.Outcome == JobOutcome.Completed ? Channel.TASKS_COMPLETED : Channel.TASKS_ABORTED,
+                };
+                if (queue.BroadcastMessage(antennaReg, msg) == ErrorCode.None) unsentReportSent[i] = msg;
             }
+        }
+
+        private void RemoveUnsentReport(int i)
+        {
+            unsentReports.RemoveAt(i);
+            unsentReportTimes.RemoveAt(i);
+            unsentReportSent.RemoveAt(i);
         }
         #endregion
 

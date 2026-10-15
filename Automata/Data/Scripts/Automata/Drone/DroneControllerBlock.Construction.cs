@@ -327,7 +327,7 @@ namespace Automata.Drone
             bidIdCounter = System.Math.Max(bidIdCounter, s.BidCounter);
             jobMessageCounter = System.Math.Max(jobMessageCounter, s.MessageCounter);
             if (s.UnsentReports != null)
-                for (int i = 0; i < s.UnsentReports.Count; i++) { unsentReports.Add(s.UnsentReports[i]); unsentReportTimes.Add(DateTime.UtcNow); }
+                for (int i = 0; i < s.UnsentReports.Count; i++) { unsentReports.Add(s.UnsentReports[i]); unsentReportTimes.Add(DateTime.UtcNow); unsentReportSent.Add(null); }
             if (s.PendingBidAuctionId != 0 && s.PendingBidSecondsLeft > 0 && currentJob == null)
             {
                 pendingBidAuctionId = s.PendingBidAuctionId;

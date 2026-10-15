@@ -96,6 +96,7 @@ namespace Automata.Construction
         private long entityId;
         private MessageQueue messaging;
         private IMyRadioAntenna antenna;
+        private AntennaReg antennaReg;
         private bool ready;
         private int lastScan = int.MinValue / 2, lastAntennaSearch = int.MinValue / 2;
         private int lastFullScan = int.MinValue / 2;
@@ -123,6 +124,7 @@ namespace Automata.Construction
             public int HeldUntil;     // its auction failed: not announced before this frame, 0 = not held
             public int DronesOut;     // awarded: drones that have not reported their share yet
             public bool Announced;    // the last announcement reached someone
+            public bool Pending;      // an announcement is in the network: told whether it was taken once its life is up
             public string LastResult;
             public bool PerBlock;     // a drone reported its unreachable blocks: those are held back, not the whole job
             public readonly HashSet<KeyValuePair<long, Vector3I>> Unreachable = new HashSet<KeyValuePair<long, Vector3I>>();
@@ -262,7 +264,7 @@ namespace Automata.Construction
                 if (drawArea && AutomataSession.Instance != null) AutomataSession.Instance.RequestDraw(this, false);
                 if (block != null) block.AppendingCustomInfo -= AppendInfo;
                 scanCache.Dispose();
-                if (messaging != null) { messaging.RemoveAntenna(entityId); messaging.UnsubscribeAll(entityId); }
+                if (messaging != null) { messaging.ReaderClosed(entityId); }
                 Log.Debug("CC {0}: closed ({1} open job(s))", entityId, jobs.Count);
             }
             catch (Exception ex)
@@ -463,20 +465,7 @@ namespace Automata.Construction
 
         private bool EnsureAntenna()
         {
-            if (!AntennaUtil.Alive(antenna) || !antenna.IsWorking || !antenna.EnableBroadcasting) return false;
-            MessageQueue.AntennaInfo antennaInfo;
-            if (!messaging.GetAntennaInfo(entityId, out antennaInfo) || antennaInfo.Antenna != antenna)
-            {
-                messaging.RemoveAntenna(entityId);
-                messaging.RegisterAntenna(entityId, MessageQueue.IAIBlockType.ConstructionComputer, antenna, block.CubeGrid.IsStatic);
-                messaging.Subscribe(entityId, Channel.ORCHESTRATOR_AUCTION_WINNER_ANNOUNCEMENT);
-                messaging.Subscribe(entityId, Channel.JOB_ANNOUNCEMENT_FAILED);
-                messaging.Subscribe(entityId, Channel.TASKS_COMPLETED);
-                messaging.Subscribe(entityId, Channel.TASKS_ABORTED);
-                messaging.Subscribe(entityId, Channel.JOB_KEEPALIVE);
-                Log.Info("CC {0}: on the virtual network through antenna '{1}' ({2:F0} m)", entityId, antenna.CustomName, antenna.Radius);
-            }
-            return true;
+            return AntennaReg.Ensure(messaging, ref antennaReg, antenna);
         }
         #endregion
 
@@ -766,7 +755,6 @@ namespace Automata.Construction
                 Payload = ja,
                 SenderId = entityId,
                 SenderOwnerId = block.OwnerId,
-                RequiresAck = false,
                 RecipientBlockType = MessageQueue.IAIBlockType.Orchestrator,
                 Channel = Channel.CONSTRUCTION_COMPUTER_JOB_ANNOUNCEMENT,
             };
@@ -789,28 +777,35 @@ namespace Automata.Construction
                     job.LastAnnounced = int.MinValue / 2;
                     Log.Debug("CC {0}: job {1} off hold", entityId, job.JobId);
                 }
+                if (job.Pending)
+                {
+                    if (job.Message.Delivered) { job.Pending = false; job.Announced = true; job.LastResult = Loc.T(StrAnnounced); }
+                    else if (now - job.LastAnnounced >= messaging.LifetimeTicks) { job.Pending = false; job.Announced = false; job.LastResult = Loc.T(StrNoOrchestratorInRange); }
+                    else continue;   // still in the network
+                    if (job.Announced && !job.Logged)
+                    {
+                        job.Logged = true;   // no drone yet: an announcement
+                        AddEvent(Loc.F(StrLogJob, LabelOf(job), job.Summary));
+                    }
+                }
                 if (now - job.LastAnnounced < (job.Announced ? RESPONSE_TIMEOUT_TICKS : RETRY_TICKS)) continue;
                 bool again = job.LastAnnounced > int.MinValue / 2;
                 job.LastAnnounced = now;
                 job.Message.MessageId = IdGenerator.GenerateId(ref messageCounter, entityId);
                 job.Message.CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow);
-                var error = messaging.BroadcastMessage(antenna, job.Message, false);
-                job.Announced = error == ErrorCode.None;
-                if (job.Announced && !job.Logged)
-                {
-                    job.Logged = true;   // no drone yet: an announcement
-                    AddEvent(Loc.F(StrLogJob, LabelOf(job), job.Summary));
-                }
-                job.LastResult = error == ErrorCode.None ? Loc.T(StrAnnounced) : error == ErrorCode.NoSubscribers ? Loc.T(StrNoOrchestratorInRange) : error.ToString();
+                var error = messaging.BroadcastMessage(antennaReg, job.Message, false);
+                job.Announced = false;
+                job.Pending = error == ErrorCode.None;
+                if (error != ErrorCode.None) job.LastResult = error.ToString();
                 Log.Debug("CC {0}: job {1} ({2}, {3} block(s)) {4}: {5}", entityId, job.JobId, LabelOf(job), job.Blocks.Count,
-                          again ? "announced again" : "announced", job.LastResult);
+                          again ? "announced again" : "announced", error);
             }
         }
 
         // An orchestrator of the owner / faction got no bid for one of its jobs: on hold for the time it says
         private void ReadFailures(int now)
         {
-            messaging.ReadMessages(entityId, antenna, Channel.JOB_ANNOUNCEMENT_FAILED, failureInbox, 20, true, PayloadType.JobAnnouncementFailed);
+            messaging.ReadMessages(entityId, MessageQueue.IAIBlockType.ConstructionComputer, antennaReg, Channel.JOB_ANNOUNCEMENT_FAILED, failureInbox, 20, true, PayloadType.JobAnnouncementFailed);
             for (int i = 0; i < failureInbox.Count; i++)
             {
                 var f = failureInbox[i].Payload;
@@ -832,7 +827,7 @@ namespace Automata.Construction
         // An orchestrator of the owner / faction awarded one of its jobs: not announced again, its blocks kept out of new jobs
         private void ReadAwards(int now)
         {
-            messaging.ReadMessages(entityId, antenna, Channel.ORCHESTRATOR_AUCTION_WINNER_ANNOUNCEMENT, awardInbox, 20, true,
+            messaging.ReadMessages(entityId, MessageQueue.IAIBlockType.ConstructionComputer, antennaReg, Channel.ORCHESTRATOR_AUCTION_WINNER_ANNOUNCEMENT, awardInbox, 20, true,
                                    PayloadType.AuctionWinnerAnnouncement);
             for (int i = 0; i < awardInbox.Count; i++)
             {
@@ -866,7 +861,7 @@ namespace Automata.Construction
             bool changed = false;
             for (int c = 0; c < 2; c++)
             {
-                messaging.ReadMessages(entityId, antenna, c == 0 ? Channel.TASKS_COMPLETED : Channel.TASKS_ABORTED, reportInbox, 20, true,
+                messaging.ReadMessages(entityId, MessageQueue.IAIBlockType.ConstructionComputer, antennaReg, c == 0 ? Channel.TASKS_COMPLETED : Channel.TASKS_ABORTED, reportInbox, 20, true,
                                        PayloadType.JobStatusReport);
                 for (int i = 0; i < reportInbox.Count; i++)
                 {
@@ -957,7 +952,7 @@ namespace Automata.Construction
 
         private void ReadKeepalives(int now)
         {
-            messaging.ReadMessages(entityId, antenna, Channel.JOB_KEEPALIVE, reportInbox, 50, true, PayloadType.JobStatusReport);
+            messaging.ReadMessages(entityId, MessageQueue.IAIBlockType.ConstructionComputer, antennaReg, Channel.JOB_KEEPALIVE, reportInbox, 50, true, PayloadType.JobStatusReport);
             for (int i = 0; i < reportInbox.Count; i++)
             {
                 var r = reportInbox[i].Payload;

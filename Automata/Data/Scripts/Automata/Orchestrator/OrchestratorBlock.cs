@@ -132,6 +132,7 @@ namespace Automata.Orchestrator
         private readonly StringBuilder info = new StringBuilder();
         private MessageQueue messaging;
         private IMyRadioAntenna ownAntenna;
+        private AntennaReg antennaReg;
         private int lastStep = int.MinValue / 2, lastCapabilities = int.MinValue / 2;
         public State currentState { get; private set; }
         private string status = Loc.T(StrStarting);
@@ -418,7 +419,7 @@ namespace Automata.Orchestrator
                 if (block != null) block.AppendingCustomInfo -= AppendInfo;
                 All.Remove(this);
                 HideAllPlayerGps();
-                if (messaging != null) { messaging.RemoveAntenna(entityId); messaging.UnsubscribeAll(entityId); }
+                if (messaging != null) { messaging.ReaderClosed(entityId); }
                 Log.Debug("Orchestrator {0}: closed ({1} open auction(s), {2} queued)", entityId, auctions.Count, jobQueue.Count);
             }
             catch (Exception ex)
@@ -611,22 +612,7 @@ namespace Automata.Orchestrator
 
         private bool EnsureAntenna()
         {
-            if (!AntennaUtil.Alive(ownAntenna) || !ownAntenna.IsWorking || !ownAntenna.EnableBroadcasting) return false;
-            MessageQueue.AntennaInfo info;
-            if (!messaging.GetAntennaInfo(entityId, out info) || info.Antenna != ownAntenna)
-            {
-                messaging.RemoveAntenna(entityId);
-                messaging.RegisterAntenna(entityId, MessageQueue.IAIBlockType.Orchestrator, ownAntenna, block.CubeGrid.IsStatic);
-                for (int i = 0; i < AnnouncementChannels.Length; i++) messaging.Subscribe(entityId, AnnouncementChannels[i]);
-                messaging.Subscribe(entityId, Channel.ORCHESTRATOR_AUCTION_BIDS);
-                messaging.Subscribe(entityId, Channel.ORCHESTRATOR_AUCTION_START);   // other orchestrators' auctions
-                messaging.Subscribe(entityId, Channel.TASKS_COMPLETED);
-                messaging.Subscribe(entityId, Channel.TASKS_ABORTED);
-                messaging.Subscribe(entityId, Channel.JOB_WITHDRAWN);
-                messaging.Subscribe(entityId, Channel.JOB_KEEPALIVE);   // its own (player) jobs' drones
-                Log.Info("Orchestrator {0}: listening on antenna '{1}' ({2:F0} m)", entityId, ownAntenna.CustomName, AntennaUtil.Range(ownAntenna));
-            }
-            return true;
+            return AntennaReg.Ensure(messaging, ref antennaReg, ownAntenna);
         }
         #endregion
 
@@ -635,7 +621,7 @@ namespace Automata.Orchestrator
         {
             for (int c = 0; c < AnnouncementChannels.Length; c++)
             {
-                messaging.ReadMessages(entityId, ownAntenna, AnnouncementChannels[c], announcementInbox, 50, true, PayloadType.JobAnnouncement);
+                messaging.ReadMessages(entityId, MessageQueue.IAIBlockType.Orchestrator, antennaReg, AnnouncementChannels[c], announcementInbox, 50, true, PayloadType.JobAnnouncement);
                 for (int i = 0; i < announcementInbox.Count; i++)
                 {
                     var msg = announcementInbox[i];
@@ -767,7 +753,6 @@ namespace Automata.Orchestrator
                 CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
                 SenderId = entityId,
                 SenderOwnerId = block.OwnerId,
-                RequiresAck = false,
                 // (orchestrators too: two in range of one announcer must not both auction the job)
                 RecipientBlockType = MessageQueue.IAIBlockType.Drone | MessageQueue.IAIBlockType.LogisticsComputer | MessageQueue.IAIBlockType.Orchestrator,
                 Channel = Channel.ORCHESTRATOR_AUCTION_START,
@@ -782,7 +767,7 @@ namespace Automata.Orchestrator
                 open.LastBroadcast = now;
                 open.Message.MessageId = IdGenerator.GenerateId(ref messageCounter, entityId);
                 open.Message.CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow);
-                var error = messaging.BroadcastMessage(ownAntenna, open.Message, false);
+                var error = messaging.BroadcastMessage(antennaReg, open.Message, false);
                 Log.Debug("Orchestrator {0}: auction {1} (job {2}, {3}) broadcast: {4}", entityId, open.Auction.AuctionId, open.Auction.JobId,
                           LabelOf(open.Auction), error == ErrorCode.None ? "sent" : error.ToString());
             }
@@ -792,7 +777,7 @@ namespace Automata.Orchestrator
         #region Bids
         private void ReadBids()
         {
-            messaging.ReadMessages(entityId, ownAntenna, Channel.ORCHESTRATOR_AUCTION_BIDS, bidInbox, 100, true, PayloadType.Bid);
+            messaging.ReadMessages(entityId, MessageQueue.IAIBlockType.Orchestrator, antennaReg, Channel.ORCHESTRATOR_AUCTION_BIDS, bidInbox, 100, true, PayloadType.Bid);
             for (int i = 0; i < bidInbox.Count; i++)
             {
                 var bid = bidInbox[i].Payload;
@@ -1484,7 +1469,6 @@ namespace Automata.Orchestrator
                 CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
                 SenderId = entityId,
                 SenderOwnerId = block.OwnerId,
-                RequiresAck = false,
                 RecipientBlockType = MessageQueue.IAIBlockType.Drone | MessageQueue.IAIBlockType.LogisticsComputer
                                      | MessageQueue.IAIBlockType.ConstructionComputer
                                      | MessageQueue.IAIBlockType.MiningSurveyor,         // the announcer stops repeating the job
@@ -1517,17 +1501,18 @@ namespace Automata.Orchestrator
             for (int i = winnerOutbox.Count - 1; i >= 0; i--)
             {
                 var msg = winnerOutbox[i];
-                var error = messaging.BroadcastMessage(ownAntenna, msg, false);
-                bool old = (DateTime.UtcNow - msg.Payload.CreatedTime).TotalSeconds > 30;
+                if (msg.Delivered) { winnerOutbox.RemoveAt(i); continue; }
+                if (messaging.InFlight(msg)) continue;   // a reader may still take it
+                if ((DateTime.UtcNow - msg.Payload.CreatedTime).TotalSeconds > 30)
+                {
+                    Log.Warning("Orchestrator {0}: winners of auction {1} never delivered", entityId, msg.Payload.AuctionId);
+                    winnerOutbox.RemoveAt(i);
+                    continue;
+                }
+                var error = messaging.BroadcastMessage(antennaReg, msg, false);
                 if (error == ErrorCode.None)
                     Log.Debug("Orchestrator {0}: winners of auction {1} (job {2}) sent: {3}", entityId, msg.Payload.AuctionId, msg.Payload.JobId,
                               DescribeAssignments(msg.Payload.TaskAssignments));
-                if (error == ErrorCode.None || old)
-                {
-                    if (error != ErrorCode.None)
-                        Log.Warning("Orchestrator {0}: winners of auction {1} never delivered: {2}", entityId, msg.Payload.AuctionId, error);
-                    winnerOutbox.RemoveAt(i);
-                }
             }
         }
 
@@ -1553,24 +1538,24 @@ namespace Automata.Orchestrator
                 CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
                 SenderId = entityId,
                 SenderOwnerId = block.OwnerId,
-                RequiresAck = false,
                 RecipientBlockType = MessageQueue.IAIBlockType.ConstructionComputer | MessageQueue.IAIBlockType.LogisticsComputer
                                      | MessageQueue.IAIBlockType.MiningSurveyor,
                 Channel = Channel.JOB_ANNOUNCEMENT_FAILED,
             });
         }
 
-        // Failures go out until delivered (30 s at most, like winners)
+        // Failures go out until someone takes them (30 s at most, like winners); sent again once the last copy has expired
         private void SendFailures()
         {
             for (int i = failureOutbox.Count - 1; i >= 0; i--)
             {
                 var msg = failureOutbox[i];
-                var error = messaging.BroadcastMessage(ownAntenna, msg, false);
-                bool old = DateTime.UtcNow > TimeUtil.TimestampToDateTime(msg.CreatedAt).AddSeconds(30);
+                if (msg.Delivered) { failureOutbox.RemoveAt(i); continue; }
+                if (messaging.InFlight(msg)) continue;
+                if (DateTime.UtcNow > TimeUtil.TimestampToDateTime(msg.CreatedAt).AddSeconds(30)) { failureOutbox.RemoveAt(i); continue; }
+                var error = messaging.BroadcastMessage(antennaReg, msg, false);
                 Log.Debug("Orchestrator {0}: failure of job {1} to {2}: {3}", entityId, msg.Payload.JobId, msg.Payload.AnnouncerEntityId,
                           error == ErrorCode.None ? "sent" : error.ToString());
-                if (error == ErrorCode.None || old) failureOutbox.RemoveAt(i);
             }
         }
 
@@ -1584,7 +1569,7 @@ namespace Automata.Orchestrator
 
         private void ReadWithdrawals(int now)
         {
-            messaging.ReadMessages(entityId, ownAntenna, Channel.JOB_WITHDRAWN, withdrawInbox, 50, true, PayloadType.JobStatusReport);
+            messaging.ReadMessages(entityId, MessageQueue.IAIBlockType.Orchestrator, antennaReg, Channel.JOB_WITHDRAWN, withdrawInbox, 50, true, PayloadType.JobStatusReport);
             for (int i = 0; i < withdrawInbox.Count; i++)
             {
                 var w = withdrawInbox[i].Payload;
@@ -1616,7 +1601,7 @@ namespace Automata.Orchestrator
 
         private void ReadPeerAuctions(int now)
         {
-            messaging.ReadMessages(entityId, ownAntenna, Channel.ORCHESTRATOR_AUCTION_START, peerAuctionInbox, 50, true, PayloadType.Auction);
+            messaging.ReadMessages(entityId, MessageQueue.IAIBlockType.Orchestrator, antennaReg, Channel.ORCHESTRATOR_AUCTION_START, peerAuctionInbox, 50, true, PayloadType.Auction);
             for (int i = 0; i < peerAuctionInbox.Count; i++)
             {
                 var m = peerAuctionInbox[i];
@@ -1657,7 +1642,7 @@ namespace Automata.Orchestrator
         // The drones on its own jobs (designator orders): unheard for a minute, said once (DroneWatch)
         private void ReadKeepalives(int now)
         {
-            messaging.ReadMessages(entityId, ownAntenna, Channel.JOB_KEEPALIVE, keepaliveInbox, 50, true, PayloadType.JobStatusReport);
+            messaging.ReadMessages(entityId, MessageQueue.IAIBlockType.Orchestrator, antennaReg, Channel.JOB_KEEPALIVE, keepaliveInbox, 50, true, PayloadType.JobStatusReport);
             for (int i = 0; i < keepaliveInbox.Count; i++)
             {
                 var r = keepaliveInbox[i].Payload;
@@ -1674,7 +1659,7 @@ namespace Automata.Orchestrator
         {
             for (int c = 0; c < 2; c++)
             {
-                messaging.ReadMessages(entityId, ownAntenna, c == 0 ? Channel.TASKS_COMPLETED : Channel.TASKS_ABORTED, reportInbox, 50, true,
+                messaging.ReadMessages(entityId, MessageQueue.IAIBlockType.Orchestrator, antennaReg, c == 0 ? Channel.TASKS_COMPLETED : Channel.TASKS_ABORTED, reportInbox, 50, true,
                                        PayloadType.JobStatusReport);
                 for (int i = 0; i < reportInbox.Count; i++)
                 {

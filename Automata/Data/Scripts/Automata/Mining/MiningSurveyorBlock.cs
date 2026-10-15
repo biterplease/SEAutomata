@@ -99,6 +99,7 @@ namespace Automata.Mining
         private long entityId;
         private MessageQueue messaging;
         private IMyRadioAntenna antenna;
+        private AntennaReg antennaReg;
         private IMyOreDetector detector;
         private bool ready;
         private int stepCounter;
@@ -133,6 +134,7 @@ namespace Automata.Mining
             public int LastAnnounced = int.MinValue / 2, Assigned, HeldUntil, DronesOut;
             public double DeliveredKg;   // reported so far by the drones of the award (several miners on one job)
             public bool Announced;
+            public bool Pending;   // an announcement is in the network: told whether it was taken once its life is up
             public string LastResult;
         }
         private readonly List<MiningJob> jobs = new List<MiningJob>();
@@ -234,7 +236,7 @@ namespace Automata.Mining
                 if (block != null) block.AppendingCustomInfo -= AppendInfo;
                 All.Remove(this);
                 if (IsServer) { RemoveGps(); RemoveGps(requestedHashes); }
-                if (messaging != null) { messaging.RemoveAntenna(entityId); messaging.UnsubscribeAll(entityId); }
+                if (messaging != null) { messaging.ReaderClosed(entityId); }
                 Log.Debug("MS {0}: closed ({1} deposit(s), {2} job(s))", entityId, deposits.Count, jobs.Count);
             }
             catch (Exception ex)
@@ -466,21 +468,7 @@ namespace Automata.Mining
 
         private bool EnsureAntenna()
         {
-            if (!AntennaUtil.Alive(antenna) || !antenna.IsWorking || !antenna.EnableBroadcasting) return false;
-            MessageQueue.AntennaInfo antennaInfo;
-            if (!messaging.GetAntennaInfo(entityId, out antennaInfo) || antennaInfo.Antenna != antenna)
-            {
-                messaging.RemoveAntenna(entityId);
-                messaging.RegisterAntenna(entityId, MessageQueue.IAIBlockType.MiningSurveyor, antenna, block.CubeGrid.IsStatic);
-                messaging.Subscribe(entityId, Channel.MINING_DATA_FOUND_ANNOUNCEMENT);
-                messaging.Subscribe(entityId, Channel.ORCHESTRATOR_AUCTION_WINNER_ANNOUNCEMENT);
-                messaging.Subscribe(entityId, Channel.JOB_ANNOUNCEMENT_FAILED);
-                messaging.Subscribe(entityId, Channel.TASKS_COMPLETED);
-                messaging.Subscribe(entityId, Channel.TASKS_ABORTED);
-                messaging.Subscribe(entityId, Channel.JOB_KEEPALIVE);
-                Log.Info("MS {0}: on the virtual network through antenna '{1}' ({2:F0} m)", entityId, antenna.CustomName, AntennaUtil.Range(antenna));
-            }
-            return true;
+            return AntennaReg.Ensure(messaging, ref antennaReg, antenna);
         }
         #endregion
 
@@ -534,7 +522,7 @@ namespace Automata.Mining
 
         private void ReadSurveys()
         {
-            messaging.ReadMessages(entityId, antenna, Channel.MINING_DATA_FOUND_ANNOUNCEMENT, surveyInbox, 20, true, PayloadType.MiningSurveyDataBroadcast);
+            messaging.ReadMessages(entityId, MessageQueue.IAIBlockType.MiningSurveyor, antennaReg, Channel.MINING_DATA_FOUND_ANNOUNCEMENT, surveyInbox, 20, true, PayloadType.MiningSurveyDataBroadcast);
             for (int i = 0; i < surveyInbox.Count; i++)
             {
                 var m = surveyInbox[i];
@@ -683,7 +671,7 @@ namespace Automata.Mining
             for (int j = jobs.Count - 1; j >= 0; j--)
                 if (jobs[j].Assigned == 0 && !seen.Contains(jobs[j].Ore))
                 {
-                    if (jobs[j].Announced) Withdraw(jobs[j], Loc.T(StrOrderRemoved));   // an auction may already run for it
+                    if (jobs[j].Announced || jobs[j].Pending) Withdraw(jobs[j], Loc.T(StrOrderRemoved));   // an auction may already run for it
                     jobs.RemoveAt(j);
                 }
         }
@@ -700,11 +688,10 @@ namespace Automata.Mining
                 CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
                 SenderId = entityId,
                 SenderOwnerId = block.OwnerId,
-                RequiresAck = false,
                 RecipientBlockType = MessageQueue.IAIBlockType.Orchestrator,
                 Channel = Channel.JOB_WITHDRAWN,
             };
-            var error = messaging.BroadcastMessage(antenna, msg, false);
+            var error = messaging.BroadcastMessage(antennaReg, msg, false);
             Log.Debug("MS {0}: job {1} ({2}) withdrawn ({3}): {4}", entityId, job.JobId, job.Ore, why, error);
         }
 
@@ -812,7 +799,6 @@ namespace Automata.Mining
                 Payload = ja,
                 SenderId = entityId,
                 SenderOwnerId = block.OwnerId,
-                RequiresAck = false,
                 RecipientBlockType = MessageQueue.IAIBlockType.Orchestrator,
                 Channel = Channel.MINING_JOB_ANNOUNCEMENT,
             };
@@ -831,14 +817,21 @@ namespace Automata.Mining
                     job.HeldUntil = 0;
                     job.LastAnnounced = int.MinValue / 2;
                 }
+                if (job.Pending)
+                {
+                    if (job.Message.Delivered) { job.Pending = false; job.Announced = true; job.LastResult = Loc.T(StrAnnounced); }
+                    else if (now - job.LastAnnounced >= messaging.LifetimeTicks) { job.Pending = false; job.Announced = false; job.LastResult = Loc.T(StrNoOrchestratorInRange); }
+                    else continue;   // still in the network
+                }
                 if (now - job.LastAnnounced < (job.Announced ? RESPONSE_TIMEOUT_TICKS : RETRY_TICKS)) continue;
                 job.LastAnnounced = now;
                 job.Message.MessageId = IdGenerator.GenerateId(ref messageCounter, entityId);
                 job.Message.CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow);
-                var error = messaging.BroadcastMessage(antenna, job.Message, false);
-                job.Announced = error == ErrorCode.None;
-                job.LastResult = error == ErrorCode.None ? Loc.T(StrAnnounced) : error == ErrorCode.NoSubscribers ? Loc.T(StrNoOrchestratorInRange) : error.ToString();
-                Log.Debug("MS {0}: job {1} ({2}, {3:F0} kg): {4}", entityId, job.JobId, job.Ore, job.Kg, job.LastResult);
+                var error = messaging.BroadcastMessage(antennaReg, job.Message, false);
+                job.Announced = false;
+                job.Pending = error == ErrorCode.None;
+                if (error != ErrorCode.None) job.LastResult = error.ToString();
+                Log.Debug("MS {0}: job {1} ({2}, {3:F0} kg): {4}", entityId, job.JobId, job.Ore, job.Kg, error);
             }
         }
 
@@ -850,7 +843,7 @@ namespace Automata.Mining
 
         private void ReadAwards(int now)
         {
-            messaging.ReadMessages(entityId, antenna, Channel.ORCHESTRATOR_AUCTION_WINNER_ANNOUNCEMENT, awardInbox, 20, true, PayloadType.AuctionWinnerAnnouncement);
+            messaging.ReadMessages(entityId, MessageQueue.IAIBlockType.MiningSurveyor, antennaReg, Channel.ORCHESTRATOR_AUCTION_WINNER_ANNOUNCEMENT, awardInbox, 20, true, PayloadType.AuctionWinnerAnnouncement);
             for (int i = 0; i < awardInbox.Count; i++)
             {
                 var award = awardInbox[i].Payload;
@@ -870,7 +863,7 @@ namespace Automata.Mining
 
         private void ReadFailures(int now)
         {
-            messaging.ReadMessages(entityId, antenna, Channel.JOB_ANNOUNCEMENT_FAILED, failureInbox, 20, true, PayloadType.JobAnnouncementFailed);
+            messaging.ReadMessages(entityId, MessageQueue.IAIBlockType.MiningSurveyor, antennaReg, Channel.JOB_ANNOUNCEMENT_FAILED, failureInbox, 20, true, PayloadType.JobAnnouncementFailed);
             for (int i = 0; i < failureInbox.Count; i++)
             {
                 var f = failureInbox[i].Payload;
@@ -889,7 +882,7 @@ namespace Automata.Mining
         {
             for (int c = 0; c < 2; c++)
             {
-                messaging.ReadMessages(entityId, antenna, c == 0 ? Channel.TASKS_COMPLETED : Channel.TASKS_ABORTED, reportInbox, 20, true, PayloadType.JobStatusReport);
+                messaging.ReadMessages(entityId, MessageQueue.IAIBlockType.MiningSurveyor, antennaReg, c == 0 ? Channel.TASKS_COMPLETED : Channel.TASKS_ABORTED, reportInbox, 20, true, PayloadType.JobStatusReport);
                 for (int i = 0; i < reportInbox.Count; i++)
                 {
                     var r = reportInbox[i].Payload;
@@ -920,7 +913,7 @@ namespace Automata.Mining
 
         private void ReadKeepalives(int now)
         {
-            messaging.ReadMessages(entityId, antenna, Channel.JOB_KEEPALIVE, reportInbox, 50, true, PayloadType.JobStatusReport);
+            messaging.ReadMessages(entityId, MessageQueue.IAIBlockType.MiningSurveyor, antennaReg, Channel.JOB_KEEPALIVE, reportInbox, 50, true, PayloadType.JobStatusReport);
             for (int i = 0; i < reportInbox.Count; i++)
             {
                 var r = reportInbox[i].Payload;

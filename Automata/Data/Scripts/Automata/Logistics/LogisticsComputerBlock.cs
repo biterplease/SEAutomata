@@ -129,6 +129,7 @@ namespace Automata.Logistics
         private string reportedSmallConnectors;
         private ConveyorNetwork primary;
         private IMyRadioAntenna antenna;
+        private AntennaReg antennaReg;
         private bool dirty = true;
         private int lastScan = int.MinValue / 2, lastInventory = int.MinValue / 2, lastQuotaCheck = int.MinValue / 2;
         private int networkCounter;
@@ -152,6 +153,7 @@ namespace Automata.Logistics
             public int DronesOut;    // awarded: drones that have not reported their trips yet
             public bool Finished;    // every drone reported, or one gave up: closed at the next check (need recomputed)
             public bool Announced;   // the last announcement reached an orchestrator
+            public Message<JobAnnouncement> Sent;   // the announcement in flight: told whether it was taken once its life is up
             public string LastResult;
         }
         private OpenJob requestJob, pushJob;
@@ -219,7 +221,7 @@ namespace Automata.Logistics
             {
                 if (block != null) block.AppendingCustomInfo -= AppendInfo;
                 UnsubscribeBase();
-                if (messaging != null) { messaging.RemoveAntenna(entityId); messaging.UnsubscribeAll(entityId); }
+                if (messaging != null) { messaging.ReaderClosed(entityId); }
                 for (int i = 0; i < networks.Count; i++) networks[i].Detach();   // inventory content subscriptions
                 Log.Debug("LC {0}: closed", entityId);
             }
@@ -489,21 +491,7 @@ namespace Automata.Logistics
 
         private bool EnsureAntenna()
         {
-            if (!AntennaUtil.Alive(antenna) || !antenna.IsWorking || !antenna.EnableBroadcasting) return false;
-            MessageQueue.AntennaInfo antennaInfo;
-            if (!messaging.GetAntennaInfo(entityId, out antennaInfo) || antennaInfo.Antenna != antenna)
-            {
-                messaging.RemoveAntenna(entityId);
-                messaging.RegisterAntenna(entityId, MessageQueue.IAIBlockType.LogisticsComputer, antenna, block.CubeGrid.IsStatic);
-                messaging.Subscribe(entityId, Channel.ORCHESTRATOR_AUCTION_START);
-                messaging.Subscribe(entityId, Channel.ORCHESTRATOR_AUCTION_WINNER_ANNOUNCEMENT);
-                messaging.Subscribe(entityId, Channel.JOB_ANNOUNCEMENT_FAILED);
-                messaging.Subscribe(entityId, Channel.TASKS_COMPLETED);
-                messaging.Subscribe(entityId, Channel.TASKS_ABORTED);
-                messaging.Subscribe(entityId, Channel.JOB_KEEPALIVE);
-                Log.Info("LC {0}: on the virtual network through antenna '{1}' ({2:F0} m)", entityId, antenna.CustomName, AntennaUtil.Range(antenna));
-            }
-            return true;
+            return AntennaReg.Ensure(messaging, ref antennaReg, antenna);
         }
         #endregion
 
@@ -636,6 +624,12 @@ namespace Automata.Logistics
                 job.Assigned = 0;
                 job.LastAnnounced = int.MinValue / 2;
             }
+            if (job.Sent != null)
+            {
+                if (job.Sent.Delivered) { job.Announced = true; job.Sent = null; job.LastResult = Loc.T(StrAnnounced); }
+                else if (now - job.LastAnnounced >= messaging.LifetimeTicks) { job.Announced = false; job.Sent = null; job.LastResult = Loc.T(StrNoOrchestratorInRange); }
+                else return;   // still in the network
+            }
             if (now - job.LastAnnounced < (job.Announced ? RESPONSE_TIMEOUT_TICKS : RETRY_TICKS)) return;
             job.LastAnnounced = now;
             var dock = FreeDock(primary);
@@ -667,15 +661,15 @@ namespace Automata.Logistics
                 CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
                 SenderId = entityId,
                 SenderOwnerId = block.OwnerId,
-                RequiresAck = false,
                 RecipientBlockType = MessageQueue.IAIBlockType.Orchestrator,
                 Channel = job.Type == Orchestrator.JobType.DeliverMissingInventory ? Channel.LOGISTIC_REQUEST : Channel.LOGISTIC_PUSH,
             };
-            var error = messaging.BroadcastMessage(antenna, msg, false);
-            job.Announced = error == ErrorCode.None;
-            job.LastResult = error == ErrorCode.None ? Loc.T(StrAnnounced) : error == ErrorCode.NoSubscribers ? Loc.T(StrNoOrchestratorInRange) : error.ToString();
+            var error = messaging.BroadcastMessage(antennaReg, msg, false);
+            job.Announced = false;
+            job.Sent = error == ErrorCode.None ? msg : null;
+            if (error != ErrorCode.None) job.LastResult = error.ToString();
             Log.Debug("LC {0}: job {1} ({2}) announced at connector {3}: {4} ({5})", entityId, job.JobId, job.Type, dock.EntityId,
-                      DescribeItems(job.Items), job.LastResult);
+                      DescribeItems(job.Items), error);
         }
         #endregion
 
@@ -683,7 +677,7 @@ namespace Automata.Logistics
         private void ReadAuctions(int now)
         {
             if (!Has(OperationMode.ProvideForLogistics) && !Has(OperationMode.ProvideForConstruction)) return;
-            messaging.ReadMessages(entityId, antenna, Channel.ORCHESTRATOR_AUCTION_START, auctionInbox, 20, true, PayloadType.Auction);
+            messaging.ReadMessages(entityId, MessageQueue.IAIBlockType.LogisticsComputer, antennaReg, Channel.ORCHESTRATOR_AUCTION_START, auctionInbox, 20, true, PayloadType.Auction);
             for (int i = 0; i < auctionInbox.Count; i++)
             {
                 var a = auctionInbox[i].Payload;
@@ -967,11 +961,10 @@ namespace Automata.Logistics
                 CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
                 SenderId = entityId,
                 SenderOwnerId = block.OwnerId,
-                RequiresAck = false,
                 RecipientBlockType = MessageQueue.IAIBlockType.Orchestrator,
                 Channel = Channel.ORCHESTRATOR_AUCTION_BIDS,
             };
-            var error = messaging.BroadcastMessage(antenna, msg, false);
+            var error = messaging.BroadcastMessage(antennaReg, msg, false);
             lastBid = string.Format("{0}: {1} ({2})", a.JobType, DescribeItems(items), error == ErrorCode.None ? Loc.T(StrSent) : error.ToString());
             var entry = new StringBuilder();
             entry.AppendLoc(StrLogBid, BidKind(a), ConnectorName(dock.EntityId));
@@ -985,7 +978,7 @@ namespace Automata.Logistics
         // drone docks at one of its connectors), else it's released
         private void ReadAwards(int now)
         {
-            messaging.ReadMessages(entityId, antenna, Channel.ORCHESTRATOR_AUCTION_WINNER_ANNOUNCEMENT, awardInbox, 20, true,
+            messaging.ReadMessages(entityId, MessageQueue.IAIBlockType.LogisticsComputer, antennaReg, Channel.ORCHESTRATOR_AUCTION_WINNER_ANNOUNCEMENT, awardInbox, 20, true,
                                    PayloadType.AuctionWinnerAnnouncement);
             for (int i = 0; i < awardInbox.Count; i++)
             {
@@ -1037,7 +1030,7 @@ namespace Automata.Logistics
         {
             for (int c = 0; c < 2; c++)
             {
-                messaging.ReadMessages(entityId, antenna, c == 0 ? Channel.TASKS_COMPLETED : Channel.TASKS_ABORTED, reportInbox, 20, true,
+                messaging.ReadMessages(entityId, MessageQueue.IAIBlockType.LogisticsComputer, antennaReg, c == 0 ? Channel.TASKS_COMPLETED : Channel.TASKS_ABORTED, reportInbox, 20, true,
                                        PayloadType.JobStatusReport);
                 for (int i = 0; i < reportInbox.Count; i++)
                 {
@@ -1084,7 +1077,7 @@ namespace Automata.Logistics
 
         private void ReadKeepalives(int now)
         {
-            messaging.ReadMessages(entityId, antenna, Channel.JOB_KEEPALIVE, reportInbox, 50, true, PayloadType.JobStatusReport);
+            messaging.ReadMessages(entityId, MessageQueue.IAIBlockType.LogisticsComputer, antennaReg, Channel.JOB_KEEPALIVE, reportInbox, 50, true, PayloadType.JobStatusReport);
             for (int i = 0; i < reportInbox.Count; i++)
             {
                 var r = reportInbox[i].Payload;
@@ -1102,7 +1095,7 @@ namespace Automata.Logistics
         // An orchestrator got no bid for its job: on hold for the time it says
         private void ReadFailures(int now)
         {
-            messaging.ReadMessages(entityId, antenna, Channel.JOB_ANNOUNCEMENT_FAILED, failureInbox, 20, true, PayloadType.JobAnnouncementFailed);
+            messaging.ReadMessages(entityId, MessageQueue.IAIBlockType.LogisticsComputer, antennaReg, Channel.JOB_ANNOUNCEMENT_FAILED, failureInbox, 20, true, PayloadType.JobAnnouncementFailed);
             for (int i = 0; i < failureInbox.Count; i++)
             {
                 var f = failureInbox[i].Payload;
