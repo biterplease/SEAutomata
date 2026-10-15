@@ -18,7 +18,7 @@ namespace Automata.Drone
         [ProtoMember(1)] public DroneControllerSettings Settings;
         [ProtoMember(2)] public DroneJobState Job;
         [ProtoMember(3)] public DroneOperatingState Operating;
-        [ProtoMember(4)] public List<MessageQueue.TimestampedMessage> Outbox;
+        // ProtoMember 4 was the messages in flight (saved by the message queue now)
         [ProtoMember(5)] public DroneCombatState Combat;
         /// <summary>The block that saved it (<see cref="Util.BlockSave.OwnState"/>).</summary>
         [ProtoMember(6)] public long EntityId;

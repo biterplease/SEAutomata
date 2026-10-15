@@ -8,7 +8,6 @@
         int MessageRetentionTicks();
         int DlqMessageRetentionTicks();
         int MessageCleanupIntervalTicks();
-        MessageSerializationMode SerializationMode();
 
     }
     /// <summary>
@@ -38,8 +37,6 @@
         public int DlqMessageRetentionTicks() => dlqMessageRetentionTicks;
         public int messageCleanupIntervalTicks { get; internal set; } = 3600; // 1 min
         public int MessageCleanupIntervalTicks() => messageCleanupIntervalTicks;
-        public MessageSerializationMode messageSerializationMode { get; internal set; } = MessageSerializationMode.ProtoBuf;
-        public MessageSerializationMode SerializationMode() => messageSerializationMode;
 
         public int maxBidsPerTask { get; internal set; } = 10;
         public int MaxBidsPerTask() => maxBidsPerTask;

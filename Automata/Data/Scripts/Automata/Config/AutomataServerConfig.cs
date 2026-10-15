@@ -23,25 +23,6 @@ namespace Automata.Config
         Error = 16
     }
 
-    /// <summary>
-    /// Serialization mode for the virtual-network message queue.
-    /// This is how drones, orchestrators and logistics computers communicate with each other.
-    /// </summary>
-    public enum MessageSerializationMode : byte
-    {
-        /// <summary>
-        /// XML serialization is slow, use only for debugging.
-        /// </summary>
-        XML,
-
-        /// <summary>
-        /// ProtoBuf serialization, faster, no visibility in-flight.
-        /// </summary>
-        ProtoBuf
-    }
-
-    
-
     public class ServerConfig
     {
         #region UI strings
@@ -575,13 +556,6 @@ namespace Automata.Config
             MessageQueue.schedulerMessageReadLimit = Math.Max(1, ini.Get("MessageQueue", "SchedulerMessageReadLimit").ToInt32(MessageQueue.schedulerMessageReadLimit));
             MessageQueue.messageRetentionTicks = Math.Max(600, ini.Get("MessageQueue", "MessageRetentionTicks").ToInt32(MessageQueue.messageRetentionTicks));
             MessageQueue.messageCleanupIntervalTicks = Math.Max(60, ini.Get("MessageQueue", "MessageCleanupIntervalTicks").ToInt32(MessageQueue.messageCleanupIntervalTicks));
-
-            var serializationMode = ini.Get("MessageQueue", "MessageSerializationMode").ToString("ProtoBuf");
-            MessageSerializationMode mode;
-            if (Enum.TryParse<MessageSerializationMode>(serializationMode, true, out mode))
-            {
-                MessageQueue.messageSerializationMode = mode;
-            }
 
             // Parse LogisticsComputer section
             LogisticsComputer.AllowLogistics = ini.Get("LogisticsComputer", "AllowLogistics").ToBoolean(LogisticsComputer.AllowLogistics);
