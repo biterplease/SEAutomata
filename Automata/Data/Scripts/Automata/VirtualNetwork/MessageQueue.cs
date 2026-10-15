@@ -231,8 +231,7 @@ namespace Automata.VirtualNetwork
                 log.LastSentAt = msg.SentAt;
             }
             message.Receipt = msg;
-            if (Log.DebugEnabled)
-                Log.Debug("VNet: {0} {1} #{2} from {3} ({4:F0} m) to {5}", message.Channel, message.Payload != null ? message.Payload.GetType().Name : "null",
+            if (Log.DebugEnabled) Log.Debug("VNet: {0} {1} #{2} from {3} ({4:F0} m) to {5}", message.Channel, message.Payload != null ? message.Payload.GetType().Name : "null",
                           message.MessageId, message.SenderId, sender.Range, message.RecipientBlockType);
             return ErrorCode.None;
         }
@@ -346,8 +345,7 @@ namespace Automata.VirtualNetwork
                 }
                 log.Cursors[readerId] = cursor;
             }
-            if ((taken > 0 || outOfRange > 0) && Log.DebugEnabled)
-                Log.Debug("VNet: {0} read {1}: {2} message(s), {3} out of range", readerId, channel, taken, outOfRange);
+            if ((taken > 0 || outOfRange > 0) && Log.DebugEnabled) Log.Debug("VNet: {0} read {1}: {2} message(s), {3} out of range", readerId, channel, taken, outOfRange);
             return taken > 0 ? ErrorCode.None : ErrorCode.TryAgainLater;
         }
 
@@ -482,7 +480,7 @@ namespace Automata.VirtualNetwork
                     }
                 }
             }
-            Log.Debug("VNet: snapshot of {0} message(s), {1} antenna(s) for the save", saved.Count, Relays.Count);
+            if (Log.DebugEnabled) Log.Debug("VNet: snapshot of {0} message(s), {1} antenna(s) for the save", saved.Count, Relays.Count);
             return MyUtilitiesDelegate.SerializeToBinary<MessageQueueSnapshot>(
                 new MessageQueueSnapshot { Messages = saved, SavedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow), Antennas = Relays.Snapshot() });
         }

@@ -105,8 +105,7 @@ namespace Automata.VirtualNetwork
                 antennas[cur.AntennaId] = cur;
                 topo++;
                 indexDirty = true;
-                if (Log.DebugEnabled)
-                    Log.Debug("VNet relay: antenna {0} '{1}' on '{2}' registered ({3:F0} m{4}), {5} antenna(s)", cur.AntennaId, cur.Name, cur.GridName, cur.Range,
+                if (Log.DebugEnabled) Log.Debug("VNet relay: antenna {0} '{1}' on '{2}' registered ({3:F0} m{4}), {5} antenna(s)", cur.AntennaId, cur.Name, cur.GridName, cur.Range,
                               cur.GridIsStatic ? ", static" : "", antennas.Count);
                 return;
             }

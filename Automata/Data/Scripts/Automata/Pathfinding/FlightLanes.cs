@@ -233,7 +233,7 @@ namespace Automata.Pathfinding
             // No full knowledge: both tubes must lie where the flight's sensors saw
             if (!Covered(lane.AB, pts, sensed) || !Covered(lane.BA, pts, sensed))
             {
-                Log.Debug("Lanes: {0} not made: the flight's sensors didn't cover its tubes (a later trip may)", lane.PairName);
+                if (Log.DebugEnabled) Log.Debug("Lanes: {0} not made: the flight's sensors didn't cover its tubes (a later trip may)", lane.PairName);
                 nextNumber--;
                 return;
             }
@@ -485,7 +485,7 @@ namespace Automata.Pathfinding
                         Vector3D pa, pb;
                         if (SegmentDistance(l.Centre[i], l.Centre[i + 1], o.Centre[j], o.Centre[j + 1], out pa, out pb) > need) continue;
                         Lift(l, pa, Math.Max(l.Hull, o.Hull) + need);
-                        Log.Debug("Lanes: new lane lifted {0:F0} m over L{1} where they cross", Math.Max(l.Hull, o.Hull) + need, o.Number);
+                        if (Log.DebugEnabled) Log.Debug("Lanes: new lane lifted {0:F0} m over L{1} where they cross", Math.Max(l.Hull, o.Hull) + need, o.Number);
                         Derive(l);
                         return;
                     }
@@ -780,7 +780,7 @@ namespace Automata.Pathfinding
                             l.NextCheckFrame = now + 60 * 30;
                             return;
                         }
-                        Log.Debug("Lanes: {0}: tube segment {1} blocked by {2}", l.PairName, k + 1, e != null ? e.DisplayName : "?");
+                        if (Log.DebugEnabled) Log.Debug("Lanes: {0}: tube segment {1} blocked by {2}", l.PairName, k + 1, e != null ? e.DisplayName : "?");
                         FailCheck(l, "tube blocked by " + (e != null ? e.DisplayName : "something"));
                         l.CheckIndex = 0;
                         l.NextCheckFrame = now + 60 * 60;   // again in a minute (a ship passing by)

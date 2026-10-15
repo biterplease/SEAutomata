@@ -2,9 +2,6 @@
 {
     public interface IMessageQueueConfig
     {
-        float NetworkUpdateRate();
-        int SchedulerAntennaCacheUpdateIntervalTicks();
-        int SchedulerMessageReadLimit();
         int MessageRetentionTicks();
         int MessageCleanupIntervalTicks();
 
@@ -15,24 +12,12 @@
     /// </summary>
     public class MessageQueueConfig : IMessageQueueConfig
     {
-        public float networkUpdateRate { get; internal set; } = 10.0f;
-        public float NetworkUpdateRate() => networkUpdateRate;
-        /// <summary>
-        /// Schedulers keep a cache of antennas. Limit how often said cache is updated.
-        /// </summary>
-        public int schedulerAntennaCacheUpdateIntervalTicks { get; internal set; } = 60;
-        public int SchedulerAntennaCacheUpdateIntervalTicks() => schedulerAntennaCacheUpdateIntervalTicks;
-        public int schedulerMessageReadLimit { get; internal set; } = 50;
-        public int SchedulerMessageReadLimit() => schedulerMessageReadLimit;
         /// <summary>
         /// How long a message lives: readers that look within this time (and in range) get it.
         /// </summary>
         public int messageRetentionTicks { get; internal set; } = 600; // 10 seconds
         public int MessageRetentionTicks() => messageRetentionTicks;
-        public int messageCleanupIntervalTicks { get; internal set; } = 3600; // 1 min
+        public int messageCleanupIntervalTicks { get; internal set; } = 600; // 10 s
         public int MessageCleanupIntervalTicks() => messageCleanupIntervalTicks;
-
-        public int maxBidsPerTask { get; internal set; } = 10;
-        public int MaxBidsPerTask() => maxBidsPerTask;
     }
 }

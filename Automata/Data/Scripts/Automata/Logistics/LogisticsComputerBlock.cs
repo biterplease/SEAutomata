@@ -223,7 +223,7 @@ namespace Automata.Logistics
                 UnsubscribeBase();
                 if (messaging != null) { messaging.ReaderClosed(entityId); }
                 for (int i = 0; i < networks.Count; i++) networks[i].Detach();   // inventory content subscriptions
-                Log.Debug("LC {0}: closed", entityId);
+                if (Log.DebugEnabled) Log.Debug("LC {0}: closed", entityId);
             }
             catch (Exception ex)
             {
@@ -318,7 +318,7 @@ namespace Automata.Logistics
                 var before = primary;
                 primary = PickPrimary();
                 if (primary != before)
-                    Log.Debug("LC {0}: main network: {1}", entityId, primary != null ? DescribeNetwork(networks.IndexOf(primary)) : "none (no free standard connector)");
+                    if (Log.DebugEnabled) Log.Debug("LC {0}: main network: {1}", entityId, primary != null ? DescribeNetwork(networks.IndexOf(primary)) : "none (no free standard connector)");
             }
             if (primary == null) { status = Loc.T(StrNoConveyorNetworkWithA); return; }
             status = Loc.T(StrActive);
@@ -385,7 +385,7 @@ namespace Automata.Logistics
             {
                 reportedSmallConnectors = small;
                 if (small != null)
-                    Log.Debug("LC {0}: small connector(s) '{1}': ports for combat drones, ore scouts and ore haulers only", entityId, small);
+                    if (Log.DebugEnabled) Log.Debug("LC {0}: small connector(s) '{1}': ports for combat drones, ore scouts and ore haulers only", entityId, small);
             }
             MapNetworks();
             SubscribeBase();
@@ -524,8 +524,8 @@ namespace Automata.Logistics
             }
             if (minimums.Count > 0 && !Has(OperationMode.Request)) quotaWarnings.Add(Loc.T(StrMinSetButRequestMode));
             if (maximums.Count > 0 && !Has(OperationMode.Push)) quotaWarnings.Add(Loc.T(StrMaxSetButPushMode));
-            Log.Debug("LC {0}: Min/Max: {1} min, {2} max, {3} warning(s)", entityId, minimums.Count, maximums.Count, quotaWarnings.Count);
-            for (int i = 0; i < quotaWarnings.Count; i++) Log.Debug("LC {0}: Min/Max warning: {1}", entityId, quotaWarnings[i]);
+            if (Log.DebugEnabled) Log.Debug("LC {0}: Min/Max: {1} min, {2} max, {3} warning(s)", entityId, minimums.Count, maximums.Count, quotaWarnings.Count);
+            for (int i = 0; i < quotaWarnings.Count; i++) if (Log.DebugEnabled) Log.Debug("LC {0}: Min/Max warning: {1}", entityId, quotaWarnings[i]);
         }
         #endregion
 
@@ -568,7 +568,7 @@ namespace Automata.Logistics
                 int total = Total(have, job.Items);
                 if (total != job.LastTotal)
                 {
-                    Log.Debug("LC {0}: job {1} ({2}): items moved, {3} -> {4} on hand", entityId, job.JobId, job.Type, job.LastTotal, total);
+                    if (Log.DebugEnabled) Log.Debug("LC {0}: job {1} ({2}): items moved, {3} -> {4} on hand", entityId, job.JobId, job.Type, job.LastTotal, total);
                     job.LastTotal = total;
                     job.LastChange = now;
                 }
@@ -578,7 +578,7 @@ namespace Automata.Logistics
                          || (job.Assigned == 0 && job.LastChange > job.Opened && now - job.LastChange > DELIVERY_SETTLE_TICKS)
                          || (job.Assigned == 0 && now - job.Opened > JOB_STALE_TICKS);
                 if (!done) return job;
-                Log.Debug("LC {0}: job {1} ({2}) closed: {3}", entityId, job.JobId, job.Type,
+                if (Log.DebugEnabled) Log.Debug("LC {0}: job {1} ({2}) closed: {3}", entityId, job.JobId, job.Type,
                           needed.IsEmpty() ? "satisfied" : job.Finished ? "drones reported, the rest is asked again"
                           : job.LastChange > job.Opened ? "items moved, the rest is asked again" : "nobody took it");
                 job = null;
@@ -594,7 +594,7 @@ namespace Automata.Logistics
                 LastTotal = Total(have, needed),
                 LastAnnounced = int.MinValue / 2,
             };
-            Log.Debug("LC {0}: job {1} opened ({2}): {3}", entityId, job.JobId, type, DescribeItems(needed));
+            if (Log.DebugEnabled) Log.Debug("LC {0}: job {1} opened ({2}): {3}", entityId, job.JobId, type, DescribeItems(needed));
             return job;
         }
 
@@ -615,12 +615,12 @@ namespace Automata.Logistics
                 if (now < job.HeldUntil) return;
                 job.HeldUntil = 0;
                 job.LastAnnounced = int.MinValue / 2;
-                Log.Debug("LC {0}: job {1} off hold", entityId, job.JobId);
+                if (Log.DebugEnabled) Log.Debug("LC {0}: job {1} off hold", entityId, job.JobId);
             }
             if (job.Assigned != 0)
             {
                 if (now - job.Assigned <= ASSIGNED_TTL_TICKS) return;
-                Log.Debug("LC {0}: job {1} awarded long ago and not done: announced again", entityId, job.JobId);
+                if (Log.DebugEnabled) Log.Debug("LC {0}: job {1} awarded long ago and not done: announced again", entityId, job.JobId);
                 job.Assigned = 0;
                 job.LastAnnounced = int.MinValue / 2;
             }
@@ -633,7 +633,7 @@ namespace Automata.Logistics
             if (now - job.LastAnnounced < (job.Announced ? RESPONSE_TIMEOUT_TICKS : RETRY_TICKS)) return;
             job.LastAnnounced = now;
             var dock = FreeDock(primary);
-            if (dock == null) { job.LastResult = Loc.T(StrNoFreeConnector); Log.Debug("LC {0}: job {1}: no free connector to announce", entityId, job.JobId); return; }
+            if (dock == null) { job.LastResult = Loc.T(StrNoFreeConnector); if (Log.DebugEnabled) Log.Debug("LC {0}: job {1}: no free connector to announce", entityId, job.JobId); return; }
             Vector3D at = dock.PositionData.ToVector3D();
             float interference;
             float g = MyAPIGateway.Physics.CalculateNaturalGravityAt(at, out interference).Length();
@@ -668,7 +668,7 @@ namespace Automata.Logistics
             job.Announced = false;
             job.Sent = error == ErrorCode.None ? msg : null;
             if (error != ErrorCode.None) job.LastResult = error.ToString();
-            Log.Debug("LC {0}: job {1} ({2}) announced at connector {3}: {4} ({5})", entityId, job.JobId, job.Type, dock.EntityId,
+            if (Log.DebugEnabled) Log.Debug("LC {0}: job {1} ({2}) announced at connector {3}: {4} ({5})", entityId, job.JobId, job.Type, dock.EntityId,
                       DescribeItems(job.Items), error);
         }
         #endregion
@@ -690,18 +690,18 @@ namespace Automata.Logistics
                     // Same auction id, another job: the orchestrator's ids started over (a reload without saving) and
                     // this promise is from the old one
                     commitments.Remove(a.AuctionId);
-                    Log.Debug("LC {0}: auction {1} is a new one (job {2}, the promise was for job {3}): old promise released", entityId, a.AuctionId, a.JobId, held.JobId);
+                    if (Log.DebugEnabled) Log.Debug("LC {0}: auction {1} is a new one (job {2}, the promise was for job {3}): old promise released", entityId, a.AuctionId, a.JobId, held.JobId);
                 }
                 seenAuctions[a.AuctionId] = now;
                 if (a.RequesterEntityId == entityId) continue;   // its own job
                 if (!AnchorDirectory.IsAllowed(block.OwnerId, auctionInbox[i].SenderOwnerId))
                 {
-                    Log.Debug("LC {0}: auction {1} ignored: orchestrator of another owner / faction", entityId, a.AuctionId);
+                    if (Log.DebugEnabled) Log.Debug("LC {0}: auction {1} ignored: orchestrator of another owner / faction", entityId, a.AuctionId);
                     continue;
                 }
                 var items = a.ComponentsInventory;
                 if (items == null || items.IsEmpty()) continue;
-                Log.Debug("LC {0}: auction {1} ({2}, job {3}): {4}", entityId, a.AuctionId, a.JobType, a.JobId, DescribeItems(items));
+                if (Log.DebugEnabled) Log.Debug("LC {0}: auction {1} ({2}, job {3}): {4}", entityId, a.AuctionId, a.JobType, a.JobId, DescribeItems(items));
                 switch (a.JobType)
                 {
                     case Orchestrator.JobType.Weld:
@@ -741,7 +741,7 @@ namespace Automata.Logistics
                 bool all;
                 var supply = SupplyFrom(n, wanted, out all);
                 int count = supply.GetTotalItemCount();
-                Log.Debug("LC {0}: auction {1}: network {2} can give {3}", entityId, a.AuctionId, n + 1, count > 0 ? DescribeItems(supply) : "nothing");
+                if (Log.DebugEnabled) Log.Debug("LC {0}: auction {1}: network {2} can give {3}", entityId, a.AuctionId, n + 1, count > 0 ? DescribeItems(supply) : "nothing");
                 if (count <= bestCount) continue;
                 best = n; bestCount = count; bestSupply = supply; bestDock = dock; bestAll = all;
             }
@@ -796,18 +796,18 @@ namespace Automata.Logistics
                 if (dock == null) continue;
                 if (ice && genSomewhere && !networks[n].HasGasGenerators())
                 {
-                    Log.Debug("LC {0}: auction {1}: network {2} has no O2/H2 generator (another one has)", entityId, a.AuctionId, n + 1);
+                    if (Log.DebugEnabled) Log.Debug("LC {0}: auction {1}: network {2} has no O2/H2 generator (another one has)", entityId, a.AuctionId, n + 1);
                     continue;
                 }
                 if (needRefinery && !CanRefine(networks[n], incoming))
                 {
-                    Log.Debug("LC {0}: auction {1}: network {2} has no refinery for {3}", entityId, a.AuctionId, n + 1, DescribeItems(incoming));
+                    if (Log.DebugEnabled) Log.Debug("LC {0}: auction {1}: network {2} has no refinery for {3}", entityId, a.AuctionId, n + 1, DescribeItems(incoming));
                     continue;
                 }
                 bool all;
                 var accept = RoomIn(n, incoming, out all);
                 double volume = accept != null ? (double)accept.TotalInventoryVolume() : 0;
-                Log.Debug("LC {0}: auction {1}: network {2} can take {3}", entityId, a.AuctionId, n + 1, accept != null ? DescribeItems(accept) : "nothing");
+                if (Log.DebugEnabled) Log.Debug("LC {0}: auction {1}: network {2} can take {3}", entityId, a.AuctionId, n + 1, accept != null ? DescribeItems(accept) : "nothing");
                 if (accept == null || volume <= 0) continue;
                 // Ice with no O2/H2 generator here: the network with the best refinery first (the drone also brings
                 // stone / other ores; the orchestrator may send it here for those), then the most room
@@ -905,7 +905,7 @@ namespace Automata.Logistics
                 if (wants && maximums.TryGetValue(ingot, out max) && have.GetItemCount(ingot) >= max) wants = false;
             }
             kv.Clear();
-            if (!wants) Log.Debug("LC {0}: ore {1} not wanted: Max reached (ore or its ingot)", entityId, DescribeItems(ores));
+            if (!wants) if (Log.DebugEnabled) Log.Debug("LC {0}: ore {1} not wanted: Max reached (ore or its ingot)", entityId, DescribeItems(ores));
             return wants;
         }
 
@@ -970,7 +970,7 @@ namespace Automata.Logistics
             entry.AppendLoc(StrLogBid, BidKind(a), ConnectorName(dock.EntityId));
             Nicknames.AppendPayload(entry, Loc.T(StrLogPayload), items);
             log.Add(entry.ToString());
-            Log.Debug("LC {0}: bid on auction {1} ({2}) from {3}, port {4} ({8}): {5} {6} ({7})", entityId, a.AuctionId, a.JobType,
+            if (Log.DebugEnabled) Log.Debug("LC {0}: bid on auction {1} ({2}) from {3}, port {4} ({8}): {5} {6} ({7})", entityId, a.AuctionId, a.JobType,
                       network.Nickname, dock.EntityId, fulfillment, DescribeItems(items), error, DockFit.Describe(msg.Payload.DockSite));
         }
 
@@ -994,7 +994,7 @@ namespace Automata.Logistics
                         own.HeldUntil = 0;
                         own.DronesOut = award.TaskAssignments != null ? award.TaskAssignments.Count : 0;
                         own.LastResult = Loc.T(StrAssigned);
-                        Log.Debug("LC {0}: job {1} ({2}) awarded by orchestrator {3}", entityId, own.JobId, own.Type, awardInbox[i].SenderId);
+                        if (Log.DebugEnabled) Log.Debug("LC {0}: job {1} ({2}) awarded by orchestrator {3}", entityId, own.JobId, own.Type, awardInbox[i].SenderId);
                     }
                 }
                 if (!commitments.ContainsKey(award.AuctionId) || !seenAwards.Add(award.AuctionId)) continue;
@@ -1008,7 +1008,7 @@ namespace Automata.Logistics
                 if (!won)
                 {
                     commitments.Remove(award.AuctionId);
-                    Log.Debug("LC {0}: lost auction {1} (job {2}): promise released", entityId, award.AuctionId, award.JobId);
+                    if (Log.DebugEnabled) Log.Debug("LC {0}: lost auction {1} (job {2}): promise released", entityId, award.AuctionId, award.JobId);
                 }
                 else
                 {
@@ -1017,7 +1017,7 @@ namespace Automata.Logistics
                     c.Won = true;
                     c.Drones = drones;
                     c.Frame = now;
-                    Log.Debug("LC {0}: won auction {1} (job {2}): {3} reserved", entityId, award.AuctionId, award.JobId, c.Supply ? "items" : "room");
+                    if (Log.DebugEnabled) Log.Debug("LC {0}: won auction {1} (job {2}): {3} reserved", entityId, award.AuctionId, award.JobId, c.Supply ? "items" : "room");
                 }
             }
             awardInbox.Clear();
@@ -1045,12 +1045,12 @@ namespace Automata.Logistics
                         if (held.Drones == null || held.Drones.Count == 0)   // the last drone docking here (null: restored save)
                         {
                             commitments.Remove(r.AuctionId);
-                            Log.Debug("LC {0}: auction {1}: drone {2} {3}, reservation released", entityId, r.AuctionId, r.DroneEntityId, r.Outcome);
+                            if (Log.DebugEnabled) Log.Debug("LC {0}: auction {1}: drone {2} {3}, reservation released", entityId, r.AuctionId, r.DroneEntityId, r.Outcome);
                         }
                         else
                         {
                             held.Frame = now;
-                            Log.Debug("LC {0}: auction {1}: drone {2} {3}, {4} drone(s) still hold the reservation", entityId, r.AuctionId,
+                            if (Log.DebugEnabled) Log.Debug("LC {0}: auction {1}: drone {2} {3}, {4} drone(s) still hold the reservation", entityId, r.AuctionId,
                                       r.DroneEntityId, r.Outcome, held.Drones.Count);
                         }
                     }
@@ -1065,7 +1065,7 @@ namespace Automata.Logistics
                         lastQuotaCheck = int.MinValue / 2;   // closed / re-opened at once
                     }
                     job.LastResult = Loc.F(StrDroneOutcome, r.Outcome);
-                    Log.Debug("LC {0}: job {1} ({2}): drone {3} {4} ({5}); {6}", entityId, job.JobId, job.Type, r.DroneEntityId, r.Outcome, r.Reason,
+                    if (Log.DebugEnabled) Log.Debug("LC {0}: job {1} ({2}): drone {3} {4} ({5}); {6}", entityId, job.JobId, job.Type, r.DroneEntityId, r.Outcome, r.Reason,
                               job.Finished ? "closing" : job.DronesOut + " drone(s) still out");
                 }
                 reportInbox.Clear();
@@ -1105,14 +1105,14 @@ namespace Automata.Logistics
                 if (commitments.TryGetValue(f.AuctionId, out held) && !held.Won)
                 {
                     commitments.Remove(f.AuctionId);
-                    Log.Debug("LC {0}: auction {1} dropped ({2}): promise released", entityId, f.AuctionId, f.Reason);
+                    if (Log.DebugEnabled) Log.Debug("LC {0}: auction {1} dropped ({2}): promise released", entityId, f.AuctionId, f.Reason);
                 }
                 if (f.AnnouncerEntityId != entityId) continue;
                 var job = requestJob != null && requestJob.JobId == f.JobId ? requestJob : pushJob != null && pushJob.JobId == f.JobId ? pushJob : null;
                 if (job == null || job.Assigned != 0 || (job.HeldUntil != 0 && job.HeldUntil > now)) continue;
                 job.HeldUntil = now + Math.Max(10, f.HoldSeconds) * 60;
                 job.LastResult = Loc.F(StrOnHoldReason, f.Reason);
-                Log.Debug("LC {0}: job {1} ({2}) on hold for {3} s: orchestrator {4}: {5}", entityId, job.JobId, job.Type, f.HoldSeconds,
+                if (Log.DebugEnabled) Log.Debug("LC {0}: job {1} ({2}) on hold for {3} s: orchestrator {4}: {5}", entityId, job.JobId, job.Type, f.HoldSeconds,
                           f.OrchestratorEntityId, f.Reason);
             }
             failureInbox.Clear();
@@ -1140,7 +1140,7 @@ namespace Automata.Logistics
             for (int i = 0; i < cleanup.Count; i++)
             {
                 commitments.Remove(cleanup[i]);
-                Log.Debug("LC {0}: promise for auction {1} expired", entityId, cleanup[i]);
+                if (Log.DebugEnabled) Log.Debug("LC {0}: promise for auction {1} expired", entityId, cleanup[i]);
             }
         }
         #endregion
@@ -1224,7 +1224,7 @@ namespace Automata.Logistics
             foreach (var c in commitments)
                 s.Commitments.Add(new CommitmentState { AuctionId = c.Key, Items = c.Value.Items, Volume = c.Value.Volume, AgeTicks = BlockSave.Age(c.Value.Frame),
                                                          Supply = c.Value.Supply, Network = c.Value.Network, Won = c.Value.Won, JobId = c.Value.JobId });
-            Log.Debug("LC {0}: state saved: request {1}, push {2}, {3} promise(s)", entityId,
+            if (Log.DebugEnabled) Log.Debug("LC {0}: state saved: request {1}, push {2}, {3} promise(s)", entityId,
                       requestJob != null ? requestJob.JobId : 0, pushJob != null ? pushJob.JobId : 0, s.Commitments.Count);
             return s;
         }
@@ -1373,7 +1373,7 @@ namespace Automata.Logistics
         public bool Terminal_RemoveQuota()
         {
             if (Terminal_SelectedQuota < 0 || Terminal_SelectedQuota >= settings.Quotas.Count) return false;
-            Log.Debug("LC {0}: Min/Max '{1}' removed", entityId, settings.Quotas[Terminal_SelectedQuota]);
+            if (Log.DebugEnabled) Log.Debug("LC {0}: Min/Max '{1}' removed", entityId, settings.Quotas[Terminal_SelectedQuota]);
             settings.Quotas.RemoveAt(Terminal_SelectedQuota);
             Terminal_SelectedQuota = -1;
             Terminal_EditText.Clear();
@@ -1415,7 +1415,7 @@ namespace Automata.Logistics
             else if (existing >= 0) { settings.Quotas[existing] = text; Terminal_SelectedQuota = existing; }
             else { settings.Quotas.Add(text); Terminal_SelectedQuota = settings.Quotas.Count - 1; }
             Terminal_EditText.Clear().Append(text);
-            Log.Debug("LC {0}: Min/Max '{1}' set", entityId, text);
+            if (Log.DebugEnabled) Log.Debug("LC {0}: Min/Max '{1}' set", entityId, text);
             SettingsEdited();
         }
 

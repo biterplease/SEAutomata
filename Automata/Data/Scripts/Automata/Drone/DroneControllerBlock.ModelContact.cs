@@ -82,7 +82,7 @@ namespace Automata.Drone
                 VRage.ModAPI.IMyEntity hitEntity;
                 if (pm.SegmentBlocked(ref pq, ref att, hull, hull + move, 0.5, out hit, out hitEntity, false, false))
                 {
-                    Log.Debug("Drone {0}: tool sphere misses the model of {1} ({2:F1} m off), and the way onto it is blocked by {3}",
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: tool sphere misses the model of {1} ({2:F1} m off), and the way onto it is blocked by {3}",
                               Entity.EntityId, slim.BlockDefinition.Id.SubtypeName, dist - r, hitEntity != null ? hitEntity.DisplayName : "something");
                     contactMoves = CONTACT_MOVES_MAX;
                     return;
@@ -98,7 +98,7 @@ namespace Automata.Drone
                     return;
             }
             MatrixD frame = flightState.WorldMatrix;
-            Log.Debug("Drone {0}: tool sphere misses the model of {1} at {2} ({3:F1} m off the sphere): sliding the tool {4:F1} m onto it ({5}/{6})",
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: tool sphere misses the model of {1} at {2} ({3:F1} m off the sphere): sliding the tool {4:F1} m onto it ({5}/{6})",
                       Entity.EntityId, slim.BlockDefinition.Id.SubtypeName, slim.Position, dist - r, move.Length(), contactMoves, CONTACT_MOVES_MAX);
             if (FlyStrafe(anchor, ref am, target, ref mount, ref frame))
                 SetToolEnabled(task.Type, true);   // the strafe switched the tools off

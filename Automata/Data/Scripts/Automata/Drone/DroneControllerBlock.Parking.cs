@@ -457,7 +457,7 @@ namespace Automata.Drone
                 Vector3D l = Vector3D.Transform(s, inv);
                 return Math.Abs(l.X) <= hx + 0.5 && Math.Abs(l.Z) <= hz + 0.5 && l.Y >= -hy - 2 && l.Y <= hy + 0.5;
             }, where, out spot, out tried);
-            Log.Debug("Drone {0}: park: {1} in the parking area ({2} ray(s), {3})", Entity.EntityId, ok ? "spot" : "no free spot", tried, GearSummary());
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: park: {1} in the parking area ({2} ray(s), {3})", Entity.EntityId, ok ? "spot" : "no free spot", tried, GearSummary());
             return ok;
         }
 
@@ -564,12 +564,12 @@ namespace Automata.Drone
                 total += tried;
                 if (ok)
                 {
-                    Log.Debug("Drone {0}: park: spot on friendly grid '{1}' after {2} ray(s)", Entity.EntityId, grid.DisplayName, total);
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: park: spot on friendly grid '{1}' after {2} ray(s)", Entity.EntityId, grid.DisplayName, total);
                     nearGrids.Clear();
                     return true;
                 }
             }
-            Log.Debug("Drone {0}: park: no free spot on {1} friendly static grid(s) ({2} ray(s), {3})", Entity.EntityId, nearGrids.Count, total, GearSummary());
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: park: no free spot on {1} friendly static grid(s) ({2} ray(s), {3})", Entity.EntityId, nearGrids.Count, total, GearSummary());
             nearGrids.Clear();
             return false;
         }
@@ -622,11 +622,11 @@ namespace Automata.Drone
                 total += tried;
                 if (ok)
                 {
-                    Log.Debug("Drone {0}: park: voxel spot ({1} surface(s) tried, pass {2}, {3})", Entity.EntityId, total, pass + 1, GearSummary());
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: park: voxel spot ({1} surface(s) tried, pass {2}, {3})", Entity.EntityId, total, pass + 1, GearSummary());
                     return true;
                 }
             }
-            Log.Debug("Drone {0}: park: no free voxel spot ({1} surface(s) tried, {2})", Entity.EntityId, total, GearSummary());
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: park: no free voxel spot ({1} surface(s) tried, {2})", Entity.EntityId, total, GearSummary());
             return false;
         }
 
@@ -914,7 +914,7 @@ namespace Automata.Drone
                     && !needsHydrogenRefuel && preflightStage == 0 && activeFlightOrder == null && dockingHomeId == 0 && !CombatHoldsControl
                     && now - lastParkTryFrame >= AUTO_HOME_RETRY_TICKS)
                 {
-                    Log.Debug("Drone {0}: park: docked with nothing to do here", Entity.EntityId);
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: park: docked with nothing to do here", Entity.EntityId);
                     GoPark();
                 }
                 return;
@@ -977,7 +977,7 @@ namespace Automata.Drone
         {
             parkFails++;
             parkRejected.Add(parkSpot);
-            Log.Debug("Drone {0}: park: failed ({1}), attempt {2}", Entity.EntityId, why, parkFails);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: park: failed ({1}), attempt {2}", Entity.EntityId, why, parkFails);
             EndPark(why);
             if (parkFails < 3) { if (GoPark()) return; }
             Report(StrParkFailedWaiting, why);
@@ -1086,7 +1086,7 @@ namespace Automata.Drone
                     return true;
                 }
             }
-            Log.Debug("Drone {0}: recharge: no free connector it can dock at within {1:F0} m ({2} candidate(s))", Entity.EntityId, CHARGE_SEARCH_RADIUS, chargeCandidates.Count);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: recharge: no free connector it can dock at within {1:F0} m ({2} candidate(s))", Entity.EntityId, CHARGE_SEARCH_RADIUS, chargeCandidates.Count);
             chargeCandidates.Clear();
             return false;
         }

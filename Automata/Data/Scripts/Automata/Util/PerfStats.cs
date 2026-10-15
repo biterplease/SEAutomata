@@ -79,7 +79,7 @@ namespace Automata.Util
                 sb.Append(Names[i]).Append(": ").Append(count[i]).Append("x, ").Append(total[i].ToString("F2")).Append(" ms total, avg ")
                   .Append((total[i] / count[i]).ToString("F3")).Append(" ms, max ").Append(max[i].ToString("F2")).Append(" ms, ")
                   .Append((total[i] * 100.0 / budget).ToString("F3")).Append("% of server time");
-                Log.Debug("Perf ({0:F0} s): {1}", ticks / 60.0, sb.ToString());
+                if (Log.DebugEnabled) Log.Debug("Perf ({0:F0} s): {1}", ticks / 60.0, sb.ToString());
                 count[i] = 0;
                 total[i] = 0;
                 max[i] = 0;

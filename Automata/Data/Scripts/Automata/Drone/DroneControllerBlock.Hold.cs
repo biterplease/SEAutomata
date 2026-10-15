@@ -76,7 +76,7 @@ namespace Automata.Drone
             holdOrder = o;
             holdReason = why;
             holdPos = flightState.Position;
-            Log.Debug("Drone {0}: holding on the dampeners ({1})", _entityId, why);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: holding on the dampeners ({1})", _entityId, why);
         }
 
         /// <summary>Every tick while holding: true while the hold goes on (the flight tick is skipped).</summary>
@@ -102,7 +102,7 @@ namespace Automata.Drone
         private void EndHold(string why, bool drift)
         {
             if (!holdActive) return;
-            Log.Debug("Drone {0}: dampener hold ends ({1}, {2}): normal control", _entityId, holdReason, why);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: dampener hold ends ({1}, {2}): normal control", _entityId, holdReason, why);
             holdActive = false;
             holdOrder = null;
             holdReason = null;

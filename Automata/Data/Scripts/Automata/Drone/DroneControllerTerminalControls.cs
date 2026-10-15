@@ -348,7 +348,7 @@ namespace Automata.Drone
 
             foreach (IMyTerminalControl c in controls)
             {
-                Log.Debug("init print actions: action {0}", c.Id);
+                if (Log.DebugEnabled) Log.Debug("init print actions: action {0}", c.Id);
                 if (defaultExplicitRemoveControls.Contains(c.Id) || c.Id != null && c.Id.StartsWith(IdPrefix))
                 {
                     c.Visible = TerminalChainedDelegate.Create(c.Visible, AppendedCondition);    

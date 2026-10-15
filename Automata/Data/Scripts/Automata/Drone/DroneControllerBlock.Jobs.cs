@@ -165,7 +165,7 @@ namespace Automata.Drone
             if (startIndex == 0 && source != JobSource.Housekeeping) PrepareCargoForJob(job);   // starts empty
             else clearTripInserted = false;
             Report(StrStartingJobBlocksTasks, job.JobId, job.BlockCount, job.Tasks != null ? job.Tasks.Count : 0, Orchestrator.JobTypeExtensions.Label(job.JobType, job.WeldCategory));
-            Log.Debug("Drone {0}: job {1}: {2}, {3}", Entity.EntityId, job.JobId, source, job.JobType);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: job {1}: {2}, {3}", Entity.EntityId, job.JobId, source, job.JobType);
             RunTasks();
         }
 
@@ -216,7 +216,7 @@ namespace Automata.Drone
             currentJob.Tasks.Insert(at + added, Orchestrator.Task.ReturnHome());   // and home after those (or on again)
             currentJob.BlockCount += more.BlockCount;
             fieldContinuations++;
-            Log.Debug("Drone {0}: continuing in the field ({1}/{2}): {3} more blocks from what it carries", Entity.EntityId,
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: continuing in the field ({1}/{2}): {3} more blocks from what it carries", Entity.EntityId,
                       fieldContinuations, FIELD_CONTINUATIONS_MAX, more.BlockCount);
             return true;
         }
@@ -262,7 +262,7 @@ namespace Automata.Drone
             {
                 // Nothing got done (all unreachable / timed out): not straight back into the same trip
                 lastConstructionScanFrame = MyAPIGateway.Session.GameplayFrameCounter;
-                Log.Debug("Drone {0}: trip made no progress, next scan in {1} s", Entity.EntityId,
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: trip made no progress, next scan in {1} s", Entity.EntityId,
                           AutomataSession.GetConfig().ConstructionComputer.DroneScanIntervalSeconds);
             }
             else lastConstructionScanFrame = int.MinValue / 2;   // stand-alone: next trip right away
@@ -573,7 +573,7 @@ namespace Automata.Drone
                     if (ClearsCargo) ClearCargo();   // leftovers of earlier work out first: it carries this load only
                     int planned = task.Inventory.GetTotalItemCount();
                     int moved = TransferToDrone(task.Inventory);
-                    Log.Debug("Drone {0}: load at {1}: {2}/{3} items ({4})", Entity.EntityId, source.CustomName, moved, planned,
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: load at {1}: {2}/{3} items ({4})", Entity.EntityId, source.CustomName, moved, planned,
                               DescribeTop(task.Inventory, 6));
                     if (moved < planned && moved > 0 && currentJob.BlockCount == 0)
                     {
@@ -606,10 +606,10 @@ namespace Automata.Drone
                     bool allOre = currentJob.JobType == Orchestrator.JobType.MineOre && currentJob.IndexOf(Orchestrator.TaskType.UnloadInventory, taskIndex + 1) < 0;
                     if (!UnloadCargo(task.Inventory, allOre))
                     {
-                        Log.Debug("Drone {0}: unload at {1}: no room for everything", Entity.EntityId, target.CustomName);
+                        if (Log.DebugEnabled) Log.Debug("Drone {0}: unload at {1}: no room for everything", Entity.EntityId, target.CustomName);
                         return Fail(Orchestrator.TaskFailure.NoCargoSpace, TaskStatus.Failed);
                     }
-                    Log.Debug("Drone {0}: unloaded at {1} ({2})", Entity.EntityId, target.CustomName,
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: unloaded at {1} ({2})", Entity.EntityId, target.CustomName,
                               task.Inventory != null && !task.Inventory.IsEmpty() ? DescribeTop(task.Inventory, 6) : "all components");
                     return TaskStatus.Done;
                 }
@@ -629,7 +629,7 @@ namespace Automata.Drone
                         if (already != Orchestrator.TaskFailure.None) return Fail(already, TaskStatus.SkipBlock);
                         if (ProbedUnreachable(ref tool))
                         {
-                            Log.Debug("Drone {0}: block {1}: no work site (pre-load check): skipped", Entity.EntityId, tool.TargetBlock.ToVector3I());
+                            if (Log.DebugEnabled) Log.Debug("Drone {0}: block {1}: no work site (pre-load check): skipped", Entity.EntityId, tool.TargetBlock.ToVector3I());
                             return Fail(Orchestrator.TaskFailure.Unreachable, TaskStatus.SkipBlock);
                         }
                         if (tool.Type == Orchestrator.TaskType.Mine && !mineSiteFixed) PlanMineSite(ref task, ref tool);   // angled bore for a sideways drill (rebores: set already)
@@ -701,7 +701,7 @@ namespace Automata.Drone
                     Vector3D awayBack;
                     if (PushBlocked(out awayBack))
                     {
-                        Log.Debug("Drone {0}: back-out pressed against something: stopped there", Entity.EntityId);
+                        if (Log.DebugEnabled) Log.Debug("Drone {0}: back-out pressed against something: stopped there", Entity.EntityId);
                         PlanContactBackOut(awayBack, false);
                         pushBlockedTicks = 0;
                         ClearFlightOrder();
@@ -778,7 +778,7 @@ namespace Automata.Drone
                         if (ToolTarget(ref task, out gone) == null)
                         {
                             SetToolEnabled(task.Type, false);
-                            Log.Debug("Drone {0}: projected block at {1} not built after {2} s of welding: skipped", Entity.EntityId,
+                            if (Log.DebugEnabled) Log.Debug("Drone {0}: projected block at {1} not built after {2} s of welding: skipped", Entity.EntityId,
                                       task.TargetBlock.ToVector3I(), PROJECTED_APPEAR_TICKS / 60);
                             return Fail(Orchestrator.TaskFailure.Timeout, TaskStatus.Done);
                         }
@@ -810,7 +810,7 @@ namespace Automata.Drone
                         if (DockedInNetworkOf(target, out dockedHere))
                         {
                             lastCargoPortId = dockedHere.EntityId;
-                            Log.Debug("Drone {0}: already docked at {1}, same network as {2}: no new dock", Entity.EntityId, dockedHere.CustomName, target.CustomName);
+                            if (Log.DebugEnabled) Log.Debug("Drone {0}: already docked at {1}, same network as {2}: no new dock", Entity.EntityId, dockedHere.CustomName, target.CustomName);
                             return TaskStatus.Done;
                         }
                         ToolsOff();
@@ -865,7 +865,7 @@ namespace Automata.Drone
 
                 default:
                     // DeliverMessage: not implemented yet
-                    Log.Debug("Drone {0}: task {1} not supported yet, skipped", Entity.EntityId, task.Type);
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: task {1} not supported yet, skipped", Entity.EntityId, task.Type);
                     return TaskStatus.Done;
             }
         }
@@ -894,7 +894,7 @@ namespace Automata.Drone
             bool sweepPoint = SweepWaypointActive();
             if (sweepPoint && ++scoutSkips <= SCOUT_SKIPS_MAX)
             {
-                Log.Debug("Drone {0}: sweep waypoint {1}/{2} skipped ({3}), {4}/{5} in a row", Entity.EntityId, taskIndex / 2 + 1,
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: sweep waypoint {1}/{2} skipped ({3}), {4}/{5} in a row", Entity.EntityId, taskIndex / 2 + 1,
                           currentJob.Tasks.Count / 2, failure, scoutSkips, SCOUT_SKIPS_MAX);
                 routeFailed = false;
                 ClearFlightOrder();
@@ -1069,7 +1069,7 @@ namespace Automata.Drone
             int stalled = now - taskProgressFrame;
             if (constructionLegs.Contains(o) && d < CONSTRUCTION_LEG_CLOSE && stalled > CONSTRUCTION_LEG_SETTLE_TICKS)
             {
-                Log.Debug("Drone {0}: detour leg settled {1:F1} m off, moving on", Entity.EntityId, d);
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: detour leg settled {1:F1} m off, moving on", Entity.EntityId, d);
                 ForceLegHandover();
                 taskBestDistance = double.MaxValue;
                 taskProgressFrame = now;
@@ -1162,7 +1162,7 @@ namespace Automata.Drone
         {
             if (++siteRedispatches > SITE_REDISPATCH_MAX)
             {
-                Log.Debug("Drone {0}: block {1}: {2}; {3} work sites tried, skipping it", Entity.EntityId, tool.TargetBlock.ToVector3I(), why, SITE_REDISPATCH_MAX);
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: block {1}: {2}; {3} work sites tried, skipping it", Entity.EntityId, tool.TargetBlock.ToVector3I(), why, SITE_REDISPATCH_MAX);
                 return Orchestrator.TaskFailure.Unreachable;
             }
             if (rejectSite && siteChosen)
@@ -1174,7 +1174,7 @@ namespace Automata.Drone
                     siteRejectNormals.Add(siteNormal);
                 }
             }
-            Log.Debug("Drone {0}: block {1}: {2}; choosing its work site again{3} ({4}/{5})", Entity.EntityId, tool.TargetBlock.ToVector3I(), why,
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: block {1}: {2}; choosing its work site again{3} ({4}/{5})", Entity.EntityId, tool.TargetBlock.ToVector3I(), why,
                       rejectSite && siteChosen ? string.Format(" without face {0} side {1}", siteCell, siteNormal) : "", siteRedispatches, SITE_REDISPATCH_MAX);
             ClearFlightOrder();
             routeOwner = RouteOwner.None;
@@ -1250,10 +1250,10 @@ namespace Automata.Drone
             double run = FreeRun(start, to, len, out blocker);
             if (run < BACK_OUT_MIN)
             {
-                Log.Debug("Drone {0}: no room to back out ({1} {2:F1} m away): planning from where it is", Entity.EntityId, blocker, len);
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: no room to back out ({1} {2:F1} m away): planning from where it is", Entity.EntityId, blocker, len);
                 return;
             }
-            Log.Debug("Drone {0}: backing out {1:F1} m first{2}", Entity.EntityId, run,
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: backing out {1:F1} m first{2}", Entity.EntityId, run,
                       blocker != null ? string.Format(" (of {0:F1} m: {1} in the way)", len, blocker) : "");
             start += to * run;
             points.Add(start);
@@ -1276,7 +1276,7 @@ namespace Automata.Drone
             if (NearDockArea(HullCentreWorld)) return false;
             pushBlockedTicks = 0;
             if (++contactReplans > CONTACT_REPLANS_MAX) return false;
-            Log.Debug("Drone {0}: pressed against something on the way ({1}/{2}): backing off, new route", Entity.EntityId,
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: pressed against something on the way ({1}/{2}): backing off, new route", Entity.EntityId,
                       contactReplans, CONTACT_REPLANS_MAX);
             PlanContactBackOut(away, false);
             lastReplanFrame = MyAPIGateway.Session.GameplayFrameCounter;
@@ -1305,14 +1305,14 @@ namespace Automata.Drone
             for (int i = 0; i < gyroscopes.Count; i++) if (gyroscopes[i].Gyro.IsWorking) gyrosWorking++;
             double tiltNow = flightState.InGravity ? MathHelperD.ToDegrees(Math.Acos(MathHelperD.Clamp(Vector3D.Dot(wm.Up, flightState.GravityUp), -1, 1))) : 0;
             double tiltWanted = flightState.InGravity ? MathHelperD.ToDegrees(Math.Acos(MathHelperD.Clamp(Vector3D.Dot(up, flightState.GravityUp), -1, 1))) : 0;
-            Log.Debug("Drone {0}: stalled on {1}, phase {2}: {3:F1} m from its target (best {4:F1} m), speed {5:F2} m/s, "
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: stalled on {1}, phase {2}: {3:F1} m from its target (best {4:F1} m), speed {5:F2} m/s, "
                       + "attitude off by {6:F0}° (forward) / {7:F0}° (up), tilt from level {8:F0}° (wanted {9:F0}°), turning {10:F2} rad/s "
                       + "(asked {11:F2}, gyro accel est. {12:F2} rad/s², {13}/{14} gyros working), {15} legs queued, gravity {16:F1} m/s²",
                       Entity.EntityId, which, o.Phase, d, taskBestDistance, flightState.LinearVelocity.Length(), angle, upAngle,
                       tiltNow, tiltWanted, flightState.AngularVelocity.Length(), lastDesiredRotSpeed, rotAlphaEstimate, gyrosWorking,
                       gyroscopes.Count, queuedLegs.Count + (nextLeg != null ? 1 : 0), flightState.InGravity ? flightState.Gravity.Length() : 0);
             // Why it doesn't move: what the controller asks, what caps it, what it can push with
-            Log.Debug("Drone {0}: stall detail: command {1:F2} m/s (profile {2:F2} m/s x gate {3:F2}), order cap {4}, lane cap {5}, "
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: stall detail: command {1:F2} m/s (profile {2:F2} m/s x gate {3:F2}), order cap {4}, lane cap {5}, "
                       + "yielding {6}, economy {7}, accel cap {8:F2} m/s² (Max thrust {9:F0} %), thrust overrides {10}, "
                       + "face max F {11} B {12} L {13} R {14} U {15} D {16}, mass {17:F0} kg",
                       Entity.EntityId, commandedVelocity.Length(), diagAlong, diagGate, o.SpeedCap > 0 ? o.SpeedCap.ToString("F2") : "-",
@@ -1322,7 +1322,7 @@ namespace Automata.Drone
                       DroneStatusDisplay.Force(EffectiveMax(Base6Directions.Direction.Left)), DroneStatusDisplay.Force(EffectiveMax(Base6Directions.Direction.Right)),
                       DroneStatusDisplay.Force(EffectiveMax(Base6Directions.Direction.Up)), DroneStatusDisplay.Force(EffectiveMax(Base6Directions.Direction.Down)),
                       physicalMass);
-            Log.Debug("Drone {0}: stall detail: dampeners {1}, throttle F {2:P0} B {3:P0} L {4:P0} R {5:P0} U {6:P0} D {7:P0}, "
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: stall detail: dampeners {1}, throttle F {2:P0} B {3:P0} L {4:P0} R {5:P0} U {6:P0} D {7:P0}, "
                       + "integral F {8:F2} U {9:F2} R {10:F2}, line integral {11:F2} m/s, asked {12:F2} m/s, moving {13:F2} m/s that way, "
                       + "pressed {14:F1} s, thrust obstructed {15}, gear locked {16}, connector locked {17}, connector status {18}",
                       Entity.EntityId, shipController != null && shipController.DampenersOverride,
@@ -1332,7 +1332,7 @@ namespace Automata.Drone
                       integralForward, integralUp, integralRight, xtIntegral.Length(), pushAsked, pushMoved, pushBlockedTicks / 60.0,
                       thrustObstructedDir >= 0 ? ((Base6Directions.Direction)thrustObstructedDir).ToString() : "no",
                       AnyGearLocked(), AnyConnectorLocked(), ConnectorStatuses());
-            Log.Debug("Drone {0}: stall detail: {1}", Entity.EntityId, ThrustAndContactDiag());
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: stall detail: {1}", Entity.EntityId, ThrustAndContactDiag());
             // Turning to a work attitude it can't hold (tilted too far for its thrusters / gyros in gravity): later
             // approaches stay below that tilt (runtime only)
             if (o == constructionOrder && (o.Phase == FlightPhase.Align || o.DirectApproach) && flightState.InGravity && angle > 15 && tiltWanted > 20)
@@ -1341,7 +1341,7 @@ namespace Automata.Drone
                 if (limit < maxWorkTiltDegrees)
                 {
                     maxWorkTiltDegrees = limit;
-                    Log.Debug("Drone {0}: couldn't turn to a {1:F0}° tilt from level: work attitudes limited to {2:F0}° from now on",
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: couldn't turn to a {1:F0}° tilt from level: work attitudes limited to {2:F0}° from now on",
                               Entity.EntityId, tiltWanted, limit);
                 }
             }
@@ -1532,7 +1532,7 @@ namespace Automata.Drone
                         Vector3D sc, ap;
                         // Straight in, else tilted: the cheapest approach whose way in is clear
                         ApproachCandidates(ref mount, grid, normal, fn, toDrone, gUp);
-                        Log.Debug("Drone {0}: block {1}{6}: face {2} side {3} (up {4:F2}), {5} approaches to try",
+                        if (Log.DebugEnabled) Log.Debug("Drone {0}: block {1}{6}: face {2} side {3} (up {4:F2}), {5} approaches to try",
                                   Entity.EntityId, tool.TargetBlock.ToVector3I(), faceCell, normal, Vector3D.Dot(fn, gUp.LengthSquared() > 0.5 ? gUp : topUp),
                                   Math.Min(approachDirs.Count, APPROACHES_PER_FACE),
                                   pass == 0 ? string.Format(" (unit {0}..{1})", emin, emax) : pass == 1 ? string.Format(" (through welded blocks, {0}..{1})", emin, emax)
@@ -1570,7 +1570,7 @@ namespace Automata.Drone
                             }
                         }
                         if (refused > 0)
-                            Log.Debug("Drone {0}:   {1} approaches refused{2}; first: {3}{4}", Entity.EntityId, refused,
+                            if (Log.DebugEnabled) Log.Debug("Drone {0}:   {1} approaches refused{2}; first: {3}{4}", Entity.EntityId, refused,
                                       found ? " before one fit" : "", firstWhy, lastWhy != null ? "; last: " + lastWhy : "");
                         if (!found)
                         {
@@ -1636,13 +1636,13 @@ namespace Automata.Drone
             {
                 onFace = true;
                 if (!FlyStrafe(anchor, ref am, sphereCentre, ref mount, ref frame)) return Orchestrator.TaskFailure.Unreachable;
-                Log.Debug("Drone {0}: {1} at {2}, strafing to face point {3}", Entity.EntityId, tool.Type, tool.TargetBlock.ToVector3I(), point);
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: {1} at {2}, strafing to face point {3}", Entity.EntityId, tool.Type, tool.TargetBlock.ToVector3I(), point);
                 return Orchestrator.TaskFailure.None;
             }
             onFace = false;
             var failure = FlyRoute(anchor, ref am, sphereCentre, approach, hull, mount.LocalPoint, ref frame, grid != null);
             if (failure == Orchestrator.TaskFailure.None)
-                Log.Debug("Drone {0}: {1} at {2}, face point {3}, normal {4}, approach tilted {5:F0}°, {6:F1} m out, work attitude {7}{8}", Entity.EntityId, tool.Type,
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: {1} at {2}, face point {3}, normal {4}, approach tilted {5:F0}°, {6:F1} m out, work attitude {7}{8}", Entity.EntityId, tool.Type,
                           tool.TargetBlock.ToVector3I(), point, dirW, MathHelperD.ToDegrees(Math.Acos(MathHelperD.Clamp(Vector3D.Dot(dirA, dirW), -1, 1))),
                           Vector3D.Distance(approach, sphereCentre), DescribeAttitude(ref frame), SiteShapeNote());
             return failure;
@@ -1727,7 +1727,7 @@ namespace Automata.Drone
                     strafeNormal = normal;
                     strafeGridId = grid.EntityId;
                     onFace = true;
-                    Log.Debug("Drone {0}: next block in the same unit ({1}), staying", Entity.EntityId, tool.TargetBlock.ToVector3I());
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: next block in the same unit ({1}), staying", Entity.EntityId, tool.TargetBlock.ToVector3I());
                     return true;
                 }
             }
@@ -1741,7 +1741,7 @@ namespace Automata.Drone
             strafeGridId = grid.EntityId;
             onFace = true;
             ToolsOff();
-            Log.Debug("Drone {0}: next block contiguous ({1} -> {2}), strafing instead of backing out", Entity.EntityId, fromCell, next);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: next block contiguous ({1} -> {2}), strafing instead of backing out", Entity.EntityId, fromCell, next);
             return true;
         }
 
@@ -1810,10 +1810,10 @@ namespace Automata.Drone
                 {
                     if (run < BACK_OUT_MIN)
                     {
-                        Log.Debug("Drone {0}: no back-out: {1} behind ({2:F1} m line); the next route starts here", Entity.EntityId, blocker, len);
+                        if (Log.DebugEnabled) Log.Debug("Drone {0}: no back-out: {1} behind ({2:F1} m line); the next route starts here", Entity.EntityId, blocker, len);
                         return false;
                     }
-                    Log.Debug("Drone {0}: back-out shortened to {1:F1} m of {2:F1} m: {3} behind", Entity.EntityId, run, len, blocker);
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: back-out shortened to {1:F1} m of {2:F1} m: {3} behind", Entity.EntityId, run, len, blocker);
                     target = here + dir * run;
                 }
             }
@@ -1896,7 +1896,7 @@ namespace Automata.Drone
                 Vector3D up = flightState.InGravity ? flightState.GravityUp : flightState.WorldMatrix.Up;
                 if (SegmentObstacleTop(approach, target, up, 0, 0, out top))
                 {
-                    Log.Debug("Drone {0}: approach line blocked", Entity.EntityId);
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: approach line blocked", Entity.EntityId);
                     return Orchestrator.TaskFailure.Unreachable;
                 }
             }
@@ -2077,7 +2077,7 @@ namespace Automata.Drone
                 MatrixD f;
                 Vector3D sc, ap;
                 if (WorkSite(ref mount, fp, fn, dirA, true, true, true, grid, min, max, false, shift, out f, out sc, out ap)) return shift;
-                Log.Debug("Drone {0}: precise weld: the sphere moved {1:F1} m puts the hull in the way ({2}){3}", Entity.EntityId, shift.Length(),
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: precise weld: the sphere moved {1:F1} m puts the hull in the way ({2}){3}", Entity.EntityId, shift.Length(),
                           workSiteWhy ?? "?", k == 0 ? ", trying half" : ", not moved");
             }
             return Vector3D.Zero;
@@ -2126,12 +2126,12 @@ namespace Automata.Drone
             for (int k = 0; k < shifts.Count && k < PRECISE_CHECKS_MAX; k++)
             {
                 if (!WorkSite(ref mount, fp, fn, dirA, true, true, true, grid, min, max, false, shifts[k], out f, out sc, out ap)) continue;
-                Log.Debug("Drone {0}: precise weld: sphere moved {1:F1} m, touches {2} projected neighbour(s) instead of {3}",
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: precise weld: sphere moved {1:F1} m, touches {2} projected neighbour(s) instead of {3}",
                           Entity.EntityId, shifts[k].Length(), (int)(scores[k] / 100), baseline);
                 return shifts[k];
             }
             if (shifts.Count > 0)
-                Log.Debug("Drone {0}: precise weld: no better sphere spot fits; {1} projected neighbour(s) touched", Entity.EntityId, baseline);
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: precise weld: no better sphere spot fits; {1} projected neighbour(s) touched", Entity.EntityId, baseline);
             return Vector3D.Zero;
         }
 
@@ -2373,7 +2373,7 @@ namespace Automata.Drone
                 if (pb == null) continue;
                 if (projector.CanBuild(pb, false) == BuildCheckResult.NotConnected)
                 {
-                    Log.Debug("Drone {0}: projected block at {1} ({2}) not attached to anything built yet: skipped",
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: projected block at {1} ({2}) not attached to anything built yet: skipped",
                               Entity.EntityId, cell, pb.BlockDefinition.Id.SubtypeName);
                     return Orchestrator.TaskFailure.NotAttached;
                 }
@@ -2381,7 +2381,7 @@ namespace Automata.Drone
                 if (def != null && def.Components != null && def.Components.Length > 0 && !CargoHasComponent(def.Components[0].Definition.Id.SubtypeName))
                 {
                     if (!siteProbing)   // (the pre-load check: nothing is aboard yet)
-                    Log.Debug("Drone {0}: projected block at {1} ({2}) needs a {3} to be placed, none aboard: skipped",
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: projected block at {1} ({2}) needs a {3} to be placed, none aboard: skipped",
                               Entity.EntityId, cell, def.Id.SubtypeName, def.Components[0].Definition.Id.SubtypeName);
                     return Orchestrator.TaskFailure.NoPartsAboard;
                 }
@@ -2477,7 +2477,7 @@ namespace Automata.Drone
                     slim.GetMissingComponents(missingBuffer);
                     var sb = new System.Text.StringBuilder();
                     foreach (var kv in missingBuffer) sb.Append(' ').Append(kv.Value).Append(' ').Append(kv.Key);
-                    Log.Debug("Drone {0}: block {1} ({2}, {3:P0} built) still misses:{4}; cargo has:{5}", Entity.EntityId,
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: block {1} ({2}, {3:P0} built) still misses:{4}; cargo has:{5}", Entity.EntityId,
                               task.TargetBlock.ToVector3I(), slim.BlockDefinition.Id.SubtypeName, slim.BuildLevelRatio, sb, DescribeTop(CargoComponents(), 6));
                     return true;
                 }
@@ -2677,12 +2677,12 @@ namespace Automata.Drone
                 List<Orchestrator.Task> tasks;
                 if (award.TaskAssignments == null || !award.TaskAssignments.TryGetValue(_entityId, out tasks) || tasks == null || tasks.Count == 0)
                 {
-                    Log.Debug("Drone {0}: auction {1} (job {2}) went to another drone", _entityId, award.AuctionId, award.JobId);
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: auction {1} (job {2}) went to another drone", _entityId, award.AuctionId, award.JobId);
                     continue;
                 }
                 if (!IsAvailableForJobs)
                 {
-                    Log.Debug("Drone {0}: award for job {1} declined, busy", _entityId, award.JobId);
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: award for job {1} declined, busy", _entityId, award.JobId);
                     QueueJobReport(new JobStatusReport
                     {
                         AnnouncerEntityId = award.AnnouncerEntityId, JobId = award.JobId, AuctionId = award.AuctionId,
@@ -2724,7 +2724,7 @@ namespace Automata.Drone
                 jobAwardType = job.JobType;
                 jobAwardWeld = job.JobType == Orchestrator.JobType.Weld ? job.WeldCategory : Orchestrator.JobTypeExtensions.WELD_ANY;
                 Report(BidWonText(award, job));
-                Log.Debug("Drone {0}: job {1} awarded: {2} tasks{3}", _entityId, award.JobId, tasks.Count, award.SharedSite ? ", shared site" : "");
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: job {1} awarded: {2} tasks{3}", _entityId, award.JobId, tasks.Count, award.SharedSite ? ", shared site" : "");
                 StartJob(job, JobSource.Orchestrator);
                 jobSharedSite = currentJob != null && award.SharedSite && settings.OperationMode == OperationMode.ManagedByOrchestrator;
                 break;   // one job at a time
@@ -2802,14 +2802,13 @@ namespace Automata.Drone
                     if (auctionInbox[i].Payload != null && auctionInbox[i].Payload.AuctionId == pendingBidAuctionId) pendingBidSeenFrame = now;
                 if (DateTime.UtcNow > pendingBidExpires || now - pendingBidSeenFrame > PENDING_BID_SILENCE_TICKS)
                 {
-                    Log.Debug("Drone {0}: auction {1}: no outcome heard, free to bid again", _entityId, pendingBidAuctionId);
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: auction {1}: no outcome heard, free to bid again", _entityId, pendingBidAuctionId);
                     pendingBidAuctionId = 0;   // lost / dropped / never announced
                 }
             }
             if (!IsAvailableForJobs || pendingBidAuctionId != 0)
             {
-                if (auctionInbox.Count > 0 && Log.DebugEnabled)
-                    Log.Debug("Drone {0}: {1} auction(s) read, no bid: {2}", _entityId, auctionInbox.Count,
+                if (auctionInbox.Count > 0 && Log.DebugEnabled) Log.Debug("Drone {0}: {1} auction(s) read, no bid: {2}", _entityId, auctionInbox.Count,
                               pendingBidAuctionId != 0 ? "waiting for the outcome of auction " + pendingBidAuctionId : WhyNotAvailable());
                 auctionInbox.Clear();
                 return;
@@ -2828,7 +2827,7 @@ namespace Automata.Drone
                 {
                     if (noBidLogged.Count > 200) noBidLogged.Clear();
                     if (noBidLogged.Add(auction.AuctionId))   // rebroadcasts: logged once
-                        Log.Debug("Drone {0}: auction {1} ({2}, job {3}): no bid: {4}", _entityId, auction.AuctionId,
+                        if (Log.DebugEnabled) Log.Debug("Drone {0}: auction {1} ({2}, job {3}): no bid: {4}", _entityId, auction.AuctionId,
                                   Orchestrator.JobTypeExtensions.Label(auction.JobType, auction.WeldCategory), auction.JobId, why);
                     continue;
                 }
@@ -2839,8 +2838,7 @@ namespace Automata.Drone
             if (pick != null)
             {
                 var auction = pick;
-                if (bias != Orchestrator.JobTypeExtensions.WELD_ANY && Log.DebugEnabled)
-                    Log.Debug("Drone {0}: bidding on auction {1} ({2}, job {3}){4}", _entityId, auction.AuctionId,
+                if (bias != Orchestrator.JobTypeExtensions.WELD_ANY && Log.DebugEnabled) Log.Debug("Drone {0}: bidding on auction {1} ({2}, job {3}){4}", _entityId, auction.AuctionId,
                               Orchestrator.JobTypeExtensions.Label(auction.JobType, auction.WeldCategory), auction.JobId,
                               auction.JobType == Orchestrator.JobType.Weld && auction.WeldCategory == bias ? ": its own kind of weld" : "");
                 SendBid(queue, auction);
@@ -2990,7 +2988,7 @@ namespace Automata.Drone
                 Channel = Channel.ORCHESTRATOR_AUCTION_BIDS,
             };
             queue.BroadcastMessage(antennaReg, msg);
-            Log.Debug("Drone {0}: bid on auction {1} (job {2}, {3})", _entityId, auction.AuctionId, auction.JobId, auction.JobType);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: bid on auction {1} (job {2}, {3})", _entityId, auction.AuctionId, auction.JobId, auction.JobType);
         }
 
         // The face (Base6Directions.Direction, controller frame) of the tool a weld / grind job uses; null otherwise
@@ -3100,14 +3098,14 @@ namespace Automata.Drone
                 var sent = unsentReportSent[i];
                 if (sent != null && sent.Delivered)
                 {
-                    Log.Debug("Drone {0}: job {1} {2} report to {3}: delivered", _entityId, r.JobId, r.Outcome, r.AnnouncerEntityId);
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: job {1} {2} report to {3}: delivered", _entityId, r.JobId, r.Outcome, r.AnnouncerEntityId);
                     RemoveUnsentReport(i);
                     continue;
                 }
                 if (queue != null && sent != null && queue.InFlight(sent)) continue;
                 if ((DateTime.UtcNow - unsentReportTimes[i]).TotalSeconds > JOB_REPORT_TTL_SECONDS)
                 {
-                    Log.Debug("Drone {0}: job {1} {2} report to {3}: dropped (nobody took it)", _entityId, r.JobId, r.Outcome, r.AnnouncerEntityId);
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: job {1} {2} report to {3}: dropped (nobody took it)", _entityId, r.JobId, r.Outcome, r.AnnouncerEntityId);
                     RemoveUnsentReport(i);
                     continue;
                 }

@@ -176,7 +176,7 @@ namespace Automata.Orchestrator
             if (settings == null || !settings.UseBroadcastController) return;
             string via;
             bool sent = BroadcastControllerSender.Send(block, Loc.F(StrTagged, droneName, mode), out via);
-            Log.Debug("Orchestrator {0}: tagged {1} ({2}), broadcast {3}: {4}", entityId, droneName, mode, sent ? "sent via" : "not sent", via);
+            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: tagged {1} ({2}), broadcast {3}: {4}", entityId, droneName, mode, sent ? "sent via" : "not sent", via);
         }
 
         private bool IsPlayerJob(KeyValuePair<long, uint> key)
@@ -193,7 +193,7 @@ namespace Automata.Orchestrator
             PlayerJob pj;
             if (open.JobKey.Key != entityId || !playerJobs.TryGetValue(open.JobKey.Value, out pj)) return false;
             pj.ExpiresAt = DateTime.UtcNow;
-            Log.Debug("Orchestrator {0}: player job {1} ({2}): no taker ({3})", entityId, pj.JobId, pj.Announcement.Type, why);
+            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: player job {1} ({2}): no taker ({3})", entityId, pj.JobId, pj.Announcement.Type, why);
             return true;
         }
 
@@ -312,7 +312,7 @@ namespace Automata.Orchestrator
             }
             string via;
             bool sent = BroadcastControllerSender.Send(block, text, out via);
-            Log.Debug("Orchestrator {0}: order {1} accepted, broadcast {2}: {3}", entityId, order.OrderId, sent ? "sent via" : "not sent", via);
+            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: order {1} accepted, broadcast {2}: {3}", entityId, order.OrderId, sent ? "sent via" : "not sent", via);
         }
 
         private readonly List<uint> recallJobIds = new List<uint>();
@@ -356,7 +356,7 @@ namespace Automata.Orchestrator
             }
             recallJobIds.Clear();
             if (taken.Count > 0) drones = Drone.DroneControllerBlock.RecallJobs(entityId, taken, by);
-            Log.Debug("Orchestrator {0}: order {1} recalled at its marker ({2}): {3} drone(s) recalled, {4} job(s) cancelled", entityId, best.OrderId, by,
+            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: order {1} recalled at its marker ({2}): {3} drone(s) recalled, {4} job(s) cancelled", entityId, best.OrderId, by,
                       drones, cancelled);
             return true;
         }

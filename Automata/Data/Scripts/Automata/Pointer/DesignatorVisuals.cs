@@ -232,7 +232,7 @@ namespace Automata.Pointer
                 for (int i = 0; i < COUNTER_DUMMIES.Length; i++)
                 {
                     if (v.Counters[i] != null || kv.Key.IndexOf(COUNTER_DUMMIES[i], StringComparison.OrdinalIgnoreCase) < 0) continue;
-                    if (file == null) { Log.Debug("Pointer: counter dummy {0} has no file", kv.Key); break; }
+                    if (file == null) { if (Log.DebugEnabled) Log.Debug("Pointer: counter dummy {0} has no file", kv.Key); break; }
                     var c = new Part();
                     if (!Attach(c, ent, kv.Key, kv.Value, file)) break;
                     c.Axis = COUNTER_AXIS ?? CylinderAxis(c.Entity.PositionComp.LocalAABB.Size);
@@ -242,7 +242,7 @@ namespace Automata.Pointer
                 }
             }
             dummies.Clear();
-            if (v.Knob.Entity == null) Log.Debug("Pointer: no knob dummy (file {0}) on {1}", knobFile, v.Rifle.DefinitionId.SubtypeName);
+            if (v.Knob.Entity == null) if (Log.DebugEnabled) Log.Debug("Pointer: no knob dummy (file {0}) on {1}", knobFile, v.Rifle.DefinitionId.SubtypeName);
         }
 
         private static string FileOf(IMyModelDummy dummy)
@@ -283,7 +283,7 @@ namespace Automata.Pointer
                 }
             }
             p.Pivot = p.Entity.PositionComp.LocalAABB.Center;
-            Log.Debug("Pointer: part {0} on {1}: {2}, box {3}", dummyName, rifle.DefinitionId != null ? rifle.DefinitionId.Value.SubtypeName : "?",
+            if (Log.DebugEnabled) Log.Debug("Pointer: part {0} on {1}: {2}, box {3}", dummyName, rifle.DefinitionId != null ? rifle.DefinitionId.Value.SubtypeName : "?",
                       p.Own ? @"own entity, Models\Items\" + file + ".mwm" : "the game's subpart", p.Entity.PositionComp.LocalAABB.Size);
             return true;
         }

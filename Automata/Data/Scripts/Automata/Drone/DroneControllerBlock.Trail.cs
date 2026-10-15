@@ -87,14 +87,14 @@ namespace Automata.Drone
                     legForwards.Insert(0, startForward);   // back the way it came: the attitude held
                     legUps.Insert(0, startUp);
                 }
-                Log.Debug("Drone {0}: no way from where it is; back the way it came, {1:F0} m ({2} points), and on from there",
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: no way from where it is; back the way it came, {1:F0} m ({2} points), and on from there",
                           Entity.EntityId, back, retracePoints.Count);
                 retracePoints.Clear();
                 RecoverSucceeded();
                 return true;
             }
             if (points.Count > count) points.RemoveRange(count, points.Count - count);
-            Log.Debug("Drone {0}: no way back the way it came either ({1:F0} m of {2} trail points tried, {3} route(s) from it{4})", Entity.EntityId,
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: no way back the way it came either ({1:F0} m of {2} trail points tried, {3} route(s) from it{4})", Entity.EntityId,
                       back, trail.Count, plans, stop != null ? "; built over: " + stop : "");
             retracePoints.Clear();
             return false;

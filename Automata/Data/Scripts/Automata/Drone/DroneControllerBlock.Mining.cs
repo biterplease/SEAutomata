@@ -201,7 +201,7 @@ namespace Automata.Drone
                 boreStart = tool;
                 boreStartSet = true;
                 if (!DispatchBore()) { FinishMine(); return Fail(Orchestrator.TaskFailure.Unreachable, TaskStatus.ToReturnHome); }
-                Log.Debug("Drone {0}: mine {1}: boring {2:F0} m to the deposit ({3}, {4:F0}° from level), collecting within {5:F1} m of the ore{6}",
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: mine {1}: boring {2:F0} m to the deposit ({3}, {4:F0}° from level), collecting within {5:F1} m of the ore{6}",
                           Entity.EntityId, boreOre, Vector3D.Distance(tool, boreDeposit), mineAngled ? "angled" : "straight",
                           flightState.InGravity ? MathHelperD.ToDegrees(Math.Asin(MathHelperD.Clamp(-Vector3D.Dot(boreDir, flightState.GravityUp), -1, 1))) : 0,
                           boreCollectAt, boreCollecting ? " (there already)" : "");
@@ -222,7 +222,7 @@ namespace Automata.Drone
                     oreGainFrame = now;
                     boreOreBest = double.MaxValue;
                     boreOreBestFrame = now;
-                    Log.Debug("Drone {0}: mine: within {1:F1} m of the ore{2}: terrain clearing off, collecting", Entity.EntityId, boreCollectAt,
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: mine: within {1:F1} m of the ore{2}: terrain clearing off, collecting", Entity.EntityId, boreCollectAt,
                               boreEndReached ? " (bore end)" : "");
                 }
             }
@@ -248,7 +248,7 @@ namespace Automata.Drone
                         if (DispatchBore())
                         {
                             boreSteers++;
-                            Log.Debug("Drone {0}: mine: ore voxel {1:F1} m from the drill, {2:F1} m off the bore line: the bore's end moves to it ({3}/{4})",
+                            if (Log.DebugEnabled) Log.Debug("Drone {0}: mine: ore voxel {1:F1} m from the drill, {2:F1} m off the bore line: the bore's end moves to it ({3}/{4})",
                                       Entity.EntityId, nearDist, lateral, boreSteers, MINE_STEERS_MAX);
                         }
                         else boreEnd = old;
@@ -399,11 +399,11 @@ namespace Automata.Drone
                 currentJob.Tasks.Insert(back + 3, Orchestrator.Task.BackOut(0, approach));
                 mineRebores++;
                 mineSiteFixed = true;
-                Log.Debug("Drone {0}: mine: another bore on {1} ({2}/{3}) {4:F0} m from the last deposit, {5:F0} m of rock", Entity.EntityId, boreOre,
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: mine: another bore on {1} ({2}/{3}) {4:F0} m from the last deposit, {5:F0} m of rock", Entity.EntityId, boreOre,
                           mineRebores, MINE_REBORES_MAX, Vector3D.Distance(ore, boreDeposit), Vector3D.Distance(entry, ore));
                 return true;
             }
-            Log.Debug("Drone {0}: mine: no other spot of {1} near the last deposit", Entity.EntityId, boreOre);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: mine: no other spot of {1} near the last deposit", Entity.EntityId, boreOre);
             return false;
         }
 
@@ -451,7 +451,7 @@ namespace Automata.Drone
                 start += up * (need - h + 1);
                 points.Add(start);
             }
-            Log.Debug("Drone {0}: route starts in the ground: climbing out first ({1} point(s))", Entity.EntityId, points.Count);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: route starts in the ground: climbing out first ({1} point(s))", Entity.EntityId, points.Count);
             return true;
         }
 
@@ -547,7 +547,7 @@ namespace Automata.Drone
             }
             if (bestScore == double.MaxValue)
             {
-                Log.Debug("Drone {0}: mine: no angled way in within {1:F0} m at {2:F0}° ({3} drill): the planned site", Entity.EntityId,
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: mine: no angled way in within {1:F0} m at {2:F0}° ({3} drill): the planned site", Entity.EntityId,
                           MINE_BORE_SEARCH, MathHelperD.ToDegrees(angle), face);
                 return;
             }
@@ -579,7 +579,7 @@ namespace Automata.Drone
             }
             mineAngled = true;
             mineAngledDir = bestDir;
-            Log.Debug("Drone {0}: mine: angled bore {1:F0}° from level ({2} drill, limit {3:F0}°), {4:F0} m of rock from {5}", Entity.EntityId,
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: mine: angled bore {1:F0}° from level ({2} drill, limit {3:F0}°), {4:F0} m of rock from {5}", Entity.EntityId,
                       MathHelperD.ToDegrees(angle), face, limit, Vector3D.Distance(bestEntry, deposit), bestEntry);
         }
 
@@ -659,7 +659,7 @@ namespace Automata.Drone
                 surveyScanner.RunAll(boreDeposit, MINE_SITE_RADIUS, siteHits, MINE_SITE_MAX_CELLS);
                 RecordSweep(boreDeposit, MINE_SITE_RADIUS, siteHits);
             }
-            Log.Debug("Drone {0}: mine done: {1:F0} kg of {2} aboard", Entity.EntityId, minedOreKg, boreOre.String);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: mine done: {1:F0} kg of {2} aboard", Entity.EntityId, minedOreKg, boreOre.String);
         }
 
         private void SetDrillClearing(bool on)
@@ -795,7 +795,7 @@ namespace Automata.Drone
             // No mining surveyor of the owner / faction anywhere: nobody to hand it to, the scan is lost
             if (!Mining.MiningSurveyorBlock.AnyFor(block.OwnerId))
             {
-                if (!noSurveyorLogged) Log.Debug("Drone {0}: ore scan at {1} ({2} hit(s)) dropped: no mining surveyor", Entity.EntityId, center, hits.Count);
+                if (!noSurveyorLogged) if (Log.DebugEnabled) Log.Debug("Drone {0}: ore scan at {1} ({2} hit(s)) dropped: no mining surveyor", Entity.EntityId, center, hits.Count);
                 noSurveyorLogged = true;
                 surveyBuffer.Clear();
                 return;
@@ -812,7 +812,7 @@ namespace Automata.Drone
                                                              Voxels = hits[i].Voxels, VoxelId = hits[i].VoxelId });
             surveyBuffer.Add(sweep);
             if (surveyBuffer.Count > SURVEY_BUFFER_MAX) surveyBuffer.RemoveAt(0);
-            Log.Debug("Drone {0}: ore scan at {1} ({2:F0} m): {3} hit(s), {4} scan(s) waiting for a surveyor", Entity.EntityId, center, radius,
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: ore scan at {1} ({2:F0} m): {3} hit(s), {4} scan(s) waiting for a surveyor", Entity.EntityId, center, radius,
                       hits.Count, surveyBuffer.Count);
             lastSurveyPublish = int.MinValue / 2;   // straight away if a surveyor is in range (else held until one is)
             PublishSurveys();
@@ -829,7 +829,7 @@ namespace Automata.Drone
             if (surveyBuffer.Count == 0 || primaryAntenna == null) { surveySent = null; surveySentSweeps.Clear(); return; }
             if (!Mining.MiningSurveyorBlock.AnyFor(block.OwnerId))
             {
-                Log.Debug("Drone {0}: {1} held ore scan(s) dropped: no mining surveyor any more", _entityId, surveyBuffer.Count);
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: {1} held ore scan(s) dropped: no mining surveyor any more", _entityId, surveyBuffer.Count);
                 surveyBuffer.Clear();
                 surveySent = null;
                 surveySentSweeps.Clear();
@@ -842,7 +842,7 @@ namespace Automata.Drone
                 if (surveySent.Delivered)
                 {
                     for (int i = 0; i < surveySentSweeps.Count; i++) surveyBuffer.Remove(surveySentSweeps[i]);
-                    Log.Debug("Drone {0}: {1} ore scan(s) taken by the surveyors", _entityId, surveySentSweeps.Count);
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: {1} ore scan(s) taken by the surveyors", _entityId, surveySentSweeps.Count);
                     surveySent = null;
                     surveySentSweeps.Clear();
                     if (surveyBuffer.Count == 0) return;
@@ -875,7 +875,7 @@ namespace Automata.Drone
             surveySent = msg;
             surveySentSweeps.Clear();
             surveySentSweeps.AddRange(surveyBuffer);
-            Log.Debug("Drone {0}: {1} ore scan(s) sent to the surveyors", _entityId, surveyBuffer.Count);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: {1} ore scan(s) sent to the surveyors", _entityId, surveyBuffer.Count);
         }
 
         private AntennaReg antennaReg;

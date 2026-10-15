@@ -1229,7 +1229,7 @@ namespace Automata.Pathfinding
             for (int k = 1; k < points.Count - 1; k++) waypoints.Add(points[k]);
             int added = points.Count - 2;
             points.Clear();
-            Log.Debug("Pathfinding: {0:F0} m, {1} waypoints, {2} stretches not fully seen (assumed clear){7}, {3} checks, {4} blocks, {5} rays, {6:F2} ms; stage {8} (straight {9:F2} ms{10})",
+            if (Log.DebugEnabled) Log.Debug("Pathfinding: {0:F0} m, {1} waypoints, {2} stretches not fully seen (assumed clear){7}, {3} checks, {4} blocks, {5} rays, {6:F2} ms; stage {8} (straight {9:F2} ms{10})",
                       Vector3D.Distance(start, goal), added, unseen, planChecks, blocksTested, planRays, watch.Elapsed.TotalMilliseconds,
                       unseen > 0 ? DescribeView(ref q, start, goal) : "", stage, t1 - t0,
                       (stage != "straight" ? string.Format(", memory {0:F2} ms", t2 - t1) : "") + (stage == "theta" ? string.Format(", Lazy Theta* {0:F2} ms", t3 - t2) : ""));
@@ -1330,7 +1330,7 @@ namespace Automata.Pathfinding
                 double sf, st;
                 if (!SeenSpan(ref q, points[k], d / len, len, out sf, out st) || sf > SeenSlack(ref q) || st < len) unseen++;
             }
-            if (points.Count < before) Log.Debug("Pathfinding: route straightened, {0} of {1} waypoints left", points.Count - 2, before - 2);
+            if (points.Count < before) if (Log.DebugEnabled) Log.Debug("Pathfinding: route straightened, {0} of {1} waypoints left", points.Count - 2, before - 2);
         }
 
         private readonly List<Vector3D> rounded = new List<Vector3D>();
@@ -1374,7 +1374,7 @@ namespace Automata.Pathfinding
             {
                 points.Clear();
                 points.AddRange(rounded);
-                Log.Debug("Pathfinding: {0} corner(s) rounded, {1} kept (no room)", arcs, kept);
+                if (Log.DebugEnabled) Log.Debug("Pathfinding: {0} corner(s) rounded, {1} kept (no room)", arcs, kept);
             }
             rounded.Clear();
         }
@@ -1429,7 +1429,7 @@ namespace Automata.Pathfinding
 
         private RouteResult Fail(Vector3D start, Vector3D goal, string why)
         {
-            Log.Debug("Pathfinding: no route {0:F0} m ({1}), {2} checks, {3} rays, {4:F2} ms", Vector3D.Distance(start, goal), why,
+            if (Log.DebugEnabled) Log.Debug("Pathfinding: no route {0:F0} m ({1}), {2} checks, {3} rays, {4:F2} ms", Vector3D.Distance(start, goal), why,
                       planChecks, planRays, watch.Elapsed.TotalMilliseconds);
             points.Clear();
             return RouteResult.Blocked;

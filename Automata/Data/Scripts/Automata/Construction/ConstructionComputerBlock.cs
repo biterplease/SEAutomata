@@ -265,7 +265,7 @@ namespace Automata.Construction
                 if (block != null) block.AppendingCustomInfo -= AppendInfo;
                 scanCache.Dispose();
                 if (messaging != null) { messaging.ReaderClosed(entityId); }
-                Log.Debug("CC {0}: closed ({1} open job(s))", entityId, jobs.Count);
+                if (Log.DebugEnabled) Log.Debug("CC {0}: closed ({1} open job(s))", entityId, jobs.Count);
             }
             catch (Exception ex)
             {
@@ -460,7 +460,7 @@ namespace Automata.Construction
                         antenna = a;
             gridBuffer.Clear();
             if (antenna != before)
-                Log.Debug("CC {0}: antenna {1}", entityId, antenna != null ? "'" + antenna.CustomName + "'" : "none");
+                if (Log.DebugEnabled) Log.Debug("CC {0}: antenna {1}", entityId, antenna != null ? "'" + antenna.CustomName + "'" : "none");
         }
 
         private bool EnsureAntenna()
@@ -548,7 +548,7 @@ namespace Automata.Construction
                 if (job.Blocks.Count > 0) continue;
                 doneCount++;
                 AddEvent(Loc.F(StrJobDone, job.Summary ?? job.Blocks.Count.ToString(), LabelOf(job)));
-                Log.Debug("CC {0}: job {1} ({2}) done: none of its blocks needs work any more", entityId, job.JobId, LabelOf(job));
+                if (Log.DebugEnabled) Log.Debug("CC {0}: job {1} ({2}) done: none of its blocks needs work any more", entityId, job.JobId, LabelOf(job));
                 jobs.RemoveAt(j);
             }
             RebuildInJobs();
@@ -591,7 +591,7 @@ namespace Automata.Construction
             for (int c = 0; c < lastCategory.Length; c++) lastCategory[c] = 0;
             for (int t = 0; t < targets.Count; t++)
                 if (targets[t].Type == Orchestrator.JobType.Weld && (int)targets[t].Category < lastCategory.Length) lastCategory[(int)targets[t].Category]++;
-            Log.Debug("CC {0}: scan {1:F1} ms: {2} grid group(s) ({8} unchanged), {3} block(s) ({4} weld, {5} grind), {6} new job(s), {7} open, {9} block(s) waiting to batch",
+            if (Log.DebugEnabled) Log.Debug("CC {0}: scan {1:F1} ms: {2} grid group(s) ({8} unchanged), {3} block(s) ({4} weld, {5} grind), {6} new job(s), {7} open, {9} block(s) waiting to batch",
                       entityId, PerfStats.Since(watch), groups, targets.Count, weld, grind, created, jobs.Count, cached, waiting);
             targets.Clear();
         }
@@ -649,8 +649,7 @@ namespace Automata.Construction
                 if (best < 0) break;
                 slotsPer[best]++;
             }
-            if (Log.DebugEnabled)
-                Log.Debug("CC {0}: published job shares (repair / projected / unbuilt / grind): slots {1}/{2}/{3}/{4}, published {5}/{6}/{7}/{8}",
+            if (Log.DebugEnabled) Log.Debug("CC {0}: published job shares (repair / projected / unbuilt / grind): slots {1}/{2}/{3}/{4}, published {5}/{6}/{7}/{8}",
                           entityId, slotsPer[0], slotsPer[1], slotsPer[2], slotsPer[3], openPer[0], openPer[1], openPer[2], openPer[3]);
         }
         #endregion
@@ -741,7 +740,7 @@ namespace Automata.Construction
             for (int i = 0; i < group.Count && !ja.Sequential; i++) ja.Sequential = group[i].Predicted;   // a line: one drone, trip after trip
             open.Message = AnnouncementMessage(ja);
             jobs.Add(open);
-            Log.Debug("CC {0}: job {1} ({2}): {3} block(s), first at {4}, {5}", entityId, job.JobId, LabelOf(open), job.BlockCount,
+            if (Log.DebugEnabled) Log.Debug("CC {0}: job {1} ({2}): {3} block(s), first at {4}, {5}", entityId, job.JobId, LabelOf(open), job.BlockCount,
                       group[0].Cell, Describe(items));
             return true;
         }
@@ -775,7 +774,7 @@ namespace Automata.Construction
                     if (now < job.HeldUntil) continue;
                     job.HeldUntil = 0;
                     job.LastAnnounced = int.MinValue / 2;
-                    Log.Debug("CC {0}: job {1} off hold", entityId, job.JobId);
+                    if (Log.DebugEnabled) Log.Debug("CC {0}: job {1} off hold", entityId, job.JobId);
                 }
                 if (job.Pending)
                 {
@@ -797,7 +796,7 @@ namespace Automata.Construction
                 job.Announced = false;
                 job.Pending = error == ErrorCode.None;
                 if (error != ErrorCode.None) job.LastResult = error.ToString();
-                Log.Debug("CC {0}: job {1} ({2}, {3} block(s)) {4}: {5}", entityId, job.JobId, LabelOf(job), job.Blocks.Count,
+                if (Log.DebugEnabled) Log.Debug("CC {0}: job {1} ({2}, {3} block(s)) {4}: {5}", entityId, job.JobId, LabelOf(job), job.Blocks.Count,
                           again ? "announced again" : "announced", error);
             }
         }
@@ -818,7 +817,7 @@ namespace Automata.Construction
                     job.HeldUntil = now + Math.Max(10, f.HoldSeconds) * 60;
                     failedCount++;
                     AddEvent(Loc.F(StrJobOnHold, LabelOf(job) + ":\n" + job.Summary, f.HoldSeconds, f.Reason));
-                    Log.Debug("CC {0}: job {1} on hold for {2} s: orchestrator {3}: {4}", entityId, job.JobId, f.HoldSeconds, f.OrchestratorEntityId, f.Reason);
+                    if (Log.DebugEnabled) Log.Debug("CC {0}: job {1} on hold for {2} s: orchestrator {3}: {4}", entityId, job.JobId, f.HoldSeconds, f.OrchestratorEntityId, f.Reason);
                 }
             }
             failureInbox.Clear();
@@ -846,7 +845,7 @@ namespace Automata.Construction
                     if (award.TaskAssignments != null)
                         foreach (var d in award.TaskAssignments.Keys) { if (names.Length > 0) names.Append(", "); names.Append(Nicknames.Of(d)); }
                     AddEvent(Loc.F(StrLogJobDrone, LabelOf(job), job.Summary, names));
-                    Log.Debug("CC {0}: job {1} assigned by orchestrator {2} to {3} drone(s)", entityId, job.JobId, awardInbox[i].SenderId, drones);
+                    if (Log.DebugEnabled) Log.Debug("CC {0}: job {1} assigned by orchestrator {2} to {3} drone(s)", entityId, job.JobId, awardInbox[i].SenderId, drones);
                 }
             }
             awardInbox.Clear();
@@ -893,7 +892,7 @@ namespace Automata.Construction
                         bool close = job.DronesOut <= 0;
                         AddEvent(string.IsNullOrEmpty(r.Reason) ? Loc.F(StrJobDroneOutcome, LabelOf(job), Nicknames.Of(r.DroneEntityId), r.Outcome)
                                                                  : Loc.F(StrJobDroneOutcomeReason, LabelOf(job), Nicknames.Of(r.DroneEntityId), r.Outcome, r.Reason));
-                        Log.Debug("CC {0}: job {1}: drone {2} {3} ({4}), {5}/{6} block(s); {7}", entityId, job.JobId, r.DroneEntityId, r.Outcome,
+                        if (Log.DebugEnabled) Log.Debug("CC {0}: job {1}: drone {2} {3} ({4}), {5}/{6} block(s); {7}", entityId, job.JobId, r.DroneEntityId, r.Outcome,
                                   r.Reason, r.BlocksDone, r.BlocksTotal, close ? "closed, blocks back to the pool" : job.DronesOut + " drone(s) still out");
                         if (!close) continue;
                         if (job.Unreachable.Count > 0) HoldUnreachable(job, now);
@@ -912,7 +911,7 @@ namespace Automata.Construction
                                 held++;
                             }
                             if (held > 0)
-                                Log.Debug("CC {0}: job {1}: {2} block(s) held back {3} s before a new job", entityId, job.JobId, held, (until - now) / 60);
+                                if (Log.DebugEnabled) Log.Debug("CC {0}: job {1}: {2} block(s) held back {3} s before a new job", entityId, job.JobId, held, (until - now) / 60);
                         }
                         foreach (var k in job.Blocks) scanCache.Touch(k.Key);   // its grids are looked at again whatever the events said
                         jobs.RemoveAt(j);
@@ -944,7 +943,7 @@ namespace Automata.Construction
                 blockCooldown[k] = now + (int)ticks;
                 longest = Math.Max(longest, (int)ticks);
             }
-            Log.Debug("CC {0}: job {1}: {2} unreachable block(s) held back up to {3} s", entityId, job.JobId, job.Unreachable.Count, longest / 60);
+            if (Log.DebugEnabled) Log.Debug("CC {0}: job {1}: {2} unreachable block(s) held back up to {3} s", entityId, job.JobId, job.Unreachable.Count, longest / 60);
         }
 
         // Drones still working on an awarded job: its expiry starts again (a dead / destroyed / lost drone stops sending)
@@ -974,7 +973,7 @@ namespace Automata.Construction
                 // Unawarded jobs stay (cached, announced again when due); an award long ago didn't get them done
                 if (job.Assigned == 0 || now - job.Assigned <= ASSIGNED_TTL_TICKS) continue;
                 expiredCount++;
-                Log.Debug("CC {0}: job {1} ({2}) no drone keepalive for {3} s: {4} block(s) back to the pool", entityId, job.JobId, LabelOf(job),
+                if (Log.DebugEnabled) Log.Debug("CC {0}: job {1} ({2}) no drone keepalive for {3} s: {4} block(s) back to the pool", entityId, job.JobId, LabelOf(job),
                           ASSIGNED_TTL_TICKS / 60, job.Blocks.Count);
                 AddEvent(Loc.F(StrJobExpired, LabelOf(job) + ":\n" + job.Summary));
                 jobs.RemoveAt(j);
@@ -1107,7 +1106,7 @@ namespace Automata.Construction
             var frameGrids = new HashSet<long>(scannedGrids);
             for (int j = 0; j < jobs.Count; j++) foreach (var k in jobs[j].Blocks) frameGrids.Add(k.Key);
             BuildPlanner.ExportFrames(frameGrids, s.Frames);
-            Log.Debug("CC {0}: state saved: {1} job(s), {2} sweep frame(s)", entityId, s.Jobs.Count, s.Frames.Count);
+            if (Log.DebugEnabled) Log.Debug("CC {0}: state saved: {1} job(s), {2} sweep frame(s)", entityId, s.Jobs.Count, s.Frames.Count);
             return s;
         }
 

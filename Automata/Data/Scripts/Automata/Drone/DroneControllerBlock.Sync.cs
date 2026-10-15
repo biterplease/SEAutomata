@@ -161,12 +161,12 @@ namespace Automata.Drone
                 FillSettingPacket(packet);
                 if (IsServer)
                 {
-                    Log.Debug("Net: drone {0} setting {1} -> clients", Entity.EntityId, packet.Key);
+                    if (Log.DebugEnabled) Log.Debug("Net: drone {0} setting {1} -> clients", Entity.EntityId, packet.Key);
                     net.SendToEveryone(packet);
                 }
                 else
                 {
-                    Log.Debug("Net: drone {0} setting {1} -> server", Entity.EntityId, packet.Key);
+                    if (Log.DebugEnabled) Log.Debug("Net: drone {0} setting {1} -> server", Entity.EntityId, packet.Key);
                     net.SendToServer(packet);
                 }
             }
@@ -268,7 +268,7 @@ namespace Automata.Drone
                 }
                 info.Relay = RelayMode.ToOthers;
             }
-            Log.Debug("Net: drone {0} setting {1} received from {2}", Entity.EntityId, p.Key, senderSteamId);
+            if (Log.DebugEnabled) Log.Debug("Net: drone {0} setting {1} received from {2}", Entity.EntityId, p.Key, senderSteamId);
             applyingRemote = true;
             try { ApplySettingPacket(p); }
             finally { applyingRemote = false; }
@@ -358,7 +358,7 @@ namespace Automata.Drone
             var net = Net;
             if (net == null || Entity == null) return;
             p.EntityId = Entity.EntityId;
-            Log.Debug("Net: drone {0} action {1} -> server", Entity.EntityId, p.Action);
+            if (Log.DebugEnabled) Log.Debug("Net: drone {0} action {1} -> server", Entity.EntityId, p.Action);
             net.SendToServer(p);   // on the server / in single player this calls ReceiveAction directly
         }
 
@@ -378,7 +378,7 @@ namespace Automata.Drone
             }
             if (!initialized || settings == null)
             {
-                Log.Debug("Net: drone {0} action {1} ignored (not initialized)", Entity.EntityId, p.Action);
+                if (Log.DebugEnabled) Log.Debug("Net: drone {0} action {1} ignored (not initialized)", Entity.EntityId, p.Action);
                 return;
             }
             if ((p.HasVectorA && !IsFinite(p.VectorA)) || (p.HasVectorB && !IsFinite(p.VectorB)))
@@ -393,7 +393,7 @@ namespace Automata.Drone
                 if (anchorListRequests.TryGetValue(senderSteamId, out last) && now - last < 60) return;   // 1 per second per player
                 anchorListRequests[senderSteamId] = now;
             }
-            Log.Debug("Net: drone {0} action {1} from {2}", Entity.EntityId, p.Action, senderSteamId);
+            if (Log.DebugEnabled) Log.Debug("Net: drone {0} action {1} from {2}", Entity.EntityId, p.Action, senderSteamId);
             try
             {
                 ExecuteAction(p, senderSteamId, identity);
@@ -530,7 +530,7 @@ namespace Automata.Drone
             AutomataSession.Instance.Anchors.GetForViewer(block, identity, anchorListBuffer);
             var packet = new DroneAnchorListPacket { EntityId = Entity.EntityId, Entries = new List<AnchorEntry>(anchorListBuffer) };
             anchorListBuffer.Clear();
-            Log.Debug("Net: drone {0} anchor list ({1}) -> {2}", Entity.EntityId, packet.Entries.Count, steamId);
+            if (Log.DebugEnabled) Log.Debug("Net: drone {0} anchor list ({1}) -> {2}", Entity.EntityId, packet.Entries.Count, steamId);
             Net?.SendToPlayer(packet, steamId);
         }
 

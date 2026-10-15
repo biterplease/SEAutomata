@@ -235,7 +235,7 @@ namespace Automata.Drone
                 siteYielding = true;
                 siteYieldStart = now;
                 siteYieldFor = blocker._entityId;
-                Log.Debug("Drone {0}: shared site: holding for drone {1} ({2:F1} m away)", _entityId, blocker._entityId,
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: shared site: holding for drone {1} ({2:F1} m away)", _entityId, blocker._entityId,
                           Vector3D.Distance(blocker.HullCentreWorld, myFrom));
             }
             // Holding is no stall: the progress clocks wait
@@ -248,7 +248,7 @@ namespace Automata.Drone
         {
             if (!siteYielding) return;
             siteYielding = false;
-            Log.Debug("Drone {0}: shared site: going on after {1:F0} s ({2})", _entityId,
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: shared site: going on after {1:F0} s ({2})", _entityId,
                       (MyAPIGateway.Session.GameplayFrameCounter - siteYieldStart) / 60.0, why);
             siteYieldFor = 0;
         }
@@ -260,7 +260,7 @@ namespace Automata.Drone
             EndYield("drone " + blocker._entityId + " stays in the way");
             if (routeOwner == RouteOwner.Docking && (taskIndex >= currentJob.Tasks.Count || currentJob.Tasks[taskIndex].Type != Orchestrator.TaskType.NavigateToolTo))
             {
-                Log.Debug("Drone {0}: shared site: drone {1} stays in the way of the dock: planning the way in again", _entityId, blocker._entityId);
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: shared site: drone {1} stays in the way of the dock: planning the way in again", _entityId, blocker._entityId);
                 lastReplanFrame = MyAPIGateway.Session.GameplayFrameCounter;
                 if (!Replan()) RouteStopped(Loc.T(StrNoRouteAheadStopped));
                 return;
@@ -302,7 +302,7 @@ namespace Automata.Drone
                 if (other == this || !other.jobSharedSite || !other.siteWatchCenterSet || other.currentJob == null) continue;
                 if (Vector3D.DistanceSquared(other.siteWatchCenter, siteWatchCenter) > SITE_NEIGHBOUR_RADIUS * SITE_NEIGHBOUR_RADIUS) continue;
                 jobSharedSite = true;
-                Log.Debug("Drone {0}: shared site: drone {1} works near this site, watching too", _entityId, other._entityId);
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: shared site: drone {1} works near this site, watching too", _entityId, other._entityId);
                 return;
             }
         }

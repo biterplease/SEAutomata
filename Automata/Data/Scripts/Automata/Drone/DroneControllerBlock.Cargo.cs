@@ -164,8 +164,7 @@ namespace Automata.Drone
                     if (AmountAt(src, i, type) > 0)
                     {
                         left = true;
-                        if (Log.DebugEnabled)
-                            Log.Debug("Drone {0}: clear: {1} {2} stayed in {3} ({4} container(s) on the network{5})", Entity.EntityId,
+                        if (Log.DebugEnabled) Log.Debug("Drone {0}: clear: {1} {2} stayed in {3} ({4} container(s) on the network{5})", Entity.EntityId,
                                       (double)AmountAt(src, i, type), type.SubtypeId, ClearSourceName(s), homeNetwork.cargoContainers.Count,
                                       NetworkFull() ? ", all full" : ", not conveyor-connected or no room for it");
                     }
@@ -196,7 +195,7 @@ namespace Automata.Drone
             ClearCargo();
             double after = ClearableVolume();
             if (after < before) lastCargoPortId = at.EntityId;
-            Log.Debug("Drone {0}: cargo cleared at {1}: {2:F3} -> {3:F3} m3", Entity.EntityId, at.CustomName, before, after);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: cargo cleared at {1}: {2:F3} -> {3:F3} m3", Entity.EntityId, at.CustomName, before, after);
             if (after > CLEAR_MIN_VOLUME)
             {
                 Report(StrCargoLeftAboard, at.CustomName, after);
@@ -231,7 +230,7 @@ namespace Automata.Drone
             if (found != null)
             {
                 lastCargoPortId = found.EntityId;
-                Log.Debug("Drone {0}: no cargo connector known: nearest with room is {1} ({2:F0} m)", Entity.EntityId, found.CustomName,
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: no cargo connector known: nearest with room is {1} ({2:F0} m)", Entity.EntityId, found.CustomName,
                           Vector3D.Distance(found.GetPosition(), block.GetPosition()));
             }
             return found;
@@ -319,7 +318,7 @@ namespace Automata.Drone
             if (port == null || (docked != null && docked.EntityId == port.EntityId)) return;   // nowhere else / no room here
             job.Tasks.Insert(0, ClearCargoTask());
             job.Tasks.Insert(0, DockTaskFor(port));
-            Log.Debug("Drone {0}: job {1}: cargo aboard, clearing it at {2} first", Entity.EntityId, job.JobId, port.CustomName);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: job {1}: cargo aboard, clearing it at {2} first", Entity.EntityId, job.JobId, port.CustomName);
         }
 
         /// <summary>
@@ -337,7 +336,7 @@ namespace Automata.Drone
             currentJob.Tasks.Insert(taskIndex, ClearCargoTask());
             currentJob.Tasks.Insert(taskIndex, DockTaskFor(port));
             taskStarted = false;
-            Log.Debug("Drone {0}: cargo aboard before going to rest: clearing it at {1} first", Entity.EntityId, port.CustomName);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: cargo aboard before going to rest: clearing it at {1} first", Entity.EntityId, port.CustomName);
             return true;
         }
 

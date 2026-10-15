@@ -237,7 +237,7 @@ namespace Automata.Mining
                 All.Remove(this);
                 if (IsServer) { RemoveGps(); RemoveGps(requestedHashes); }
                 if (messaging != null) { messaging.ReaderClosed(entityId); }
-                Log.Debug("MS {0}: closed ({1} deposit(s), {2} job(s))", entityId, deposits.Count, jobs.Count);
+                if (Log.DebugEnabled) Log.Debug("MS {0}: closed ({1} deposit(s), {2} job(s))", entityId, deposits.Count, jobs.Count);
             }
             catch (Exception ex)
             {
@@ -414,7 +414,7 @@ namespace Automata.Mining
                 scanHits.Clear();
                 double r = Math.Min(detector.Range, MiningConfig.MaxScanRadius);
                 if (scanner.Begin(detector.GetPosition(), r))
-                    Log.Debug("MS {0}: own scan started ({1:F0} m)", entityId, r);
+                    if (Log.DebugEnabled) Log.Debug("MS {0}: own scan started ({1:F0} m)", entityId, r);
             }
             bool online = EnsureAntenna();
             if (online)
@@ -460,8 +460,8 @@ namespace Automata.Mining
                     if (d.IsFunctional && (bestDetector == null || d.Range > bestDetector.Range)) bestDetector = d;
             }
             gridBuffer.Clear();
-            if (bestAntenna != antenna) Log.Debug("MS {0}: antenna {1}", entityId, bestAntenna != null ? "'" + bestAntenna.CustomName + "'" : "none");
-            if (bestDetector != detector) Log.Debug("MS {0}: ore detector {1}", entityId, bestDetector != null ? "'" + bestDetector.CustomName + "'" : "none");
+            if (bestAntenna != antenna) if (Log.DebugEnabled) Log.Debug("MS {0}: antenna {1}", entityId, bestAntenna != null ? "'" + bestAntenna.CustomName + "'" : "none");
+            if (bestDetector != detector) if (Log.DebugEnabled) Log.Debug("MS {0}: ore detector {1}", entityId, bestDetector != null ? "'" + bestDetector.CustomName + "'" : "none");
             antenna = bestAntenna;
             detector = bestDetector;
         }
@@ -475,7 +475,7 @@ namespace Automata.Mining
         #region Deposits
         private void OwnScanDone()
         {
-            Log.Debug("MS {0}: own scan done: {1} cell(s) read, {2} hit(s)", entityId, scanner.CellsRead, scanHits.Count);
+            if (Log.DebugEnabled) Log.Debug("MS {0}: own scan done: {1} cell(s) read, {2} hit(s)", entityId, scanner.CellsRead, scanHits.Count);
             CountDeposits(depositsBefore);
             ApplySweep(scanner.Center, scanner.Radius, DateTime.UtcNow, scanHits, Loc.T(StrOwnScan));
             scanHits.Clear();
@@ -547,7 +547,7 @@ namespace Automata.Mining
                 }
                 string found = NewOres(depositsBefore);
                 if (found != null) AddEvent(Loc.F(StrLogSurveyDrone, Nicknames.Of(m.SenderId), found));
-                Log.Debug("MS {0}: survey from drone {1}: {2} scan(s), deposits {3} -> {4}", entityId, m.SenderId, m.Payload.Sweeps.Count, before, deposits.Count);
+                if (Log.DebugEnabled) Log.Debug("MS {0}: survey from drone {1}: {2} scan(s), deposits {3} -> {4}", entityId, m.SenderId, m.Payload.Sweeps.Count, before, deposits.Count);
             }
             surveyInbox.Clear();
             sweepHits.Clear();
@@ -600,7 +600,7 @@ namespace Automata.Mining
                 }
                 deposits.Add(new Deposit { Ore = hit.Ore, Position = hit.Position, VoxelId = hit.VoxelId, Voxels = hit.Voxels, Seen = scanned });
                 changed = true;
-                Log.Debug("MS {0}: new deposit {1} at {2} ({3})", entityId, hit.Ore, hit.Position, source);
+                if (Log.DebugEnabled) Log.Debug("MS {0}: new deposit {1} at {2} ({3})", entityId, hit.Ore, hit.Position, source);
             }
             // Too many: the farthest go
             int max = MiningConfig.MaxDepositsPerSurveyor;
@@ -692,7 +692,7 @@ namespace Automata.Mining
                 Channel = Channel.JOB_WITHDRAWN,
             };
             var error = messaging.BroadcastMessage(antennaReg, msg, false);
-            Log.Debug("MS {0}: job {1} ({2}) withdrawn ({3}): {4}", entityId, job.JobId, job.Ore, why, error);
+            if (Log.DebugEnabled) Log.Debug("MS {0}: job {1} ({2}) withdrawn ({3}): {4}", entityId, job.JobId, job.Ore, why, error);
         }
 
         // Back to its order: a job that won't be done (or was done short / over)
@@ -701,7 +701,7 @@ namespace Automata.Mining
             OrderProgress p;
             if (!settings.KeepOrdersConstant && progress.TryGetValue(job.Ore, out p))
                 p.RemainingKg = Math.Max(0, p.RemainingKg + job.Kg - deliveredKg);
-            Log.Debug("MS {0}: job {1} ({2}, {3:F0} kg) settled: {4:F0} kg delivered, {5}", entityId, job.JobId, job.Ore, job.Kg, deliveredKg, why);
+            if (Log.DebugEnabled) Log.Debug("MS {0}: job {1} ({2}, {3:F0} kg) settled: {4:F0} kg delivered, {5}", entityId, job.JobId, job.Ore, job.Kg, deliveredKg, why);
         }
         #endregion
 
@@ -739,7 +739,7 @@ namespace Automata.Mining
             if (voxel == null)
             {
                 deposits.Remove(deposit);
-                Log.Debug("MS {0}: deposit {1} at {2}: its voxel map is gone", entityId, deposit.Ore, deposit.Position);
+                if (Log.DebugEnabled) Log.Debug("MS {0}: deposit {1} at {2}: its voxel map is gone", entityId, deposit.Ore, deposit.Position);
                 return null;
             }
             // Bored from outside: away from the asteroid's / planet's centre, through to the deposit
@@ -749,7 +749,7 @@ namespace Automata.Mining
             Vector3D surface;
             if (!OreScanner.FindSurface(voxel, deposit.Position, outward, BORE_SEARCH_METERS, out surface))
             {
-                Log.Debug("MS {0}: deposit {1} at {2}: no way in within {3:F0} m", entityId, deposit.Ore, deposit.Position, BORE_SEARCH_METERS);
+                if (Log.DebugEnabled) Log.Debug("MS {0}: deposit {1} at {2}: no way in within {3:F0} m", entityId, deposit.Ore, deposit.Position, BORE_SEARCH_METERS);
                 return null;
             }
             float interference;
@@ -831,7 +831,7 @@ namespace Automata.Mining
                 job.Announced = false;
                 job.Pending = error == ErrorCode.None;
                 if (error != ErrorCode.None) job.LastResult = error.ToString();
-                Log.Debug("MS {0}: job {1} ({2}, {3:F0} kg): {4}", entityId, job.JobId, job.Ore, job.Kg, error);
+                if (Log.DebugEnabled) Log.Debug("MS {0}: job {1} ({2}, {3:F0} kg): {4}", entityId, job.JobId, job.Ore, job.Kg, error);
             }
         }
 
@@ -1038,7 +1038,7 @@ namespace Automata.Mining
                     DronesOut = job.DronesOut, Announced = job.Announced,
                 });
             }
-            Log.Debug("MS {0}: state saved: {1} deposit(s), {2} depleted, {3} order(s), {4} job(s)", entityId, s.Deposits.Count, s.Depleted.Count, s.Orders.Count, s.Jobs.Count);
+            if (Log.DebugEnabled) Log.Debug("MS {0}: state saved: {1} deposit(s), {2} depleted, {3} order(s), {4} job(s)", entityId, s.Deposits.Count, s.Depleted.Count, s.Orders.Count, s.Jobs.Count);
             return s;
         }
 

@@ -236,11 +236,11 @@ namespace Automata.Drone
                 float speed;
                 CorridorFlight(berth, out speed, out backOutLineTol);
                 backOutSpeedCap = speed;
-                Log.Debug("Drone {0}: undocking from {1} through its corridor ({2}; straight out blocked: {3})", Entity.EntityId,
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: undocking from {1} through its corridor ({2}; straight out blocked: {3})", Entity.EntityId,
                           docked.CustomName, how, why);
                 return n;
             }
-            Log.Debug("Drone {0}: undocking from {1}: straight out ({2:F1} m) blocked by {3}, no corridor ({4}): straight out anyway",
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: undocking from {1}: straight out ({2:F1} m) blocked by {3}, no corridor ({4}): straight out anyway",
                       Entity.EntityId, docked.CustomName, depth, why, how);
             pts.Add(straight);
             start = straight;
