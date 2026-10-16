@@ -37,6 +37,7 @@ namespace Automata.Drone
         private bool recoverReplanPending;               // flying to recoverSpot: plan again once there
         private Vector3D recoverSpot;
         private double recoverArrive;
+        private int recoverDeadline;                     // frame: not at the spot by then - planned again from where it is
         private string routeErrorPending;                // repositions used up: error state at the next update
         private bool routeError;                         // in State.Error for want of a route (kept until Stop / Go home / recall)
         private bool routeErrorByDrone;                  // ...because other drones were in the way: tried again by itself
@@ -44,7 +45,20 @@ namespace Automata.Drone
         #region Timing
         private const int ROUTE_ERROR_DRONE_RETRY_TICKS = 5 * 60;    // in error because of drones in the way: free again after this
         private const int ROUTE_ERROR_RETRY_TICKS = 15 * 60;         // any other route error: tried again after this (was: until a player acted)
+        // Flying to a reposition spot: the leg-start check, the look-ahead and the just-in-time replans leave the route
+        // alone until the drone is there (or this long has passed). They replaced the spot within the same second, three
+        // times over, before the drone had moved: the leg there was checked again in the leg's own attitude (the route
+        // builder's, not the one it was found clear in) and "blocked", and the stretch on from the spot is a placeholder
+        // that is blocked by definition. The deadline: RECOVER_FLY_MIN_TICKS plus RECOVER_FLY_TICKS_PER_M per metre.
+        private const int RECOVER_FLY_MIN_TICKS = 8 * 60;
+        private const int RECOVER_FLY_TICKS_PER_M = 60;              // 1 s per metre (15 m: 23 s, 30 m: 38 s)
         #endregion
+
+        /// <summary>Flying to a reposition spot: the route checks wait (see RECOVER_FLY_MIN_TICKS).</summary>
+        private bool RecoverFlying
+        {
+            get { return recoverReplanPending && Sandbox.ModAPI.MyAPIGateway.Session.GameplayFrameCounter < recoverDeadline; }
+        }
 
         private void RecoverSucceeded()
         {
@@ -107,6 +121,8 @@ namespace Automata.Drone
                 recoverReplanPending = true;
                 recoverSpot = s;
                 recoverArrive = Math.Max(3, Vector3D.Distance(start, s) * 0.4);
+                recoverDeadline = Sandbox.ModAPI.MyAPIGateway.Session.GameplayFrameCounter + RECOVER_FLY_MIN_TICKS
+                                  + (int)(Vector3D.Distance(start, s) * RECOVER_FLY_TICKS_PER_M);
                 recoverCandidates.Clear();
                 Report(StrNoRouteRepositioning, Vector3D.Distance(start, s), recoverAttempts, RECOVER_MAX);
                 return true;
@@ -171,9 +187,12 @@ namespace Automata.Drone
             if (!recoverReplanPending) return;
             if (activeFlightOrder == null || routeOwner == RouteOwner.None) { recoverReplanPending = false; return; }
             CaptureFlightState();
-            if (Vector3D.DistanceSquared(HullCentreWorld, recoverSpot) > recoverArrive * recoverArrive) return;
+            double left = Vector3D.Distance(HullCentreWorld, recoverSpot);
+            bool late = Sandbox.ModAPI.MyAPIGateway.Session.GameplayFrameCounter >= recoverDeadline;
+            if (left > recoverArrive && !late) return;
             recoverReplanPending = false;
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: at the reposition spot ({1}/{2}): planning again", Entity.EntityId, recoverAttempts, RECOVER_MAX);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: {1} ({2}/{3}): planning again", Entity.EntityId,
+                      late ? string.Format("not at the reposition spot in time ({0:F1} m short)", left) : "at the reposition spot", recoverAttempts, RECOVER_MAX);
             lastReplanFrame = Sandbox.ModAPI.MyAPIGateway.Session.GameplayFrameCounter;
             if (!Replan()) RouteStopped(Loc.T(StrNoRouteAheadStopped));
         }

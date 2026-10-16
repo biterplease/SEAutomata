@@ -159,7 +159,7 @@ namespace Automata.Drone
         /// </summary>
         private static bool WillClear(DroneControllerBlock other)
         {
-            if (other.currentState == State.Error || other.siteYielding) return false;
+            if (other.currentState == State.Error || other.siteYielding || other.StalledNow) return false;   // stuck: it won't
             Vector3D f, t;
             if (other.NextMove(out f, out t)) return true;
             var job = other.currentJob;
@@ -260,6 +260,8 @@ namespace Automata.Drone
             EndYield("drone " + blocker._entityId + " stays in the way");
             if (routeOwner == RouteOwner.Docking && (taskIndex >= currentJob.Tasks.Count || currentJob.Tasks[taskIndex].Type != Orchestrator.TaskType.NavigateToolTo))
             {
+                // It won't move (stuck, stopped, hovering): another connector of the station, if one is free (DockAt)
+                if (!WillClear(blocker) && SwitchToSiblingConnector(Nicknames.Of(blocker.block) + " stuck in the way")) return;
                 if (Log.DebugEnabled) Log.Debug("Drone {0}: shared site: drone {1} stays in the way of the dock: planning the way in again", _entityId, blocker._entityId);
                 lastReplanFrame = MyAPIGateway.Session.GameplayFrameCounter;
                 if (!Replan()) RouteStopped(Loc.T(StrNoRouteAheadStopped));

@@ -119,6 +119,7 @@ namespace Automata.Drone
 
         private void ResetRoute()
         {
+            CancelPendingRoute();
             routeFailed = false;
             routeReplans = 0;
             routeWatchCounter = 0;
@@ -129,6 +130,7 @@ namespace Automata.Drone
             q = new PathQuery
             {
                 Controller = flightState.WorldMatrix,
+                Owner = Entity.EntityId,
                 LocalHull = localHullBox,
                 OwnGrids = droneGrids,
                 Cameras = cameraBlocks,
@@ -211,6 +213,25 @@ namespace Automata.Drone
             return TryRecoverRoute(start, goal, points, count, startForward, startUp, pm, ref q);
         }
 
+        // Boxed in at the start: the search kept the dock corridor's clearance near it (PathQuery.EscapeRadius). The legs
+        // that start in that zone are flown like corridor legs - precise, slow, not watched (the leg-start check and the
+        // look-ahead keep the full berth: they would see the way out as blocked and plan again, over and over)
+        private bool routeEscape;
+        private Vector3D routeEscapeCentre;
+        private double routeEscapeRadius, routeEscapeBerth;
+
+        private bool InRouteEscape(Vector3D p)
+        {
+            return routeEscape && Vector3D.DistanceSquared(p, routeEscapeCentre) < routeEscapeRadius * routeEscapeRadius;
+        }
+
+        private void MakeEscapeLeg(FlightOrder leg)
+        {
+            float speed, tol;
+            CorridorFlight(routeEscapeBerth, out speed, out tol);
+            MakeCorridorLeg(leg, speed, tol);
+        }
+
         private readonly List<Vector3D> escapeSpots = new List<Vector3D>();
         private readonly List<string> escapeWhy = new List<string>();
         private static readonly double[] ESCAPE_DISTANCES = { 4, 8 };
@@ -286,6 +307,7 @@ namespace Automata.Drone
                 routePlanFrame = now;
                 routeUnseen = 0;
                 routeJitArmed = true;
+                routeEscape = false;
             }
             if (usePathfinder)
             {
@@ -293,6 +315,7 @@ namespace Automata.Drone
                 BuildPathQuery(out q);
                 q.LooseGoal = looseGoal;
                 q.NoHeldTurn = NearDockArea(start);
+                q.AsyncOk = asyncPlanOk;
                 pm.BeginPlan();
             }
             Vector3D from = start;
@@ -309,6 +332,7 @@ namespace Automata.Drone
                 }
                 int before = points.Count;
                 RouteResult rr = usePathfinder ? pm.PlanRoute(ref q, from, to, points) : RouteResult.Direct;
+                if (rr == RouteResult.Pending) throw PlanPendingException.Instance;   // FlyRoute holds the drone and plans again later
                 // A stretch inside the lane that needed a way round: the lane is checked again (twice: suspended)
                 if (laneName != null && i > laneFirst && i <= laneLast && (rr == RouteResult.Blocked || points.Count > before))
                 {
@@ -332,6 +356,16 @@ namespace Automata.Drone
                     return false;
                 }
                 if (i < routeScratch.Count) points.Add(to);
+                // Boxed in at the start, a way out found with corridor clearance near it: those legs fly as corridor legs
+                if (usePathfinder && q.EscapeRadius > 0 && !routeEscape)
+                {
+                    routeEscape = true;
+                    routeEscapeCentre = q.EscapeCentre;
+                    routeEscapeRadius = q.EscapeRadius;
+                    routeEscapeBerth = q.EscapeBerth;
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: boxed in here: out with {1:F2} m clearance for the first {2:F0} m (corridor legs)",
+                              Entity.EntityId, q.EscapeBerth, q.EscapeRadius);
+                }
                 from = to;
             }
             routeScratch.Clear();
@@ -481,6 +515,7 @@ namespace Automata.Drone
                 leg.Watched = watched;
                 leg.LooseArrival = true;   // the final work / dock order settles position and attitude precisely
                 if (k < backOuts) MakeCorridorLeg(leg, backOutSpeedCap, backOutLineTol);   // out of a dock / hangar: precise, slow
+                else if (k < n + (move ? 1 : 0) && InRouteEscape(at)) MakeEscapeLeg(leg);   // boxed in: out of it with corridor clearance
                 legsOut.Add(leg);
                 before = at;
                 at = point;
@@ -839,6 +874,7 @@ namespace Automata.Drone
                 ApplyLegAttitude(leg, true, ref none, fwds[i], ups[i]);
                 leg.Watched = i >= backOuts;   // not the back-out: the base is right beside it
                 if (i < backOuts) MakeCorridorLeg(leg, backOutSpeedCap, backOutLineTol);
+                else if (InRouteEscape(i == 0 ? hullNow : pts[i - 1])) MakeEscapeLeg(leg);   // boxed in: out with corridor clearance
                 leg.PlayerWaypoint = isPlayer[i];
                 if (isPlayer[i]) leg.ArrivalTolerance = WaypointTol;
             }
@@ -916,7 +952,8 @@ namespace Automata.Drone
                 Vector3D fwd = world ? flyForward : AnchorToWorldDir(ref am, flyForward);
                 Vector3D up = world ? flyUp : AnchorToWorldDir(ref am, flyUp);
                 MatrixD frame = MatrixD.CreateWorld(Vector3D.Zero, fwd, up);
-                return FlyRoute(anchor, ref am, target, approach, flyHull, flyRefOffset, ref frame, flyCheckLine)
+                return FlyRoute(anchor, ref am, target, approach, flyHull, flyRefOffset, ref frame, flyCheckLine,
+                                cPhase == ConstructionPhase.Running && currentJob != null)
                        == Orchestrator.TaskFailure.None;
             }
             if (routeOwner == RouteOwner.Player)
@@ -932,7 +969,7 @@ namespace Automata.Drone
             {
                 var target = AnchorDirectory.Resolve(block, dockReplanTargetId) as IMyShipConnector;
                 if (target == null || dockReplanMount >= connectorMounts.Count) return false;
-                return StartDocking(target, dockReplanMount, dockReplanOffset, dockReplanForward, dockReplanUp);
+                return StartDocking(target, dockReplanMount, dockReplanOffset, dockReplanForward, dockReplanUp, true);
             }
             return false;
         }
@@ -945,6 +982,7 @@ namespace Automata.Drone
             legChecked = o;
             legsSinceUndock++;
             if (!o.Watched || routeOwner == RouteOwner.None) return;
+            if (RecoverFlying) return;                                               // to a reposition spot: checked clear when chosen
             if (legsSinceUndock <= Math.Min(2, undockLegs)) return;                  // undocking (the back-out legs only)
             if (parkPhase != ParkPhase.None && o == parkOrder) return;               // landing: ends on the surface it parks on
             if (dockingOrder != null && (o == dockingOrder || nextLeg == dockingOrder
@@ -1092,6 +1130,7 @@ namespace Automata.Drone
             if (droneGrids.Count == 0) RefreshDroneGrids();   // the drone's own grids are never obstacles
             int now = MyAPIGateway.Session.GameplayFrameCounter;
             if (now - lastReplanFrame < ROUTE_REPLAN_MIN_TICKS) return;
+            if (RecoverFlying) return;   // to a reposition spot: planned again there (UpdateRecovery10)
 
             Vector3D from = HullCentreWorld;
             var pf = AutomataSession.GetConfig().Pathfinding;

@@ -56,6 +56,10 @@ namespace Automata.Pathfinding
         private readonly List<Vector3D> thetaPath = new List<Vector3D>();
         private readonly List<ThetaNode> thetaNeighbours = new List<ThetaNode>();
         private readonly HashSet<long> thetaSeenKeys = new HashSet<long>();
+        private FastPriorityQueue<ThetaNode> thetaOpen;
+        private readonly List<ThetaNode> thetaPool = new List<ThetaNode>();
+        private int thetaPoolUsed;
+        private const int THETA_POOL_KEEP = 65536;   // nodes kept between searches (the rest go to the GC)
         private Vector3D thetaOrigin;
         private double thetaCell, thetaHull;
         private int thetaN;   // cells per axis
@@ -68,6 +72,7 @@ namespace Automata.Pathfinding
         private const double THETA_FREE_SHARE = 0.5;     // of the time / expansion budget for the any-attitude search
         private const int THETA_HELD_MAX = 6;            // attitudes tried: as it is first, then the least turned
         private bool thetaHeld;                          // the search in progress holds q.Controller's attitude
+        private int thetaHeldIndex = -1;                 // the held attitude that found the way (0: as it is), -1: any attitude
         private Quaternion thetaRot;
         private Vector3D thetaBoxHalf;                   // the hull's half size + the berth (held attitude)
         private readonly List<MatrixD> thetaHeldFrames = new List<MatrixD>();
@@ -84,10 +89,84 @@ namespace Automata.Pathfinding
         private bool ThetaStage(ref PathQuery q, Vector3D start, Vector3D goal, out string why)
         {
             var total = System.Diagnostics.Stopwatch.StartNew();
-            double ms = config.ThetaMaxMs;
-            int exp = config.ThetaMaxExpansions;
+            double ms = offThread ? config.PathSearchMaxMs : config.ThetaMaxMs;
+            int exp = offThread ? (int)(config.ThetaMaxExpansions * ms / Math.Max(1.0, config.ThetaMaxMs)) : config.ThetaMaxExpansions;
+            thetaMaxExpanded = 0;
+            if (ThetaStageWithin(ref q, start, goal, ms, exp, out why)) return true;
+            // Boxed in where it starts (the search died within a few cells: no room for the hull and the full berth
+            // anywhere around the start - inside a station's frame, a hollow hull): searched again with the dock
+            // corridor's clearance near the start (the escape zone), the full berth beyond it
+            double left = ms - total.Elapsed.TotalMilliseconds;
+            double tight = Math.Max(THETA_ESCAPE_BERTH_MIN, config.DockClearance);
+            if (q.EscapeRadius > 0 || thetaMaxExpanded > THETA_ESCAPE_EXPANSIONS || left < THETA_ESCAPE_MIN_MS || tight >= Berth(ref q)) return false;
+            q.EscapeRadius = Math.Max(THETA_ESCAPE_RADIUS_MIN, THETA_ESCAPE_RADIUS_HULLS * HullRadius(ref q));
+            q.EscapeCentre = start;
+            q.EscapeBerth = tight;
+            string why2;
+            if (ThetaStageWithin(ref q, start, goal, left, Math.Max(16, (int)(exp * left / ms)), out why2))
+            {
+                if (!offThread && Log.DebugEnabled) Log.Debug("Pathfinding: boxed in at the start: a way out with {0:F2} m clearance within {1:F0} m of it ({2})",
+                          q.EscapeBerth, q.EscapeRadius, why);
+                why = null;
+                return true;
+            }
+            why += string.Format("; boxed in, with {0:F2} m clearance within {1:F0} m: {2}", q.EscapeBerth, q.EscapeRadius, why2);
+            q.EscapeRadius = 0;
+            return false;
+        }
+
+        // The escape zone (boxed in at the start, ThetaStage): tried when the first searches expanded at most this many cells
+        private const int THETA_ESCAPE_EXPANSIONS = 32;
+        private const double THETA_ESCAPE_RADIUS_MIN = 15;     // m around the start...
+        private const double THETA_ESCAPE_RADIUS_HULLS = 3;    // ...or this many hull radii
+        private const double THETA_ESCAPE_BERTH_MIN = 0.1;     // m (DockClearance below this: this)
+        private const double THETA_ESCAPE_MIN_MS = 1.0;        // budget left for it, at least
+        private int thetaMaxExpanded;                          // most cells one search of this stage expanded
+        private double thetaHullTight;                         // thetaHull / thetaBoxHalf with the escape berth
+        private Vector3D thetaBoxHalfTight;
+
+        // In the escape zone: the whole brick (centre, half diagonal / half side) within it
+        private static bool InEscape(ref PathQuery q, Vector3D centre, double reach)
+        {
+            return q.EscapeRadius > 0 && Vector3D.Distance(centre, q.EscapeCentre) + reach <= q.EscapeRadius;
+        }
+
+        /// <summary>
+        /// SegmentBlocked for an answer of the search: with an escape zone, the part of the stretch inside it is checked
+        /// with the escape berth (the start's own tight room: corridor-level clearance), the rest with the full berth.
+        /// </summary>
+        private bool SegmentBlockedGraded(ref PathQuery q, Vector3D a, Vector3D b, out Vector3D hit, out IMyEntity e, bool extendPastEnd)
+        {
+            double r = q.EscapeRadius;
+            Vector3D c = q.EscapeCentre;
+            double da2 = Vector3D.DistanceSquared(a, c);
+            if (r <= 0 || da2 >= r * r) return SegmentBlocked(ref q, ref q.Controller, a, b, 0.5, out hit, out e, extendPastEnd);
+            // Where a -> b leaves the zone (a is inside): t along it
+            Vector3D ab = b - a;
+            double len = ab.Length();
+            double exitT = len;
+            if (len > 1e-6)
+            {
+                Vector3D dir = ab / len;
+                double m = Vector3D.Dot(a - c, dir);
+                double disc = m * m - (da2 - r * r);
+                exitT = -m + Math.Sqrt(Math.Max(0, disc));
+            }
+            PathQuery qt = q;
+            qt.Berth = q.EscapeBerth;
+            qt.EscapeRadius = 0;
+            if (exitT >= len) return SegmentBlocked(ref qt, ref qt.Controller, a, b, 0.5, out hit, out e, extendPastEnd);
+            Vector3D x = a + ab * (exitT / len);
+            if (SegmentBlocked(ref qt, ref qt.Controller, a, x, 0.5, out hit, out e, false)) return true;
+            return SegmentBlocked(ref q, ref q.Controller, x, b, 0, out hit, out e, extendPastEnd);
+        }
+
+        private bool ThetaStageWithin(ref PathQuery q, Vector3D start, Vector3D goal, double ms, int exp, out string why)
+        {
+            var total = System.Diagnostics.Stopwatch.StartNew();
             bool canHold = q.HullCentred && q.LocalHull.Max.X >= q.LocalHull.Min.X;
             thetaHeld = false;
+            thetaHeldIndex = -1;
             if (ThetaSearch(ref q, start, goal, canHold ? ms * THETA_FREE_SHARE : ms,
                             canHold ? Math.Max(16, (int)(exp * THETA_FREE_SHARE)) : exp, out why)) return true;
             if (!canHold) return false;
@@ -118,7 +197,8 @@ namespace Automata.Pathfinding
                 if (ok)
                 {
                     q.HoldAttitude = true;
-                    if (Log.DebugEnabled) Log.Debug("Pathfinding: Lazy Theta* found a way holding the drone's attitude{0} (any-attitude search: {1})",
+                    thetaHeldIndex = i;
+                    if (!offThread && Log.DebugEnabled) Log.Debug("Pathfinding: Lazy Theta* found a way holding the drone's attitude{0} (any-attitude search: {1})",
                               i == 0 ? " as it is" : string.Format(", turned {0:F0}° at the start", TurnDegrees(ref controller, ref f)), why);
                     why = null;
                     return true;
@@ -130,6 +210,192 @@ namespace Automata.Pathfinding
             q.Eyes = eyes;
             why += string.Format("; held attitudes: {0} of {1} tried{2}", tried, thetaHeldFrames.Count, last != null ? " (last: " + last + ")" : "");
             return false;
+        }
+
+        // The grid: a cube around start and target (a goal further than 2 x the search radius: the point on the way) with
+        // a margin each side; cells per axis a multiple of 64 (bricks)
+        private void ThetaGrid(ref PathQuery q, Vector3D start, Vector3D goal, out Vector3D origin, out double cell, out int n,
+                               out Vector3D target, out bool far)
+        {
+            cell = Math.Max(THETA_CELL_MIN, HullRadius(ref q) * THETA_CELL_HULL);
+            double radius = config.ThetaSearchRadius;
+            target = goal;
+            double dist = Vector3D.Distance(start, goal);
+            far = dist > 2 * radius;
+            if (far) target = start + (goal - start) / dist * (2 * radius);
+            Vector3D mid = (start + target) * 0.5;
+            double span = Vector3D.Distance(start, target) + 2 * Math.Max(radius * 0.5, 8 * cell);
+            n = Math.Max(64, (int)Math.Ceiling(span / cell / 64) * 64);
+            if (n > 1024) { n = 1024; cell = span / n; }
+            origin = mid - new Vector3D(n * cell * 0.5);
+        }
+
+        /// <summary>
+        /// The world box a search from 'start' to 'goal' reads of the scene: its grid (the search may go anywhere in it),
+        /// plus what its probes reach past the grid's faces: a corner brick's probe sphere (half diagonal - half side of
+        /// the biggest brick, 0.37 x 64 cells), the hull and its clearance. Main thread, to capture the scene for a worker.
+        /// </summary>
+        public BoundingBoxD SearchRegion(ref PathQuery q, Vector3D start, Vector3D goal)
+        {
+            Vector3D origin, target;
+            double cell;
+            int n;
+            bool far;
+            ThetaGrid(ref q, start, goal, out origin, out cell, out n, out target, out far);
+            double reach = 0.37 * 64 * cell + HullRadius(ref q) + 2 * Berth(ref q) + 5;
+            return new BoundingBoxD(origin - new Vector3D(reach), origin + new Vector3D(n * cell + reach));
+        }
+
+        /// <summary>
+        /// A worker's planner: Lazy Theta* (all stages, as on the main thread) over the snapshot scene and the frozen
+        /// query. The checks that need rays or the game's objects are left to <see cref="AcceptSearch"/> on the main thread.
+        /// </summary>
+        internal PathSearchResult RunSearch(PathQuery q, Vector3D start, Vector3D goal, int now)
+        {
+            var r = new PathSearchResult();
+            frame = now;
+            planChecks = planRays = blocksTested = unseen = budgetBase = 0;
+            planHitDynamic = false;
+            searchFar = false;
+            thetaHeldIndex = -1;
+            searchDoors.Clear();
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            string why;
+            r.Found = ThetaStage(ref q, start, goal, out why);
+            r.Why = why;
+            r.Ms = sw.Elapsed.TotalMilliseconds;
+            r.Probes = thetaProbes;
+            r.Checks = planChecks;
+            r.Blocks = blocksTested;
+            r.HitDynamic = planHitDynamic || (why != null && why.Contains("budget"));   // out of time: may go another time
+            if (r.Found)
+            {
+                r.Points = new List<Vector3D>(points);
+                r.Far = searchFar;
+                r.Target = searchTarget;
+                r.Hold = q.HoldAttitude;
+                r.HeldIndex = thetaHeldIndex;
+                r.Controller = q.Controller;
+                r.EscapeRadius = q.EscapeRadius;
+                r.EscapeCentre = q.EscapeCentre;
+                r.EscapeBerth = q.EscapeBerth;
+                if (searchDoors.Count > 0) r.Doors = new List<SearchDoor>(searchDoors);
+                points.Clear();
+            }
+            searchDoors.Clear();
+            return r;
+        }
+
+        private bool searchFar;          // worker: the goal is beyond the search, the rest is the main thread's straight stage
+        private Vector3D searchTarget;   // ...from this point
+
+        #region Timing
+        private const int ACCEPT_REUSE_TICKS = 3 * 60;   // an accepted answer is used as it is by plans of the same stretch this soon after
+        #endregion
+        private const double ACCEPT_REUSE_SLACK = 0.5;   // m: ...from a start / to a goal this close
+
+        // Stretch i of 'points' (AcceptSearch) is the worker's own (start and end as it checked them)
+        private bool WorkerStretch(int i)
+        {
+            var wp = acceptResult.Points;
+            return i + 1 < wp.Count && i + 1 < points.Count && points[i] == wp[i] && points[i + 1] == wp[i + 1];
+        }
+
+        /// <summary>
+        /// Main thread: a worker's answer made into the route in 'points' (the controller turned to the held attitude as
+        /// ThetaStage would have left it) and checked like any route: rays and doors, and the box checks against what
+        /// changed since the worker read it (grids that moved or whose blocks changed, new ones; the stretches whose ends
+        /// moved: all); the rest after the search's end by the straight stage. False: 'why'. An answer accepted just
+        /// before for the same stretch (a route of several stretches planned again) is used as it is.
+        /// </summary>
+        internal bool AcceptSearch(ref PathQuery q, Vector3D start, Vector3D goal, PathSearchResult r, out string why)
+        {
+            why = null;
+            if (r.Accepted && frame - r.AcceptFrame <= ACCEPT_REUSE_TICKS
+                && Vector3D.DistanceSquared(r.AcceptStart, start) <= ACCEPT_REUSE_SLACK * ACCEPT_REUSE_SLACK
+                && Vector3D.DistanceSquared(r.AcceptGoal, goal) <= ACCEPT_REUSE_SLACK * ACCEPT_REUSE_SLACK)
+            {
+                points.Clear();
+                points.AddRange(r.AcceptPoints);
+                points[0] = start;
+                points[points.Count - 1] = goal;
+                if (r.AcceptHold) ApplyHeld(ref q, ref r.AcceptController);
+                ApplyEscape(ref q, r);
+                return true;
+            }
+            points.Clear();
+            points.AddRange(r.Points);
+            points[0] = start;
+            if (!r.Far) points[points.Count - 1] = goal;
+            MatrixD orig = q.Controller, eyes = q.Eyes;
+            bool eyesSet = q.EyesSet, hold = q.HoldAttitude;
+            bool ok = true;
+            ApplyEscape(ref q, r);
+            if (r.Hold)
+            {
+                MatrixD f = r.Controller;
+                ApplyHeld(ref q, ref f);
+                // The turn to a held attitude other than the drone's: its room checked with the rays too
+                if (r.HeldIndex > 0 && !TurnSweepFree(ref q, start, ref q.Controller, Berth(ref q))) { why = "no room to turn to the held attitude"; ok = false; }
+            }
+            if (ok)
+            {
+                // The grids the worker read that are as they were: their box checks hold (SegmentBlocked skips them on its stretches)
+                acceptTrust.Clear();
+                if (r.Trust != null)
+                    for (int i = 0; i < r.Trust.Length; i++)
+                    {
+                        var t = r.Trust[i];
+                        var live = t.Live;
+                        if (live == null || live.Grid == null || live.Blocks != t.Blocks || live.Version != t.Version || live.Entity.MarkedForClose) continue;
+                        MatrixD w = live.Grid.WorldMatrix;
+                        if (Vector3D.DistanceSquared(w.Translation, t.World.Translation) > 1e-4
+                            || Vector3D.Dot(w.Forward, t.World.Forward) < 0.999999 || Vector3D.Dot(w.Up, t.World.Up) < 0.999999) continue;
+                        acceptTrust.Add(live);
+                    }
+                acceptResult = r;
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                try { ok = CheckThetaPath(ref q, r.Far ? r.Target : goal, goal, r.Far, 0, sw, out why); }
+                finally { acceptResult = null; acceptTrust.Clear(); trustSeg = -1; }
+            }
+            if (!ok)
+            {
+                points.Clear();
+                q.Controller = orig;
+                q.Eyes = eyes;
+                q.EyesSet = eyesSet;
+                q.HoldAttitude = hold;
+                q.EscapeRadius = 0;
+                return false;
+            }
+            r.Accepted = true;
+            r.AcceptFrame = frame;
+            r.AcceptStart = start;
+            r.AcceptGoal = goal;
+            if (r.AcceptPoints == null) r.AcceptPoints = new List<Vector3D>(points.Count);
+            r.AcceptPoints.Clear();
+            r.AcceptPoints.AddRange(points);
+            r.AcceptHold = r.Hold;
+            r.AcceptController = q.Controller;
+            return true;
+        }
+
+        // The worker's escape zone (found boxed in) on the main thread's query, as ThetaStage leaves it
+        private static void ApplyEscape(ref PathQuery q, PathSearchResult r)
+        {
+            q.EscapeRadius = r.EscapeRadius;
+            q.EscapeCentre = r.EscapeCentre;
+            q.EscapeBerth = r.EscapeBerth;
+        }
+
+        // The controller turned to a held attitude (rotation of 'f', position as it is), as ThetaStage leaves it
+        private static void ApplyHeld(ref PathQuery q, ref MatrixD f)
+        {
+            MatrixD c = f;
+            c.Translation = q.Controller.Translation;
+            if (!q.EyesSet) { q.Eyes = q.Controller; q.EyesSet = true; }
+            q.Controller = c;
+            q.HoldAttitude = true;
         }
 
         private static double TurnDegrees(ref MatrixD a, ref MatrixD b)
@@ -151,7 +417,8 @@ namespace Automata.Pathfinding
             bool inGravity = q.GravityUp.LengthSquared() > 0.5;
             double minUp = q.MaxPitch >= 0 ? Math.Cos(q.MaxPitch) : 0.7;
             Vector3D[] axes = { c.Right, c.Up, c.Backward, c.Left, c.Down, c.Forward };
-            var scored = new List<KeyValuePair<double, MatrixD>>();
+            var scored = heldScored;
+            scored.Clear();
             for (int fi = 0; fi < 6; fi++)
                 for (int ui = 0; ui < 6; ui++)
                 {
@@ -178,6 +445,8 @@ namespace Automata.Pathfinding
             }
         }
 
+        private readonly List<KeyValuePair<double, MatrixD>> heldScored = new List<KeyValuePair<double, MatrixD>>();
+
         // Half size along world axis 'w' of the hull box (half extents 'h') in attitude 'f'
         private static double Extent(ref MatrixD f, ref Vector3D h, Vector3D w)
         {
@@ -190,21 +459,16 @@ namespace Automata.Pathfinding
             var sw = System.Diagnostics.Stopwatch.StartNew();
             thetaProbes = thetaLos = 0;
             thetaHull = thetaHeld ? thetaBoxHalf.Length() : HullRadius(ref q) + Berth(ref q);
+            thetaBoxHalfTight = q.LocalHull.HalfExtents + new Vector3D(q.EscapeBerth);
+            thetaHullTight = thetaHeld ? thetaBoxHalfTight.Length() : HullRadius(ref q) + q.EscapeBerth;
             thetaCell = Math.Max(THETA_CELL_MIN, HullRadius(ref q) * THETA_CELL_HULL);
-            double radius = config.ThetaSearchRadius;
-            Vector3D target = goal;
-            double dist = Vector3D.Distance(start, goal);
-            bool far = dist > 2 * radius;
-            if (far) target = start + (goal - start) / dist * (2 * radius);
-
-            // The grid: a cube around start and target with a margin each side; cells per axis a multiple of 64 (bricks)
-            Vector3D mid = (start + target) * 0.5;
-            double span = Vector3D.Distance(start, target) + 2 * Math.Max(radius * 0.5, 8 * thetaCell);
-            thetaN = Math.Max(64, (int)Math.Ceiling(span / thetaCell / 64) * 64);
-            if (thetaN > 1024) { thetaN = 1024; thetaCell = span / thetaN; }
-            thetaOrigin = mid - new Vector3D(thetaN * thetaCell * 0.5);
+            Vector3D target;
+            bool far;
+            ThetaGrid(ref q, start, goal, out thetaOrigin, out thetaCell, out thetaN, out target, out far);
             for (int i = 0; i < thetaLevels.Length; i++) thetaLevels[i].Clear();
             thetaNodes.Clear();
+            thetaPoolUsed = 0;
+            if (thetaPool.Count > THETA_POOL_KEEP) thetaPool.RemoveRange(THETA_POOL_KEEP, thetaPool.Count - THETA_POOL_KEEP);
 
             // Asteroids in the box, once
             thetaAsteroids.Clear();
@@ -245,12 +509,17 @@ namespace Automata.Pathfinding
             s.G = 0;
             s.Parent = s;
 
-            var open = new FastPriorityQueue<ThetaNode>(maxExpansions * 16 + 64);
+            // One queue per planner, grown when needed (a new one per search was a large-object allocation each time)
+            int need = maxExpansions * 16 + 64;
+            if (thetaOpen == null || thetaOpen.MaxSize < need) thetaOpen = new FastPriorityQueue<ThetaNode>(need);
+            else thetaOpen.Clear();
+            var open = thetaOpen;
             open.Enqueue(s, THETA_WEIGHT * Vector3D.Distance(start, target));
             int expansions = 0;
             ThetaNode reached = null;
             while (open.Count > 0)
             {
+                if (CancelSearch) { why = "cancelled"; break; }
                 if (expansions >= maxExpansions) { why = "expansion budget"; break; }
                 if (sw.Elapsed.TotalMilliseconds > maxMs) { why = "time budget"; break; }
                 var cur = open.Dequeue();
@@ -292,6 +561,7 @@ namespace Automata.Pathfinding
                     }
                 }
             }
+            if (expansions > thetaMaxExpanded) thetaMaxExpanded = expansions;
             if (reached == null)
             {
                 why = (why ?? "no way through") + string.Format(" ({0} cells expanded, {1} probes, {2} sight checks, {3:F1} ms)",
@@ -312,12 +582,17 @@ namespace Automata.Pathfinding
                                     System.Diagnostics.Stopwatch sw, out string why)
         {
             why = null;
+            if (offThread) searchDoors.Clear();   // (the doors of the answer that passes: the last check)
             for (int i = 0; i + 1 < points.Count; i++)
             {
                 Vector3D hit;
                 IMyEntity e;
                 bool toGoal = !far && i + 2 == points.Count;
-                if (SegmentBlocked(ref q, ref q.Controller, points[i], points[i + 1], 0.5, out hit, out e, !(toGoal && q.LooseGoal)))
+                if (offThread) searchSeg = i;
+                else trustSeg = acceptResult != null && WorkerStretch(i) ? i : -1;
+                bool blocked = SegmentBlockedGraded(ref q, points[i], points[i + 1], out hit, out e, !(toGoal && q.LooseGoal));
+                searchSeg = trustSeg = -1;
+                if (blocked)
                 {
                     why = string.Format("its stretch {0} of {1} is blocked by {2} ({3} cells, {4:F1} ms)", i + 1, points.Count - 1,
                                         e != null ? e.DisplayName : "?", expansions, sw.Elapsed.TotalMilliseconds);
@@ -326,6 +601,12 @@ namespace Automata.Pathfinding
                 }
             }
             int found = points.Count;
+            if (far && offThread)
+            {
+                searchFar = true;
+                searchTarget = target;
+                return true;
+            }
             if (far)
             {
                 var head = new List<Vector3D>(points);
@@ -338,7 +619,7 @@ namespace Automata.Pathfinding
                 points.AddRange(head);
                 for (int i = 1; i < tail.Count; i++) points.Add(tail[i]);
             }
-            if (Log.DebugEnabled) Log.Debug("Pathfinding: Lazy Theta* found {0} points in {1} cells expanded ({2} probes, {3} sight checks, cell {4:F1} m, {5}^3 grid), {6:F1} ms{7}",
+            if (!offThread && Log.DebugEnabled) Log.Debug("Pathfinding: Lazy Theta* found {0} points in {1} cells expanded ({2} probes, {3} sight checks, cell {4:F1} m, {5}^3 grid), {6:F1} ms{7}",
                       found, expansions, thetaProbes, thetaLos, thetaCell, thetaN, sw.Elapsed.TotalMilliseconds, far ? ", the rest by the straight stage" : "");
             return true;
         }
@@ -353,7 +634,21 @@ namespace Automata.Pathfinding
             {
                 double size = thetaCell * (1 << (2 * level));
                 var pos = thetaOrigin + new Vector3D((bx + 0.5) * size, (by + 0.5) * size, (bz + 0.5) * size);
-                n = new ThetaNode { Key = k, Level = level, BX = bx, BY = by, BZ = bz, Pos = pos, G = double.MaxValue, Unseen = !Seen(ref q, pos) };
+                // From the planner's pool (nodes are many and short-lived)
+                if (thetaPoolUsed < thetaPool.Count) n = thetaPool[thetaPoolUsed];
+                else { n = new ThetaNode(); thetaPool.Add(n); }
+                thetaPoolUsed++;
+                n.Key = k;
+                n.Level = level;
+                n.BX = bx;
+                n.BY = by;
+                n.BZ = bz;
+                n.Pos = pos;
+                n.G = double.MaxValue;
+                n.Unseen = !Seen(ref q, pos);
+                n.Parent = null;
+                n.Closed = false;
+                n.QueueIndex = 0;
                 thetaNodes[k] = n;
             }
             return n;
@@ -438,14 +733,17 @@ namespace Automata.Pathfinding
             // hull at its centre, with a quarter cell of slack - the half diagonal made every cell of a cramped bay
             // (drones, station beams a few metres apart) blocked, and the search died at its start cell; lines between
             // cells are checked cell by cell, and the answer exactly (CheckThetaPath)
-            double reach = (level == 0 ? size * 0.25 : size * 0.8660254) + thetaHull;
+            // The escape zone (boxed in at the start): bricks wholly inside it keep only the escape berth
+            bool tight = InEscape(ref q, centre, size * 0.8660254);
+            double hull = tight ? thetaHullTight : thetaHull;
+            double reach = (level == 0 ? size * 0.25 : size * 0.8660254) + hull;
             bool seen = Seen(ref q, centre);
             st = CellState.Free;
             if (thetaHeld)
             {
                 // The hull box in the held attitude, anywhere in the brick / near the cell's centre
-                double grow = reach - thetaHull;
-                var box = new MyOrientedBoundingBoxD(centre, thetaBoxHalf + new Vector3D(grow), thetaRot);
+                double grow = reach - hull;
+                var box = new MyOrientedBoundingBoxD(centre, (tight ? thetaBoxHalfTight : thetaBoxHalf) + new Vector3D(grow), thetaRot);
                 if (!BoxFree(ref q, ref box)) st = CellState.Mixed;
             }
             else if (!HullSpaceFree(ref q, centre, reach)) st = CellState.Mixed;

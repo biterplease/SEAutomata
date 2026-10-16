@@ -45,6 +45,13 @@ namespace Automata.Pathfinding
         public bool SeeAll;
         /// <summary>m kept between the hull and obstacles by the checks (0: the server's ObstacleClearance).</summary>
         public double Berth;
+        /// <summary>
+        /// Boxed in where it starts (set by the search, ThetaStage): within EscapeRadius of EscapeCentre the search and
+        /// the check of its answer keep EscapeBerth (the dock corridor's clearance) instead of the berth. 0: off.
+        /// </summary>
+        public double EscapeRadius;
+        public Vector3D EscapeCentre;
+        public double EscapeBerth;
         /// <summary>A block (its cells) that is not an obstacle: the one being worked on.</summary>
         public IMyCubeGrid IgnoreGrid;
         public Vector3I IgnoreMin, IgnoreMax;
@@ -69,6 +76,41 @@ namespace Automata.Pathfinding
         // What the drone sees from (its real attitude) when Controller was turned to a held attitude
         internal bool EyesSet;
         internal MatrixD Eyes;
+        /// <summary>The asking drone's entity id (0: nobody, a warm-up): a search queued for it comes back to it.</summary>
+        public long Owner;
+        /// <summary>
+        /// The caller can wait for an answer (it handles <see cref="PlanPendingException"/>): the expensive stages go to
+        /// the search queue (worker threads) instead of running at once.
+        /// </summary>
+        public bool AsyncOk;
+
+        // The instruments as of Frozen(): a search on another thread must not read the blocks
+        internal bool Snap;
+        internal Vector3D[] SensorPos;
+        internal bool[] SensorOn;
+        internal MatrixD[] CameraWorld;
+        internal bool[] CameraOn;
+
+        /// <summary>A copy for a search on another thread: own grids copied, instruments (position, working) captured.</summary>
+        internal PathQuery Frozen()
+        {
+            PathQuery f = this;
+            if (OwnGrids != null) f.OwnGrids = new List<IMyCubeGrid>(OwnGrids);
+            int ns = Sensors != null ? Sensors.Count : 0, nc = Cameras != null ? Cameras.Count : 0;
+            f.SensorPos = new Vector3D[ns];
+            f.SensorOn = new bool[ns];
+            for (int i = 0; i < ns; i++)
+                if (f.SensorOn[i] = PathfindingManager.InstrumentOn(Sensors[i], SleepingIds)) f.SensorPos[i] = Sensors[i].GetPosition();
+            f.CameraWorld = new MatrixD[nc];
+            f.CameraOn = new bool[nc];
+            for (int i = 0; i < nc; i++)
+                if (f.CameraOn[i] = PathfindingManager.InstrumentOn(Cameras[i], SleepingIds)) f.CameraWorld[i] = Cameras[i].WorldMatrix;
+            f.Sensors = null;
+            f.Cameras = null;
+            f.SleepingIds = null;
+            f.Snap = true;
+            return f;
+        }
     }
 
     public enum RouteResult : byte
@@ -76,6 +118,7 @@ namespace Automata.Pathfinding
         Direct,    // nothing seen in the way: no waypoints
         Detour,    // waypoints added
         Blocked,   // no way found within the attempts: don't fly it
+        Pending,   // the search is queued / running (PathQuery.AsyncOk): ask again when it is done
     }
 
     /// <summary>
@@ -113,6 +156,11 @@ namespace Automata.Pathfinding
         public RouteMemory Memory { get; private set; }
         /// <summary>Directional flight lanes; null on clients.</summary>
         public FlightLanes Lanes { get; private set; }
+        internal LocalScene LiveScene { get { return liveScene; } }
+        /// <summary>A worker's planner: set when the world unloads, its search stops at the next check.</summary>
+        internal volatile bool CancelSearch;
+        /// <summary>Queue of searches run on worker threads (Lazy Theta*); null when off (PathSearchWorkers = 0) or not the server.</summary>
+        public PathSearchQueue Searches { get; private set; }
         private int lastPlanFrame = -1;
 
         public static void Load(PathfindingConfig config)
@@ -128,6 +176,8 @@ namespace Automata.Pathfinding
                 Instance.Lanes = new FlightLanes(config);
                 Instance.Lanes.Load(MyAPIGateway.Session != null ? MyAPIGateway.Session.GameplayFrameCounter : 0);
             }
+            if (config.PathSearchWorkers > 0 && config.AllowLazyTheta && (MyAPIGateway.Multiplayer == null || MyAPIGateway.Multiplayer.IsServer))
+                Instance.Searches = new PathSearchQueue(Instance, config);
             Log.Info("Pathfinding: chain straight line > {0} > {1} > repositioning", config.UsePathMemory ? "memory" : "(memory off)",
                      config.AllowLazyTheta ? "Lazy Theta*" : "(Lazy Theta* off)");
         }
@@ -141,7 +191,11 @@ namespace Automata.Pathfinding
 
         public static void Unload()
         {
-            if (Instance != null) Instance.scene.Clear();
+            if (Instance != null)
+            {
+                if (Instance.Searches != null) Instance.Searches.Shutdown();
+                Instance.liveScene.Clear();
+            }
             Instance = null;
         }
 
@@ -160,7 +214,9 @@ namespace Automata.Pathfinding
         private int unseen;             // stretches of the current PlanRoute the drone couldn't fully see
         private int planUnseen;         // same, the whole plan (BeginPlan)
         private int frame;
-        private readonly LocalScene scene = new LocalScene();
+        private readonly LocalScene liveScene;   // the game's scene (main thread); null in a worker's planner
+        private readonly ISceneView scene;       // what the checks read: liveScene, or a worker's snapshot of it
+        private readonly bool offThread;         // a worker's planner: no rays, no log, nothing read from game objects
         private readonly List<LocalScene.Entry> entryBuffer = new List<LocalScene.Entry>();
         private readonly List<IMySlimBlock> slimBuffer = new List<IMySlimBlock>();
         private readonly System.Diagnostics.Stopwatch watch = new System.Diagnostics.Stopwatch();
@@ -257,6 +313,16 @@ namespace Automata.Pathfinding
         private PathfindingManager(PathfindingConfig config)
         {
             this.config = config;
+            liveScene = new LocalScene();
+            scene = liveScene;
+        }
+
+        /// <summary>A planner for searches on a worker thread: reads its snapshot and the query only (see PathSearchQueue).</summary>
+        internal PathfindingManager(PathfindingConfig config, SnapshotScene snapshot)
+        {
+            this.config = config;
+            scene = snapshot;
+            offThread = true;
         }
 
         /// <summary>Session, every tick: refills the look-ahead ray budget shared by all drones; scene upkeep.</summary>
@@ -264,7 +330,8 @@ namespace Automata.Pathfinding
         {
             raysLeft = config.RaysPerTick;
             frame = MyAPIGateway.Session.GameplayFrameCounter;
-            scene.Update(frame);
+            liveScene.Update(frame);
+            if (Searches != null) Searches.Update(frame);
             if (Memory != null) Memory.Update(frame);
             if (Lanes != null)
             {
@@ -312,14 +379,28 @@ namespace Automata.Pathfinding
             double sensorRange = config.SimulatedSensorRange, camRange = config.MaxSimulatedCameraRaycastMeters();
             if (config.RequireSensorsForPathfinding())
             {
-                if (q.Sensors != null)
+                if (q.Snap)
+                {
+                    for (int i = 0; i < q.SensorPos.Length; i++)
+                        if (q.SensorOn[i]) SphereSpan(a, dir, len, q.SensorPos[i], sensorRange);
+                }
+                else if (q.Sensors != null)
                     for (int i = 0; i < q.Sensors.Count; i++)
                         if (InstrumentOn(q.Sensors[i], q.SleepingIds)) SphereSpan(a, dir, len, q.Sensors[i].GetPosition(), sensorRange);
             }
             else HullSpan(ref q, a, dir, len, sensorRange);
             if (config.RequireCamerasForPathfinding())
             {
-                if (q.Cameras != null)
+                if (q.Snap)
+                {
+                    for (int i = 0; i < q.CameraWorld.Length; i++)
+                    {
+                        if (!q.CameraOn[i]) continue;
+                        MatrixD m = q.CameraWorld[i];
+                        ConeSpan(a, dir, len, m.Translation, m.Forward, m.Right, m.Up, camRange);
+                    }
+                }
+                else if (q.Cameras != null)
                     for (int i = 0; i < q.Cameras.Count; i++)
                     {
                         if (!InstrumentOn(q.Cameras[i], q.SleepingIds)) continue;
@@ -527,9 +608,10 @@ namespace Automata.Pathfinding
                     if (entry.Voxel) { voxels = true; continue; }
                     var grid = entry.Grid;
                     if (IsOwn(ref q, grid)) continue;
+                    if (trustSeg >= 0 && acceptTrust.Contains(entry)) continue;   // unchanged since the worker checked this stretch against it
                     var blocks = scene.BlocksOf(entry);
                     if (blocks == null) continue;
-                    MatrixD inv = grid.WorldMatrixNormalizedInv;
+                    MatrixD inv = entry.Inv;
                     MyOrientedBoundingBoxD wl = ToLocal(ref wide, ref inv), tl = ToLocal(ref tight, ref inv);
                     BoundingBoxD lb = wl.GetAABB();
                     blocks.OverlapAllBoundingBox(ref lb, slimBuffer, 0u, true);
@@ -538,7 +620,7 @@ namespace Automata.Pathfinding
                     {
                         var slim = slimBuffer[k];
                         if (Ignored(ref q, grid, slim)) continue;
-                        BoundingBoxD box = LocalScene.BlockBox(slim, grid.GridSize);
+                        BoundingBoxD box = LocalScene.BlockBox(slim, entry.GridSize);
                         blocksTested++;
                         if (!wl.Intersects(ref box)) continue;
                         // An open door / gate: its cells span the doorway, so its box would close it; checked with rays
@@ -570,12 +652,28 @@ namespace Automata.Pathfinding
                             if (realShapeCleared.Add(slim)) RealShapeClears++;   // (a block spans several chunks: once)
                             continue;
                         }
-                        if (t < best) { best = t; bestEntity = grid; bestBlock = slim; }
+                        if (t < best)
+                        {
+                            best = t;
+                            bestEntity = grid;
+                            bestBlock = slim;
+                            if (!entry.Static || slim.FatBlock is IMyDoor) planHitDynamic = true;
+                        }
                     }
                     slimBuffer.Clear();
                 }
                 entryBuffer.Clear();
             }
+            // The doors the worker met on this stretch of its answer (in grids not looked at again here): their rays now
+            if (trustSeg >= 0 && acceptResult != null && acceptResult.Doors != null)
+                for (int k = 0; k < acceptResult.Doors.Count; k++)
+                {
+                    var d = acceptResult.Doors[k];
+                    if (d.Seg == trustSeg && !doorBlocks.Contains(d.Block)) { doorBlocks.Add(d.Block); doorGrids.Add(d.Grid); }
+                }
+            // A worker: the doors of its answer's stretches go with the answer (rays are the main thread's)
+            if (offThread && searchSeg >= 0)
+                for (int k = 0; k < doorBlocks.Count; k++) searchDoors.Add(new SearchDoor { Seg = searchSeg, Block = doorBlocks[k], Grid = doorGrids[k] });
             if (doorBlocks.Count > 0)
             {
                 double td;
@@ -586,6 +684,7 @@ namespace Automata.Pathfinding
                     best = td;
                     bestEntity = dg;
                     bestBlock = db;
+                    planHitDynamic = true;
                 }
                 doorBlocks.Clear();
                 doorGrids.Clear();
@@ -614,6 +713,7 @@ namespace Automata.Pathfinding
         {
             hit = Vector3D.Zero;
             hitEntity = null;
+            if (offThread) return false;   // physics rays are for the main thread: the route is checked again there
             Vector3D along = b - a;
             double len = along.Length();
             if (len < 0.1) return false;
@@ -691,6 +791,7 @@ namespace Automata.Pathfinding
                                     Vector3D side1, double h1, Vector3D side2, double h2)
         {
             if (t1 <= t0) return true;
+            if (offThread) return false;   // rays: cell boxes count (searches with a real-shape grid aren't queued)
             int n1 = h1 > 0.75 ? 5 : h1 > 0.3 ? 4 : 3, n2 = h2 > 0.75 ? 5 : h2 > 0.3 ? 4 : 3;
             if (RealShapeRayBudget < n1 * n2) return false;
             BoundingBoxD cells = box.GetInflated(0.02);
@@ -756,6 +857,7 @@ namespace Automata.Pathfinding
             t = double.MaxValue;
             grid = null;
             block = null;
+            if (offThread) return false;   // rays: the main thread checks the doors of the finished route
             int n1 = Math.Max(2, Math.Min(DOOR_RAYS_MAX, (int)Math.Ceiling(2 * h1 / DOOR_RAY_SPACING) + 1));
             int n2 = Math.Max(2, Math.Min(DOOR_RAYS_MAX, (int)Math.Ceiling(2 * h2 / DOOR_RAY_SPACING) + 1));
             for (int i = 0; i < n1; i++)
@@ -801,7 +903,12 @@ namespace Automata.Pathfinding
             double sensorRange = pf.SimulatedSensorRange, camRange = pf.MaxSimulatedCameraRaycastMeters();
             if (pf.RequireSensorsForPathfinding())
             {
-                if (q.Sensors != null)
+                if (q.Snap)
+                {
+                    for (int i = 0; i < q.SensorPos.Length; i++)
+                        if (q.SensorOn[i] && Vector3D.DistanceSquared(p, q.SensorPos[i]) <= sensorRange * sensorRange) return true;
+                }
+                else if (q.Sensors != null)
                     for (int i = 0; i < q.Sensors.Count; i++)
                         if (InstrumentOn(q.Sensors[i], q.SleepingIds) && Vector3D.DistanceSquared(p, q.Sensors[i].GetPosition()) <= sensorRange * sensorRange) return true;
             }
@@ -818,7 +925,16 @@ namespace Automata.Pathfinding
             }
             if (pf.RequireCamerasForPathfinding())
             {
-                if (q.Cameras != null)
+                if (q.Snap)
+                {
+                    for (int i = 0; i < q.CameraWorld.Length; i++)
+                    {
+                        if (!q.CameraOn[i]) continue;
+                        MatrixD m = q.CameraWorld[i];
+                        if (InCone(p, m.Translation, m.Forward, m.Right, m.Up, camRange)) return true;
+                    }
+                }
+                else if (q.Cameras != null)
                     for (int i = 0; i < q.Cameras.Count; i++)
                     {
                         if (!InstrumentOn(q.Cameras[i], q.SleepingIds)) continue;
@@ -958,7 +1074,7 @@ namespace Automata.Pathfinding
                 var blocks = scene.BlocksOf(entry);
                 if (blocks == null) continue;
                 var grid = entry.Grid;
-                MatrixD inv = grid.WorldMatrixNormalizedInv;
+                MatrixD inv = entry.Inv;
                 MyOrientedBoundingBoxD local = ToLocal(ref box, ref inv);
                 BoundingBoxD lb = local.GetAABB();
                 blocks.OverlapAllBoundingBox(ref lb, slimBuffer, 0u, true);
@@ -966,12 +1082,13 @@ namespace Automata.Pathfinding
                 {
                     var slim = slimBuffer[k];
                     if (Ignored(ref q, grid, slim)) continue;
-                    BoundingBoxD bb = LocalScene.BlockBox(slim, grid.GridSize);
+                    BoundingBoxD bb = LocalScene.BlockBox(slim, entry.GridSize);
                     blocksTested++;
                     if (!local.Intersects(ref bb)) continue;
-                    if (!Seen(ref q, Vector3D.Transform(bb.Center, grid.WorldMatrix))) continue;
+                    if (!Seen(ref q, Vector3D.Transform(bb.Center, entry.World))) continue;
                     free = false;
                     LastHitBlock = slim;
+                    if (!entry.Static || slim.FatBlock is IMyDoor) planHitDynamic = true;
                     break;
                 }
                 slimBuffer.Clear();
@@ -985,6 +1102,7 @@ namespace Automata.Pathfinding
             radius += Berth(ref q);
             if (!HullSpaceFree(ref q, centre, radius)) return false;
             if (!VoxelNear(centre, radius)) return true;
+            if (offThread) return true;   // the 14 rays are the main thread's: a held attitude's turn is checked there again
             for (int k = 0; k < 14; k++)
             {
                 Vector3D d = k < 6 ? (Vector3D)Base6Directions.GetIntVector((Base6Directions.Direction)k)
@@ -1037,19 +1155,20 @@ namespace Automata.Pathfinding
                 var blocks = scene.BlocksOf(entry);
                 if (blocks == null) continue;
                 var grid = entry.Grid;
-                MatrixD inv = grid.WorldMatrixNormalizedInv;
+                MatrixD inv = entry.Inv;
                 var local = new BoundingSphereD(Vector3D.Transform(centre, inv), radius);
                 blocks.OverlapAllBoundingSphere(ref local, slimBuffer, true);
                 for (int k = 0; k < slimBuffer.Count; k++)
                 {
                     var slim = slimBuffer[k];
                     if (Ignored(ref q, grid, slim)) continue;
-                    BoundingBoxD box = LocalScene.BlockBox(slim, grid.GridSize);
+                    BoundingBoxD box = LocalScene.BlockBox(slim, entry.GridSize);
                     blocksTested++;
                     if (!box.Intersects(ref local)) continue;
-                    if (!Seen(ref q, Vector3D.Transform(box.Center, grid.WorldMatrix))) continue;
+                    if (!Seen(ref q, Vector3D.Transform(box.Center, entry.World))) continue;
                     free = false;
                     LastHitBlock = slim;
+                    if (!entry.Static || slim.FatBlock is IMyDoor) planHitDynamic = true;
                     break;
                 }
                 slimBuffer.Clear();
@@ -1110,6 +1229,118 @@ namespace Automata.Pathfinding
             return SegmentBlocked(ref q, ref q.Controller, from, to, 0.5, out hit, out hitEntity, false);
         }
 
+        #region Query signature, failed routes, stage time limits
+        /// <summary>What makes two asks the same search (besides owner, start and goal): hull, clearances, flags, ignored cells.</summary>
+        internal static int QuerySignature(ref PathQuery q)
+        {
+            unchecked
+            {
+                int h = 17;
+                bool hull = q.LocalHull.Max.X >= q.LocalHull.Min.X;
+                Vector3D e = hull ? q.LocalHull.HalfExtents : Vector3D.Zero;
+                h = h * 31 + (int)(e.X * 4);
+                h = h * 31 + (int)(e.Y * 4);
+                h = h * 31 + (int)(e.Z * 4);
+                h = h * 31 + (int)(q.Berth * 10);
+                h = h * 31 + (int)(q.Clearance * 10);
+                h = h * 31 + (int)(q.MinAltitude > 0 ? 1 : 0);
+                h = h * 31 + (q.MaxPitch >= 0 ? (int)(q.MaxPitch * 100) : -1);
+                int bits = (q.HullCentred ? 1 : 0) | (q.LooseGoal ? 2 : 0) | (q.StrictEnds ? 4 : 0) | (q.NoHeldTurn ? 8 : 0)
+                         | (q.AlignToRoute ? 16 : 0) | (q.SeeAll ? 32 : 0) | (q.GravityUp.LengthSquared() > 0.5 ? 64 : 0)
+                         | (q.RealShapeGrid != null ? 128 : 0) | (q.HoldAttitude ? 256 : 0) | (q.EyesSet ? 512 : 0);
+                h = h * 31 + bits;
+                if (q.IgnoreGrid != null) h = h * 31 + q.IgnoreGrid.EntityId.GetHashCode() + q.IgnoreMin.GetHashCode() * 7 + q.IgnoreMax.GetHashCode() * 13;
+                if (q.RealShapeGrid != null) h = h * 31 + q.RealShapeGrid.EntityId.GetHashCode();
+                return h;
+            }
+        }
+
+        // The drone's attitude, coarsely (held-attitude searches depend on it)
+        private static int AttitudeKey(ref MatrixD m)
+        {
+            unchecked
+            {
+                Vector3D f = m.Forward, u = m.Up;
+                int h = (int)Math.Round(f.X * 4) + 9 * (int)Math.Round(f.Y * 4) + 81 * (int)Math.Round(f.Z * 4);
+                return h * 1031 + (int)Math.Round(u.X * 4) + 9 * (int)Math.Round(u.Y * 4) + 81 * (int)Math.Round(u.Z * 4);
+            }
+        }
+
+        // "No route from here to there" (TODO/22, prerequisite 4): a drone asking the same again (a dock approach retried every
+        // minute, the escape spots of a failed plan) gets the answer at once. Until FAILED_ROUTE_*_TICKS pass (short when a
+        // moving grid or a door was in the way), the drone moves (START slack), or something that can open a way happens
+        // (LocalScene.RemovalVersion: blocks removed, a grid split, an obstacle gone). Main thread; not for plans that ran out
+        // of the shared check budget (an earlier stretch spent it).
+        #region Timing
+        private const int FAILED_ROUTE_STATIC_TICKS = 120 * 60;
+        private const int FAILED_ROUTE_DYNAMIC_TICKS = 10 * 60;
+        #endregion
+        private const double FAILED_ROUTE_START_SLACK = 2;   // m
+        private const double FAILED_ROUTE_GOAL_SLACK = 1;    // m
+        private const int FAILED_ROUTES_MAX = 128;
+
+        private struct FailedRoute
+        {
+            public long Owner;
+            public int Sig, Attitude, Frame, Ttl, Version;
+            public Vector3D Start, Goal;
+            public string Why;
+            public IMyEntity Blocker;
+            public IMySlimBlock HitBlock;
+        }
+        private readonly List<FailedRoute> failedRoutes = new List<FailedRoute>();
+        /// <summary>For the logs: plans answered from the failed-route cache.</summary>
+        public int FailedRouteHits;
+
+        private bool planHitDynamic;   // the current plan met a moving grid or a door in the way
+        private bool planNoCache;      // ...or failed for want of the plan's check budget: not remembered
+
+        private bool FindFailedRoute(ref PathQuery q, Vector3D start, Vector3D goal, out FailedRoute found)
+        {
+            found = default(FailedRoute);
+            if (failedRoutes.Count == 0) return false;
+            int sig = QuerySignature(ref q), att = AttitudeKey(ref q.Controller), version = liveScene.RemovalVersion;
+            for (int i = failedRoutes.Count - 1; i >= 0; i--)
+            {
+                var f = failedRoutes[i];
+                if (frame - f.Frame > f.Ttl || f.Version != version) { failedRoutes.RemoveAt(i); continue; }
+                if (f.Owner != q.Owner || f.Sig != sig || f.Attitude != att) continue;
+                if (Vector3D.DistanceSquared(f.Start, start) > FAILED_ROUTE_START_SLACK * FAILED_ROUTE_START_SLACK
+                    || Vector3D.DistanceSquared(f.Goal, goal) > FAILED_ROUTE_GOAL_SLACK * FAILED_ROUTE_GOAL_SLACK) continue;
+                found = f;
+                return true;
+            }
+            return false;
+        }
+
+        private void RememberFailedRoute(ref PathQuery q, Vector3D start, Vector3D goal, string why)
+        {
+            if (offThread || q.Owner == 0 || planNoCache) return;
+            if (failedRoutes.Count >= FAILED_ROUTES_MAX) failedRoutes.RemoveAt(0);
+            failedRoutes.Add(new FailedRoute
+            {
+                Owner = q.Owner, Sig = QuerySignature(ref q), Attitude = AttitudeKey(ref q.Controller), Frame = frame,
+                // (a stage out of time / expansions may get through another time: short too)
+                Ttl = planHitDynamic || why.Contains("budget") ? FAILED_ROUTE_DYNAMIC_TICKS : FAILED_ROUTE_STATIC_TICKS, Version = liveScene.RemovalVersion,
+                Start = start, Goal = goal, Why = why, Blocker = LastBlocker, HitBlock = LastHitBlock,
+            });
+        }
+
+        // Stage 1 / 2 time limits (StraightMaxMs, MemoryMaxMs): the later stages (the search) take the hard cases
+        private readonly System.Diagnostics.Stopwatch stageClock = new System.Diagnostics.Stopwatch();
+        private double stageLimitMs;   // 0: none
+        private bool StageTimeUp { get { return stageLimitMs > 0 && stageClock.Elapsed.TotalMilliseconds > stageLimitMs; } }
+
+        // AcceptSearch: the worker's answer being checked (its doors, the grids it read unchanged), the stretch of it
+        // SegmentBlocked is checking (-1: none / not one of the worker's)
+        private PathSearchResult acceptResult;
+        private readonly HashSet<LocalScene.Entry> acceptTrust = new HashSet<LocalScene.Entry>();
+        private int trustSeg = -1;
+        // A worker: the stretch of its answer its final check is on, and the doors met (to the main thread with the answer)
+        private int searchSeg = -1;
+        private readonly List<SearchDoor> searchDoors = new List<SearchDoor>();
+        #endregion
+
         #region Planning
         /// <summary>
         /// Waypoints (controller positions, world) from 'start' to 'goal', both excluded: detours around what the
@@ -1121,10 +1352,10 @@ namespace Automata.Pathfinding
         {
             planRays = planChecks = blocksTested = planUnseen = budgetBase = 0;
             lastPlanFrame = MyAPIGateway.Session.GameplayFrameCounter;
-            lookups0 = scene.Lookups;
-            trees0 = scene.TreesBuilt;
-            indexed0 = scene.BlocksIndexed;
-            build0 = scene.BuildMs;
+            lookups0 = liveScene.Lookups;
+            trees0 = liveScene.TreesBuilt;
+            indexed0 = liveScene.BlocksIndexed;
+            build0 = liveScene.BuildMs;
             frame = MyAPIGateway.Session.GameplayFrameCounter;
             watch.Reset();
         }
@@ -1144,10 +1375,10 @@ namespace Automata.Pathfinding
         public void PlanStats(out int notSeen, out int checks, out int rays, out int blocks, out double ms,
                               out int lookups, out int trees, out int indexed, out double buildMs)
         {
-            lookups = scene.Lookups - lookups0;
-            trees = scene.TreesBuilt - trees0;
-            indexed = scene.BlocksIndexed - indexed0;
-            buildMs = scene.BuildMs - build0;
+            lookups = liveScene.Lookups - lookups0;
+            trees = liveScene.TreesBuilt - trees0;
+            indexed = liveScene.BlocksIndexed - indexed0;
+            buildMs = liveScene.BuildMs - build0;
             notSeen = planUnseen;
             checks = planChecks;
             rays = planRays;
@@ -1157,10 +1388,12 @@ namespace Automata.Pathfinding
 
         public RouteResult PlanRoute(ref PathQuery q, Vector3D start, Vector3D goal, List<Vector3D> waypoints)
         {
+            double perf = PerfStats.Start();
             watch.Start();
             var r = PlanRouteTimed(ref q, start, goal, waypoints);
             watch.Stop();
             planUnseen += unseen;
+            PerfStats.Stop(PerfStats.PathPlan, perf);
             return r;
         }
 
@@ -1173,12 +1406,7 @@ namespace Automata.Pathfinding
         {
             unseen = 0;
             LastBlocker = null;
-            // A goal inside something (another drone parked there, a ship) can't be reached, whatever the route
-            if (!q.LooseGoal && !HullFits(ref q, goal))
-            {
-                LastBlocker = LastHitBlock != null ? LastHitBlock.CubeGrid : null;
-                return Fail(start, goal, "the goal is inside " + Describe(LastHitBlock));
-            }
+            planHitDynamic = planNoCache = false;
             // Min altitude is for travel: a hop shorter than the altitude itself (work between blocks, a short move at a
             // site, mining close to the ground) stays low; longer flights climb to it after take-off and land from it
             if (q.MinAltitude > 0 && Vector3D.Distance(start, goal) <= Math.Max(2 * TERRAIN_END_MARGIN, q.MinAltitude)) q.MinAltitude = 0;
@@ -1187,41 +1415,99 @@ namespace Automata.Pathfinding
             if (config.UsePlanetAwarePathfinding() && q.GravityUp.LengthSquared() > 0.5 && Vector3D.Distance(start, goal) > config.ArcMinDistance)
                 q.MinAltitude = Math.Max(q.MinAltitude, config.CruiseAltitude);
 
-            double t0 = watch.Elapsed.TotalMilliseconds;
-            string why1, why2 = null, stage = "straight";
-            bool shaped;
-            bool ok = StraightStage(ref q, start, goal, out why1, out shaped);
-            double t1 = watch.Elapsed.TotalMilliseconds, t2 = t1;
-            if (!ok && Memory != null)
+            // Asked before and no way then (nothing changed since): the same answer, nothing checked again
+            FailedRoute failed;
+            if (!offThread && q.Owner != 0 && FindFailedRoute(ref q, start, goal, out failed))
             {
-                int was = budgetBase;
-                budgetBase = planChecks + planRays;   // its own budget
-                memoryPoints.Clear();
-                ok = Memory.FindRoute(this, ref q, start, goal, memoryPoints, out why2);
-                budgetBase = was;
-                if (ok)
-                {
-                    points.Clear();
-                    points.Add(start);
-                    for (int k = 0; k < memoryPoints.Count; k++) points.Add(q.HullCentred ? memoryPoints[k] : HullToController(ref q, memoryPoints[k]));
-                    points.Add(goal);
-                    shaped = false;
-                    stage = "memory";
-                }
-                t2 = watch.Elapsed.TotalMilliseconds;
+                FailedRouteHits++;
+                LastBlocker = failed.Blocker;
+                LastHitBlock = failed.HitBlock;
+                points.Clear();
+                if (Log.DebugEnabled) Log.Debug("Pathfinding: no route {0:F0} m (as {1:F0} s ago: {2})", Vector3D.Distance(start, goal), (frame - failed.Frame) / 60.0, failed.Why);
+                return RouteResult.Blocked;
             }
+            // A goal inside something (another drone parked there, a ship) can't be reached, whatever the route
+            if (!q.LooseGoal && !HullFits(ref q, goal))
+            {
+                LastBlocker = LastHitBlock != null ? LastHitBlock.CubeGrid : null;
+                string inside = "the goal is inside " + Describe(LastHitBlock);
+                RememberFailedRoute(ref q, start, goal, inside);
+                return Fail(start, goal, inside);
+            }
+
+            // The search queue (worker threads) when the caller can wait for it; a real-shape check needs rays all along: here
+            bool searches = q.AsyncOk && Searches != null && !offThread && ThetaAvailable && q.RealShapeGrid == null;
+            PathSearchResult sr = null;
+            var poll = SearchPoll.Inline;
+            // A search for this stretch queued before (the stages before it failed then): straight to it, they aren't run again
+            if (searches) poll = Searches.Find(ref q, start, goal, out sr);
+            if (poll == SearchPoll.Pending) return RouteResult.Pending;
+
+            double t0 = watch.Elapsed.TotalMilliseconds;
+            string why1 = null, why2 = null, stage = "straight";
+            bool shaped = false, ok = false;
+            double t1 = t0, t2 = t0;
+            if (poll == SearchPoll.Inline)
+            {
+                ok = StraightStage(ref q, start, goal, out why1, out shaped, true);
+                t1 = t2 = watch.Elapsed.TotalMilliseconds;
+                if (!ok && Memory != null && !(searches && Searches.MemoryFailedBefore(ref q, start, goal)))
+                {
+                    int was = budgetBase;
+                    budgetBase = planChecks + planRays;   // its own budget
+                    memoryPoints.Clear();
+                    ok = Memory.FindRoute(this, ref q, start, goal, memoryPoints, out why2, config.MemoryMaxMs);
+                    budgetBase = was;
+                    if (!ok && searches) Searches.NoteMemoryFailed(ref q, start, goal);
+                    if (ok)
+                    {
+                        points.Clear();
+                        points.Add(start);
+                        for (int k = 0; k < memoryPoints.Count; k++) points.Add(q.HullCentred ? memoryPoints[k] : HullToController(ref q, memoryPoints[k]));
+                        points.Add(goal);
+                        shaped = false;
+                        stage = "memory";
+                    }
+                    t2 = watch.Elapsed.TotalMilliseconds;
+                }
+            }
+            else why1 = "queued search";
             string why3 = null;
             double t3 = t2;
             if (!ok && ThetaAvailable)
             {
-                ok = ThetaStage(ref q, start, goal, out why3);
-                if (ok) { shaped = false; stage = q.HoldAttitude ? "theta, held attitude" : "theta"; }
+                if (searches && poll == SearchPoll.Inline)
+                {
+                    poll = Searches.Ask(ref q, start, goal, out sr);
+                    if (poll == SearchPoll.Pending) return RouteResult.Pending;
+                }
+                if (poll == SearchPoll.Ready)
+                {
+                    if (sr.Found)
+                    {
+                        double pa = PerfStats.Start();
+                        ok = AcceptSearch(ref q, start, goal, sr, out why3);
+                        PerfStats.Stop(PerfStats.PathAccept, pa);
+                        if (!ok) Searches.Reject(sr, why3);
+                    }
+                    else why3 = sr.Why;
+                    if (sr.HitDynamic || !ok && sr.Found) planHitDynamic = true;
+                    if (ok) { shaped = false; stage = q.HoldAttitude ? "theta (queued), held attitude" : "theta (queued)"; }
+                }
+                else
+                {
+                    ok = ThetaStage(ref q, start, goal, out why3);
+                    if (ok) { shaped = false; stage = q.HoldAttitude ? "theta, held attitude" : "theta"; }
+                }
                 t3 = watch.Elapsed.TotalMilliseconds;
             }
             if (!ok)
-                return Fail(start, goal, why1 + (why2 != null ? "; memory: " + why2 : "") + (why3 != null ? "; Lazy Theta*: " + why3 : "")
-                            + string.Format(" [straight {0:F2} ms{1}{2}]", t1 - t0, Memory != null ? string.Format(", memory {0:F2} ms", t2 - t1) : "",
-                                            ThetaAvailable ? string.Format(", Lazy Theta* {0:F2} ms", t3 - t2) : ""));
+            {
+                string why = why1 + (why2 != null ? "; memory: " + why2 : "") + (why3 != null ? "; Lazy Theta*: " + why3 : "");
+                RememberFailedRoute(ref q, start, goal, why);
+                return Fail(start, goal, why + string.Format(" [straight {0:F2} ms{1}{2}]", t1 - t0, Memory != null ? string.Format(", memory {0:F2} ms", t2 - t1) : "",
+                                                             ThetaAvailable ? string.Format(", Lazy Theta* {0:F2} ms", t3 - t2) : ""));
+            }
 
             if (stage != "straight") budgetBase = planChecks + planRays;   // straightening a searched route gets its own budget
             if (!shaped && points.Count > 3) Shortcut(ref q);
@@ -1232,7 +1518,7 @@ namespace Automata.Pathfinding
             if (Log.DebugEnabled) Log.Debug("Pathfinding: {0:F0} m, {1} waypoints, {2} stretches not fully seen (assumed clear){7}, {3} checks, {4} blocks, {5} rays, {6:F2} ms; stage {8} (straight {9:F2} ms{10})",
                       Vector3D.Distance(start, goal), added, unseen, planChecks, blocksTested, planRays, watch.Elapsed.TotalMilliseconds,
                       unseen > 0 ? DescribeView(ref q, start, goal) : "", stage, t1 - t0,
-                      (stage != "straight" ? string.Format(", memory {0:F2} ms", t2 - t1) : "") + (stage == "theta" ? string.Format(", Lazy Theta* {0:F2} ms", t3 - t2) : ""));
+                      (stage != "straight" ? string.Format(", memory {0:F2} ms", t2 - t1) : "") + (stage.StartsWith("theta") ? string.Format(", Lazy Theta* {0:F2} ms", t3 - t2) : ""));
             return added > 0 ? RouteResult.Detour : RouteResult.Direct;
         }
 
@@ -1247,9 +1533,18 @@ namespace Automata.Pathfinding
 
         /// <summary>
         /// Stage 1: the straight line, terrain climbs and greedy detours (one obstacle at a time). Fills 'points' (start,
-        /// waypoints, goal); false: none found ('why'), 'points' empty.
+        /// waypoints, goal); false: none found ('why'), 'points' empty. 'limited': within StraightMaxMs when the search is
+        /// there to take over (not the rest of a far search's route: that is the long, plain part of the flight).
         /// </summary>
-        private bool StraightStage(ref PathQuery q, Vector3D start, Vector3D goal, out string why, out bool shaped)
+        private bool StraightStage(ref PathQuery q, Vector3D start, Vector3D goal, out string why, out bool shaped, bool limited = false)
+        {
+            stageLimitMs = limited && ThetaAvailable && !offThread ? config.StraightMaxMs : 0;
+            stageClock.Restart();
+            try { return StraightStageTimed(ref q, start, goal, out why, out shaped); }
+            finally { stageLimitMs = 0; }
+        }
+
+        private bool StraightStageTimed(ref PathQuery q, Vector3D start, Vector3D goal, out string why, out bool shaped)
         {
             why = null;
             points.Clear();
@@ -1264,7 +1559,8 @@ namespace Automata.Pathfinding
             int i = 0;
             while (i < points.Count - 1)
             {
-                if (BudgetSpent || points.Count > maxPoints) { why = "check / node budget"; points.Clear(); return false; }
+                if (BudgetSpent || points.Count > maxPoints) { why = "check / node budget"; planNoCache |= BudgetSpent; points.Clear(); return false; }
+                if (StageTimeUp) { why = "time budget"; points.Clear(); return false; }
                 Vector3D a = points[i], b = points[i + 1];
 
                 Vector3D over1, over2;
@@ -1288,7 +1584,13 @@ namespace Automata.Pathfinding
                     int seenBefore = unseen;   // detour candidates aren't the route: not counted as unseen stretches
                     bool found = DetourPoint(ref q, a, b, hit, entity, out p);
                     unseen = seenBefore;
-                    if (!found) { why = "no way around " + (entity != null ? entity.DisplayName : "?"); LastBlocker = entity; points.Clear(); return false; }
+                    if (!found)
+                    {
+                        why = StageTimeUp ? "time budget" : "no way around " + (entity != null ? entity.DisplayName : "?");
+                        LastBlocker = entity;
+                        points.Clear();
+                        return false;
+                    }
                     points.Insert(i + 1, p);
                     continue;   // a -> p checked by construction; p -> b next
                 }
@@ -1469,7 +1771,8 @@ namespace Automata.Pathfinding
                     Vector3D u = c == 0 ? up : c == 1 ? side : c == 2 ? -side
                                : c == 3 ? Vector3D.Normalize(up + side) : c == 4 ? Vector3D.Normalize(up - side) : -up;
                     if (c == 5 && inGravity) continue;                 // not under it in gravity
-                    if (BudgetSpent) return false;                      // budget spent: give up (Blocked)
+                    if (BudgetSpent) { planNoCache = true; return false; }   // budget spent: give up (Blocked)
+                    if (StageTimeUp) return false;                      // the search takes over
                     Vector3D p = back + u * off;
                     if (SegmentBlocked(ref q, a, p, 0.5, out h, out e)) continue;
                     if (!HullSpaceFree(ref q, p, hull + q.Clearance)) continue;   // the hull must fit there

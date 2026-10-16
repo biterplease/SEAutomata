@@ -23,12 +23,20 @@ namespace Automata.Util
         public const int CcScan = 4;         // a whole Construction Computer scan
         public const int CcGroup = 5;        // one grid group scanned for real (ConstructionComputer.ScanArea)
         public const int CcGroupCached = 6;  // one grid group answered from the cache (signature check only)
-        private const int COUNT = 7;
+        public const int PathPlan = 7;       // main thread: one PlanRoute (stages 1-2, accepting a search's answer)
+        public const int PathPrepare = 8;    // main thread: scene captured for the queued searches (block trees built), per tick
+        public const int PathWarm = 9;       // main thread: scene warm-up of the areas expected to be busy, per tick
+        public const int PathSearch = 10;    // worker threads: one Lazy Theta* search (not main-thread time)
+        public const int PathSearchWait = 11; // a search from queued until its answer is back (not main-thread time)
+        public const int PathAccept = 12;    // main thread: a search's answer checked with rays and doors
+        private const int COUNT = 13;
 
         private static readonly string[] Names =
         {
             "LCD feed packet", "(unused)", "LCD update (computers)", "LCD feed packet (drones)",
             "CC scan", "CC group scanned", "CC group cached",
+            "path plan (main thread)", "path search scene capture (main thread)", "path warm-up (main thread)",
+            "path search (worker threads)", "path search queued to answered", "path search answer checked (main thread)",
         };
 
         /// <summary>True when timers run (server log level includes Debug).</summary>
@@ -57,6 +65,15 @@ namespace Automata.Util
         {
             if (start < 0) return;
             double ms = clock.Elapsed.TotalMilliseconds - start;
+            count[timer]++;
+            total[timer] += ms;
+            if (ms > max[timer]) max[timer] = ms;
+        }
+
+        /// <summary>Main thread: a time measured elsewhere (a worker's search, reported by its completion callback).</summary>
+        public static void Record(int timer, double ms)
+        {
+            if (!Enabled) return;
             count[timer]++;
             total[timer] += ms;
             if (ms > max[timer]) max[timer] = ms;

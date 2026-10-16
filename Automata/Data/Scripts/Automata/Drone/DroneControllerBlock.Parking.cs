@@ -1079,7 +1079,7 @@ namespace Automata.Drone
             });
             for (int i = 0; i < chargeCandidates.Count && i < 5; i++)
             {
-                if (DockAtConnector(chargeCandidates[i]))
+                if (DockAtConnector(chargeCandidates[i], false))   // (in turn: an answer now)
                 {
                     Report(StrRechargeDockingAt, chargeCandidates[i].CustomName);
                     chargeCandidates.Clear();

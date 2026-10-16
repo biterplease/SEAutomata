@@ -89,7 +89,7 @@ namespace Automata
         Enemies = 8,
     }
     [MySessionComponentDescriptor(MyUpdateOrder.BeforeSimulation)]
-    public class AutomataSession : MySessionComponentBase
+    public partial class AutomataSession : MySessionComponentBase
     {
         #region UI strings
         private static readonly MyStringId StrUpdateError = MyStringId.GetOrCompute("Update error: {0}");
@@ -202,6 +202,9 @@ namespace Automata
         public const ushort NETWORK_CHANNEL = 21843;
         public Digi.NetworkLib.Network Net { get; private set; }
 
+        // Chat commands (/automata ...): players (single player, host, clients), not the dedicated server
+        private readonly AutomataSessionCommandHandler commands = new AutomataSessionCommandHandler();
+
         public static ServerConfig GetConfig() => _serverConfig;
         public static MessageQueue GetMessageQueue() => _messageQueue;
 
@@ -210,6 +213,7 @@ namespace Automata
             Instance = this;
             Net = new Digi.NetworkLib.Network(NETWORK_CHANNEL, MOD_NAME);
             Util.NicknameControl.Register();
+            if (!MyAPIGateway.Utilities.IsDedicated) MyAPIGateway.Utilities.MessageEntered += commands.MessageEntered;
             // Localization settings
             // LoadLangOverrides();
             // MyAPIGateway.Gui.GuiControlRemoved += GuiControlRemoved;
@@ -235,7 +239,7 @@ namespace Automata
                 Pointer.ScoutPointer.Load(ModContext != null ? ModContext.ModPath : null);
 
                 _serverConfig = ServerConfig.Instance;
-                _serverConfig.LoadConfig();
+                _serverConfig.LoadConfig(ModContext);
                 Log.Verbose("Server config loaded.");
                 Pathfinding.PathfindingManager.Load(_serverConfig.Pathfinding);
                 MessageQueue.Init(_serverConfig.MessageQueue);
@@ -244,6 +248,7 @@ namespace Automata
                 _messageQueue = MessageQueue.Instance;
                 LoadMessages();   // in-flight messages of the last save (server)
                 Log.Info("Log level: {0}", _serverConfig.Logging.LogLevel.ToString());
+                Log.Info("Build: {0}", BuildLabel(MOD_VERSION_DEBUG));
 
                 _updateInterval = _serverConfig.Session.UpdateInterval;
 
@@ -360,6 +365,7 @@ namespace Automata
                     itemsIndexed = true;
                     LoadComponentsAndBlocks();
                 }
+                UpdateBuildAnnounce();                               // debug: which build this is (once, after load)
                 Pathfinding.PathfindingManager.Instance?.Update();   // look-ahead ray budget
                 Pointer.ScoutPointer.Update();                       // pointers' magazines kept full (no vanilla reload)
                 if (MyAPIGateway.Multiplayer == null || MyAPIGateway.Multiplayer.IsServer) Pointer.ScoutPointer.UpdateServer();
@@ -453,6 +459,7 @@ namespace Automata
             {
                 Pointer.ScoutPointer.Unload();
                 Util.NicknameControl.Unregister();
+                if (MyAPIGateway.Utilities != null) MyAPIGateway.Utilities.MessageEntered -= commands.MessageEntered;
                 itemsIndexed = false;   // statics outlive the session (next world in the same game process)
                 Pathfinding.PathfindingManager.Unload();
                 Construction.BuildPlanner.ClearFrames();
