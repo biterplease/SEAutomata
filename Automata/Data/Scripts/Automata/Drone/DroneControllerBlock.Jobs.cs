@@ -39,6 +39,8 @@ namespace Automata.Drone
         private static readonly MyStringId StrReasonSentHome = MyStringId.GetOrCompute("{0}, sent home");
         private static readonly MyStringId StrStopped = MyStringId.GetOrCompute("stopped");
         private static readonly MyStringId StrCouldLoadOnly = MyStringId.GetOrCompute("Job: could load only {0}/{1} parts, check conveyors");
+        private static readonly MyStringId StrPartialLoad = MyStringId.GetOrCompute("Job: loaded {0}/{1} parts (the rest is missing): blocks it has no parts for are skipped");
+        private static readonly MyStringId StrOutOfPartsFor = MyStringId.GetOrCompute("Block {0}/{1}: out of parts for it, on to the next");
         private static readonly MyStringId StrJobOutcomeReason = MyStringId.GetOrCompute("Job {0} ({3}): {1} ({2})");
         private static readonly MyStringId StrJobOutcome = MyStringId.GetOrCompute("Job {0} ({2}): {1}");
         private static readonly MyStringId StrStartingJobBlocksTasks = MyStringId.GetOrCompute("Starting Job {0} ({3}): blocks: {1}, tasks: {2}");
@@ -117,6 +119,10 @@ namespace Automata.Drone
 
         // The drone's own setting, capped by the server's (which may have been lowered since it was set)
         private const int PROJECTED_APPEAR_TICKS = 10 * 60;   // welding a projected block that isn't there after this long: skipped
+        private const int WELD_PARTS_GRACE_TICKS = 3 * 60;    // a weld checks for parts it still needs aboard after this...
+        private const int WELD_PARTS_CHECK_TICKS = 60;        // ...every this many ticks
+        private const double PARTIAL_LOAD_MIN_SHARE = 0.25;   // a construction trip goes with at least this share of its parts loaded
+        private int weldPartsCheckFrame;
 
         private int TaskTimeoutTicks
         {
@@ -251,6 +257,7 @@ namespace Automata.Drone
                                  : lastJobFailure ?? Loc.T(StrBlocksLeftUndone)));
             }
             jobAbortReason = null;
+            CancelPendingRoute();
             var source = jobSource;
             currentJob = null;
             constructionOrder = null;
@@ -279,6 +286,7 @@ namespace Automata.Drone
         {
             if (reason == null) reason = Loc.T(StrStopped);
             jobAbortReason = null;
+            CancelPendingRoute();
             if (designatorCombat != DesignatorCombat.None)
             {
                 // Engage / escort under way: AI behaviours off, our controller takes back (the caller sends it home)
@@ -346,6 +354,7 @@ namespace Automata.Drone
             for (int guard = 0; guard < 16 && cPhase == ConstructionPhase.Running && currentJob != null; guard++)
             {
                 if (currentJob.Tasks == null || taskIndex >= currentJob.Tasks.Count) { FinishJob(); return; }
+                if (routePending && !ServicePendingRoute()) return;   // the route is being searched for: the drone holds
                 bool starting = !taskStarted;
                 if (starting)
                 {
@@ -581,6 +590,16 @@ namespace Automata.Drone
                         Report(StrLoadedItemsAtTheRest, moved, planned, source.CustomName);
                         return TaskStatus.Done;
                     }
+                    if (moved < planned && moved > 0 && currentJob.BlockCount > 0 && moved >= planned * PARTIAL_LOAD_MIN_SHARE)
+                    {
+                        // Construction, some parts missing (used meanwhile, short in stock): the trip goes on with what was
+                        // loaded. A block it has nothing aboard for is skipped before it flies there (NoPartsAboard), a weld
+                        // that runs out of parts moves on (WeldBlock); what is left undone goes back to the computer. Aborting
+                        // the whole job (38 blocks for 2 missing parts) left the drones docked and the build waiting.
+                        if (Log.DebugEnabled) Log.Debug("Drone {0}: partial load {1}/{2}: going with it", Entity.EntityId, moved, planned);
+                        ReportProblem(Loc.F(StrPartialLoad, moved, planned));
+                        return TaskStatus.Done;
+                    }
                     if (moved < planned)
                     {
                         // Materials gone meanwhile, no conveyor path, or cargo refused: don't fly a trip that can't be finished
@@ -770,6 +789,21 @@ namespace Automata.Drone
                         return TaskStatus.Done;
                     }
                     if (task.Type != Orchestrator.TaskType.Mine) KeepToolOnModel(ref task, elapsed);   // a thin model: the sphere onto it
+                    // Out of parts for it (a partial load, or the neighbours took them): on to the next block rather than
+                    // standing there until the task timeout
+                    if (task.Type == Orchestrator.TaskType.WeldBlock && elapsed > WELD_PARTS_GRACE_TICKS
+                        && MyAPIGateway.Session.GameplayFrameCounter - weldPartsCheckFrame >= WELD_PARTS_CHECK_TICKS)
+                    {
+                        weldPartsCheckFrame = MyAPIGateway.Session.GameplayFrameCounter;
+                        bool gone;
+                        var slim = ToolTarget(ref task, out gone);
+                        if (slim != null && !slim.IsFullIntegrity && !CargoHasAnyOf(slim))
+                        {
+                            SetToolEnabled(task.Type, false);
+                            Report(StrOutOfPartsFor, BlockNumber(taskIndex), currentJob.BlockCount);
+                            return Fail(Orchestrator.TaskFailure.NoPartsAboard, TaskStatus.Done);
+                        }
+                    }
                     // A projected block that doesn't appear (not attachable after all - a predicted line whose block before didn't
                     // take - or something in its cells): on to the next one well before the task timeout
                     if (task.IsProjected && elapsed > PROJECTED_APPEAR_TICKS)
@@ -801,6 +835,7 @@ namespace Automata.Drone
                     if (starting)
                     {
                         dockWaitTarget = 0;
+                        dockRetries = 0;
                         var target = task.TargetEntityId != 0 ? AnchorDirectory.Resolve(block, task.TargetEntityId) as IMyShipConnector : null;
                         if (target == null) return Fail(Orchestrator.TaskFailure.TargetNotFound, TaskStatus.ToReturnHome);
                         if (IsDockedAt(target.EntityId)) return TaskStatus.Done;
@@ -833,10 +868,13 @@ namespace Automata.Drone
                     }
                     if (IsDockedAt(task.TargetEntityId)) return TaskStatus.Done;
                     if (dockWaitTarget != 0) return UpdateDockWait(task);
+                    if (routeFailed) return Fail(Orchestrator.TaskFailure.Unreachable, TaskStatus.ToReturnHome);   // (a docking that waited for its route search)
                     if (dockingHomeId == 0 && activeFlightOrder == null) return Fail(Orchestrator.TaskFailure.Unreachable, TaskStatus.ToReturnHome);
                     if (dockingHomeId != task.TargetEntityId) return TaskStatus.Interrupted;   // Go home, a player order...
                     if (ContactOnTheWay()) return TaskStatus.Running;
-                    return WatchProgress() ? TaskStatus.Running : Fail(Orchestrator.TaskFailure.Timeout, TaskStatus.ToReturnHome);
+                    if (DockLegStuck(true)) return TaskStatus.Running;
+                    if (WatchProgress()) return TaskStatus.Running;
+                    return DockRetry("no progress", Vector3D.Zero, true) ? TaskStatus.Running : Fail(Orchestrator.TaskFailure.Timeout, TaskStatus.ToReturnHome);
                 }
 
                 case Orchestrator.TaskType.ReturnHome:
@@ -844,6 +882,7 @@ namespace Automata.Drone
                     if (starting)
                     {
                         ToolsOff();
+                        dockRetries = 0;
                         if (InsertClearTripBeforeRest()) return TaskStatus.Running;   // dock + clear first (no home connector)
                         if (IsAtRest()) { ClearIfDocked(); return TaskStatus.Done; }
                         if (TryContinueInField()) return TaskStatus.Done;   // more blocks it carries the parts for: on with those
@@ -856,11 +895,14 @@ namespace Automata.Drone
                         return TaskStatus.Running;
                     }
                     if (IsAtRest()) { ClearIfDocked(); return TaskStatus.Done; }   // home: cleared on arrival
+                    if (routeFailed && dockingHomeId == 0 && activeFlightOrder == null) return Fail(Orchestrator.TaskFailure.Unreachable, TaskStatus.Failed);
                     if (dockingHomeId == 0 && parkPhase == ParkPhase.None && activeFlightOrder == null) return Fail(Orchestrator.TaskFailure.Unreachable, TaskStatus.Failed);
                     if (!IsGoingToRest) return TaskStatus.Interrupted;                              // someone else's order
                     if (parkPhase != ParkPhase.None) return TaskStatus.Running;                     // the park watches itself
                     if (ContactOnTheWay()) return TaskStatus.Running;
-                    return WatchProgress() ? TaskStatus.Running : Fail(Orchestrator.TaskFailure.Timeout, TaskStatus.Failed);
+                    if (DockLegStuck(false)) return TaskStatus.Running;
+                    if (WatchProgress()) return TaskStatus.Running;
+                    return dockingHomeId != 0 && DockRetry("no progress", Vector3D.Zero, false) ? TaskStatus.Running : Fail(Orchestrator.TaskFailure.Timeout, TaskStatus.Failed);
                 }
 
                 default:
@@ -1219,6 +1261,7 @@ namespace Automata.Drone
             contactBackOutFrom = hc;
             contactBackOutFrame = MyAPIGateway.Session.GameplayFrameCounter;
             contactBackOutSet = true;
+            ResetIntegralTerms();   // what it wound up pushing into stays behind
             if (alongLine && o != null && o == constructionOrder)
             {
                 // On the way in: back along the line it came in on (checked clear), unless that is where it pushes
@@ -1288,9 +1331,88 @@ namespace Automata.Drone
         }
         #endregion
 
+        #region Dock leg recovery
+        // Stuck on the way in to a dock (docking route legs, next to the platform too, where ContactOnTheWay stands back):
+        // pressed against something, or the push boost at its top and still not moving, or no progress for the stall
+        // timeout: back off DOCK_BACK_OFF m (away from the push, else back along the leg) and the way in planned again;
+        // after DOCK_RETRIES_MAX of those a free connector of the same station (DockAt; ReturnHome has its own home)
+        private const int DOCK_RETRIES_MAX = 2;
+        private const double DOCK_BACK_OFF = 4.0;
+        private const int DOCK_STALL_TICKS = WIGGLE_START_TICKS + WIGGLE_TICKS + 60;   // the boost and one attitude shake first
+        private int dockRetries;
+
+        private bool DockLegStuck(bool siblingOk)
+        {
+            var o = activeFlightOrder;
+            if (o == null || o == dockingOrder || dockingHomeId == 0 || dockWaitTarget != 0 || routePending) return false;
+            Vector3D away;
+            bool pressed = PushBlocked(out away);
+            if (!pressed && pushStallTicks < DOCK_STALL_TICKS) return false;
+            return DockRetry(pressed ? "pressed against something on the way in" : "not moving on the way in", pressed ? away : Vector3D.Zero, siblingOk);
+        }
+
+        private bool DockRetry(string why, Vector3D away, bool siblingOk)
+        {
+            int now = MyAPIGateway.Session.GameplayFrameCounter;
+            pushBlockedTicks = 0;
+            pushStallTicks = 0;
+            if (++dockRetries > DOCK_RETRIES_MAX)
+            {
+                if (siblingOk && SwitchToSiblingConnector(why)) return true;
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: docking: {1}, {2} tries and no other connector", Entity.EntityId, why, DOCK_RETRIES_MAX);
+                return false;
+            }
+            CaptureFlightState();
+            Vector3D hc = HullCentreWorld;
+            if (away.LengthSquared() < 0.5)
+                away = legDir.LengthSquared() > 0.5 ? -legDir : flightState.InGravity ? flightState.GravityUp : flightState.WorldMatrix.Backward;
+            contactBackOut = hc + Vector3D.Normalize(away) * DOCK_BACK_OFF;
+            ResetIntegralTerms();   // what it wound up pushing into stays behind
+            contactBackOutFrom = hc;
+            contactBackOutFrame = now;
+            contactBackOutSet = true;
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: docking: {1} ({2}/{3}): backing off, the way in planned again", Entity.EntityId, why, dockRetries, DOCK_RETRIES_MAX);
+            lastReplanFrame = now;
+            if (!Replan()) return false;
+            taskProgressFrame = now;
+            taskBestDistance = double.MaxValue;
+            watchedOrder = null;
+            return true;
+        }
+
+        /// <summary>DockAt: a free connector of the same station instead of the current one (backing off first); false when there is none.</summary>
+        private bool SwitchToSiblingConnector(string why)
+        {
+            if (currentJob == null || taskIndex < 0 || taskIndex >= currentJob.Tasks.Count) return false;
+            var t = currentJob.Tasks[taskIndex];
+            if (t.Type != Orchestrator.TaskType.DockAt) return false;
+            var target = AnchorDirectory.Resolve(block, t.TargetEntityId) as IMyShipConnector;
+            if (target == null) return false;
+            var other = FreeSiblingConnector(target);
+            if (other == null) return false;
+            Report(StrDockUsingInstead, other.CustomName, target.CustomName, why);
+            PlanContactBackOut(Vector3D.Zero, false);
+            t.TargetEntityId = other.EntityId;
+            currentJob.Tasks[taskIndex] = t;
+            lastCargoPortId = other.EntityId;
+            dockRetries = 0;
+            pushBlockedTicks = 0;
+            pushStallTicks = 0;
+            int now = MyAPIGateway.Session.GameplayFrameCounter;
+            taskProgressFrame = now;
+            taskBestDistance = double.MaxValue;
+            watchedOrder = null;
+            if (!DockAtConnector(other)) { routeFailed = true; return true; }   // the task fails Unreachable on its next step
+            constructionOrder = activeFlightOrder;
+            constructionLegs.Clear();
+            return true;
+        }
+        #endregion
+
         // Debug: where a navigation task stalled
         private void LogStall(FlightOrder o, double d)
         {
+            lastStallFrame = MyAPIGateway.Session.GameplayFrameCounter;
             Vector3D fwd, up;
             // The attitude the order ends in (holding the current one on the way would always read 0° off)
             if (o.Orientation == FlightOrientationMode.Explicit) { fwd = o.Forward.ToVector3D(); up = o.Up.ToVector3D(); }
@@ -1640,7 +1762,7 @@ namespace Automata.Drone
                 return Orchestrator.TaskFailure.None;
             }
             onFace = false;
-            var failure = FlyRoute(anchor, ref am, sphereCentre, approach, hull, mount.LocalPoint, ref frame, grid != null);
+            var failure = FlyRoute(anchor, ref am, sphereCentre, approach, hull, mount.LocalPoint, ref frame, grid != null, true);
             if (failure == Orchestrator.TaskFailure.None)
                 if (Log.DebugEnabled) Log.Debug("Drone {0}: {1} at {2}, face point {3}, normal {4}, approach tilted {5:F0}°, {6:F1} m out, work attitude {7}{8}", Entity.EntityId, tool.Type,
                           tool.TargetBlock.ToVector3I(), point, dirW, MathHelperD.ToDegrees(Math.Acos(MathHelperD.Clamp(Vector3D.Dot(dirA, dirW), -1, 1))),
@@ -1674,7 +1796,7 @@ namespace Automata.Drone
             heading -= gUp * Vector3D.Dot(heading, gUp);
             if (heading.LengthSquared() < 1e-4) heading = flightState.WorldMatrix.Forward;
             MatrixD frame = MatrixD.CreateWorld(Vector3D.Zero, Vector3D.Normalize(heading), gUp);
-            return FlyRoute(anchor, ref am, target, approach, DroneRadius(), Vector3D.Zero, ref frame, false);
+            return FlyRoute(anchor, ref am, target, approach, DroneRadius(), Vector3D.Zero, ref frame, false, true);
         }
 
         /// <summary>
@@ -1865,7 +1987,33 @@ namespace Automata.Drone
         /// 'checkApproachLine': the approach -> target line must be clear too (tool work), else Unreachable.
         /// </summary>
         private Orchestrator.TaskFailure FlyRoute(IMyTerminalBlock anchor, ref MatrixD am, Vector3D target, Vector3D approach,
-                                                  double hull, Vector3D referenceOffset, ref MatrixD frame, bool checkApproachLine)
+                                                  double hull, Vector3D referenceOffset, ref MatrixD frame, bool checkApproachLine,
+                                                  bool async = false)
+        {
+            // 'async': the task runner can wait for a route search on a worker thread (RunTasks, ServicePendingRoute): a
+            // route that needs one is planned when its answer is in, the drone holding meanwhile (DeferFlyRoute)
+            var pm = Pathfinding.PathfindingManager.Instance;
+            bool was = asyncPlanOk;
+            async = async && pm != null && pm.Searches != null;
+            asyncPlanOk = async;
+            bool pending = false;
+            bool contactSet = contactBackOutSet;   // (consumed on the way: put back when the plan is made again later)
+            try { return FlyRouteCore(anchor, ref am, target, approach, hull, referenceOffset, ref frame, checkApproachLine); }
+            catch (Pathfinding.PlanPendingException)
+            {
+                pending = true;
+                if (contactSet) { contactBackOutSet = true; contactBackOutFrame = MyAPIGateway.Session.GameplayFrameCounter; }
+                return DeferFlyRoute(anchor, ref am, target, approach, hull, referenceOffset, ref frame, checkApproachLine);
+            }
+            finally
+            {
+                asyncPlanOk = was;
+                if (async && !pending) pm.Searches.EndPlan(Entity.EntityId);   // the plan is over: its answers go
+            }
+        }
+
+        private Orchestrator.TaskFailure FlyRouteCore(IMyTerminalBlock anchor, ref MatrixD am, Vector3D target, Vector3D approach,
+                                                      double hull, Vector3D referenceOffset, ref MatrixD frame, bool checkApproachLine)
         {
             bool world = anchor == null;
             constructionLegs.Clear();

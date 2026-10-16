@@ -54,11 +54,12 @@ namespace Automata.Construction
         public Vector3I Offset, Rotation;
         public Vector3D AreaCenter, AreaHalf;
         public int MaxLen, UpAxis;
+        public uint WeldIgnoreColor, GrindColor;   // the colors it was planned with (neither is welded): changed, planned again
         public int LastUsed;
 
         private readonly IMyCubeGrid projected, physical;
         private readonly bool units;                      // small grid: nodes are 3x3x3 units of the physical grid
-        private readonly HashSet<IMySlimBlock> eligible;  // in the area, not weld-ignore colored, not built (at planning time)
+        private readonly HashSet<IMySlimBlock> eligible;  // in the area, not weld-ignore / grind colored, not built (at planning time)
         private readonly List<Node> nodes = new List<Node>();
         private readonly Dictionary<IMySlimBlock, Node> nodeOf = new Dictionary<IMySlimBlock, Node>();
         private readonly Dictionary<Vector3I, Node> unitAt = new Dictionary<Vector3I, Node>();

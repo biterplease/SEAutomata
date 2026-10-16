@@ -2619,5 +2619,23 @@ Sent: {0}</value>
   <data name="Page: {0}/{1}" xml:space="preserve">
     <value>Page: {0}/{1}</value>
   </data>
+  <data name="Debug build: {0}" xml:space="preserve">
+    <value>Debug build: {0}</value>
+  </data>
+  <data name="Debug build - server: {0} | this client: {1}" xml:space="preserve">
+    <value>Debug build - server: {0} | this client: {1}</value>
+  </data>
+  <data name="The server and this client run different builds of the mod." xml:space="preserve">
+    <value>The server and this client run different builds of the mod.</value>
+  </data>
+  <data name="unversioned (not deployed by mod_version_debug.ps1)" xml:space="preserve">
+    <value>unversioned (not deployed by mod_version_debug.ps1)</value>
+  </data>
+  <data name="Job: loaded {0}/{1} parts (the rest is missing): blocks it has no parts for are skipped" xml:space="preserve">
+    <value>Job: loaded {0}/{1} parts (the rest is missing): blocks it has no parts for are skipped</value>
+  </data>
+  <data name="Block {0}/{1}: out of parts for it, on to the next" xml:space="preserve">
+    <value>Block {0}/{1}: out of parts for it, on to the next</value>
+  </data>
   <!-- END Automata mod -->
 </root>

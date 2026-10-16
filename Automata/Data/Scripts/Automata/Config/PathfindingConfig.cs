@@ -138,6 +138,16 @@ namespace Automata.Config
         public int ThetaMaxExpansions { get; internal set; } = 3000;
         /// <summary>Most milliseconds one search may take.</summary>
         public double ThetaMaxMs { get; internal set; } = 15;
+        /// <summary>Worker threads for Lazy Theta* searches (the search queue); 0: they run on the main thread, as before.</summary>
+        public int PathSearchWorkers { get; internal set; } = 2;
+        /// <summary>Most milliseconds one search on a worker thread may take (the expansion limit scales with it).</summary>
+        public double PathSearchMaxMs { get; internal set; } = 50;
+        /// <summary>Searches queued while nobody asks: the scene of the areas expected to be busy is prepared ahead.</summary>
+        public bool PathWarmUp { get; internal set; } = true;
+        /// <summary>Most ms the straight-line stage (detours) may take before the later stages take over (0: no limit).</summary>
+        public double StraightMaxMs { get; internal set; } = 10;
+        /// <summary>Most ms the route-memory stage may take (0: no limit).</summary>
+        public double MemoryMaxMs { get; internal set; } = 10;
         /// <summary>Minutes a flight lane may go unused before it is dropped.</summary>
         public double FlightLaneExpirationMinutes { get; internal set; } = 240;
     }

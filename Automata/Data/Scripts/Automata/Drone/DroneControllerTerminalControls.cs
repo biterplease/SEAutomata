@@ -51,7 +51,7 @@ namespace Automata.Drone
             AddToggleActions("DrawObservationArea", MyStrings.DrawObservationArea,
                 l => l.Terminal_ObservationAreaDraw, (l, v) => l.Terminal_ObservationAreaDraw = v);
             AddToggleActions("UseBroadcastController", MyStrings.UseBroadcastController,
-                l => l.Terminal_UseBroadcastController, (l, v) => l.Terminal_ObservationAreaDraw = v);
+                l => l.Terminal_UseBroadcastController, (l, v) => l.Terminal_UseBroadcastController = v);
             AddAction("GoHome", Loc.T(MyStrings.GoHome), ICON_START, l => l.Terminal_GoHome(), null);
             AddAction("Stop", Loc.T(MyStrings.Stop), ICON_START, l => l.Terminal_StopOrders(), null);
         }

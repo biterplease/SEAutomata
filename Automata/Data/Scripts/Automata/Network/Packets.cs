@@ -27,6 +27,8 @@ namespace Digi.NetworkLib
     [ProtoInclude(23, typeof(Automata.Util.LcdSubscribePacket))]
     [ProtoInclude(24, typeof(Automata.Util.LcdAttachPacket))]
     [ProtoInclude(25, typeof(Automata.Pointer.DesignatorCameraPacket))]
+    [ProtoInclude(26, typeof(Automata.Network.BuildVersionRequestPacket))]
+    [ProtoInclude(27, typeof(Automata.Network.BuildVersionPacket))]
     public abstract partial class PacketBase
     {
     }
@@ -194,6 +196,36 @@ namespace Automata.Network
         {
             if (MyAPIGateway.Multiplayer.IsServer) return;
             DroneControllerBlock.ApplyClientSettings(this);
+        }
+    }
+
+    /// <summary>Client -> server, once after load: this client's build (MOD_VERSION_DEBUG). Answered only in debug mode.</summary>
+    [ProtoContract]
+    public class BuildVersionRequestPacket : PacketBase
+    {
+        public BuildVersionRequestPacket() { }
+
+        [ProtoMember(1)] public string ClientVersion;
+
+        public override void Received(ref PacketInfo packetInfo, ulong senderSteamId)
+        {
+            if (!MyAPIGateway.Multiplayer.IsServer) return;
+            AutomataSession.ServerBuildRequested(ClientVersion, senderSteamId);
+        }
+    }
+
+    /// <summary>Server -> one client: the server's build, for the client's announcement (debug mode only).</summary>
+    [ProtoContract]
+    public class BuildVersionPacket : PacketBase
+    {
+        public BuildVersionPacket() { }
+
+        [ProtoMember(1)] public string ServerVersion;
+
+        public override void Received(ref PacketInfo packetInfo, ulong senderSteamId)
+        {
+            if (MyAPIGateway.Multiplayer.IsServer) return;
+            AutomataSession.AnnounceBuilds(ServerVersion);
         }
     }
 }

@@ -20,6 +20,26 @@ wired** (`AllowAStar` only logs a warning); the legacy planners (`AStarPathfinde
   answer checked with `SegmentBlocked`; far goals searched for 2 x ThetaSearchRadius, the rest by stage 1; ini
   AllowLazyTheta, ThetaSearchRadius, ThetaMaxExpansions, ThetaMaxMs). Stage 4 is the drone's repositioning. The
   per-plan log line names the stage and each stage's ms; later stages get their own check budget (`budgetBase`).
+- Search queue (TODO/22 section 1; ini PathSearchWorkers, PathSearchMaxMs, PathWarmUp): a route that reaches stage 3 is queued in
+  `PathSearchQueue` instead of searched inline. The request carries a frozen `PathQuery` (`Frozen()`); a `SnapshotScene`
+  (entries with copied matrices + the live block trees; a rebuild makes a new tree, never clears one a worker reads) is captured
+  on the main thread within a per-tick budget; the search runs on a worker with its own `PathfindingManager` (`RunSearch`)
+  reading only that snapshot - no rays, no entity reads, no logging on the worker. The drone holds (`PlanPendingException` ->
+  `DeferFlyRoute` / `DeferDocking`, `DroneControllerBlock.Pending.cs`); `ServicePendingRoute` only waits while
+  `PathSearchQueue.Waiting`, then replans: `PlanRouteTimed` looks the job up first (`Find`) and goes straight to it (stages 1-2
+  not run again). `AcceptSearch` checks the answer on the main thread: rays, doors (the worker hands over the doors per
+  stretch), turn sweep, and box checks only against grids that changed since the worker read them (`SceneTrust`: tree object,
+  `Entry.Version`, matrix); an accepted answer is reused for 3 s (routes of several stretches). Async callers: FlyRoute from the
+  task runner / replans in a job, StartDocking (GoHome, DockAtConnector, docking replans; `DockPrep` keeps the corridor while
+  waiting). Synchronous: player routes, parking, the GoCharge connector loop, RealShapeGrid queries, the memory stage.
+  `PathWarmUp` offers areas (static grids with Automata blocks, 50 m round their projectors, construction areas) to
+  `PathSearchQueue.WarmUp`, which only builds the scene ahead (entries, block trees).
+- Failed-route cache (`PathfindingManager`, main thread): a plan that found no route is answered at once when asked again
+  (owner, `QuerySignature`, coarse attitude, start within 2 m, goal within 1 m) for 120 s, 10 s when a moving grid / door / a
+  budget was involved, until `LocalScene.RemovalVersion` changes (block removed, split, obstacle closed). Not for plans that ran
+  out of the shared check budget.
+- Stage time limits: ini StraightMaxMs (straight stage incl. detours, only when Lazy Theta* is on; not the tail of a far search)
+  and MemoryMaxMs (RouteMemory.FindRoute), default 10 ms each: the later stages take the hard cases.
 - Recording: `DroneControllerBlock.RecordFlight10` (every 10 ticks on a watched route) feeds the memory and the lanes.
 - Lanes: `Pathfinding/FlightLanes.cs` (+ `Orchestrator/OrchestratorBlock.Lanes.cs` for the terminal list / drawing).
   Made from a trip between two places (static grid with a Logistics Computer, asteroid), offset each way, tubes

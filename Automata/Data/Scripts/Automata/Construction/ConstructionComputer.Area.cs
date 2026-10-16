@@ -76,6 +76,7 @@ namespace Automata.Construction
                             bool shares = false, int predictLine = 0)
         {
             if (rootGrid == null || maxJobs <= 0) return 0;
+            _scanGrindColor = grindColor;
             bool weldBuilt = (modes & (WorkModes.WeldUnfinishedBlocks | WorkModes.RepairDamagedBlocks)) != 0;
             bool weldProjected = (modes & WorkModes.WeldProjectedBlocks) != 0;
             bool grind = (modes & WorkModes.Grind) != 0;
@@ -144,9 +145,10 @@ namespace Automata.Construction
                     {
                         var b = _areaBlocks[i];
                         Orchestrator.JobType type;
-                        // Exact colours (ColorUtil.SameColor): the grind color is ground; the weld-ignore color is never welded
+                        // Exact colours (ColorUtil.SameColor): the grind color is ground; neither it nor the weld-ignore color
+                        // is ever welded (grinding off: a grind-colored block is left alone, not welded up to be ground later)
                         if (grind && ColorUtil.SameColor(b, grindColor)) type = Orchestrator.JobType.Grind;
-                        else if (weldBuilt && NeedsWeld(b, modes) && !ColorUtil.SameColor(b, weldIgnoreColor)) type = Orchestrator.JobType.Weld;
+                        else if (weldBuilt && NeedsWeld(b, modes) && !NoWeld(b, weldIgnoreColor)) type = Orchestrator.JobType.Weld;
                         else continue;
                         var category = type == Orchestrator.JobType.Grind ? WorkCategory.Grind : CategoryOf(b, modes);
                         Vector3D center;
@@ -185,7 +187,7 @@ namespace Automata.Construction
                         for (int i = 0; i < _projectedBlocks.Count && found < buildable; i++)
                         {
                             var b = _projectedBlocks[i];
-                            if (ColorUtil.SameColor(b, weldIgnoreColor)) continue;   // painted the weld-ignore color in the blueprint
+                            if (NoWeld(b, weldIgnoreColor)) continue;   // painted the weld-ignore / grind color in the blueprint
                             Vector3D center;
                             if (!IntersectsArea(b, ref areaObb, areaCenter, areaRadius, out center)) continue;
                             double key = SortKeyOf(center, ref areaCenter, ref areaInv, WorkPriorities.Rank(priority, WorkCategory.Projected));
@@ -310,8 +312,15 @@ namespace Automata.Construction
         {
             if ((modes & WorkModes.Grind) != 0 && ColorUtil.SameColor(b, grindColor)) return true;
             return (modes & (WorkModes.WeldUnfinishedBlocks | WorkModes.RepairDamagedBlocks)) != 0 && NeedsWeld(b, modes)
-                   && !ColorUtil.SameColor(b, weldIgnoreColor);
+                   && !ColorUtil.SameColor(b, weldIgnoreColor) && !ColorUtil.SameColor(b, grindColor);
         }
+
+        // Never welded: the weld-ignore color, or the grind color (this scan's, _scanGrindColor) - built or projected
+        private bool NoWeld(IMySlimBlock b, Color weldIgnoreColor)
+        {
+            return ColorUtil.SameColor(b, weldIgnoreColor) || ColorUtil.SameColor(b, _scanGrindColor);
+        }
+        private Color _scanGrindColor;
 
         private static bool NeedsWeld(IMySlimBlock b, WorkModes modes)
         {
@@ -480,6 +489,7 @@ namespace Automata.Construction
             bool fresh = !_plans.TryGetValue(projector.EntityId, out plan) || plan.ProjectedId != projected.EntityId
                          || plan.Offset != projector.ProjectionOffset || plan.Rotation != projector.ProjectionRotation
                          || plan.MaxLen != maxLen || plan.UpAxis != upAxis
+                         || plan.WeldIgnoreColor != weldIgnoreColor.PackedValue || plan.GrindColor != _scanGrindColor.PackedValue
                          || Vector3D.DistanceSquared(plan.AreaCenter, areaCenter) > 1 || Vector3D.DistanceSquared(plan.AreaHalf, half) > 0.01;
             if (fresh)
             {
@@ -489,7 +499,7 @@ namespace Automata.Construction
                 for (int i = 0; i < _projectedBlocks.Count; i++)
                 {
                     var b = _projectedBlocks[i];
-                    if (ColorUtil.SameColor(b, weldIgnoreColor)) continue;
+                    if (NoWeld(b, weldIgnoreColor)) continue;
                     Vector3D center;
                     if (!IntersectsArea(b, ref areaObb, areaCenter, areaRadius, out center)) continue;
                     PhysicalExtent(b, physical, out cell, out min, out max);
@@ -506,6 +516,7 @@ namespace Automata.Construction
                 {
                     ProjectedId = projected.EntityId, Offset = projector.ProjectionOffset, Rotation = projector.ProjectionRotation,
                     AreaCenter = areaCenter, AreaHalf = half, MaxLen = maxLen, UpAxis = upAxis,
+                    WeldIgnoreColor = weldIgnoreColor.PackedValue, GrindColor = _scanGrindColor.PackedValue,
                 };
                 _plans[projector.EntityId] = plan;
                 _planEligible.Clear();
@@ -579,7 +590,7 @@ namespace Automata.Construction
             {
                 var b = _line[i];
                 Vector3D center;
-                if (_lineTaken.Contains(b) || ColorUtil.SameColor(b, weldIgnoreColor) || !IntersectsArea(b, ref areaObb, areaCenter, areaRadius, out center)) break;
+                if (_lineTaken.Contains(b) || NoWeld(b, weldIgnoreColor) || !IntersectsArea(b, ref areaObb, areaCenter, areaRadius, out center)) break;
                 _lineBest.Add(b);
                 _lineCenters.Add(center);
             }
@@ -633,7 +644,7 @@ namespace Automata.Construction
                     cell += d * (ahead + 1);
                     var next = projected.GetCubeBlock(cell);
                     if (next == null || next == prev || _lineTaken.Contains(next)) break;
-                    if (ColorUtil.SameColor(next, weldIgnoreColor)) break;
+                    if (NoWeld(next, weldIgnoreColor)) break;
                     Vector3D center;
                     if (!IntersectsArea(next, ref areaObb, areaCenter, areaRadius, out center)) break;
                     _lineNeighbours.Clear();

@@ -280,15 +280,23 @@ namespace Automata.Pathfinding
         private readonly List<KeyValuePair<int, double>> joinStart = new List<KeyValuePair<int, double>>();
         private readonly List<KeyValuePair<int, double>> joinGoal = new List<KeyValuePair<int, double>>();
         private readonly List<KeyValuePair<int, double>> near = new List<KeyValuePair<int, double>>();
+        private readonly System.Diagnostics.Stopwatch findClock = new System.Diagnostics.Stopwatch();
+        private double findMaxMs;
+        private bool TimeUp { get { return findMaxMs > 0 && findClock.Elapsed.TotalMilliseconds > findMaxMs; } }
+        private FastPriorityQueue<SearchNode> open;   // reused (sized for the memory, grown with it)
 
         /// <summary>
         /// A way from 'start' to 'goal' over remembered links (hull-centre points, world), appended to 'waypoints' (start
         /// and goal excluded). False: none ('why' says what was missing). Every straight stretch of the answer was checked.
+        /// 'maxMs' (> 0): given up after that long (the search takes the hard cases).
         /// </summary>
-        public bool FindRoute(PathfindingManager pm, ref PathQuery q, Vector3D start, Vector3D goal, List<Vector3D> waypoints, out string why)
+        public bool FindRoute(PathfindingManager pm, ref PathQuery q, Vector3D start, Vector3D goal, List<Vector3D> waypoints, out string why,
+                              double maxMs = 0)
         {
             why = null;
             if (nodes.Count == 0) { why = "no remembered points"; return false; }
+            findClock.Restart();
+            findMaxMs = maxMs;
             NewQuery();
             double hull = PathfindingManager.HullRadiusOf(ref q);
             double reach = Math.Max(JOIN_RANGE, Vector3D.Distance(start, goal) * 0.5);
@@ -297,19 +305,23 @@ namespace Automata.Pathfinding
 
             Nearest(start, Math.Min(reach, JOIN_RANGE), mid, area, near);
             Joinable(pm, ref q, start, true, joinStart);
+            if (TimeUp) { why = "time budget"; return false; }
             if (joinStart.Count == 0) { why = "no remembered point reachable from the start"; return false; }
             Nearest(goal, Math.Min(reach, JOIN_RANGE), mid, area, near);
             Joinable(pm, ref q, goal, false, joinGoal);
+            if (TimeUp) { why = "time budget"; return false; }
             if (joinGoal.Count == 0) { why = "no remembered point reaches the goal"; return false; }
 
             for (int attempt = 0; attempt <= SEARCH_RETRIES; attempt++)
             {
+                if (TimeUp) { why = "time budget"; return false; }
                 var path = AStar(hull, start, goal);
                 if (path == null) { why = attempt == 0 ? "the remembered points don't connect" : "remembered links blocked"; return false; }
                 // Every link of the answer checked (the joins already were): a blocked one goes, and the search runs again
                 bool ok = true;
                 for (int i = 1; i + 2 < path.Count && ok; i++)
                 {
+                    if (TimeUp) { why = "time budget"; return false; }
                     Vector3D a, b;
                     Node na = nodes[path[i]], nb = nodes[path[i + 1]];
                     if (!World(na, out a) || !World(nb, out b)) { ok = false; break; }
@@ -359,7 +371,7 @@ namespace Automata.Pathfinding
         private void Joinable(PathfindingManager pm, ref PathQuery q, Vector3D p, bool fromStart, List<KeyValuePair<int, double>> result)
         {
             result.Clear();
-            for (int i = 0; i < near.Count && i < JOIN_TRIES && result.Count < JOIN_KEEP; i++)
+            for (int i = 0; i < near.Count && i < JOIN_TRIES && result.Count < JOIN_KEEP && !TimeUp; i++)
             {
                 Vector3D w;
                 if (!World(nodes[near[i].Key], out w)) continue;
@@ -376,7 +388,8 @@ namespace Automata.Pathfinding
         private List<int> AStar(double hull, Vector3D start, Vector3D goal)
         {
             search.Clear();
-            var open = new FastPriorityQueue<SearchNode>(nodes.Count + 4);
+            if (open == null || open.MaxSize < nodes.Count + 4) open = new FastPriorityQueue<SearchNode>(nodes.Count * 2 + 16);
+            else open.Clear();
             var s = new SearchNode { Id = START, G = 0 };
             search[START] = s;
             open.Enqueue(s, Vector3D.Distance(start, goal));

@@ -306,6 +306,7 @@ namespace Automata.Drone
         // Strict orders (docking, corridors): a stiffer pull onto the line, plus an integral that takes out a steady
         // offset (thrust imbalance, gravity, a moving base) the proportional part alone settles with
         private const double XT_GAIN_STRICT = 1.2;      // 1/s
+        private const double XT_MIN_STRICT = 0.15;      // m/s: back to a strict line from beyond its tolerance, at least
         private const double XT_INTEGRAL_GAIN = 0.4;    // (m/s) per (m·s)
         private const double XT_INTEGRAL_MAX = 0.3;     // m/s
         private Vector3D xtIntegral;
@@ -463,7 +464,10 @@ namespace Automata.Drone
                 {
                     BuildOrderFrame(activeFlightOrder, out fwd, out up);
                     ecoActive = EconomyAttitude(activeFlightOrder, ref fwd, ref up);   // economy flight: the burn / flip attitude
+                    Vector3D orderFwd = fwd, orderUp = up;
+                    bool wiggling = !ecoActive && UnstickWiggle(ref fwd, ref up);
                     UpdateOrientation(ref fwd, ref up, out orientationError);
+                    if (wiggling) orientationError = AngleOff(ref orderFwd, ref orderUp);   // the order's gates go by its own attitude
                     orienting = true;
                 }
                 else if (orientationTargetSet)
@@ -564,6 +568,7 @@ namespace Automata.Drone
                     RecordTrail10();
                     UpdateRecovery10();
                     UpdateDocking();
+                    UpdatePendingRoute10();
                     UpdateConstruction10();
                     UpdateSharedSite10();
                     UpdateCombat10();
@@ -1935,6 +1940,7 @@ namespace Automata.Drone
 
         public void ClearFlightOrder()
         {
+            CancelPendingRoute();   // (whoever clears the order drops a route waiting for its search)
             activeFlightOrder = null;
             goingToDeparture = false;
             ResetOrderState();
@@ -2084,19 +2090,35 @@ namespace Automata.Drone
             double eU = Vector3D.Dot(velErr, flightState.WorldMatrix.Up);
             double eR = Vector3D.Dot(velErr, flightState.WorldMatrix.Right);
 
-            UpdateIntegralTerms(eF, eU, eR);
+            // Pushing and not moving: the integral holds (it would only wind up towards whatever holds the drone, then
+            // push that way for seconds after the command turned round - a back-out cancelled by it)
+            if (pushStallTicks <= PUSH_BOOST_DELAY_TICKS) UpdateIntegralTerms(eF, eU, eR);
+            // ...and the overrides are written again every second (a thruster that stopped working and came back, an
+            // override reset by the game: the write-skip cache would keep them stale)
+            if (pushStallTicks > PUSH_BOOST_DELAY_TICKS && pushStallTicks % 60 == 0)
+                for (int i = 0; i < 6; i++) directionalThrustCache[i] = -1.0;
 
             // The acceleration asked (holding the weight aside): at most the Max thrust setting allows, except while over
             // the braking curve (an overshoot: what it has)
             double aF = Kp * eF + integralForward, aU = Kp * eU + integralUp, aR = Kp * eR + integralRight;
+            // Asking to move and not moving (PushStalled): the push grows step by step (PushBoost), and every axis that
+            // asks gets at least THRUST_FLOOR of its face - small commands near the line / the target went nowhere
+            double boost = PushBoost;
+            if (boost > 1) { aF *= boost; aU *= boost; aR *= boost; }
             if (!overCurve)
             {
-                double aLen = Math.Sqrt(aF * aF + aU * aU + aR * aR), cap = AccelCap;
+                double aLen = Math.Sqrt(aF * aF + aU * aU + aR * aR), cap = AccelCap * Math.Max(1, boost);
                 if (aLen > cap) { double k = cap / aLen; aF *= k; aU *= k; aR *= k; }
             }
             double forceFwdBack   = (-Vector3D.Dot(flightState.Gravity, flightState.WorldMatrix.Forward) + aF) * physicalMass;
             double forceUpDown    = (-Vector3D.Dot(flightState.Gravity, flightState.WorldMatrix.Up)      + aU) * physicalMass;
             double forceLeftRight = (-Vector3D.Dot(flightState.Gravity, flightState.WorldMatrix.Right)   + aR) * physicalMass;
+            if (boost > 1)
+            {
+                forceFwdBack   = FloorForce(forceFwdBack,   eF, Base6Directions.Direction.Forward, Base6Directions.Direction.Backward);
+                forceUpDown    = FloorForce(forceUpDown,    eU, Base6Directions.Direction.Up,      Base6Directions.Direction.Down);
+                forceLeftRight = FloorForce(forceLeftRight, eR, Base6Directions.Direction.Right,   Base6Directions.Direction.Left);
+            }
 
             ApplyAxisForce(forceUpDown,    Base6Directions.Direction.Up,      Base6Directions.Direction.Down,
                 EffectiveMax(Base6Directions.Direction.Up),      EffectiveMax(Base6Directions.Direction.Down));
@@ -2106,6 +2128,96 @@ namespace Automata.Drone
                 EffectiveMax(Base6Directions.Direction.Forward), EffectiveMax(Base6Directions.Direction.Backward));
             thrustOverridesActive = true;
         }
+        #region Push boost (asking to move, not moving)
+        // Under a small steady command the drone sat still with its thrusters "on" for minutes (dock corridors: 0.1-2 % of a
+        // face). While it asks for at least PUSH_BOOST_MIN_SPEED and moves at less than PUSH_MOVED_SHARE of it, the push grows
+        // after PUSH_BOOST_DELAY_TICKS up to PUSH_BOOST_MAX over PUSH_BOOST_RAMP_TICKS, and each axis that asks gets at least
+        // THRUST_FLOOR of its face. Moving at half the ask (or holding still): normal again.
+        private const double PUSH_BOOST_MIN_SPEED = 0.03;   // m/s asked
+        private const double PUSH_BOOST_MAX = 4.0;
+        private const double THRUST_FLOOR = 0.04;           // share of the face's thrust
+        private const double FLOOR_MIN_ERROR = 0.02;        // m/s of velocity error on the axis: it asks
+        #region Timing
+        private const int PUSH_BOOST_DELAY_TICKS = 45;
+        private const int PUSH_BOOST_RAMP_TICKS = 180;
+        #endregion
+        private int pushStallTicks;   // asking and not moving, ticks in a row (WatchPush)
+
+        private double PushBoost
+        {
+            get
+            {
+                if (pushStallTicks <= PUSH_BOOST_DELAY_TICKS || siteYielding || boring) return 1;
+                return 1 + (PUSH_BOOST_MAX - 1) * Math.Min(1.0, (pushStallTicks - PUSH_BOOST_DELAY_TICKS) / (double)PUSH_BOOST_RAMP_TICKS);
+            }
+        }
+
+        // 'force' (N, signed along +axis) at least THRUST_FLOOR of the face that the velocity error 'err' asks for
+        private double FloorForce(double force, double err, Base6Directions.Direction positive, Base6Directions.Direction negative)
+        {
+            if (Math.Abs(err) < FLOOR_MIN_ERROR) return force;
+            if (err > 0) return Math.Max(force, THRUST_FLOOR * EffectiveMax(positive));
+            return Math.Min(force, -THRUST_FLOOR * EffectiveMax(negative));
+        }
+
+        /// <summary>
+        /// Stuck in flight now: pressed against something (PUSH_BLOCKED_TICKS), or a stall reported in the last
+        /// STALLED_RECENT_TICKS and still not moving. Other drones don't wait for it (shared site).
+        /// </summary>
+        internal bool StalledNow
+        {
+            get
+            {
+                if (activeFlightOrder == null) return false;
+                if (pushBlockedTicks >= PUSH_BLOCKED_TICKS || pushStallTicks >= PUSH_BLOCKED_TICKS) return true;
+                return lastStallFrame > 0 && MyAPIGateway.Session.GameplayFrameCounter - lastStallFrame < STALLED_RECENT_TICKS
+                       && flightState.LinearVelocity.LengthSquared() < 0.01;
+            }
+        }
+        #region Timing
+        private const int STALLED_RECENT_TICKS = 30 * 60;
+        #endregion
+        private int lastStallFrame;   // LogStall
+
+        // Still not moving with the boost half way up: the attitude is shaken a little (yaw, pitch, roll, WIGGLE_ANGLE each
+        // way, WIGGLE_STEP_TICKS per step), then back to the order's; again every WIGGLE_CYCLE_TICKS while it lasts. A
+        // drone "stuck" in open space with its thrusters at full override came loose when it was turned a little.
+        private static readonly double WIGGLE_ANGLE = MathHelperD.ToRadians(3.0);
+        private const int WIGGLE_STEP_TICKS = 20;
+        private const int WIGGLE_STEPS = 6;
+        #region Timing
+        private const int WIGGLE_START_TICKS = PUSH_BOOST_DELAY_TICKS + PUSH_BOOST_RAMP_TICKS / 2;
+        private const int WIGGLE_TICKS = WIGGLE_STEP_TICKS * WIGGLE_STEPS;
+        private const int WIGGLE_CYCLE_TICKS = WIGGLE_TICKS + 2 * 60;
+        #endregion
+
+        private bool UnstickWiggle(ref Vector3D fwd, ref Vector3D up)
+        {
+            int t = pushStallTicks - WIGGLE_START_TICKS;
+            if (t < 0 || siteYielding || boring || activeFlightOrder == null) return false;
+            t %= WIGGLE_CYCLE_TICKS;
+            if (t >= WIGGLE_TICKS) return false;
+            if (t == 0 && Log.DebugEnabled) Log.Debug("Drone {0}: not moving under thrust ({1:F2} m/s asked, {2:F2} moved): shaking its attitude {3:F0}°",
+                                                      Entity.EntityId, pushAsked, pushMoved, MathHelperD.ToDegrees(WIGGLE_ANGLE));
+            int step = t / WIGGLE_STEP_TICKS;
+            Vector3D f = Vector3D.Normalize(fwd), u = Vector3D.Normalize(up);
+            Vector3D axis = step < 2 ? u : step < 4 ? Vector3D.Normalize(Vector3D.Cross(f, u)) : f;   // yaw, pitch, roll
+            MatrixD m = MatrixD.CreateFromAxisAngle(axis, (step % 2 == 0 ? 1 : -1) * WIGGLE_ANGLE);
+            fwd = Vector3D.TransformNormal(f, m);
+            up = Vector3D.TransformNormal(u, m);
+            return true;
+        }
+
+        // rad between the drone's attitude and fwd / up (the larger of the two)
+        private double AngleOff(ref Vector3D fwd, ref Vector3D up)
+        {
+            MatrixD wm = flightState.WorldMatrix;
+            double a = Math.Acos(MathHelperD.Clamp(Vector3D.Dot(wm.Forward, Vector3D.Normalize(fwd)), -1, 1));
+            double b = Math.Acos(MathHelperD.Clamp(Vector3D.Dot(wm.Up, Vector3D.Normalize(up)), -1, 1));
+            return Math.Max(a, b);
+        }
+        #endregion
+
         // Largest acceleration the drone can hold along u (world unit vector), gravity included.
         // Gravity is split per controller axis: a tilted drone spends part of each group just holding
         // its own weight (e.g. pitched 10° nose-down, the Backward group must also cancel g·sin10°).
@@ -2211,13 +2323,30 @@ namespace Automata.Drone
 
             // Closest point on the line. Before capture it can't slide into the final leg,
             // so the drone always joins the line at least FINAL_LEG before the target.
-            double sMax = o.Captured ? len : Math.Max(0.0, len - FINAL_LEG);
+            // A leg no longer than FINAL_LEG is all final leg: nothing to join "before" it, so no pin to its start (the
+            // gate still holds the along speed back while off the line)
+            double sMax = o.Captured || len <= FINAL_LEG ? len : Math.Max(0.0, len - FINAL_LEG);
             double s = MathHelperD.Clamp(Vector3D.Dot(p - a, d), 0.0, sMax);
             Vector3D crossTrack = a + d * s - p;
             double xt = crossTrack.Length();
             bool strict = o.LineTolerance > 0 && o.Phase == FlightPhase.Approach;   // final approach of a strict order
             double capture = strict ? o.LineTolerance : XT_CAPTURE;
             if (!o.Captured && xt < capture) o.Captured = true;
+            // On the line anywhere along the leg counts too: measured only to the clamped point, a leg shorter than
+            // FINAL_LEG (dock corridor legs: strict, not loose) pinned the drone to its start - the pull back there and the
+            // gated push along cancelled out ~1.8 tolerances past it, 0.03 m/s asked, and it sat there until the timeout
+            if (!o.Captured && len > 1e-3)
+            {
+                double sFree = MathHelperD.Clamp(Vector3D.Dot(p - a, d), 0.0, len);
+                if ((a + d * sFree - p).LengthSquared() < capture * capture)
+                {
+                    o.Captured = true;
+                    sMax = len;
+                    s = sFree;
+                    crossTrack = a + d * s - p;
+                    xt = crossTrack.Length();
+                }
+            }
             // Route legs join their line anywhere. Uncaptured, a leg shorter than FINAL_LEG clamps the drone's point on
             // the line to the leg's start: after a loose arrival (up to 1.5 m off) it was pulled back there while
             // pushing on, and hovered in between, metres short of the target, until the task timed out.
@@ -2306,7 +2435,11 @@ namespace Automata.Drone
             {
                 Vector3D xDir = crossTrack / xt;
                 double xBrake = PlanBrake(-xDir, brakeFrac);
-                vCross = xDir * Math.Min(maxSpeed, Math.Min((strict ? XT_GAIN_STRICT : XT_GAIN) * xt, Math.Sqrt(2 * xBrake * xt)));
+                double vx = Math.Min((strict ? XT_GAIN_STRICT : XT_GAIN) * xt, Math.Sqrt(2 * xBrake * xt));
+                // Strict line, off it by more than its tolerance: at least XT_MIN_STRICT back towards it (the along speed is
+                // gated to ~0 out there, so a weak pull back left the drone parked beside its line)
+                if (strict && xt > o.LineTolerance) vx = Math.Max(vx, Math.Min(XT_MIN_STRICT, Math.Sqrt(2 * xBrake * xt)));
+                vCross = xDir * Math.Min(maxSpeed, vx);
             }
             if (xtIntegralOrder != o) { xtIntegral = Vector3D.Zero; xtIntegralOrder = o; }
             if (strict && xt < o.LineTolerance * 4)
@@ -2376,9 +2509,13 @@ namespace Automata.Drone
         {
             double c = cmdRel.Length();
             pushAsked = c;
-            if (siteYielding || boring || c < PUSH_MIN_SPEED) { pushMoved = 0; pushBlockedTicks = 0; return; }   // bores cut their way
+            if (siteYielding || boring || c < PUSH_BOOST_MIN_SPEED) { pushMoved = 0; pushBlockedTicks = 0; pushStallTicks = 0; return; }   // bores cut their way
             Vector3D dir = cmdRel / c;
             pushMoved = Vector3D.Dot(flightState.RelativeVelocity, dir);
+            // The push boost: asking (even a little) and not moving
+            if (pushMoved >= c * 0.5) pushStallTicks = 0;
+            else if (pushMoved < c * PUSH_MOVED_SHARE) pushStallTicks++;
+            if (c < PUSH_MIN_SPEED) { pushBlockedTicks = 0; return; }
             if (pushMoved >= c * PUSH_MOVED_SHARE) { pushBlockedTicks = 0; return; }
             pushBlockedDir = pushBlockedTicks == 0 ? dir : Vector3D.Normalize(pushBlockedDir * 0.95 + dir * 0.05);
             if (++pushBlockedTicks == PUSH_BLOCKED_TICKS)
@@ -2422,7 +2559,46 @@ namespace Automata.Drone
                 sb.Append(' ').Append(((Base6Directions.Direction)d).ToString()[0]).Append(' ')
                   .Append(DroneStatusDisplay.Force(applied).Trim()).Append('/').Append(DroneStatusDisplay.Force(asked).Trim());
             }
-            sb.AppendFormat(", physics {0}", block.CubeGrid.Physics == null ? "none" : block.CubeGrid.Physics.IsActive ? "awake" : "asleep");
+            var phys = block.CubeGrid.Physics;
+            sb.AppendFormat(", physics {0}", phys == null ? "none" : phys.IsActive ? "awake" : "asleep");
+            if (phys != null)
+            {
+                // The body as Havok has it: its mass (a much bigger one: attached to something) and its own velocity
+                sb.AppendFormat(", body mass {0:F0} kg (drone {1:F0} kg), body speed {2:F2} m/s, push boost x{3:F1}", phys.Mass, physicalMass,
+                                phys.LinearVelocity.Length(), PushBoost);
+            }
+            if (block.CubeGrid.IsStatic) sb.Append(", GRID IS STATIC");
+            // Grids physically joined to it (rotors, pistons, merge, locked gear / connector): they move with it
+            diagGroup.Clear();
+            block.CubeGrid.GetGridGroup(GridLinkTypeEnum.Physical).GetGrids(diagGroup);
+            if (diagGroup.Count > 1)
+            {
+                sb.AppendFormat(", physically joined to {0} grid(s):", diagGroup.Count - 1);
+                int shown = 0;
+                for (int i = 0; i < diagGroup.Count && shown < 3; i++)
+                {
+                    if (diagGroup[i] == block.CubeGrid) continue;
+                    sb.AppendFormat(" '{0}'{1}", diagGroup[i].DisplayName, diagGroup[i].IsStatic ? " (static)" : "");
+                    shown++;
+                }
+            }
+            diagGroup.Clear();
+            // Other drones whose hull touches this one's (+0.3 m), or close
+            if (localHullBox.Max.X >= localHullBox.Min.X)
+            {
+                MatrixD wmd = block.CubeGrid.WorldMatrix;
+                var mine = new MyOrientedBoundingBoxD(HullCentreWorld, localHullBox.HalfExtents + new Vector3D(0.3), Quaternion.CreateFromRotationMatrix(wmd));
+                for (int i = 0; i < allDrones.Count; i++)
+                {
+                    var other = allDrones[i];
+                    if (other == this || other.block == null || other.block.Closed || other.localHullBox.Max.X < other.localHullBox.Min.X) continue;
+                    Vector3D oc = other.HullCentreWorld;
+                    double dist = Vector3D.Distance(oc, mine.Center);
+                    if (dist > mine.HalfExtent.Length() + other.localHullBox.HalfExtents.Length() + 1) continue;
+                    var theirs = new MyOrientedBoundingBoxD(oc, other.localHullBox.HalfExtents, Quaternion.CreateFromRotationMatrix(other.block.CubeGrid.WorldMatrix));
+                    sb.AppendFormat(", drone {0} {1:F1} m away{2}", Nicknames.Of(other.block), dist, mine.Intersects(ref theirs) ? " TOUCHING" : "");
+                }
+            }
             var pm = Pathfinding.PathfindingManager.Instance;
             if (pm != null && localHullBox.Max.X >= localHullBox.Min.X)
             {
@@ -2438,6 +2614,8 @@ namespace Automata.Drone
             }
             return sb.ToString();
         }
+
+        private readonly List<IMyCubeGrid> diagGroup = new List<IMyCubeGrid>();
 
         private bool AnyGearLocked()
         {
@@ -2756,9 +2934,16 @@ namespace Automata.Drone
             double dt = 1.0d / TimeUtil.TICKS_PER_SECOND; // UpdateBeforeSimulation runs at a fixed 60Hz tick
 
             double max = boring ? INTEGRAL_MAX_BORING : INTEGRAL_MAX;
-            integralForward = MathHelperD.Clamp(integralForward + localForwardSpeed * INTEGRAL_GAIN * dt, -max, max);
-            integralUp      = MathHelperD.Clamp(integralUp      + localUpSpeed      * INTEGRAL_GAIN * dt, -max, max);
-            integralRight   = MathHelperD.Clamp(integralRight   + localRightSpeed   * INTEGRAL_GAIN * dt, -max, max);
+            // Winding back (the error against the integral: the command turned round) INTEGRAL_UNWIND x faster: at the
+            // plain gain a full integral took ~10 s to undo at 0.5 m/s of error, pushing the old way all that time
+            integralForward = MathHelperD.Clamp(integralForward + localForwardSpeed * IntegralGain(localForwardSpeed, integralForward) * dt, -max, max);
+            integralUp      = MathHelperD.Clamp(integralUp      + localUpSpeed      * IntegralGain(localUpSpeed, integralUp) * dt, -max, max);
+            integralRight   = MathHelperD.Clamp(integralRight   + localRightSpeed   * IntegralGain(localRightSpeed, integralRight) * dt, -max, max);
+        }
+        private const double INTEGRAL_UNWIND = 5.0;
+        private static double IntegralGain(double err, double integral)
+        {
+            return err * integral < 0 ? INTEGRAL_GAIN * INTEGRAL_UNWIND : INTEGRAL_GAIN;
         }
         private void ResetIntegralTerms()
         {

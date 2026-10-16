@@ -483,7 +483,7 @@ namespace Automata.Drone
             if (!EnsureDockPose(home, false)) { Report(StrHomeNoUsableDroneConnector); return false; }
             ResetRoute();
             int mi = FindConnectorMount(settings.HomeDockConnectorId);
-            if (!StartDocking(home, mi, settings.HomeDockOffset, settings.HomeDockForward, settings.HomeDockUp)) return false;
+            if (!StartDocking(home, mi, settings.HomeDockOffset, settings.HomeDockForward, settings.HomeDockUp, true)) return false;
             if (preflightStage == 0) SetState(State.ReturningToBase);
             Report(StrGoingHomeM, home.CustomName, Vector3D.Distance(flightState.Position, home.GetPosition()));
             return true;
@@ -493,7 +493,7 @@ namespace Automata.Drone
         /// Docks at any allowed connector (drone owner / faction, resolved by the caller), e.g. a logistics
         /// computer's connector for a job's load step. The pose is computed, not stored.
         /// </summary>
-        public bool DockAtConnector(IMyShipConnector target)
+        public bool DockAtConnector(IMyShipConnector target, bool async = true)
         {
             if (!initialized || settings == null || target == null) return false;
             CaptureFlightState();
@@ -510,26 +510,102 @@ namespace Automata.Drone
             double tilt;
             if (!ComputeDockPose(target, out offset, out forward, out up, out mi, out tilt)) { Report(StrDockNoUsableDroneConnector); return false; }
             ResetRoute();
-            if (!StartDocking(target, mi, offset, forward, up)) return false;
+            if (!StartDocking(target, mi, offset, forward, up, async)) return false;
             Report(StrDockingAtM, target.CustomName, Vector3D.Distance(flightState.Position, target.GetPosition()));
             return true;
         }
 
         // Anchored to the target connector (moving targets work): transit, align, final approach at Safe speed
         // A dock / home trip that finds no route repositions and tries again (DroneControllerBlock.Recovery)
-        private bool StartDocking(IMyShipConnector target, int mi, Vector3DData dockOffset, Vector3DData dockForward, Vector3DData dockUp)
+        // 'async': the route may wait for a search on a worker thread (PathSearchQueue): the drone holds meanwhile and the
+        // docking is planned again when the answer is in (DroneControllerBlock.Pending); returns true then.
+        private bool StartDocking(IMyShipConnector target, int mi, Vector3DData dockOffset, Vector3DData dockForward, Vector3DData dockUp,
+                                  bool async = false)
         {
-            bool was = recoverPlanning;
+            bool was = recoverPlanning, wasAsync = asyncPlanOk;
             recoverPlanning = true;
+            var pm = Pathfinding.PathfindingManager.Instance;
+            async = async && pm != null && pm.Searches != null;
+            asyncPlanOk = async;
+            bool pending = false;
+            bool contactSet = contactBackOutSet;   // (consumed on the way: put back when the plan is made again later)
             try { return StartDockingCore(target, mi, dockOffset, dockForward, dockUp); }
-            finally { recoverPlanning = was; }
+            catch (Pathfinding.PlanPendingException)
+            {
+                if (!async || dockPrepCurrent == null) throw;
+                pending = true;
+                if (contactSet) { contactBackOutSet = true; contactBackOutFrame = MyAPIGateway.Session.GameplayFrameCounter; }
+                DeferDocking(dockPrepCurrent);
+                return true;
+            }
+            finally
+            {
+                recoverPlanning = was;
+                asyncPlanOk = wasAsync;
+                dockPrepCurrent = null;
+                if (async && !pending) pm.Searches.EndPlan(Entity.EntityId);   // the plan is over: its answers go
+            }
+        }
+
+        /// <summary>
+        /// What a docking works out before its route (the dock frame, the entry corridor - the expensive part -, the
+        /// approach point): kept while the route waits for a search, and used again when it is planned again soon after,
+        /// for the same connector and pose, the connector where it was.
+        /// </summary>
+        private sealed class DockPrep
+        {
+            public IMyShipConnector Target;
+            public int Mi, Frame;
+            public Vector3D OrigOffset, OrigForward, OrigUp;      // what StartDocking was called with
+            public Vector3DData DockOffset, DockForward, DockUp;  // the pose (a corridor may turn its heading)
+            public MatrixD Hm, DockFrame;
+            public Vector3D AH, ConnectorLocal, ApproachLocal, HullFromConnector, ExitDir;
+            public bool Corridor;
+            public double Berth;
+            public readonly List<Vector3D> CorridorPts = new List<Vector3D>();
+        }
+        #region Timing
+        private const int DOCK_PREP_KEEP_TICKS = 10 * 60;   // a docking's preparation is used again this long
+        #endregion
+        private DockPrep pendingDock;      // the docking waiting for its route search
+        private DockPrep dockPrepCurrent;  // the docking being planned (StartDocking)
+
+        private static bool SameDir(Vector3D a, Vector3D b) { return Vector3D.DistanceSquared(a, b) < 1e-8; }
+
+        private bool PrepStillGood(DockPrep p, IMyShipConnector target, int mi, Vector3DData offset, Vector3DData forward, Vector3DData up)
+        {
+            if (p == null || p.Target != target || p.Mi != mi || target.Closed) return false;
+            if (MyAPIGateway.Session.GameplayFrameCounter - p.Frame > DOCK_PREP_KEEP_TICKS) return false;
+            if (!SameDir(p.OrigOffset, offset.ToVector3D()) || !SameDir(p.OrigForward, forward.ToVector3D()) || !SameDir(p.OrigUp, up.ToVector3D())) return false;
+            MatrixD hm = target.WorldMatrix;
+            return Vector3D.DistanceSquared(hm.Translation, p.Hm.Translation) < 0.0025
+                   && Vector3D.Dot(hm.Forward, p.Hm.Forward) > 0.99995 && Vector3D.Dot(hm.Up, p.Hm.Up) > 0.99995;
         }
 
         private bool StartDockingCore(IMyShipConnector target, int mi, Vector3DData dockOffset, Vector3DData dockForward, Vector3DData dockUp)
         {
             if (mi < 0) return false;
-            var droneConnector = connectorMounts[mi].Block as IMyShipConnector;
+            DockPrep prep = pendingDock;
+            pendingDock = null;
+            if (PrepStillGood(prep, target, mi, dockOffset, dockForward, dockUp))
+            {
+                prep.Frame = MyAPIGateway.Session.GameplayFrameCounter;
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: docking at {1}: its corridor / approach as worked out before", Entity.EntityId, target.CustomName);
+            }
+            else prep = PrepareDock(target, mi, dockOffset, dockForward, dockUp);
+            if (prep == null) return false;
+            dockPrepCurrent = prep;
+            return FinishDock(prep);
+        }
 
+        // The dock frame, the entry corridor (or the approach point out along the axis), the approach point. Null: refused (reported)
+        private DockPrep PrepareDock(IMyShipConnector target, int mi, Vector3DData dockOffset, Vector3DData dockForward, Vector3DData dockUp)
+        {
+            var prep = new DockPrep
+            {
+                Target = target, Mi = mi, Frame = MyAPIGateway.Session.GameplayFrameCounter,
+                OrigOffset = dockOffset.ToVector3D(), OrigForward = dockForward.ToVector3D(), OrigUp = dockUp.ToVector3D(),
+            };
             Vector3D pH, aH;
             ConnectorGeometry(target, out pH, out aH);
             MatrixD hm = target.WorldMatrix;
@@ -545,7 +621,7 @@ namespace Automata.Drone
             if (!WithinGravityLimits(ref dockFrame, out tiltNeed))
             {
                 Report(StrDockNeedsPGravityAlign, target.CustomName, tiltNeed);
-                return false;
+                return null;
             }
             Vector3D connectorLocal = dockOffset.ToVector3D() + WorldToAnchorDir(ref hm, Vector3D.TransformNormal(mount.LocalPoint, dockFrame));
             // The entry corridor (DroneControllerBlock.Corridor): from the slide's start out to where the drone can turn,
@@ -559,9 +635,9 @@ namespace Automata.Drone
             double up0 = Vector3D.Dot(dockFrame.Up, gUp);
             string corridorHow = null;
             double corridorBerth = 0;
-            dockCorridor = false;
+            bool corridor = false;
             int heading = 0;
-            for (int k = 0; k < (recorded ? 1 : 4) && !dockCorridor; k++)
+            for (int k = 0; k < (recorded ? 1 : 4) && !corridor; k++)
             {
                 MatrixD turn = MatrixD.CreateFromAxisAngle(Vector3D.Normalize(aH), k * MathHelperD.PiOver2);
                 MatrixD frameK = MatrixD.CreateWorld(Vector3D.Zero, Vector3D.TransformNormal(dockFrame.Forward, turn), Vector3D.TransformNormal(dockFrame.Up, turn));
@@ -569,9 +645,9 @@ namespace Automata.Drone
                 Vector3D p0HullK = p0World + Vector3D.TransformNormal(HullCentreLocal - mount.LocalPoint, frameK);
                 string howK;
                 double berthK;
-                if (FindCorridorAny(p0HullK, aH, ref frameK, ref hm, dockCorridorPts, out howK, out berthK))
+                if (FindCorridorAny(p0HullK, aH, ref frameK, ref hm, prep.CorridorPts, out howK, out berthK))
                 {
-                    dockCorridor = true;
+                    corridor = true;
                     corridorHow = howK;
                     corridorBerth = berthK;
                     heading = k;
@@ -585,9 +661,11 @@ namespace Automata.Drone
                 }
                 else corridorHow = corridorHow == null ? howK : corridorHow + Loc.F(StrHeadingAlternative, k * 90, howK);
             }
+            // The corridor's way out (read now: the departure's corridor, worked out after, overwrites corridorExitDir)
+            Vector3D exitDir = corridorExitDir;
             Vector3D hullFromConnector = Vector3D.TransformNormal(HullCentreLocal - mount.LocalPoint, dockFrame);
             Vector3D approachLocal;
-            if (dockCorridor)
+            if (corridor)
             {
                 approachLocal = connectorLocal + WorldToAnchorDir(ref hm, aH) * CORRIDOR_SLIDE;
                 if (Log.DebugEnabled) Log.Debug("Drone {0}: dock corridor at {1}{2}: {3}", Entity.EntityId, target.CustomName,
@@ -604,13 +682,43 @@ namespace Automata.Drone
                 {
                     corridorIgnore = null;
                     Report(StrDockNoWayInCorrectedPose, target.CustomName, lineBlocker, corridorHow);
-                    return false;
+                    return null;
                 }
                 if (Log.DebugEnabled) Log.Debug("Drone {0}: no dock corridor at {1} ({2}): approach point {3:F1} m out", Entity.EntityId, target.CustomName,
                           corridorHow, Vector3D.Distance(approachLocal, connectorLocal));
             }
             corridorIgnore = null;
-            CorridorFlight(corridorBerth, out dockCorridorSpeed, out dockLineTol);
+            prep.DockOffset = dockOffset;
+            prep.DockForward = dockForward;
+            prep.DockUp = dockUp;
+            prep.Hm = hm;
+            prep.DockFrame = dockFrame;
+            prep.AH = aH;
+            prep.ConnectorLocal = connectorLocal;
+            prep.ApproachLocal = approachLocal;
+            prep.HullFromConnector = hullFromConnector;
+            prep.ExitDir = exitDir;
+            prep.Corridor = corridor;
+            prep.Berth = corridorBerth;
+            if (!corridor) prep.CorridorPts.Clear();
+            return prep;
+        }
+
+        // The route to the approach point (back out of a dock first), the corridor legs, the dock order
+        private bool FinishDock(DockPrep prep)
+        {
+            var target = prep.Target;
+            int mi = prep.Mi;
+            var droneConnector = connectorMounts[mi].Block as IMyShipConnector;
+            ToolMount mount = connectorMounts[mi];
+            MatrixD hm = prep.Hm;
+            MatrixD dockFrame = prep.DockFrame;
+            Vector3D connectorLocal = prep.ConnectorLocal, approachLocal = prep.ApproachLocal, hullFromConnector = prep.HullFromConnector;
+            Vector3DData dockOffset = prep.DockOffset, dockForward = prep.DockForward, dockUp = prep.DockUp;
+            dockCorridor = prep.Corridor;
+            dockCorridorPts.Clear();
+            dockCorridorPts.AddRange(prep.CorridorPts);
+            CorridorFlight(prep.Berth, out dockCorridorSpeed, out dockLineTol);
 
             // Stand-alone, going home: around the observation area, not through what the drone just built there.
             // Every stretch through the pathfinder (obstacles the drone sees, terrain).
@@ -634,7 +742,7 @@ namespace Automata.Drone
             }
             undockLegs = docked != null ? backOuts : 2;
             // The 4th endpoint: the route ends up to 50 m out from the turn point; in from there at Approach speed
-            Vector3D staging = DockStagingPoint(hullAtApproach, dockCorridor ? corridorExitDir : aH);
+            Vector3D staging = DockStagingPoint(hullAtApproach, dockCorridor ? prep.ExitDir : prep.AH);
             bool staged = Vector3D.DistanceSquared(staging, hullAtApproach) > 4;
             dockAreaSet = true;   // planned near the platform: no attitude turns there (NearDockArea)
             dockAreaCentre = target.GetPosition();
@@ -1023,7 +1131,7 @@ namespace Automata.Drone
             if (Log.DebugEnabled) Log.Debug("Drone {0}: dock pose re-computed close to {1} before its corridor: {2:F2} m / {3:F0}° off, mount {4} -> {5}: planned again",
                       Entity.EntityId, target.CustomName, moved, turned, FindConnectorMount(dockingConnectorId), mi);
             ResetRoute();
-            if (!StartDocking(target, mi, offset, forward, up))
+            if (!StartDocking(target, mi, offset, forward, up, true))
             {
                 Report(StrDockNoWayInStraightBlocked, target.CustomName);
                 ClearFlightOrder();

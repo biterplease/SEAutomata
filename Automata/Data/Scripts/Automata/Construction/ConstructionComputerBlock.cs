@@ -235,6 +235,7 @@ namespace Automata.Construction
             LoadFromStorage();
             block.AppendingCustomInfo += AppendInfo;
             ready = true;
+            if (!All.Contains(this)) All.Add(this);
             NeedsUpdate |= MyEntityUpdateEnum.EACH_100TH_FRAME;
             Log.Info("CC {0}: '{1}' on '{2}': area {3}x{4}x{5} blocks, offset ({6:F0}, {7:F0}, {8:F0}) m, modes {9}, {10} saved job(s)", entityId,
                      block.CustomName, block.CubeGrid.DisplayName, settings.AreaSizeX, settings.AreaSizeY, settings.AreaSizeZ, settings.AreaOffsetBlocksX,
@@ -257,10 +258,14 @@ namespace Automata.Construction
             }
         }
 
+        /// <summary>Construction Computers in the world (the path search's scene warm-up reads their areas).</summary>
+        public static readonly List<ConstructionComputerBlock> All = new List<ConstructionComputerBlock>();
+
         public override void Close()
         {
             try
             {
+                All.Remove(this);
                 if (drawArea && AutomataSession.Instance != null) AutomataSession.Instance.RequestDraw(this, false);
                 if (block != null) block.AppendingCustomInfo -= AppendInfo;
                 scanCache.Dispose();

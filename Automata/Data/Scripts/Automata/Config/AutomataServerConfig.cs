@@ -332,10 +332,14 @@ namespace Automata.Config
             public bool LogDroneOrders { get; internal set; } = true;
         }
 
-        public void LoadConfig()
+        private VRage.Game.ModAPI.IMyModContext _modContext;
+
+        /// <summary>Reads Automata.ini from the mod's folder ('modContext': the session component's, so a workshop copy is found too).</summary>
+        public void LoadConfig(VRage.Game.ModAPI.IMyModContext modContext = null)
         {
             if (_configLoaded) return;
             _configLoaded = true;
+            _modContext = modContext;
 
             try
             {
@@ -370,12 +374,18 @@ namespace Automata.Config
         {
             try
             {
-                // Get the current mod item
-                var modItem = MyAPIGateway.Session.Mods.FirstOrDefault(m => m.GetPath().Contains("Automata"));
-                if (modItem.Name != AutomataSession.MOD_NAME)
+                // This mod's item: from its own context (a workshop copy's folder and name are its id, "3817483229.sbm"),
+                // else the local copy by name
+                VRage.Game.MyObjectBuilder_Checkpoint.ModItem modItem;
+                if (_modContext != null && !_modContext.IsBaseGame) modItem = _modContext.ModItem;
+                else
                 {
-                    Log.Warning($"{AutomataSession.MOD_NAME}: Could not find mod item for config loading");
-                    return null;
+                    modItem = MyAPIGateway.Session.Mods.FirstOrDefault(m => m.Name == AutomataSession.MOD_NAME || m.FriendlyName == AutomataSession.MOD_NAME);
+                    if (modItem.Name == null)
+                    {
+                        Log.Warning($"{AutomataSession.MOD_NAME}: Could not find mod item for config loading");
+                        return null;
+                    }
                 }
 
                 if (MyAPIGateway.Utilities.FileExistsInModLocation(CONFIG_FILENAME, modItem))
@@ -476,6 +486,11 @@ namespace Automata.Config
             Pathfinding.ThetaSearchRadius = MathHelper.Clamp(ini.Get("Pathfinding", "ThetaSearchRadius").ToDouble(Pathfinding.ThetaSearchRadius), 50.0, 2000.0);
             Pathfinding.ThetaMaxExpansions = MathHelper.Clamp(ini.Get("Pathfinding", "ThetaMaxExpansions").ToInt32(Pathfinding.ThetaMaxExpansions), 100, 100000);
             Pathfinding.ThetaMaxMs = MathHelper.Clamp(ini.Get("Pathfinding", "ThetaMaxMs").ToDouble(Pathfinding.ThetaMaxMs), 1.0, 500.0);
+            Pathfinding.PathSearchWorkers = MathHelper.Clamp(ini.Get("Pathfinding", "PathSearchWorkers").ToInt32(Pathfinding.PathSearchWorkers), 0, 8);
+            Pathfinding.PathSearchMaxMs = MathHelper.Clamp(ini.Get("Pathfinding", "PathSearchMaxMs").ToDouble(Pathfinding.PathSearchMaxMs), 1.0, 1000.0);
+            Pathfinding.PathWarmUp = ini.Get("Pathfinding", "PathWarmUp").ToBoolean(Pathfinding.PathWarmUp);
+            Pathfinding.StraightMaxMs = MathHelper.Clamp(ini.Get("Pathfinding", "StraightMaxMs").ToDouble(Pathfinding.StraightMaxMs), 0.0, 1000.0);
+            Pathfinding.MemoryMaxMs = MathHelper.Clamp(ini.Get("Pathfinding", "MemoryMaxMs").ToDouble(Pathfinding.MemoryMaxMs), 0.0, 1000.0);
             Pathfinding.FlightLaneExpirationMinutes = MathHelper.Clamp(ini.Get("Pathfinding", "FlightLaneExpirationMinutes").ToDouble(Pathfinding.FlightLaneExpirationMinutes), 5.0, 525600.0);
             Pathfinding.ArcSag = MathHelper.Clamp(ini.Get("Pathfinding", "ArcSag").ToDouble(Pathfinding.ArcSag), 1.0, 500.0);
             Pathfinding.DockClearance = MathHelper.Clamp(ini.Get("Pathfinding", "DockClearance").ToDouble(Pathfinding.DockClearance), 0.1, 3.0);

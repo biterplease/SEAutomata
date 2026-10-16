@@ -193,6 +193,7 @@ namespace Automata.Logistics
             block.AppendingCustomInfo += AppendInfo;
             SubscribeBase();   // the LC's grid until the first rescan (Triggers.cs)
             ready = true;
+            if (!All.Contains(this)) All.Add(this);
             NeedsUpdate |= MyEntityUpdateEnum.EACH_100TH_FRAME;
             Log.Info("LC {0}: '{1}' on '{2}': {3} Min/Max entries, modes {4}", entityId, block.CustomName, block.CubeGrid.DisplayName,
                      settings.Quotas.Count, settings.WorkMode);
@@ -215,10 +216,14 @@ namespace Automata.Logistics
             }
         }
 
+        /// <summary>Logistics Computers in the world (the path search's scene warm-up reads their grids).</summary>
+        public static readonly List<LogisticsComputerBlock> All = new List<LogisticsComputerBlock>();
+
         public override void Close()
         {
             try
             {
+                All.Remove(this);
                 if (block != null) block.AppendingCustomInfo -= AppendInfo;
                 UnsubscribeBase();
                 if (messaging != null) { messaging.ReaderClosed(entityId); }

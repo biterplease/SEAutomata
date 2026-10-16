@@ -25,7 +25,7 @@ namespace Automata.Pathfinding
     /// the grid, kept up to date by the grid's block added / removed events). Grid coordinates don't change when the
     /// grid moves: queries are transformed into the grid's frame with its current matrix.
     /// </summary>
-    public sealed class LocalScene
+    public sealed class LocalScene : ISceneView
     {
         #region Timing
         private const int REFRESH_TICKS = 30;        // an area looked up this recently covers queries inside it
@@ -49,6 +49,28 @@ namespace Automata.Pathfinding
             public Action<IMySlimBlock> OnAdded, OnRemoved;
             public Action<IMyCubeGrid, IMyCubeGrid> OnSplit;
             public bool Voxel { get { return Grid == null; } }
+            /// <summary>
+            /// The grid's matrices as of the last query that returned the entry (<see cref="Overlapping"/>) and its cell
+            /// size: the checks read these, never the entity (a search on another thread has a snapshot of them).
+            /// </summary>
+            public MatrixD Inv, World;
+            public double GridSize = 2.5;
+            public bool Static;                      // the grid is static (a block of it in the way stays there)
+            public int MatrixFrame = int.MinValue;   // frame the matrices were read (once per frame)
+            /// <summary>
+            /// Changes of the block tree (blocks added / removed, rebuilt): a check on another thread made against one
+            /// version holds while it is the same (PathfindingManager.AcceptSearch).
+            /// </summary>
+            public int Version;
+            /// <summary>Snapshot entries: the world box the entry had when it was captured.</summary>
+            public BoundingBoxD Box;
+            /// <summary>Snapshot entries: the live entry it was copied from.</summary>
+            public Entry Source;
+            // BuildStep: the blocks still to insert (the tree is built over several calls; block events meanwhile go
+            // to the new tree, removed ones are skipped)
+            public List<IMySlimBlock> Pending;
+            public int PendingIndex;
+            public HashSet<IMySlimBlock> PendingRemoved;
         }
 
         private struct Area
@@ -61,13 +83,17 @@ namespace Automata.Pathfinding
         private readonly Dictionary<long, Entry> entries = new Dictionary<long, Entry>();
         private readonly List<Area> areas = new List<Area>();
         private readonly List<MyEntity> found = new List<MyEntity>();
-        private readonly List<IMySlimBlock> slimBuffer = new List<IMySlimBlock>();
         private readonly List<long> removeBuffer = new List<long>();
         private int pruneCounter;
 
         /// <summary>For the logs: pruning structure lookups, block trees (re)built, blocks indexed by them, ms spent building.</summary>
         public int Lookups, TreesBuilt, BlocksIndexed;
         public double BuildMs;
+        /// <summary>
+        /// Counts what can open a way: blocks removed, grids split, obstacles closed. A "no route" remembered against an
+        /// older count is stale (PathfindingManager's failed-route cache); blocks added only close ways.
+        /// </summary>
+        public int RemovalVersion;
         private readonly System.Diagnostics.Stopwatch buildWatch = new System.Diagnostics.Stopwatch();
         public int EntryCount { get { return entries.Count; } }
 
@@ -76,6 +102,7 @@ namespace Automata.Pathfinding
         /// </summary>
         public void Ensure(BoundingSphereD sphere, int now)
         {
+            // (main thread)
             for (int i = areas.Count - 1; i >= 0; i--)
             {
                 var a = areas[i];
@@ -124,7 +151,7 @@ namespace Automata.Pathfinding
         }
 
         // The world box, grown by the distance the entity covers until its area is looked up again
-        private static BoundingBoxD BroadBox(MyEntity e)
+        internal static BoundingBoxD BroadBox(MyEntity e)
         {
             BoundingBoxD box = e.PositionComp.WorldAABB;
             var p = e.Physics;
@@ -165,43 +192,131 @@ namespace Automata.Pathfinding
                 var e = result[i];
                 if (e.Entity.MarkedForClose || e.Entity.Closed || (e.Grid != null && e.Grid.Physics == null)) { result.RemoveAt(i); continue; }
                 e.UsedFrame = now;
+                if (e.Grid != null && (e.MatrixFrame != now || !e.Static))
+                {
+                    // Static grids once per frame (the checks call this thousands of times per plan); moving ones every time
+                    // (a plan in the after-simulation part of a tick sees where physics moved them)
+                    e.MatrixFrame = now;
+                    e.Inv = e.Grid.WorldMatrixNormalizedInv;
+                    e.World = e.Grid.WorldMatrix;
+                    e.GridSize = e.Grid.GridSize;
+                    e.Static = e.Grid.IsStatic;
+                }
             }
         }
 
-        /// <summary>The grid's block tree, built / repaired if needed. Null for voxels.</summary>
+        /// <summary>The grid's block tree, built / repaired if needed (a build in progress is finished). Null for voxels.</summary>
         public MyDynamicAABBTreeD BlocksOf(Entry e)
         {
             if (e.Grid == null) return null;
-            var mg = e.Grid as MyCubeGrid;
-            int count = mg != null ? mg.BlocksCount : -1;
-            if (e.Blocks == null)
+            Hook(e);
+            if (e.Pending == null)
             {
-                e.Blocks = new MyDynamicAABBTreeD(new Vector3D(0.1), 1.0);
-                e.BlockProxies = new Dictionary<IMySlimBlock, int>();
-                var entry = e;
-                e.OnAdded = b => { if (!entry.Dirty) { AddBlock(entry, b); SyncCount(entry); } };
-                e.OnRemoved = b => { if (!entry.Dirty) { RemoveBlock(entry, b); SyncCount(entry); } };
-                e.OnSplit = (g1, g2) => entry.Dirty = true;
-                e.Grid.OnBlockAdded += e.OnAdded;
-                e.Grid.OnBlockRemoved += e.OnRemoved;
-                e.Grid.OnGridSplit += e.OnSplit;
+                var mg = e.Grid as MyCubeGrid;
+                int count = mg != null ? mg.BlocksCount : -1;
+                if (!e.Dirty && (count < 0 || count == e.IndexedCount)) return e.Blocks;
+                StartBuild(e);
             }
-            if (e.Dirty || (count >= 0 && count != e.IndexedCount))
-            {
-                buildWatch.Restart();
-                e.Blocks.Clear();
-                e.BlockProxies.Clear();
-                slimBuffer.Clear();
-                e.Grid.GetBlocks(slimBuffer);
-                for (int i = 0; i < slimBuffer.Count; i++) AddBlock(e, slimBuffer[i]);
-                BlocksIndexed += slimBuffer.Count;
-                slimBuffer.Clear();
-                e.IndexedCount = count;
-                e.Dirty = false;
-                TreesBuilt++;
-                BuildMs += buildWatch.Elapsed.TotalMilliseconds;
-            }
+            buildWatch.Restart();
+            var list = e.Pending;
+            while (e.PendingIndex < list.Count) AddPending(e, list[e.PendingIndex++]);
+            FinishBuild(e);
+            BuildMs += buildWatch.Elapsed.TotalMilliseconds;
             return e.Blocks;
+        }
+
+        // The tree and the grid's events that keep it up to date. While a tree is built over several calls (Pending) the
+        // events go to it too; a full rebuild ahead (Dirty, nothing pending) ignores them.
+        private void Hook(Entry e)
+        {
+            if (e.Blocks != null) return;
+            e.Blocks = new MyDynamicAABBTreeD(new Vector3D(0.1), 1.0);
+            e.BlockProxies = new Dictionary<IMySlimBlock, int>();
+            var entry = e;
+            e.OnAdded = b =>
+            {
+                if (entry.Pending != null) { AddBlock(entry, b); entry.Version++; }
+                else if (!entry.Dirty) { AddBlock(entry, b); SyncCount(entry); entry.Version++; }
+            };
+            e.OnRemoved = b =>
+            {
+                RemovalVersion++;
+                if (entry.Pending != null)
+                {
+                    RemoveBlock(entry, b);
+                    if (entry.PendingRemoved == null) entry.PendingRemoved = new HashSet<IMySlimBlock>();
+                    entry.PendingRemoved.Add(b);
+                    entry.Version++;
+                }
+                else if (!entry.Dirty) { RemoveBlock(entry, b); SyncCount(entry); entry.Version++; }
+            };
+            e.OnSplit = (g1, g2) =>
+            {
+                RemovalVersion++;
+                entry.Dirty = true;
+                entry.Pending = null;   // started again from the grid's blocks as they are now
+                entry.PendingRemoved = null;
+                entry.Version++;
+            };
+            e.Grid.OnBlockAdded += e.OnAdded;
+            e.Grid.OnBlockRemoved += e.OnRemoved;
+            e.Grid.OnGridSplit += e.OnSplit;
+        }
+
+        // A rebuild: a new tree (a search on another thread may still read the old one: never cleared under it)
+        private static void StartBuild(Entry e)
+        {
+            e.Dirty = true;
+            e.Blocks = new MyDynamicAABBTreeD(new Vector3D(0.1), 1.0);
+            e.BlockProxies = new Dictionary<IMySlimBlock, int>();
+            e.Pending = new List<IMySlimBlock>();
+            e.Grid.GetBlocks(e.Pending);
+            e.PendingIndex = 0;
+            e.PendingRemoved = null;
+            e.Version++;
+        }
+
+        private static void AddPending(Entry e, IMySlimBlock b)
+        {
+            if (e.PendingRemoved == null || !e.PendingRemoved.Contains(b)) AddBlock(e, b);
+        }
+
+        private void FinishBuild(Entry e)
+        {
+            BlocksIndexed += e.Pending.Count;
+            TreesBuilt++;
+            e.Pending = null;
+            e.PendingRemoved = null;
+            SyncCount(e);
+            e.Dirty = false;
+            e.Version++;
+        }
+
+        /// <summary>
+        /// The grid's block tree built (or repaired) over several calls, 'budgetMs' each: a big station costs ~10 ms in one go
+        /// (~1 us per block). True when the tree is right. Blocks added / removed meanwhile go to the tree as it is built.
+        /// </summary>
+        public bool BuildStep(Entry e, double budgetMs, System.Diagnostics.Stopwatch clock)
+        {
+            if (e.Grid == null) return true;
+            Hook(e);
+            if (e.Pending == null)
+            {
+                var mg = e.Grid as MyCubeGrid;
+                int count = mg != null ? mg.BlocksCount : -1;
+                if (!e.Dirty && (count < 0 || count == e.IndexedCount)) return true;
+                StartBuild(e);
+            }
+            double t0 = clock.Elapsed.TotalMilliseconds;
+            var list = e.Pending;
+            while (e.PendingIndex < list.Count)
+            {
+                AddPending(e, list[e.PendingIndex++]);
+                if ((e.PendingIndex & 63) == 0 && clock.Elapsed.TotalMilliseconds - t0 > budgetMs) { BuildMs += clock.Elapsed.TotalMilliseconds - t0; return false; }
+            }
+            FinishBuild(e);
+            BuildMs += clock.Elapsed.TotalMilliseconds - t0;
+            return true;
         }
 
         private static void SyncCount(Entry e)
@@ -241,7 +356,8 @@ namespace Automata.Pathfinding
             foreach (var kv in entries)
             {
                 var e = kv.Value;
-                if (e.Entity.MarkedForClose || e.Entity.Closed || now - e.UsedFrame > STALE_TICKS) removeBuffer.Add(kv.Key);
+                if (e.Entity.MarkedForClose || e.Entity.Closed) { removeBuffer.Add(kv.Key); RemovalVersion++; }
+                else if (now - e.UsedFrame > STALE_TICKS) removeBuffer.Add(kv.Key);
             }
             for (int i = 0; i < removeBuffer.Count; i++) Remove(removeBuffer[i]);
             removeBuffer.Clear();
@@ -266,8 +382,7 @@ namespace Automata.Pathfinding
             }
             e.OnAdded = e.OnRemoved = null;
             e.OnSplit = null;
-            if (e.Blocks != null) e.Blocks.Clear();
-            e.Blocks = null;
+            e.Blocks = null;   // (not cleared: a search on another thread may still read it; the GC takes it)
             e.BlockProxies = null;
         }
 
@@ -278,5 +393,17 @@ namespace Automata.Pathfinding
             tree.Clear();
             areas.Clear();
         }
+    }
+
+    /// <summary>
+    /// What the scene checks read: the live <see cref="LocalScene"/> (main thread) or a <see cref="SnapshotScene"/> (a
+    /// search on another thread: entries, matrices and block trees captured when it was dispatched).
+    /// </summary>
+    public interface ISceneView
+    {
+        void Ensure(BoundingSphereD sphere, int now);
+        void Overlapping(ref BoundingBoxD box, List<LocalScene.Entry> result, int now);
+        /// <summary>The grid's block tree (grid coordinates); null for voxels.</summary>
+        MyDynamicAABBTreeD BlocksOf(LocalScene.Entry e);
     }
 }

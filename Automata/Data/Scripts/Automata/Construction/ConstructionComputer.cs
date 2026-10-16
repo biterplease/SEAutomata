@@ -298,14 +298,10 @@ namespace Automata.Construction
 
         private bool ShouldWeldOrRepair(IMySlimBlock block)
         {
-            if (workModes.HasFlag(WorkModes.WeldUnfinishedBlocks) &&
-                    block.BuildLevelRatio < 1.0f &&
-                    !ColorUtil.ColorMatch(block, weldIgnoreColor))
-                return true;
-            if (workModes.HasFlag(WorkModes.RepairDamagedBlocks) &&
-                    block.CurrentDamage > 0.0f &&
-                    !ColorUtil.ColorMatch(block, weldIgnoreColor))
-                return true;
+            // Neither the weld-ignore color nor the grind color is welded
+            if (ColorUtil.ColorMatch(block, weldIgnoreColor) || ColorUtil.ColorMatch(block, grindColor)) return false;
+            if (workModes.HasFlag(WorkModes.WeldUnfinishedBlocks) && block.BuildLevelRatio < 1.0f) return true;
+            if (workModes.HasFlag(WorkModes.RepairDamagedBlocks) && block.CurrentDamage > 0.0f) return true;
             return false;
         }
         private bool ShouldGrind(IMySlimBlock block)
@@ -562,4 +558,4 @@ namespace Automata.Construction
 
 
     }
-}
+}

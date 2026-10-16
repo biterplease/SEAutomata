@@ -209,7 +209,7 @@ namespace Automata.Drone
                     if (now < constructionPausedUntil) return;
                     if (now - lastConstructionScanFrame < AutomataSession.GetConfig().ConstructionComputer.DroneScanIntervalSeconds * 60) return;
                     lastConstructionScanFrame = now;
-                    if (activeFlightOrder != null && dockingHomeId == 0) return;   // busy with a player's order
+                    if ((activeFlightOrder != null || routePending) && dockingHomeId == 0) return;   // busy with a player's order (or its route search)
                     if (ScanConstructionTargets() == 0) return;
                     if (!HasToolsFor(scannedTargets)) return;
                     if (IsDockedAtHome()) StartStandAloneJob();
@@ -218,7 +218,7 @@ namespace Automata.Drone
 
                 case ConstructionPhase.WaitingForDock:
                     if (IsDockedAtHome()) StartStandAloneJob();
-                    else if (dockingHomeId == 0 && activeFlightOrder == null) cPhase = ConstructionPhase.Idle;   // docking failed / cancelled
+                    else if (dockingHomeId == 0 && activeFlightOrder == null && !routePending) cPhase = ConstructionPhase.Idle;   // docking failed / cancelled
                     break;
             }
         }
