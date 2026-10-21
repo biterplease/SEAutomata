@@ -826,7 +826,7 @@ namespace Automata.Drone
         // UpdateBeforeSimulation100: waiting scans to the surveyors in range (dropped once one got them)
         private void PublishSurveys()
         {
-            if (surveyBuffer.Count == 0 || primaryAntenna == null) { surveySent = null; surveySentSweeps.Clear(); return; }
+            if (surveyBuffer.Count == 0) { surveySent = null; surveySentSweeps.Clear(); return; }
             if (!Mining.MiningSurveyorBlock.AnyFor(block.OwnerId))
             {
                 if (Log.DebugEnabled) Log.Debug("Drone {0}: {1} held ore scan(s) dropped: no mining surveyor any more", _entityId, surveyBuffer.Count);
@@ -871,20 +871,20 @@ namespace Automata.Drone
                 RecipientBlockType = MessageQueue.IAIBlockType.MiningSurveyor,
                 Channel = Channel.MINING_DATA_FOUND_ANNOUNCEMENT,
             };
-            if (queue.BroadcastMessage(antennaReg, msg) != ErrorCode.None) return;
+            if (queue.BroadcastMessage(antennaReg, msg, false, VirtualNetwork.MessageQueue.IAIBlockType.Drone) != ErrorCode.None) return;
             surveySent = msg;
             surveySentSweeps.Clear();
             surveySentSweeps.AddRange(surveyBuffer);
             if (Log.DebugEnabled) Log.Debug("Drone {0}: {1} ore scan(s) sent to the surveyors", _entityId, surveyBuffer.Count);
         }
 
-        private AntennaReg antennaReg;
+        private GridAntennaReg antennaReg;
 
-        /// <summary>The drone's antenna registration, current and handed to the queue (null: no usable antenna). Any mode: reports and surveys go out.</summary>
-        private AntennaReg SyncAntennaReg(MessageQueue queue)
+        /// <summary>The drone grid's entry in the network (null: no queue). Any mode: reports and surveys go out; docked by a connector the drone is reached through the grid it is docked to.</summary>
+        private GridAntennaReg SyncAntennaReg(MessageQueue queue)
         {
-            if (queue == null || primaryAntenna == null) return null;
-            return AntennaReg.Ensure(queue, ref antennaReg, primaryAntenna) ? antennaReg : null;
+            if (queue == null) return null;
+            return GridAntennaReg.Ensure(queue, ref antennaReg, block) ? antennaReg : null;
         }
 
         private bool EnsureNetworkRegistration(MessageQueue queue)

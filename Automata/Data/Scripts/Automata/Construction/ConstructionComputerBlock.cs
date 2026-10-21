@@ -88,7 +88,7 @@ namespace Automata.Construction
         #endregion
         private const int MAX_TARGETS_PER_SCAN = 500;
         public const double AREA_UNIT = 2.5;                    // m per area block (large grid cube)
-        public const int AREA_SIZE_MIN = 1, AREA_SIZE_MAX = 50;
+        public const int FIELD_SIZE_MIN = 1, FIELD_SIZE_MAX = 50;
         public const int AREA_OFFSET_MAX = 100;                 // blocks (250 m)
 
         private ConstructionComputerBlockSettings settings = new ConstructionComputerBlockSettings();
@@ -238,8 +238,8 @@ namespace Automata.Construction
             if (!All.Contains(this)) All.Add(this);
             NeedsUpdate |= MyEntityUpdateEnum.EACH_100TH_FRAME;
             Log.Info("CC {0}: '{1}' on '{2}': area {3}x{4}x{5} blocks, offset ({6:F0}, {7:F0}, {8:F0}) m, modes {9}, {10} saved job(s)", entityId,
-                     block.CustomName, block.CubeGrid.DisplayName, settings.AreaSizeX, settings.AreaSizeY, settings.AreaSizeZ, settings.AreaOffsetBlocksX,
-                     settings.AreaOffsetBlocksY, settings.AreaOffsetBlocksZ, settings.WorkModes, pendingState != null && pendingState.Jobs != null ? pendingState.Jobs.Count : 0);
+                     block.CustomName, block.CubeGrid.DisplayName, settings.FieldSizeX, settings.FieldSizeY, settings.FieldSizeZ, settings.FieldOffsetBlocksX,
+                     settings.FieldOffsetBlocksY, settings.FieldOffsetBlocksZ, settings.WorkModes, pendingState != null && pendingState.Jobs != null ? pendingState.Jobs.Count : 0);
         }
 
         public override void UpdateAfterSimulation100()
@@ -334,8 +334,8 @@ namespace Automata.Construction
         private string ScanKey()
         {
             return string.Join("|", settings.Enabled, settings.WorkModes, settings.WorkPriority, settings.BlocksPerJob, settings.GrindColor,
-                               settings.WeldIgnoreColor, settings.AreaSizeX, settings.AreaSizeY, settings.AreaSizeZ, settings.AreaOffsetBlocksX,
-                               settings.AreaOffsetBlocksY, settings.AreaOffsetBlocksZ, settings.ScanIntervalSeconds);
+                               settings.WeldIgnoreColor, settings.FieldSizeX, settings.FieldSizeY, settings.FieldSizeZ, settings.FieldOffsetBlocksX,
+                               settings.FieldOffsetBlocksY, settings.FieldOffsetBlocksZ, settings.ScanIntervalSeconds);
         }
 
         #region Retry jobs (terminal button)
@@ -379,21 +379,21 @@ namespace Automata.Construction
 
         private void Clamp()
         {
-            settings.AreaSizeX = MathHelper.Clamp(settings.AreaSizeX, AREA_SIZE_MIN, AREA_SIZE_MAX);
-            settings.AreaSizeY = MathHelper.Clamp(settings.AreaSizeY, AREA_SIZE_MIN, AREA_SIZE_MAX);
-            settings.AreaSizeZ = MathHelper.Clamp(settings.AreaSizeZ, AREA_SIZE_MIN, AREA_SIZE_MAX);
+            settings.FieldSizeX = MathHelper.Clamp(settings.FieldSizeX, FIELD_SIZE_MIN, FIELD_SIZE_MAX);
+            settings.FieldSizeY = MathHelper.Clamp(settings.FieldSizeY, FIELD_SIZE_MIN, FIELD_SIZE_MAX);
+            settings.FieldSizeZ = MathHelper.Clamp(settings.FieldSizeZ, FIELD_SIZE_MIN, FIELD_SIZE_MAX);
             if (!settings.OffsetInBlocks)
             {
                 // Older saves: the offset was in metres
-                settings.AreaOffsetBlocksX = (int)Math.Round(settings.AreaOffsetX / AREA_UNIT);
-                settings.AreaOffsetBlocksY = (int)Math.Round(settings.AreaOffsetY / AREA_UNIT);
-                settings.AreaOffsetBlocksZ = (int)Math.Round(settings.AreaOffsetZ / AREA_UNIT);
-                settings.AreaOffsetX = settings.AreaOffsetY = settings.AreaOffsetZ = 0;
+                settings.FieldOffsetBlocksX = (int)Math.Round(settings.FieldOffsetX / AREA_UNIT);
+                settings.FieldOffsetBlocksY = (int)Math.Round(settings.FieldOffsetY / AREA_UNIT);
+                settings.FieldOffsetBlocksZ = (int)Math.Round(settings.FieldOffsetZ / AREA_UNIT);
+                settings.FieldOffsetX = settings.FieldOffsetY = settings.FieldOffsetZ = 0;
                 settings.OffsetInBlocks = true;
             }
-            settings.AreaOffsetBlocksX = MathHelper.Clamp(settings.AreaOffsetBlocksX, -AREA_OFFSET_MAX, AREA_OFFSET_MAX);
-            settings.AreaOffsetBlocksY = MathHelper.Clamp(settings.AreaOffsetBlocksY, -AREA_OFFSET_MAX, AREA_OFFSET_MAX);
-            settings.AreaOffsetBlocksZ = MathHelper.Clamp(settings.AreaOffsetBlocksZ, -AREA_OFFSET_MAX, AREA_OFFSET_MAX);
+            settings.FieldOffsetBlocksX = MathHelper.Clamp(settings.FieldOffsetBlocksX, -AREA_OFFSET_MAX, AREA_OFFSET_MAX);
+            settings.FieldOffsetBlocksY = MathHelper.Clamp(settings.FieldOffsetBlocksY, -AREA_OFFSET_MAX, AREA_OFFSET_MAX);
+            settings.FieldOffsetBlocksZ = MathHelper.Clamp(settings.FieldOffsetBlocksZ, -AREA_OFFSET_MAX, AREA_OFFSET_MAX);
             var config = AutomataSession.GetConfig();
             int minScan = config != null ? config.ConstructionComputer.MinScanRetryIntervalSeconds : 10;
             int maxScan = config != null ? config.ConstructionComputer.MaxScanRetryIntervalSeconds : 3600;
@@ -485,8 +485,8 @@ namespace Automata.Construction
         public void GetArea(out MatrixD matrix, out Vector3D halfExtents)
         {
             matrix = block.WorldMatrix;
-            matrix.Translation += (matrix.Right * settings.AreaOffsetBlocksX + matrix.Up * settings.AreaOffsetBlocksY + matrix.Forward * settings.AreaOffsetBlocksZ) * AREA_UNIT;
-            halfExtents = new Vector3D(settings.AreaSizeX, settings.AreaSizeY, settings.AreaSizeZ) * (AREA_UNIT * 0.5);
+            matrix.Translation += (matrix.Right * settings.FieldOffsetBlocksX + matrix.Up * settings.FieldOffsetBlocksY + matrix.Forward * settings.FieldOffsetBlocksZ) * AREA_UNIT;
+            halfExtents = new Vector3D(settings.FieldSizeX, settings.FieldSizeY, settings.FieldSizeZ) * (AREA_UNIT * 0.5);
         }
 
         private void Scan(int now)
@@ -1038,8 +1038,8 @@ namespace Automata.Construction
             if (!ready) return;
             info.Clear();
             info.AppendLoc(StrInfoStatus, status).Append('\n');
-            info.AppendLoc(StrInfoArea, settings.AreaSizeX, settings.AreaSizeY,
-                              settings.AreaSizeZ, settings.AreaSizeX * AREA_UNIT, settings.AreaSizeY * AREA_UNIT, settings.AreaSizeZ * AREA_UNIT,
+            info.AppendLoc(StrInfoArea, settings.FieldSizeX, settings.FieldSizeY,
+                              settings.FieldSizeZ, settings.FieldSizeX * AREA_UNIT, settings.FieldSizeY * AREA_UNIT, settings.FieldSizeZ * AREA_UNIT,
                               settings.ScanIntervalSeconds).Append('\n');
             info.AppendLoc(StrInfoLastScan, lastFound, lastWeld, lastGrind).Append('\n');
             info.AppendLoc(StrInfoJobs, jobs.Count, doneCount, failedCount, expiredCount).Append('\n');
@@ -1071,7 +1071,7 @@ namespace Automata.Construction
             var localBox = new BoundingBoxD(-half, half);
             Color faces = Color.Magenta * 0.15f;
             Color grid = Color.Magenta * 0.6f;
-            var cells = new Vector3I(Math.Max(1, settings.AreaSizeX), Math.Max(1, settings.AreaSizeY), Math.Max(1, settings.AreaSizeZ));
+            var cells = new Vector3I(Math.Max(1, settings.FieldSizeX), Math.Max(1, settings.FieldSizeY), Math.Max(1, settings.FieldSizeZ));
             VRage.Game.MySimpleObjectDraw.DrawTransparentBox(ref m, ref localBox, ref faces, ref faces, VRage.Game.MySimpleObjectRasterizer.Solid,
                 cells, 0.002f, DrawMaterial, null, false, -1, VRageRender.MyBillboard.BlendTypeEnum.Standard);
             VRage.Game.MySimpleObjectDraw.DrawTransparentBox(ref m, ref localBox, ref grid, ref grid, VRage.Game.MySimpleObjectRasterizer.Wireframe,
@@ -1199,17 +1199,58 @@ namespace Automata.Construction
             SettingsEdited();
         }
 
-        // axis: 0 = X (right), 1 = Y (up), 2 = Z (forward)
-        public int Terminal_GetAreaSize(int axis) { return axis == 0 ? settings.AreaSizeX : axis == 1 ? settings.AreaSizeY : settings.AreaSizeZ; }
-        public void Terminal_SetAreaSize(int axis, int blocks)
-        {
-            if (axis == 0) settings.AreaSizeX = blocks; else if (axis == 1) settings.AreaSizeY = blocks; else settings.AreaSizeZ = blocks;
-            SettingsEdited();
+        /// <summary>
+        /// Get construction field size. axis: 0 = X (right), 1 = Y (up), 2 = Z (forward)
+        /// </summary>
+        public int Terminal_GetFieldSize(byte axis) {
+            if (axis == 0)
+                return settings.FieldSizeX;
+            else if (axis == 1)
+                return settings.FieldSizeY;
+            else
+                return settings.FieldSizeZ;
         }
-        public int Terminal_GetAreaOffset(int axis) { return axis == 0 ? settings.AreaOffsetBlocksX : axis == 1 ? settings.AreaOffsetBlocksY : settings.AreaOffsetBlocksZ; }
-        public void Terminal_SetAreaOffset(int axis, int blocks)
+        /// <summary>
+        /// Get construction field size. axis: 0 = X (right), 1 = Y (up), 2 = Z (forward)
+        /// </summary>
+        public void Terminal_SetFieldSize(byte axis, int blocks)
         {
-            if (axis == 0) settings.AreaOffsetBlocksX = blocks; else if (axis == 1) settings.AreaOffsetBlocksY = blocks; else settings.AreaOffsetBlocksZ = blocks;
+            blocks = MathHelper.Clamp(blocks, FIELD_SIZE_MIN, FIELD_SIZE_MAX);
+            if (axis == 0)
+                settings.FieldSizeX = blocks;
+            else if (axis == 1)
+                settings.FieldSizeY = blocks;
+            else
+                settings.FieldSizeZ = blocks;
+        }
+        /// <summary>
+        /// Get construction field offset. axis: 0 = X (right), 1 = Y (up), 2 = Z (forward)
+        /// </summary>
+        public int Terminal_GetFieldOffset(byte axis) {
+            if (axis == 0)
+                return settings.FieldOffsetBlocksX;
+            else if (axis == 1)
+                return settings.FieldOffsetBlocksY;
+            else
+                return settings.FieldOffsetBlocksZ;
+        }
+        /// <summary>
+        /// Set construction field offset. axis: 0 = X (right), 1 = Y (up), 2 = Z (forward)
+        /// </summary>
+        public void Terminal_SetFieldOffset(byte axis, int blocks)
+        {
+            blocks = MathHelper.Clamp(blocks, -AREA_OFFSET_MAX, AREA_OFFSET_MAX);
+            if (axis == 0){
+                settings.FieldOffsetBlocksX = blocks;
+            }
+            else if (axis == 1)
+            {
+                settings.FieldOffsetBlocksY = blocks;
+            } 
+            else
+            {
+                settings.FieldOffsetBlocksZ = blocks;
+            } 
             SettingsEdited();
         }
 

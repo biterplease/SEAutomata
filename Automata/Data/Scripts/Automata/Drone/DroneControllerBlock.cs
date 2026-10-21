@@ -51,6 +51,7 @@ namespace Automata.Drone
         private static readonly MyStringId StrNotAShipController = MyStringId.GetOrCompute("Not a ship controller");
         private static readonly MyStringId StrERRORFailedCapabilityCheck = MyStringId.GetOrCompute("ERROR: failed capability check ({0})");
         private static readonly MyStringId StrInitializedInMode = MyStringId.GetOrCompute("Initialized in mode: {0}");
+        private static readonly MyStringId StrSystemOverloadFound = MyStringId.GetOrCompute("System Overload: {0} found on grid");
         private static readonly MyStringId StrPartOfAStaticGrid = MyStringId.GetOrCompute("Part of a static grid (station), not a drone");
         private static readonly MyStringId StrOreScoutProfileMissingOre = MyStringId.GetOrCompute("Ore scout profile: missing ore detector");
         private static readonly MyStringId StrCombatDroneProfileMissing = MyStringId.GetOrCompute("Combat drone profile: missing");
@@ -973,6 +974,7 @@ namespace Automata.Drone
             var controllerMatrix = shipController.Orientation;
             int oreDetectors = 0, cameras = 0, wheels = 0;
             string smallConnector = null;
+            string overloadSource = null;   // an Automata computer on the drone's own grids (a drone ordering itself around)
             _gridCache.Clear();
             var gridGroup = cubeBlock.CubeGrid.GetGridGroup(GridLinkTypeEnum.Mechanical);
             gridGroup.GetGrids(_gridCache);
@@ -998,6 +1000,8 @@ namespace Automata.Drone
                 {
                     var fatBlock = slimBlock.FatBlock;
                     if (fatBlock == null || !fatBlock.IsFunctional) continue;
+
+                    if (overloadSource == null) overloadSource = ComputerName(fatBlock);
 
                     if (fatBlock is IMyShipConnector)
                     {
@@ -1125,7 +1129,7 @@ namespace Automata.Drone
             if (combatMissing == null && settings.BehaviourProfile == BehaviourProfile.IsOreScout && oreDetectors == 0 && (!initialized || isParked))
                 combatMissing = "";   // reported below as the ore scout's missing detector
 
-            bool hasMinimum = !onStatic && crippled == null && combatMissing == null && gyroscopes.Count > 0 &&
+            bool hasMinimum = overloadSource == null && !onStatic && crippled == null && combatMissing == null && gyroscopes.Count > 0 &&
                 (
                     HasAnyDirectionalComponent(hydrogenThrusters) ||
                     HasAnyDirectionalComponent(ionThrusters) ||
@@ -1144,7 +1148,8 @@ namespace Automata.Drone
             {
                 capabilities = Capabilities.None;   // nothing to offer; don't keep what a removed block gave
                 sb.Clear();
-                if (onStatic) sb.Append(Loc.T(StrPartOfAStaticGrid));
+                if (overloadSource != null) sb.Append(Loc.F(StrSystemOverloadFound, overloadSource));
+                else if (onStatic) sb.Append(Loc.T(StrPartOfAStaticGrid));
                 else if (crippled != null) sb.Append(crippled);
                 else if (combatMissing == "") sb.Append(Loc.T(StrOreScoutProfileMissingOre));
                 else if (combatMissing != null) sb.Append(Loc.T(StrCombatDroneProfileMissing)).Append(combatMissing);
@@ -1634,6 +1639,22 @@ namespace Automata.Drone
         private float MaxSpeed { get { return MathHelper.Clamp(settings.MaxSpeed, MIN_FLIGHT_SPEED, MAX_SPEED_MAX); } }
         private float ApproachSpeed { get { return MathHelper.Clamp(settings.ApproachSpeed, MIN_FLIGHT_SPEED, APPROACH_SPEED_MAX); } }
         private float SafeSpeed { get { return MathHelper.Clamp(settings.SafeSpeed, MIN_FLIGHT_SPEED, SAFE_SPEED_MAX); } }
+
+        /// <summary>
+        /// The full name of an Automata computer block (Orchestrator, Logistics Computer, Mining Surveyor, Construction
+        /// Computer), else null. A Drone Controller sharing its grids with one is overloaded: it would announce, bid on and
+        /// be sent on its own jobs, dock to its own connectors, and so on.
+        /// </summary>
+        private static string ComputerName(IMyCubeBlock b)
+        {
+            string sub = b.BlockDefinition.SubtypeName;
+            if (sub == null || !sub.StartsWith("Automata", StringComparison.Ordinal)) return null;
+            if (sub.IndexOf("Orchestrator", StringComparison.Ordinal) >= 0) return "Orchestrator";
+            if (sub.IndexOf("LogisticsComputer", StringComparison.Ordinal) >= 0) return "Logistics Computer";
+            if (sub.IndexOf("MiningSurveyor", StringComparison.Ordinal) >= 0) return "Mining Surveyor";
+            if (sub.IndexOf("ConstructionComputer", StringComparison.Ordinal) >= 0) return "Construction Computer";
+            return null;
+        }
 
         /// <summary>
         /// The LCD header's alert line: the most important current problem. Errors (red) stop the drone or make

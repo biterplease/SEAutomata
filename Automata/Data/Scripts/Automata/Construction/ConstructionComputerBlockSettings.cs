@@ -22,17 +22,17 @@ namespace Automata.Construction
         /// <summary>
         /// Observation area, in blocks of 2.5 m along the block's axes (right, up, forward): 1-50, default 25.
         /// </summary>
-        [ProtoMember(9)] public int AreaSizeX = 25;
-        [ProtoMember(10)] public int AreaSizeY = 25;
-        [ProtoMember(11)] public int AreaSizeZ = 25;
+        [ProtoMember(9)] public int FieldSizeX = 25;
+        [ProtoMember(10)] public int FieldSizeY = 25;
+        [ProtoMember(11)] public int FieldSizeZ = 25;
         /// <summary>Retired (metres): read once and converted to the block offsets below (OffsetInBlocks).</summary>
-        [ProtoMember(12)] public float AreaOffsetX;
-        [ProtoMember(13)] public float AreaOffsetY;
-        [ProtoMember(14)] public float AreaOffsetZ;
+        [ProtoMember(12)] public float FieldOffsetX;
+        [ProtoMember(13)] public float FieldOffsetY;
+        [ProtoMember(14)] public float FieldOffsetZ;
         /// <summary>Where the area's centre is from the block, in blocks of 2.5 m along its right, up, forward axes: -100 to 100.</summary>
-        [ProtoMember(18)] public int AreaOffsetBlocksX;
-        [ProtoMember(19)] public int AreaOffsetBlocksY;
-        [ProtoMember(20)] public int AreaOffsetBlocksZ;
+        [ProtoMember(18)] public int FieldOffsetBlocksX;
+        [ProtoMember(19)] public int FieldOffsetBlocksY;
+        [ProtoMember(20)] public int FieldOffsetBlocksZ;
         /// <summary>The metre offsets were converted (older saves: false until loaded once).</summary>
         [ProtoMember(21)] public bool OffsetInBlocks;
         /// <summary>"Retry jobs" (terminal): bumped by the button, the server acts on a change.</summary>
