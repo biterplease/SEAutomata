@@ -8,55 +8,47 @@
                 <TypeId>MyProgrammableBlock</TypeId>
                 <SubtypeId>AutomataLargeConstructionComputer</SubtypeId>
             </Id>
-            <DisplayName>Automata Construction Computer</DisplayName>
-            <Icon>Textures\GUI\Icons\Cubes\Broadcast.dds</Icon>
-            <Description>Scans the area around it for blocks to weld, repair, build (projections) or grind, and announces the jobs to orchestrators. Needs a broadcasting antenna on its grid.</Description>
+            <DisplayName>{LOC:DisplayName_Automata_ConstructionComputer}</DisplayName>
+            <Description>{LOC:Description_Automata_ConstructionComputer}</Description>
+            <Icon>Textures\GUI\Icons\Cubes\ProgrammingBlock.dds</Icon>
             <CubeSize>Large</CubeSize>
             <BlockTopology>TriangleMesh</BlockTopology>
             <Size x="1" y="1" z="1" />
             <ModelOffset x="0" y="0" z="0" />
-            <Model>Models\Cubes\Large\Broadcast.mwm</Model>
-            <PlaceDecals>false</PlaceDecals>
+            <Model>Models\Cubes\Large\ProgrammingBlock.mwm</Model>
             <Components>
-                <Component Subtype="InteriorPlate" Count="10" />
-                <Component Subtype="Construction" Count="20" />
-                <Component Subtype="RadioCommunication" Count="5" />
-                <Component Subtype="Computer" Count="10" />
-                <Component Subtype="Display" Count="4" />
-                <Component Subtype="Construction" Count="10" />
+                <Component Subtype="SteelPlate" Count="11" />
+                <Component Subtype="Construction" Count="4" />
+                <Component Subtype="LargeTube" Count="2" />
+                <Component Subtype="Motor" Count="1" />
+                <Component Subtype="Display" Count="1" />
+                <Component Subtype="Computer" Count="2" />
+                <Component Subtype="SteelPlate" Count="10" />
             </Components>
-            <CriticalComponent Subtype="Display" Index="0" />
-            <MountPoints>
-                <MountPoint Side="Bottom" StartX="0" StartY="0" EndX="1" EndY="1" Default="true" />
-                <MountPoint Side="Top" StartX="0" StartY="0.5" EndX="1" EndY="1" />
-                <MountPoint Side="Left" StartX="0" StartY="0" EndX="1" EndY="0.6" />
-                <MountPoint Side="Left" StartX="0" StartY="0.6" EndX="0.5" EndY="1" />
-                <MountPoint Side="Right" StartX="0" StartY="0" EndX="1" EndY="0.8" />
-                <MountPoint Side="Right" StartX="0.5" StartY="0.8" EndX="1" EndY="1" />
-                <MountPoint Side="Back" StartX="0" StartY="0" EndX="1" EndY="0.6" />
-                <MountPoint Side="Front" StartX="0" StartY="0" EndX="1" EndY="1" />
-            </MountPoints>
+            <CriticalComponent Subtype="Computer" Index="0" />
             <BuildProgressModels>
-                <Model BuildPercentUpperBound="0.33" File="Models\Cubes\Large\BroadcastConstruction1.mwm" />
-                <Model BuildPercentUpperBound="0.66" File="Models\Cubes\Large\BroadcastConstruction2.mwm" />
-                <Model BuildPercentUpperBound="1.00" File="Models\Cubes\Large\BroadcastConstruction3.mwm" />
+                <Model BuildPercentUpperBound="0.33" File="Models\Cubes\Large\ProgrammingBlockConstruction_1.mwm" />
+                <Model BuildPercentUpperBound="0.66" File="Models\Cubes\Large\ProgrammingBlockConstruction_2.mwm" />
+                <Model BuildPercentUpperBound="1.00" File="Models\Cubes\Large\ProgrammingBlockConstruction_3.mwm" />
             </BuildProgressModels>
             <ScreenAreas>
-                <ScreenArea Name="AutomataScreen_01" DisplayName="DisplayName_Screen_Large" TextureResolution="512" ScreenWidth="16" ScreenHeight="10" />
-                <ScreenArea Name="AutomataScreen_02" DisplayName="DisplayName_Screen_Keyboard" TextureResolution="256" ScreenWidth="5" ScreenHeight="2" />
+                <ScreenArea Name="CockpitScreen_02" DisplayName="DisplayName_Screen_Large" TextureResolution="512" ScreenWidth="16" ScreenHeight="10" Script="AutomataLog"/>
+                <ScreenArea Name="CockpitScreen_01" DisplayName="DisplayName_Screen_Keyboard" TextureResolution="256" ScreenWidth="5" ScreenHeight="2" />
             </ScreenAreas>
-            <BlockPairName>AutomataConstructionComputer</BlockPairName>
-            <EdgeType>Light</EdgeType>
-            <BuildTimeSeconds>16</BuildTimeSeconds>
             <MirroringY>Z</MirroringY>
             <MirroringZ>Y</MirroringZ>
+            <EdgeType>Light</EdgeType>
+            <BuildTimeSeconds>20</BuildTimeSeconds>
+            <MountPoints>
+                <MountPoint Side="Bottom" StartX="0.0" StartY="0" EndX="1.0" EndY="1.0" />
+            </MountPoints>
+            <ResourceSinkGroup>Utility</ResourceSinkGroup>
             <DamageEffectName>Damage_Electrical_Damaged</DamageEffectName>
             <DamagedSound>ParticleElectrical</DamagedSound>
-            <ResourceSinkGroup>Utility</ResourceSinkGroup>
-            <EmissiveColorPreset>Extended</EmissiveColorPreset>
+            <EmissiveColorPreset>Default</EmissiveColorPreset>
             <DestroyEffect>BlockDestroyedExplosion_Large</DestroyEffect>
             <DestroySound>WepSmallWarheadExpl</DestroySound>
-            <PCU>25</PCU>
+            <PCU>100</PCU>
             <IsAirTight>false</IsAirTight>
         </Definition>
 	</CubeBlocks>
