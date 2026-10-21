@@ -39,7 +39,7 @@ namespace Automata.Orchestrator
         private static readonly MyStringId StrLanesClearArmed = MyStringId.GetOrCompute("Press again to clear all");
         private static readonly MyStringId StrDesignatorCamera = MyStringId.GetOrCompute("Designator camera");
         private static readonly MyStringId StrDesignatorLcdTag = MyStringId.GetOrCompute("Designator LCD tag");
-        private static readonly MyStringId StrDesignatorLcdTagTip = MyStringId.GetOrCompute("Place this tag on an LCD, select the Automata Log app to see designator output.");
+        private static readonly MyStringId StrDesignatorLcdTagTip = MyStringId.GetOrCompute("Place this tag on an LCD, select the AutomataLog app to see designator output.");
         private static readonly MyStringId StrDesignatorCameraTip = MyStringId.GetOrCompute("Camera the \"Designator:\" toolbar actions aim with (15 km). On this grid, or via rotor / hinge / piston.");
         #endregion
 

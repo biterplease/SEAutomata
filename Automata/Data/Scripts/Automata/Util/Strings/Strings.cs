@@ -4,6 +4,19 @@ namespace Automata.Util.Strings
 {
     public static class MyStrings
     {
+        public static readonly MyStringId ToolbarActionIncrease = MyStringId.GetOrCompute("ToolbarAction_Increase");
+        public static readonly MyStringId ToolbarActionDecrease = MyStringId.GetOrCompute("ToolbarAction_Decrease");
+        public static readonly MyStringId ToolbarActionReset = MyStringId.GetOrCompute("ToolbarAction_Reset");
+        public static readonly MyStringId HorizontalOffset = MyStringId.GetOrCompute("BlockPropertyTitle_ProjectionOffsetX");
+        public static readonly MyStringId VerticalOffset = MyStringId.GetOrCompute("BlockPropertyTitle_ProjectionOffsetY");
+        public static readonly MyStringId ForwardOffset = MyStringId.GetOrCompute("BlockPropertyTitle_ProjectionOffsetZ");
+        public static readonly MyStringId FieldWidth = MyStringId.GetOrCompute("BlockPropertyTitle_GravityFieldWidth"); 
+        public static readonly MyStringId FieldHeight = MyStringId.GetOrCompute("BlockPropertyTitle_GravityFieldHeight"); 
+        public static readonly MyStringId FieldDepth = MyStringId.GetOrCompute("BlockPropertyTitle_GravityFieldDepth"); 
+        public static readonly MyStringId EnableAI = MyStringId.GetOrCompute("BlockPropertyTitle_EnableAI");
+        public static readonly MyStringId Width = MyStringId.GetOrCompute("Width"); 
+        public static readonly MyStringId Height = MyStringId.GetOrCompute("Height"); 
+        public static readonly MyStringId Depth = MyStringId.GetOrCompute("Depth"); 
         public static readonly MyStringId BLANK = MyStringId.GetOrCompute("");
         public static readonly MyStringId RetryJobs = MyStringId.GetOrCompute("Retry jobs");
         public static readonly MyStringId RetryJobsTip = MyStringId.GetOrCompute("Retry unassigned jobs");
@@ -17,8 +30,9 @@ namespace Automata.Util.Strings
         public static readonly MyStringId WeldIgnoreColorTip = MyStringId.GetOrCompute("Blocks with this color are ignored");
         public static readonly MyStringId ShowObservationArea = MyStringId.GetOrCompute("Show observation area");
         public static readonly MyStringId ShowObservationAreaTip = MyStringId.GetOrCompute("Draws the observation area, switches off after a while.");
-        public static readonly MyStringId On = MyStringId.GetOrCompute("ON");
-        public static readonly MyStringId Off = MyStringId.GetOrCompute("OFF");
+        public static readonly MyStringId On = MyStringId.GetOrCompute("On");
+        public static readonly MyStringId Off = MyStringId.GetOrCompute("Off");
+        public static readonly MyStringId On_Off = MyStringId.GetOrCompute("On/Off");
         public static readonly MyStringId AreaWidth = MyStringId.GetOrCompute("Area width");
         public static readonly MyStringId AreaHeight = MyStringId.GetOrCompute("Area height");
         public static readonly MyStringId AreaDepth = MyStringId.GetOrCompute("Area depth");
@@ -45,9 +59,13 @@ namespace Automata.Util.Strings
         public static readonly MyStringId DrawObservationArea = MyStringId.GetOrCompute("Draw observation area");
         public static readonly MyStringId GoHome = MyStringId.GetOrCompute("Go home");
         public static readonly MyStringId Stop = MyStringId.GetOrCompute("Stop");
+        public static readonly MyStringId Toggle = MyStringId.GetOrCompute("Toggle");
+        public static readonly MyStringId Draw = MyStringId.GetOrCompute("Draw");
+        
         public static readonly MyStringId ActionToggle = MyStringId.GetOrCompute("{0} On/Off");
         public static readonly MyStringId ActionOn = MyStringId.GetOrCompute("{0} On");
         public static readonly MyStringId ActionOff = MyStringId.GetOrCompute("{0} Off");
+        public static readonly MyStringId ActionIncrease = MyStringId.GetOrCompute("{0} Increase");
         public static readonly MyStringId MetresPerSecond = MyStringId.GetOrCompute("{0}m/s");
         public static readonly MyStringId Metres = MyStringId.GetOrCompute("{0}m");
         public static readonly MyStringId Degrees = MyStringId.GetOrCompute("{0}°");
@@ -141,7 +159,7 @@ namespace Automata.Util.Strings
         public static readonly MyStringId ConnectorNameQuery = MyStringId.GetOrCompute("Connector name");
         public static readonly MyStringId ConnectorNameQueryTip = MyStringId.GetOrCompute("Exact name of one of your (or your faction's) connectors further away than the list covers.");
         public static readonly MyStringId LCDScreenTag = MyStringId.GetOrCompute("LCD tag");
-        public static readonly MyStringId LCDScreenTagTip = MyStringId.GetOrCompute("Put this tag on LCD panels with Automata Log app set to show the block's logs.");
+        public static readonly MyStringId LCDScreenTagTip = MyStringId.GetOrCompute("Put this tag on LCD panels with AutomataLog app set to show the block's logs.");
         public static readonly MyStringId SetOrientationTargetInput = MyStringId.GetOrCompute("Set orientation target");
         public static readonly MyStringId SetOrientationTargetInputTip = MyStringId.GetOrCompute("Orient the drone to the target GPS coordinate.");
         public static readonly MyStringId NavigationTargetGPS = MyStringId.GetOrCompute("Navigate to target");
@@ -169,7 +187,8 @@ namespace Automata.Util.Strings
         public static readonly MyStringId Flight = MyStringId.GetOrCompute("Flight");
         public static readonly MyStringId Power = MyStringId.GetOrCompute("Power");
         public static readonly MyStringId Lcd = MyStringId.GetOrCompute("LCD output");
-        public static readonly MyStringId Observation = MyStringId.GetOrCompute("Observation area");
+        public static readonly MyStringId Show = MyStringId.GetOrCompute("Show");
+        public static readonly MyStringId ConstructionField = MyStringId.GetOrCompute("Construction field");
         public static readonly MyStringId ObservationAtGps = MyStringId.GetOrCompute("GPS observation area");
         public static readonly MyStringId ObservationAtGpsTip = MyStringId.GetOrCompute("Select a GPS coordinate as the drone's observation area.");
         public static readonly MyStringId ObservationGps = MyStringId.GetOrCompute("GPS point");
@@ -181,7 +200,6 @@ namespace Automata.Util.Strings
         public static readonly MyStringId Combat = MyStringId.GetOrCompute("Combat handover");
         public static readonly MyStringId Jobs = MyStringId.GetOrCompute("Jobs");
         public static readonly MyStringId Debug = MyStringId.GetOrCompute("Debug");
-        public static readonly MyStringId EnableAI = MyStringId.GetOrCompute("Enable AI");
         public static readonly MyStringId OperationMode = MyStringId.GetOrCompute("Operation mode");
         public static readonly MyStringId OperationModeTip = MyStringId.GetOrCompute("Changes the drone's operation mode\nStand-alone: weld/grind in observation area.\nManaged by orchestrator: drone's actions are assigned by Orchestrator.\nManaged by player: only player orders and debug.\nNOTE: AI must be disabled to change.");
         public static readonly MyStringId StandAlone = MyStringId.GetOrCompute("Stand-alone");

@@ -1,5 +1,4 @@
 using System.Text;
-
 using VRage;
 using VRage.Utils;
 
@@ -70,6 +69,19 @@ namespace Automata.Util
         public static StringBuilder AppendLoc(this StringBuilder sb, MyStringId id, params object[] args)
         {
             return sb.AppendFormat(MyTexts.GetString(id), args);
+        }
+
+        public static string Compose(MyStringId a, MyStringId b, string sep = " ")
+        {
+            return string.Format("{0}"+sep+"{1}", MyTexts.GetString(a), MyTexts.GetString(b));
+        }
+        public static string Compose(MyStringId a, MyStringId b, MyStringId c, string sep = " ")
+        {
+            return string.Format("{0}"+sep+"{1}"+sep+"{2}", MyTexts.GetString(a), MyTexts.GetString(b), MyTexts.GetString(c));
+        }
+        public static string Compose(MyStringId a, MyStringId b, MyStringId c, MyStringId d, string sep = " ")
+        {
+            return string.Format("{0}"+sep+"{1}"+sep+"{2}"+sep+"{3}", MyTexts.GetString(a), MyTexts.GetString(b), MyTexts.GetString(c), MyTexts.GetString(d));
         }
     }
 }

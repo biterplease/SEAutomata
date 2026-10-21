@@ -96,7 +96,7 @@ namespace Automata.Util
         /// <summary>Server, every update: true when a client is looking at one of the block's LCDs (then build the header and call <see cref="Publish"/>).</summary>
         public bool Wanted(IMyTerminalBlock owner, string tag)
         {
-            feeder.Bind(owner, tag, false, channel);
+            feeder.Bind(owner, tag, false, channel, ownScreens: channel == 0);
             return feeder.HasViewers;
         }
 
