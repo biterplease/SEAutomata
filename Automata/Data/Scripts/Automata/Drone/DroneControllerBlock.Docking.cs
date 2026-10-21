@@ -140,7 +140,8 @@ namespace Automata.Drone
             get
             {
                 var p = settings != null ? settings.BehaviourProfile : BehaviourProfile.None;
-                return p == BehaviourProfile.IsCombatDrone || p == BehaviourProfile.IsOreScout || p == BehaviourProfile.IsOreHauler;
+                return p == BehaviourProfile.IsCombatDrone || p == BehaviourProfile.IsOreScout || p == BehaviourProfile.IsOreHauler
+                    || p == BehaviourProfile.IsMiningDrone;
             }
         }
 

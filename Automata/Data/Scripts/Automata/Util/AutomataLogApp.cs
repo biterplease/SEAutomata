@@ -15,16 +15,18 @@ namespace Automata.Util
     /// only (a dedicated server never runs it); the text comes from the server as LcdFeedPackets (see LcdFeed.cs), and the
     /// app redraws only when a new feed arrived.
     /// </summary>
-    [MyTextSurfaceScript(LcdFeedServer.APP, "Automata Log")]
+    [MyTextSurfaceScript(LcdFeedServer.APP, "AutomataLog")]
     public class AutomataLogApp : MyTSSCommon
     {
         #region UI strings
         private static readonly MyStringId StrTitle = MyStringId.GetOrCompute("Automata Log");
         private static readonly MyStringId StrWaiting = MyStringId.GetOrCompute("Waiting for the server...");
-        private static readonly MyStringId StrNotPanel = MyStringId.GetOrCompute("Use this app on a text panel LCD.");
-        private static readonly MyStringId StrNotApp = MyStringId.GetOrCompute("Set this LCD's content to the Automata Log app.");
+        private static readonly MyStringId StrNotApp = MyStringId.GetOrCompute("Set this LCD's content to the AutomataLog app.");
         private static readonly MyStringId StrBusy = MyStringId.GetOrCompute("This block has too many LCDs in view.");
         private static readonly MyStringId StrNoBlock = MyStringId.GetOrCompute("No Automata block on this construct has its LCD tag in this LCD's name (same owner or faction). Name the LCD with the tag.");
+        private static readonly MyStringId StrNotPanel   = MyStringId.GetOrCompute("Use this app on an LCD or a block with screens.");
+        private static readonly MyStringId StrNotRunning = MyStringId.GetOrCompute("This block is off or not ready.");
+
         #endregion
 
         private const int ASK_EVERY_RUNS = 3;   // one request per ~5 s (a run every 100 ticks)
@@ -33,7 +35,11 @@ namespace Automata.Util
         private static readonly Color ERROR_COLOR = new Color(255, 40, 40);
         private static readonly Color WARNING_COLOR = new Color(255, 230, 0);
 
-        private readonly long panelId;
+        private readonly VRage.Game.ModAPI.Ingame.IMyCubeBlock ownerBlock;
+        private readonly long blockId;
+        private byte surfaceIndex;
+        private long panelKey;
+        private bool resolved;
         private readonly StringBuilder measure = new StringBuilder("M");
         private int askIn;
         private bool drawn;
@@ -48,21 +54,64 @@ namespace Automata.Util
         public AutomataLogApp(Sandbox.ModAPI.Ingame.IMyTextSurface surface, VRage.Game.ModAPI.Ingame.IMyCubeBlock block, Vector2 size)
             : base(surface, block, size)
         {
-            panelId = block.EntityId;
+            ownerBlock = block;
+            blockId = block != null ?  block.EntityId : 0;
         }
+
+        private bool TryResolve()                               // false: screens not ready yet, try next run
+        {
+            var provider = ownerBlock as Sandbox.ModAPI.Ingame.IMyTextSurfaceProvider;
+            int index = 0;
+            if (provider != null)
+            {
+                int n = provider.SurfaceCount;
+                bool found = false;
+                for (int i = 0; i < n && !found; i++)
+                {
+                    var s = provider.GetSurface(i);
+                    if (s == null) return false;
+                    if (ReferenceEquals(s, m_surface)) { index = i; found = true; }
+                }
+                for (int i = 0; i < n && !found; i++)          // fallback: ScreenArea name
+                {
+                    var s = provider.GetSurface(i);
+                    if (s != null && s.Name == m_surface.Name) { index = i; found = true; }
+                }
+            }                                                   // not found / not a provider: index 0
+            surfaceIndex = (byte)index;
+            panelKey = LcdFeedServer.PanelKey(blockId, surfaceIndex);
+            return true;
+        }
+
+        // private static byte FindSurface(VRage.Game.ModAPI.Ingame.IMyCubeBlock block, Sandbox.ModAPI.Ingame.IMyTextSurface surface)
+        // {
+        //     var provider = block as Sandbox.ModAPI.Ingame.IMyTextSurfaceProvider;   // a programmable block implements this one statically
+        //     if (provider == null) return 0;
+        //     for (int i = 0; i < provider.SurfaceCount; i++)
+        //         if (ReferenceEquals(provider.GetSurface(i), surface)) return (byte)i;
+        //     for (int i = 0; i < provider.SurfaceCount; i++)                         // fallback: ScreenArea name
+        //         if (provider.GetSurface(i).Name == surface.Name) return (byte)i;
+        //     return 0;
+        // }
 
         public override void Run()
         {
             base.Run();
             try
             {
+                if (blockId == 0) return;
+                if (!resolved) {
+                    resolved = TryResolve();
+                    if (!resolved)
+                        return;
+                }
                 if (--askIn < 0)
                 {
                     askIn = ASK_EVERY_RUNS - 1;
-                    LcdFeedClient.Request(panelId);
+                    LcdFeedClient.Request(blockId, surfaceIndex);
                 }
                 byte reason;
-                var feed = LcdFeedClient.Get(panelId, out reason);
+                var feed = LcdFeedClient.Get(panelKey, out reason);
                 Vector2 surfaceSize = m_surface.SurfaceSize;
                 float padding = m_surface.TextPadding;
                 if (drawn && ++sinceDraw < REDRAW_EVERY_RUNS && ReferenceEquals(feed, drawnFeed) && reason == drawnReason
@@ -112,6 +161,7 @@ namespace Automata.Util
                                 : reason == LcdAttachPacket.NOT_THE_APP ? Loc.T(StrNotApp)
                                 : reason == LcdAttachPacket.NO_BLOCK ? Loc.T(StrNoBlock)
                                 : reason == LcdAttachPacket.BUSY ? Loc.T(StrBusy)
+                                : reason == LcdAttachPacket.NOT_RUNNING ? Loc.T(StrNotRunning)
                                 : Loc.T(StrWaiting);
                     foreach (var line in Wrap(text, cols)) AddLine(frame, line, ref pos, unit.Y, fg, scale, cols);
                     return;

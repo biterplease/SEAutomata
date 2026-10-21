@@ -129,7 +129,7 @@ namespace Automata.Logistics
         private string reportedSmallConnectors;
         private ConveyorNetwork primary;
         private IMyRadioAntenna antenna;
-        private AntennaReg antennaReg;
+        private GridAntennaReg antennaReg;
         private bool dirty = true;
         private int lastScan = int.MinValue / 2, lastInventory = int.MinValue / 2, lastQuotaCheck = int.MinValue / 2;
         private int networkCounter;
@@ -496,7 +496,7 @@ namespace Automata.Logistics
 
         private bool EnsureAntenna()
         {
-            return AntennaReg.Ensure(messaging, ref antennaReg, antenna);
+            return GridAntennaReg.Ensure(messaging, ref antennaReg, block);
         }
         #endregion
 
@@ -669,7 +669,7 @@ namespace Automata.Logistics
                 RecipientBlockType = MessageQueue.IAIBlockType.Orchestrator,
                 Channel = job.Type == Orchestrator.JobType.DeliverMissingInventory ? Channel.LOGISTIC_REQUEST : Channel.LOGISTIC_PUSH,
             };
-            var error = messaging.BroadcastMessage(antennaReg, msg, false);
+            var error = messaging.BroadcastMessage(antennaReg, msg, false, MessageQueue.IAIBlockType.LogisticsComputer);
             job.Announced = false;
             job.Sent = error == ErrorCode.None ? msg : null;
             if (error != ErrorCode.None) job.LastResult = error.ToString();
@@ -969,7 +969,7 @@ namespace Automata.Logistics
                 RecipientBlockType = MessageQueue.IAIBlockType.Orchestrator,
                 Channel = Channel.ORCHESTRATOR_AUCTION_BIDS,
             };
-            var error = messaging.BroadcastMessage(antennaReg, msg, false);
+            var error = messaging.BroadcastMessage(antennaReg, msg, false, MessageQueue.IAIBlockType.LogisticsComputer);
             lastBid = string.Format("{0}: {1} ({2})", a.JobType, DescribeItems(items), error == ErrorCode.None ? Loc.T(StrSent) : error.ToString());
             var entry = new StringBuilder();
             entry.AppendLoc(StrLogBid, BidKind(a), ConnectorName(dock.EntityId));

@@ -20,12 +20,20 @@ namespace Automata.Construction
         const string IdPrefix = AutomataSession.MOD_NAME + "_ConstructionComputer_";
         static bool Done = false;
 
+        const string ICON_PLUS = @"Textures\GUI\Icons\HUD 2017\plus.dds";
+        const string ICON_DASH = @"Textures\GUI\Icons\HUD 2017\Dash.dds";
+        const string ICON_TOGGLE = @"Textures\GUI\Icons\Actions\Toggle.dds";
+        const string ICON_ON = @"Textures\GUI\Icons\Actions\SwitchOn.dds";
+        const string ICON_OFF = @"Textures\GUI\Icons\Actions\SwitchOff.dds";
+
+
         public static void DoOnce(IMyModContext context)
         {
             if (Done) return;
             Done = true;
             AutomataProgrammableBlocks.HideVanillaOnce();
             CreateControls();
+            CreateActions();
             Log.Info("Created CC terminal controls");
         }
 
@@ -79,27 +87,69 @@ namespace Automata.Construction
             Add(c);
         }
 
-        static void AreaSize(int axis, MyStringId title, MyStringId tooltip)
+        static void AddAction(string id, string name, string icon, Action<ConstructionComputerBlock> action, Action<ConstructionComputerBlock, StringBuilder> writer)
+        {
+            var a = MyAPIGateway.TerminalControls.CreateAction<IMyProgrammableBlock>(IdPrefix + id);
+            a.Name = new StringBuilder(name);
+            a.ValidForGroups = true;
+            a.Icon = icon;
+            a.Action = (b) => { var l = GetBlock(b); if (l != null) action(l); };
+            a.Writer = (b, sb) => { var l = GetBlock(b); if (l != null && writer != null) writer(l, sb); };
+            a.Enabled = Visible;
+            MyAPIGateway.TerminalControls.AddAction<IMyProgrammableBlock>(a);
+        }
+
+        static void CreateActions()
+        {
+            AddAction(IdPrefix + "_X_Offset_Increase", Loc.Compose(MyStrings.ToolbarActionIncrease, MyStrings.ConstructionField, MyStrings.HorizontalOffset), ICON_PLUS, b => { b.Terminal_SetFieldOffset(0, b.Terminal_GetFieldOffset(0) + 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldOffset(0)); });
+            AddAction(IdPrefix + "_X_Offset_Decrease", Loc.Compose(MyStrings.ToolbarActionDecrease, MyStrings.ConstructionField, MyStrings.HorizontalOffset), ICON_DASH, b => { b.Terminal_SetFieldOffset(0, b.Terminal_GetFieldOffset(0) - 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldOffset(0)); });
+            AddAction(IdPrefix + "_Y_Offset_Increase", Loc.Compose(MyStrings.ToolbarActionIncrease, MyStrings.ConstructionField, MyStrings.VerticalOffset), ICON_PLUS, b => { b.Terminal_SetFieldOffset(1, b.Terminal_GetFieldOffset(1) + 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldOffset(1)); });
+            AddAction(IdPrefix + "_Y_Offset_Decrease", Loc.Compose(MyStrings.ToolbarActionDecrease, MyStrings.ConstructionField, MyStrings.VerticalOffset), ICON_DASH, b => { b.Terminal_SetFieldOffset(1, b.Terminal_GetFieldOffset(1) - 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldOffset(1)); });
+            AddAction(IdPrefix + "_Z_Offset_Increase", Loc.Compose(MyStrings.ToolbarActionIncrease, MyStrings.ConstructionField, MyStrings.ForwardOffset), ICON_PLUS, b => { b.Terminal_SetFieldOffset(2, b.Terminal_GetFieldOffset(2) + 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldOffset(2)); });
+            AddAction(IdPrefix + "_Z_Offset_Decrease", Loc.Compose(MyStrings.ToolbarActionDecrease, MyStrings.ConstructionField, MyStrings.ForwardOffset), ICON_DASH, b => { b.Terminal_SetFieldOffset(2, b.Terminal_GetFieldOffset(2) - 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldOffset(2)); });
+
+            AddAction(IdPrefix + "_X_Size_Increase", Loc.Compose(MyStrings.ToolbarActionIncrease, MyStrings.ConstructionField, MyStrings.Width), ICON_PLUS, b => { b.Terminal_SetFieldSize(0, b.Terminal_GetFieldSize(0) + 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldSize(0)); });
+            AddAction(IdPrefix + "_X_Size_Decrease", Loc.Compose(MyStrings.ToolbarActionDecrease, MyStrings.ConstructionField, MyStrings.Width), ICON_DASH, b => { b.Terminal_SetFieldSize(0, b.Terminal_GetFieldSize(0) - 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldSize(0)); });
+            AddAction(IdPrefix + "_Y_Size_Increase", Loc.Compose(MyStrings.ToolbarActionIncrease, MyStrings.ConstructionField, MyStrings.Height), ICON_PLUS, b => { b.Terminal_SetFieldSize(1, b.Terminal_GetFieldSize(1) + 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldSize(1)); });
+            AddAction(IdPrefix + "_Y_Size_Decrease", Loc.Compose(MyStrings.ToolbarActionDecrease, MyStrings.ConstructionField, MyStrings.Height), ICON_DASH, b => { b.Terminal_SetFieldSize(1, b.Terminal_GetFieldSize(1) - 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldSize(1)); });
+            AddAction(IdPrefix + "_Z_Size_Increase", Loc.Compose(MyStrings.ToolbarActionIncrease, MyStrings.ConstructionField, MyStrings.Depth), ICON_PLUS, b => { b.Terminal_SetFieldSize(2, b.Terminal_GetFieldSize(2) + 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldSize(2)); });
+            AddAction(IdPrefix + "_Z_Size_Decrease", Loc.Compose(MyStrings.ToolbarActionDecrease, MyStrings.ConstructionField, MyStrings.Depth), ICON_DASH, b => { b.Terminal_SetFieldSize(2, b.Terminal_GetFieldSize(2) - 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldSize(2)); });
+
+            AddAction(IdPrefix + "_ToggleEnableAI_ON", Loc.Compose(MyStrings.Toggle, MyStrings.EnableAI, MyStrings.On), ICON_ON, b => { if (!b.Terminal_IsEnabled) { b.Terminal_IsEnabled = true; } }, (b, sb) => sb.Append(Loc.T(MyStrings.On)));
+            AddAction(IdPrefix + "_ToggleEnableAI_OFF", Loc.Compose(MyStrings.Toggle, MyStrings.EnableAI, MyStrings.Off), ICON_OFF, b => { if (b.Terminal_IsEnabled) { b.Terminal_IsEnabled = false; } }, (b, sb) => sb.Append(Loc.T(MyStrings.Off)));
+            AddAction(IdPrefix + "_ToggleEnableAI_ON_OFF", Loc.Compose(MyStrings.Toggle, MyStrings.EnableAI, MyStrings.On_Off), ICON_TOGGLE, b => { b.Terminal_IsEnabled = !b.Terminal_IsEnabled; }, (b, sb) => sb.Append(b.Terminal_IsEnabled ? Loc.T(MyStrings.On) : Loc.T(MyStrings.Off)));
+
+            AddAction(IdPrefix + "_ToggleConstructionField_ON", Loc.Compose(MyStrings.Toggle, MyStrings.Draw, MyStrings.ConstructionField, MyStrings.On), ICON_ON, b => { if (!b.Terminal_DrawArea) { b.Terminal_DrawArea = true; } }, (b, sb) => sb.Append(Loc.T(MyStrings.On)));
+            AddAction(IdPrefix + "_ToggleConstructionField_OFF", Loc.Compose(MyStrings.Toggle, MyStrings.Draw, MyStrings.ConstructionField, MyStrings.Off), ICON_OFF, b => { if (b.Terminal_DrawArea) { b.Terminal_DrawArea = false; } }, (b, sb) => sb.Append(Loc.T(MyStrings.Off)));
+            AddAction(IdPrefix + "_ToggleConstructionField_ON_OFF", Loc.Compose(MyStrings.Toggle, MyStrings.Draw, MyStrings.ConstructionField, MyStrings.On_Off), ICON_TOGGLE, b => { b.Terminal_DrawArea = !b.Terminal_DrawArea; }, (b, sb) => sb.Append(b.Terminal_DrawArea ? Loc.T(MyStrings.On) : Loc.T(MyStrings.Off)));
+
+            AddAction(IdPrefix + "_ToggleUseBroadcastController_ON", Loc.Compose(MyStrings.Toggle, MyStrings.UseBroadcastController, MyStrings.On), ICON_ON, b => { if (!b.Terminal_UseBroadcastController) { b.Terminal_UseBroadcastController = true; } }, (b, sb) => sb.Append(Loc.T(MyStrings.On)));
+            AddAction(IdPrefix + "_ToggleUseBroadcastController_OFF", Loc.Compose(MyStrings.Toggle, MyStrings.UseBroadcastController, MyStrings.Off), ICON_OFF, b => { if (b.Terminal_UseBroadcastController) { b.Terminal_UseBroadcastController = false; } }, (b, sb) => sb.Append(Loc.T(MyStrings.Off)));
+            AddAction(IdPrefix + "_ToggleUseBroadcastController_ON_OFF", Loc.Compose(MyStrings.Toggle, MyStrings.UseBroadcastController, MyStrings.On_Off), ICON_TOGGLE, b => { b.Terminal_UseBroadcastController = !b.Terminal_UseBroadcastController; }, (b, sb) => sb.Append(b.Terminal_UseBroadcastController ? Loc.T(MyStrings.On) : Loc.T(MyStrings.Off)));
+        }
+
+
+        static void AreaSize(byte axis, MyStringId title, MyStringId tooltip)
         {
             var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSlider, IMyProgrammableBlock>(IdPrefix + "AreaSize" + axis);
             c.Title = title;
             c.Tooltip = tooltip;
             c.SupportsMultipleBlocks = true;
             c.Visible = Visible;
-            c.SetLimits(ConstructionComputerBlock.AREA_SIZE_MIN, ConstructionComputerBlock.AREA_SIZE_MAX);
-            c.Getter = b => { var l = GetBlock(b); return l != null ? l.Terminal_GetAreaSize(axis) : 25; };
-            c.Setter = (b, v) => { var l = GetBlock(b); if (l != null) l.Terminal_SetAreaSize(axis, (int)Math.Round(v)); };
+            c.SetLimits(ConstructionComputerBlock.FIELD_SIZE_MIN, ConstructionComputerBlock.FIELD_SIZE_MAX);
+            c.Getter = b => { var l = GetBlock(b); return l != null ? l.Terminal_GetFieldSize(axis) : 25; };
+            c.Setter = (b, v) => { var l = GetBlock(b); if (l != null) l.Terminal_SetFieldSize(axis, (int)Math.Round(v)); };
             c.Writer = (b, sb) =>
             {
                 var l = GetBlock(b);
                 if (l == null) return;
-                int n = l.Terminal_GetAreaSize(axis);
+                int n = l.Terminal_GetFieldSize(axis);
                 sb.AppendLoc(n == 1 ? MyStrings.Block : MyStrings.Blocks, n);
             };
             Add(c);
         }
 
-        static void AreaOffset(int axis, MyStringId title, MyStringId tooltip)
+        static void AreaOffset(byte axis, MyStringId title, MyStringId tooltip)
         {
             var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSlider, IMyProgrammableBlock>(IdPrefix + "AreaOffset" + axis);
             c.Title = title;
@@ -107,13 +157,13 @@ namespace Automata.Construction
             c.SupportsMultipleBlocks = true;
             c.Visible = Visible;
             c.SetLimits(-ConstructionComputerBlock.AREA_OFFSET_MAX, ConstructionComputerBlock.AREA_OFFSET_MAX);
-            c.Getter = b => { var l = GetBlock(b); return l != null ? l.Terminal_GetAreaOffset(axis) : 0f; };
-            c.Setter = (b, v) => { var l = GetBlock(b); if (l != null) l.Terminal_SetAreaOffset(axis, (int)Math.Round(v)); };
+            c.Getter = b => { var l = GetBlock(b); return l != null ? l.Terminal_GetFieldOffset(axis) : 0f; };
+            c.Setter = (b, v) => { var l = GetBlock(b); if (l != null) l.Terminal_SetFieldOffset(axis, (int)Math.Round(v)); };
             c.Writer = (b, sb) =>
             {
                 var l = GetBlock(b);
                 if (l == null) return;
-                int n = l.Terminal_GetAreaOffset(axis);
+                int n = l.Terminal_GetFieldOffset(axis);
                 sb.AppendLoc(n == 1 || n == -1 ? MyStrings.Block : MyStrings.Blocks, n);
             };
             Add(c);
@@ -122,15 +172,6 @@ namespace Automata.Construction
         static void CreateControls()
         {
             Separator();
-            {
-                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlButton, IMyProgrammableBlock>(IdPrefix + "RetryJobs");
-                c.Title = MyStrings.RetryJobs;
-                c.Tooltip = MyStrings.RetryJobsTip;
-                c.SupportsMultipleBlocks = true;
-                c.Visible = Visible;
-                c.Action = b => { var l = GetBlock(b); if (l != null) l.Terminal_RetryJobs(); };
-                Add(c);
-            }
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlOnOffSwitch, IMyProgrammableBlock>(IdPrefix + "OnOffEnabled");
                 c.Title = MySpaceTexts.BlockPropertyTitle_EnableAI;
@@ -141,6 +182,15 @@ namespace Automata.Construction
                 c.OffText = MySpaceTexts.SwitchText_Off;
                 c.Getter = b => GetBlock(b)?.Terminal_IsEnabled ?? false;
                 c.Setter = (b, v) => { var l = GetBlock(b); if (l != null) l.Terminal_IsEnabled = v; };
+                Add(c);
+            }
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlButton, IMyProgrammableBlock>(IdPrefix + "RetryJobs");
+                c.Title = MyStrings.RetryJobs;
+                c.Tooltip = MyStrings.RetryJobsTip;
+                c.SupportsMultipleBlocks = true;
+                c.Visible = Visible;
+                c.Action = b => { var l = GetBlock(b); if (l != null) l.Terminal_RetryJobs(); };
                 Add(c);
             }
             Separator();

@@ -729,7 +729,7 @@ namespace Automata.Drone
 
 
             // --- Observation area (stand-alone only) ---
-            AddSection("Observation", MyStrings.Observation);
+            AddSection("Construction", MyStrings.ConstructionField);
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlCheckbox, IMyRemoteControl>(IdPrefix + "Checkbox_ObservationAtGps");
                 c.Title = MyStrings.ObservationAtGps;

@@ -99,7 +99,7 @@ namespace Automata.Mining
         private long entityId;
         private MessageQueue messaging;
         private IMyRadioAntenna antenna;
-        private AntennaReg antennaReg;
+        private GridAntennaReg antennaReg;
         private IMyOreDetector detector;
         private bool ready;
         private int stepCounter;
@@ -468,7 +468,7 @@ namespace Automata.Mining
 
         private bool EnsureAntenna()
         {
-            return AntennaReg.Ensure(messaging, ref antennaReg, antenna);
+            return GridAntennaReg.Ensure(messaging, ref antennaReg, block);
         }
         #endregion
 
@@ -679,7 +679,7 @@ namespace Automata.Mining
         // Orchestrators drop the job's queue entry / running auction
         private void Withdraw(MiningJob job, string why)
         {
-            if (messaging == null || antenna == null) return;
+            if (messaging == null) return;
             var msg = new Message<JobStatusReport>
             {
                 Payload = new JobStatusReport { AnnouncerEntityId = entityId, JobId = job.JobId, Outcome = JobOutcome.Aborted, Reason = why,
@@ -691,7 +691,7 @@ namespace Automata.Mining
                 RecipientBlockType = MessageQueue.IAIBlockType.Orchestrator,
                 Channel = Channel.JOB_WITHDRAWN,
             };
-            var error = messaging.BroadcastMessage(antennaReg, msg, false);
+            var error = messaging.BroadcastMessage(antennaReg, msg, false, MessageQueue.IAIBlockType.MiningSurveyor);
             if (Log.DebugEnabled) Log.Debug("MS {0}: job {1} ({2}) withdrawn ({3}): {4}", entityId, job.JobId, job.Ore, why, error);
         }
 
@@ -827,7 +827,7 @@ namespace Automata.Mining
                 job.LastAnnounced = now;
                 job.Message.MessageId = IdGenerator.GenerateId(ref messageCounter, entityId);
                 job.Message.CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow);
-                var error = messaging.BroadcastMessage(antennaReg, job.Message, false);
+                var error = messaging.BroadcastMessage(antennaReg, job.Message, false, MessageQueue.IAIBlockType.MiningSurveyor);
                 job.Announced = false;
                 job.Pending = error == ErrorCode.None;
                 if (error != ErrorCode.None) job.LastResult = error.ToString();

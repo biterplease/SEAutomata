@@ -109,7 +109,7 @@ Combat drones (above) take the hostile designator's jobs, and only they do:
 - Not saved as combat state: after a load the task starts again.
 
 ## Connector sizes (2026-10-05)
-Small connectors (`ConveyorNetwork.IsStandardConnector` false) mate with small ones only. Combat drones, ore scouts and ore haulers may use them (`SmallConnectorsAllowed`); other drones ignore them and are in error with no standard one. Bids carry `DockFaces` (standard) and `SmallDockFaces`; LC ports carry `Small`; `DockFit.Pick` matches size and orientation. Ore haulers (profile) take only ore / ice logistics (and mining) and are preferred there.
+Small connectors (`ConveyorNetwork.IsStandardConnector` false) mate with small ones only. Combat drones, ore scouts, ore haulers and mining drones may use them (`SmallConnectorsAllowed`); other drones ignore them and are in error with no standard one. Bids carry `DockFaces` (standard) and `SmallDockFaces`; LC ports carry `Small`; `DockFit.Pick` matches size and orientation. Ore haulers (profile) take only ore / ice logistics (and mining) and are preferred there.
 
 ## Behavior profiles (2026-10-05)
 `BehaviourProfile : ushort` bit values: Cargo, Combat, OreScout, OreHauler, Welder, Grinder, Welder + grinder, Mining, Farming (not implemented). A profile is a hard filter only for Combat (combat jobs) and OreHauler (ore / ice logistics and mining only); otherwise it adds `ProfileBonus` (+10) to bids for its preferred jobs (`OrchestratorBlock.PreferredProfile`: Weld -> Welder / Welder + grinder, Grind -> Grinder / Welder + grinder, MineOre -> Mining, ore-only logistics -> OreHauler 10 / Cargo 5).

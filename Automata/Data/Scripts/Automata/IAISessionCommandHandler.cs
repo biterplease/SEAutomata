@@ -20,8 +20,7 @@ namespace Automata
     public class AutomataSessionCommandHandler
     {
         #region UI strings
-        private static readonly MyStringId StrTaskList = MyStringId.GetOrCompute("Task list: (not yet implemented)");
-        private static readonly MyStringId StrHelp = MyStringId.GetOrCompute("Automata {0} - Commands: {1} {2}");
+        private static readonly MyStringId StrHelp = MyStringId.GetOrCompute("Automata {0} - Commands: {1}");
         private static readonly MyStringId StrDebugDrawUsage = MyStringId.GetOrCompute("Usage: /automata debugdraw [dronenav] [droneobs] [ccobs] [park] [off] (none: all)");
         private static readonly MyStringId StrDebugDrawOn = MyStringId.GetOrCompute("Debug draw on within {0} m: {1} drone route(s), {2} drone area(s), {3} construction area(s), {4} parking area(s).");
         private static readonly MyStringId StrDebugDrawOff = MyStringId.GetOrCompute("Debug draw off within {0} m: {1} drone route(s), {2} drone area(s), {3} construction area(s), {4} parking area(s).");
@@ -29,22 +28,14 @@ namespace Automata
 
         public AutomataSessionCommandHandler() { }
 
-        private const string CMDROOT = "/iai";
         private const string CMDROOT_AUTOMATA = "/automata";
-        private const string HELP = "-h";
-        private const string HELPLONG = "-help";
-        private const string LIST_TASKS = "list-tasks";
-        private const string TASK_CMD = "task";
-        private const string TASK_WELD = "weld";
-        private const string TASK_GRIND = "grind";
-
         private const string DEBUGDRAW = "debugdraw";
         private const string DD_DRONENAV = "dronenav";
         private const string DD_DRONEOBS = "droneobs";
         private const string DD_CCOBS = "ccobs";
         private const string DD_PARK = "park";
         private const string DD_OFF = "off";
-        private const double DEBUGDRAW_RANGE = 1000;
+        private const double DEBUGDRAW_RANGE_METERS = 300;
 
         [Flags]
         private enum DrawKinds { None = 0, DroneNav = 1, DroneObs = 2, CcObs = 4, Park = 8, All = 15 }
@@ -56,7 +47,7 @@ namespace Automata
             if (string.IsNullOrEmpty(msg) || msg[0] != '/')
                 return;
             var cmd = msg.Trim().ToLowerInvariant();
-            string root = IsRoot(cmd, CMDROOT_AUTOMATA) ? CMDROOT_AUTOMATA : IsRoot(cmd, CMDROOT) ? CMDROOT : null;
+            string root = IsRoot(cmd, CMDROOT_AUTOMATA) ? CMDROOT_AUTOMATA : null;
             if (root == null)
                 return;
             sendToOthers = false;
@@ -68,9 +59,6 @@ namespace Automata
             }
             switch (args[0])
             {
-                case LIST_TASKS:
-                    MyAPIGateway.Utilities.ShowMessage(AutomataSession.MOD_NAME, GetTaskList());
-                    break;
                 case DEBUGDRAW:
                     DebugDraw(args);
                     break;
@@ -113,8 +101,8 @@ namespace Automata
 
             long me = player.IdentityId;
             Vector3D pos = player.GetPosition();
-            double rangeSq = DEBUGDRAW_RANGE * DEBUGDRAW_RANGE;
-            var sphere = new BoundingSphereD(pos, DEBUGDRAW_RANGE);
+            double rangeSq = DEBUGDRAW_RANGE_METERS * DEBUGDRAW_RANGE_METERS;
+            var sphere = new BoundingSphereD(pos, DEBUGDRAW_RANGE_METERS);
             int nav = 0, obs = 0, cc = 0, park = 0;
 
             entityBuffer.Clear();
@@ -166,18 +154,13 @@ namespace Automata
             }
             entityBuffer.Clear();
             MyAPIGateway.Utilities.ShowMessage(AutomataSession.MOD_NAME,
-                Loc.F(on ? StrDebugDrawOn : StrDebugDrawOff, (int)DEBUGDRAW_RANGE, nav, obs, cc, park));
+                Loc.F(on ? StrDebugDrawOn : StrDebugDrawOff, (int)DEBUGDRAW_RANGE_METERS, nav, obs, cc, park));
         }
         #endregion
 
-        private string GetTaskList()
+       private string GetHelpText()
         {
-            return Loc.T(StrTaskList);
-        }
-
-        private string GetHelpText()
-        {
-            return Loc.F(StrHelp, AutomataSession.VERSION, LIST_TASKS, DEBUGDRAW);
+            return Loc.F(StrHelp, AutomataSession.MOD_VERSION, DEBUGDRAW);
         }
     }
 }

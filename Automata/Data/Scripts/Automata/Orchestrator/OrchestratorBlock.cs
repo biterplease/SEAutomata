@@ -132,7 +132,7 @@ namespace Automata.Orchestrator
         private readonly StringBuilder info = new StringBuilder();
         private MessageQueue messaging;
         private IMyRadioAntenna ownAntenna;
-        private AntennaReg antennaReg;
+        private GridAntennaReg antennaReg;
         private int lastStep = int.MinValue / 2, lastCapabilities = int.MinValue / 2;
         public State currentState { get; private set; }
         private string status = Loc.T(StrStarting);
@@ -497,7 +497,7 @@ namespace Automata.Orchestrator
                     pendingState = null;
                 }
                 if (commissionedTicks == 0) commissionedTicks = DateTime.UtcNow.Ticks;   // new (or saved before this existed)
-                if (!AntennaUtil.Alive(ownAntenna) || now - lastCapabilities >= CAPABILITY_TICKS)   // removed: the next one at once
+                if ((ownAntenna != null && !AntennaUtil.Alive(ownAntenna)) || now - lastCapabilities >= CAPABILITY_TICKS)   // removed: the next one at once
                 {
                     lastCapabilities = now;
                     FindAntenna();
@@ -612,7 +612,7 @@ namespace Automata.Orchestrator
 
         private bool EnsureAntenna()
         {
-            return AntennaReg.Ensure(messaging, ref antennaReg, ownAntenna);
+            return GridAntennaReg.Ensure(messaging, ref antennaReg, block);
         }
         #endregion
 
@@ -767,7 +767,7 @@ namespace Automata.Orchestrator
                 open.LastBroadcast = now;
                 open.Message.MessageId = IdGenerator.GenerateId(ref messageCounter, entityId);
                 open.Message.CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow);
-                var error = messaging.BroadcastMessage(antennaReg, open.Message, false);
+                var error = messaging.BroadcastMessage(antennaReg, open.Message, false, MessageQueue.IAIBlockType.Orchestrator);
                 if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: auction {1} (job {2}, {3}) broadcast: {4}", entityId, open.Auction.AuctionId, open.Auction.JobId,
                           LabelOf(open.Auction), error == ErrorCode.None ? "sent" : error.ToString());
             }
@@ -1509,7 +1509,7 @@ namespace Automata.Orchestrator
                     winnerOutbox.RemoveAt(i);
                     continue;
                 }
-                var error = messaging.BroadcastMessage(antennaReg, msg, false);
+                var error = messaging.BroadcastMessage(antennaReg, msg, false, MessageQueue.IAIBlockType.Orchestrator);
                 if (error == ErrorCode.None)
                     if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: winners of auction {1} (job {2}) sent: {3}", entityId, msg.Payload.AuctionId, msg.Payload.JobId,
                               DescribeAssignments(msg.Payload.TaskAssignments));
@@ -1553,7 +1553,7 @@ namespace Automata.Orchestrator
                 if (msg.Delivered) { failureOutbox.RemoveAt(i); continue; }
                 if (messaging.InFlight(msg)) continue;
                 if (DateTime.UtcNow > TimeUtil.TimestampToDateTime(msg.CreatedAt).AddSeconds(30)) { failureOutbox.RemoveAt(i); continue; }
-                var error = messaging.BroadcastMessage(antennaReg, msg, false);
+                var error = messaging.BroadcastMessage(antennaReg, msg, false, MessageQueue.IAIBlockType.Orchestrator);
                 if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: failure of job {1} to {2}: {3}", entityId, msg.Payload.JobId, msg.Payload.AnnouncerEntityId,
                           error == ErrorCode.None ? "sent" : error.ToString());
             }

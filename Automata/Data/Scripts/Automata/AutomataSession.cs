@@ -95,7 +95,7 @@ namespace Automata
         private static readonly MyStringId StrUpdateError = MyStringId.GetOrCompute("Update error: {0}");
         #endregion
 
-        public const string VERSION = "v0.0.1";
+        public const string MOD_VERSION = "v0.0.1";
         public const string MOD_NAME = "Automata";
         public static readonly Guid MOD_GUID = new Guid("1CFDA990-FD26-4950-A127-7BBC99FF1397");
         public static AutomataSession Instance;

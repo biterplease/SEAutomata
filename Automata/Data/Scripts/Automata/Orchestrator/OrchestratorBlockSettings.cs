@@ -43,7 +43,7 @@ namespace Automata.Orchestrator
         [ProtoMember(21)] public string LaneDrawNameBA = "";
         /// <summary>The camera the "Designator:" toolbar actions point with (on this orchestrator's mechanical group); 0: none.</summary>
         [ProtoMember(22)] public long DesignatorCameraId;
-        /// <summary>LCDs whose name contains this (Automata Log app) show the designator orders (orchestrator's LCD style).</summary>
+        /// <summary>LCDs whose name contains this (AutomataLog app) show the designator orders (orchestrator's LCD style).</summary>
         [ProtoMember(23)] public string DesignatorLcdTag = "[Designator]";
     }
 

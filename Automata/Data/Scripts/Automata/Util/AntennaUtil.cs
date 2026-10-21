@@ -15,8 +15,24 @@ namespace Automata.Util
             antenna.IsWorking;
         }
 
+        
+        public static bool AntennaReady(IMyLaserAntenna antenna)
+        {
+            return Alive(antenna) &&
+            antenna.IsFunctional &&
+            antenna.Enabled &&
+            antenna.IsWorking &&
+            antenna.Status == Sandbox.ModAPI.Ingame.MyLaserAntennaStatus.Connected;
+        }
+
         /// <summary>Still a block in the world: a removed / ground / pasted-over antenna lingers in caches after it closes.</summary>
         public static bool Alive(IMyRadioAntenna antenna)
+        {
+            return antenna != null && !antenna.Closed && !antenna.MarkedForClose && antenna.InScene;
+        }
+
+                /// <summary>Still a block in the world: a removed / ground / pasted-over antenna lingers in caches after it closes.</summary>
+        public static bool Alive(IMyLaserAntenna antenna)
         {
             return antenna != null && !antenna.Closed && !antenna.MarkedForClose && antenna.InScene;
         }
@@ -31,6 +47,23 @@ namespace Automata.Util
             if (!Alive(antenna)) return 0f;
             try { return antenna.Radius; }
             catch (NullReferenceException) { return 0f; }
+        }
+
+        public static float Range(IMyLaserAntenna antenna)
+        {
+            if (!Alive(antenna)) return 0f;
+            try {return antenna.Range; }
+            catch (NullReferenceException) {return 0f; }
+        }
+        public static string Name(IMyRadioAntenna antenna)
+        {
+            try {return antenna.CustomName; }
+            catch (NullReferenceException) {return "Antenna"; }
+        }
+        public static string Name(IMyLaserAntenna antenna)
+        {
+            try {return antenna.CustomName; }
+            catch (NullReferenceException) {return "Laser Antenna"; }
         }
     }
 }
