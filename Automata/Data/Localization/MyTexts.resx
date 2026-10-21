@@ -124,11 +124,37 @@
     <value>Automata</value>
   </data>
   <data name="DisplayName_Automata_DroneController" xml:space="preserve">
-    <value>Drone Controller</value>
+    <value>Automata Drone Controller</value>
   </data>
   <data name="Description_Automata_DroneController" xml:space="preserve">
-    <value>Enhanced drone controller that enables the drone for Construction or Logistics.</value>
+    <value>Enhanced drone controller that enables the drone for automated operation.</value>
   </data>
+  <data name="DisplayName_Automata_Orchestrator" xml:space="preserve">
+    <value>Automata Orchestrator</value>
+  </data>
+  <data name="Description_Automata_Orchestrator" xml:space="preserve">
+    <value>Coordinates comms between Automata blocks through the networks. It coordinates multiple drones for optimal output.</value>
+  </data>
+  <data name="DisplayName_Automata_LogisticsComputer" xml:space="preserve">
+    <value>Automata Logistics Computer</value>
+  </data>
+  <data name="Description_Automata_LogisticsComputer" xml:space="preserve">
+    <value>Allows a grid to become part of the logistics, construction and mining network.</value>
+  </data>
+  <data name="DisplayName_Automata_MiningSurveyor" xml:space="preserve">
+    <value>Automata Mining Surveyor</value>
+  </data>
+  <data name="Description_Automata_MiningSurveyor" xml:space="preserve">
+    <value>Enables ore surveying and mining operations.</value>
+  </data>
+  <data name="DisplayName_Automata_ConstructionComputer" xml:space="preserve">
+    <value>Automata Construction Computer</value>
+  </data>
+  <data name="Description_Automata_ConstructionComputer" xml:space="preserve">
+    <value>Plans welding and grinding work. Allows drones to collaborate efficiently in a single work area.</value>
+  </data>
+
+
 
   <!-- Script UI strings: the key is the English text (MyStringId.GetOrCompute in each file's "UI strings" region). -->
   <!-- Format items ({0}, {1:F0}...) must stay in the translations. -->
@@ -336,6 +362,21 @@
   </data>
   <data name="Off" xml:space="preserve">
     <value>Off</value>
+  </data>
+  <data name="Width" xml:space="preserve">
+    <value>Width</value>
+  </data>
+  <data name="Height" xml:space="preserve">
+    <value>Height</value>
+  </data>
+  <data name="Depth" xml:space="preserve">
+    <value>Depth</value>
+  </data>
+  <data name="Toggle" xml:space="preserve">
+    <value>Toggle</value>
+  </data>
+  <data name="Draw" xml:space="preserve">
+    <value>Draw</value>
   </data>
   <data name="Area width" xml:space="preserve">
     <value>Area width</value>
@@ -1477,8 +1518,8 @@
   <data name="Designator LCD tag" xml:space="preserve">
     <value>Designator LCD tag</value>
   </data>
-  <data name="Place this tag on an LCD, select the Automata Log app to see designator output." xml:space="preserve">
-    <value>Place this tag on an LCD, select the Automata Log app to see designator output.</value>
+  <data name="Place this tag on an LCD, select the AutomataLog app to see designator output." xml:space="preserve">
+    <value>Place this tag on an LCD, select the AutomataLog app to see designator output.</value>
   </data>
   <data name="Local-job radius" xml:space="preserve">
     <value>Local-job radius</value>
@@ -1717,8 +1758,8 @@
   <data name="LCD tag" xml:space="preserve">
     <value>LCD tag</value>
   </data>
-  <data name="Put this tag on LCD panels with Automata Log app set to show the block's logs." xml:space="preserve">
-    <value>Put this tag on LCD panels with Automata Log app set to show the block's logs.</value>
+  <data name="Put this tag on LCD panels with AutomataLog app set to show the block's logs." xml:space="preserve">
+    <value>Put this tag on LCD panels with AutomataLog app set to show the block's logs.</value>
   </data>
   <data name="Set orientation target" xml:space="preserve">
     <value>Set orientation target</value>
@@ -1801,8 +1842,8 @@
   <data name="LCD output" xml:space="preserve">
     <value>LCD output</value>
   </data>
-  <data name="Observation area" xml:space="preserve">
-    <value>Observation area</value>
+  <data name="Construction field" xml:space="preserve">
+    <value>Construction field</value>
   </data>
   <data name="Mining" xml:space="preserve">
     <value>Mining</value>
