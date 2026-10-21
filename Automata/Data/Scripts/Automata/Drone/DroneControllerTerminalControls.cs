@@ -62,12 +62,7 @@ namespace Automata.Drone
             Action<DroneControllerBlock, StringBuilder> writer = (l, sb) => sb.AppendLoc(get(l) ? MyStrings.On : MyStrings.Off);
             AddAction(id, Loc.F(MyStrings.ActionToggle, Loc.T(name)), ICON_TOGGLE, l => { set(l, !get(l)); l.Terminal_Refresh(); }, writer);
             AddAction(id + "_On", Loc.F(MyStrings.ActionOn, Loc.T(name)), ICON_ON, l => { if (!get(l)) { set(l, true); l.Terminal_Refresh(); } }, writer);
-            AddAction(id + "_Off", Loc.F(MyStrings.ActionOff, Loc.T(name)), ICON_OFF, l => {
-                if (get(l)){
-                    set(l, false);
-                    l.Terminal_Refresh();
-                }
-            }, writer);
+            AddAction(id + "_Off", Loc.F(MyStrings.ActionOff, Loc.T(name)), ICON_OFF, l => { if (get(l)) { set(l, false); l.Terminal_Refresh(); } }, writer);
         }
 
         static void AddAction(string id, string name, string icon, Action<DroneControllerBlock> act, Action<DroneControllerBlock, StringBuilder> writer)
