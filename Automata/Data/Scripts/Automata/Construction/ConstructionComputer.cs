@@ -522,7 +522,9 @@ namespace Automata.Construction
                             RecipientBlockType = MessageQueue.IAIBlockType.Orchestrator,
                             Channel = Channel.CONSTRUCTION_COMPUTER_JOB_ANNOUNCEMENT,
                         };
-                        messageQueue.BroadcastMessage<JobAnnouncement>(ownAntenna, msg, true);
+                        GridAntennaReg senderReg = null;
+                        if (GridAntennaReg.Ensure(messageQueue, ref senderReg, cube))
+                            messageQueue.BroadcastMessage<JobAnnouncement>(senderReg, msg, true, MessageQueue.IAIBlockType.ConstructionComputer);
                     }
                     else
                     {
@@ -558,4 +560,4 @@ namespace Automata.Construction
 
 
     }
-}
+}

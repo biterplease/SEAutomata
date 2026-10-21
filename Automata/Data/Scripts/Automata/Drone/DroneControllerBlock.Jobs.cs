@@ -2805,7 +2805,7 @@ namespace Automata.Drone
                 return;
             }
             var queue = AutomataSession.GetMessageQueue();
-            if (queue == null || primaryAntenna == null) return;
+            if (queue == null) return;
             if (SyncAntennaReg(queue) == null) return;
             ReadAwards(queue);
             ReadAuctions(queue);
@@ -3135,7 +3135,7 @@ namespace Automata.Drone
                 SenderOwnerId = block.OwnerId,
                 Channel = Channel.ORCHESTRATOR_AUCTION_BIDS,
             };
-            queue.BroadcastMessage(antennaReg, msg);
+            queue.BroadcastMessage(antennaReg, msg, false, VirtualNetwork.MessageQueue.IAIBlockType.Drone);
             if (Log.DebugEnabled) Log.Debug("Drone {0}: bid on auction {1} (job {2}, {3})", _entityId, auction.AuctionId, auction.JobId, auction.JobType);
         }
 
@@ -3231,7 +3231,7 @@ namespace Automata.Drone
                 RecipientBlockType = VirtualNetwork.MessageQueue.IAIBlockType.ConstructionComputer | VirtualNetwork.MessageQueue.IAIBlockType.MiningSurveyor
                                      | VirtualNetwork.MessageQueue.IAIBlockType.LogisticsComputer | VirtualNetwork.MessageQueue.IAIBlockType.Orchestrator,
                 Channel = Channel.JOB_KEEPALIVE,
-            });
+            }, false, VirtualNetwork.MessageQueue.IAIBlockType.Drone);
         }
 
         // Sent until someone that listens takes it (the drone may finish out of range: sent again each time the last copy
@@ -3269,7 +3269,7 @@ namespace Automata.Drone
                                          | VirtualNetwork.MessageQueue.IAIBlockType.LogisticsComputer | VirtualNetwork.MessageQueue.IAIBlockType.MiningSurveyor,
                     Channel = r.Outcome == JobOutcome.Completed ? Channel.TASKS_COMPLETED : Channel.TASKS_ABORTED,
                 };
-                if (queue.BroadcastMessage(antennaReg, msg) == ErrorCode.None) unsentReportSent[i] = msg;
+                if (queue.BroadcastMessage(antennaReg, msg, false, VirtualNetwork.MessageQueue.IAIBlockType.Drone) == ErrorCode.None) unsentReportSent[i] = msg;
             }
         }
 

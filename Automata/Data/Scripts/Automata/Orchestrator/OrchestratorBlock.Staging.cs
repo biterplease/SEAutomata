@@ -97,7 +97,7 @@ namespace Automata.Orchestrator
                 if (!o.IsRunning || o.settings == null || !o.settings.StagingArea) continue;   // the parking protocol is on
                 if (!Drone.AnchorDirectory.IsAllowed(o.OwnerId, droneOwner)) continue;
                 double d = Vector3D.DistanceSquared(o.block.GetPosition(), near);
-                bool linked = queue != null && queue.Relays.Reaches(o.block.CubeGrid, droneGrid, o.OwnerId);
+                bool linked = queue != null && queue.Relays.Reaches(o.block.CubeGrid, droneGrid, o.OwnerId, false, true);   // a docked drone is reached through its connectors
                 if (!linked && d > 5000.0 * 5000.0) continue;
                 if (d < bestD) { bestD = d; best = o; }
             }

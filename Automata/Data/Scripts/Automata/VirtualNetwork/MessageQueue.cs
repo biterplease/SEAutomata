@@ -13,13 +13,13 @@ namespace Automata.VirtualNetwork
 {
     /// <summary>
     /// The in-memory message bus of the mod (server only). No block registers with it and nothing is encoded:
-    ///  - A sender hands over its antenna's <see cref="AntennaReg"/> (position, range, grid, owner) with the message; the
-    ///    queue notes where and how far it was sent from. A reader hands over its own and the block type it reads as.
-    ///    Both go on to the <see cref="RelayGraph"/>, which keeps one entry per antenna id.
+    ///  - A sender hands over its grid's <see cref="GridAntennaReg"/> (grid, owner) and its block type with the message; a
+    ///    reader hands over its own and the block type it reads as. Whether the reader is where the message went is the
+    ///    <see cref="RelayGraph"/>'s answer (same group, the antenna network, a docked drone's connectors).
     ///  - A message lives MessageRetentionTicks (default 10 s) in its channel's log. A reader keeps a cursor per channel
     ///    (a sequence number): each read looks at what came after it, delivers what the reader may take - not its own,
-    ///    its block type, owner / faction shares with the sender, in range of the sender's recorded position (its radius,
-    ///    or the relay network) - and moves on. A message out of range when the reader gets to it is missed.
+    ///    its block type, owner / faction shares with the sender, reachable from the sender's grid - and moves on. A
+    ///    message out of reach when the reader gets to it is missed.
     ///  - Whether anyone read a message is told by <see cref="Message{T}.Delivered"/> (senders that must be heard resend).
     /// The payload is the sender's object, shared by every reader: read-only once sent (VirtualNetwork/CLAUDE.md).
     /// </summary>
@@ -36,9 +36,9 @@ namespace Automata.VirtualNetwork
             /// <summary>When the snapshot was taken (TimeUtil ms): message times are moved on by the time the world was saved.</summary>
             [ProtoMember(2)]
             public ulong SavedAt;
-            /// <summary>The relay graph's antennas.</summary>
-            [ProtoMember(3)]
-            public List<AntennaReg> Antennas;
+            /// <summary>The relay graph's grids (member 3 held per-antenna entries once).</summary>
+            [ProtoMember(4)]
+            public List<GridAntennaReg> Grids;
             public MessageQueueSnapshot() { }
         }
         /// <summary>A message in the snapshot: <see cref="TimestampedMessage"/> with the payload encoded.</summary>
@@ -54,12 +54,10 @@ namespace Automata.VirtualNetwork
             [ProtoMember(10)] public Channel Channel;
             [ProtoMember(11)] public IAIBlockType RecipientBlockType;
             [ProtoMember(13)] public ushort PayloadTypeValue;
-            [ProtoMember(14)] public long SenderAntennaId;
-            [ProtoMember(15)] public Vector3DData SenderPosition;
-            [ProtoMember(16)] public double SenderRange;
             [ProtoMember(17)] public long SenderGridId;
             [ProtoMember(18)] public bool BothRanges;
             [ProtoMember(19)] public int Deliveries;
+            [ProtoMember(20)] public IAIBlockType SenderBlockType;
             public SavedMessage() { }
         }
         /// <summary>
@@ -81,11 +79,10 @@ namespace Automata.VirtualNetwork
             public IAIBlockType RecipientBlockType;
             public ushort PayloadTypeValue;
             #region Where it was sent from
-            public long SenderAntennaId;
-            public Vector3D SenderPosition;
-            public double SenderRange;
             public long SenderGridId;
-            /// <summary>Both antennas must reach each other (else only the sender's radius counts: a radio hears beyond its own).</summary>
+            /// <summary>What sent it (a docked drone reaches the groups its connectors hold).</summary>
+            public IAIBlockType SenderBlockType;
+            /// <summary>Both ends must reach each other (else only the sender's reach counts: a radio is heard beyond its own range).</summary>
             public bool BothRanges;
             #endregion
             /// <summary>How many readers took it.</summary>
@@ -136,8 +133,6 @@ namespace Automata.VirtualNetwork
             return nowMs < message.Receipt.SentAt + (ulong)_messageExpiration.TotalMilliseconds;
         }
 
-        /// <summary>Register (or refresh) an antenna in the relay graph. Static ones are only updated at its fallback rebuild.</summary>
-        public void RegisterAntenna(AntennaReg reg) { if (reg != null) Relays.Register(reg); }
         private readonly Dictionary<KeyValuePair<long, long>, bool> _shareCache = new Dictionary<KeyValuePair<long, long>, bool>();
         private readonly TimeSpan _messageExpiration;
         private readonly object _cleanupLock = new object();
@@ -189,11 +184,13 @@ namespace Automata.VirtualNetwork
 
         #region Sending
         /// <summary>
-        /// Sends the message from 'sender' (the sender's antenna as it is now: see <see cref="AntennaReg.Sync"/>). Nobody
+        /// Sends the message from 'sender' (its grid's entry: see <see cref="GridAntennaReg.Ensure"/>; 'senderType': the sending
+        /// block's type, a drone's messages also go through the connectors it is docked by). Nobody
         /// is looked up: readers in range take it while it lives. Returns None once it is in the channel; whether anyone
         /// took it is <see cref="Message{T}.Delivered"/>, later.
         /// </summary>
-        public ErrorCode BroadcastMessage<T>(AntennaReg sender, Message<T> message, bool enforceCommsRange = false) where T : class, IMessagePayload
+        public ErrorCode BroadcastMessage<T>(GridAntennaReg sender, Message<T> message, bool enforceCommsRange = false,
+                                             IAIBlockType senderType = IAIBlockType.None) where T : class, IMessagePayload
         {
             if (_isShuttingDown)
                 return ErrorCode.ShutdownInProgress;
@@ -201,10 +198,9 @@ namespace Automata.VirtualNetwork
                 return ErrorCode.MessageIsNull;
             if (message.Channel == Channel.DIRECT_MESSAGE)
                 return ErrorCode.InvalidChannel;
-            if (sender == null || !sender.Working)
+            if (sender == null || sender.GridId == 0)
                 return ErrorCode.SenderAntennaNotRegistered;
 
-            Relays.Register(sender);
             var log = _channels[(int)message.Channel];
             var msg = new TimestampedMessage
             {
@@ -217,10 +213,8 @@ namespace Automata.VirtualNetwork
                 Payload = message.Payload,
                 RecipientBlockType = message.RecipientBlockType,
                 PayloadType = GetPayloadType(message.Payload),
-                SenderAntennaId = sender.AntennaId,
-                SenderPosition = sender.Pos,
-                SenderRange = sender.Range,
                 SenderGridId = sender.GridId,
+                SenderBlockType = senderType,
                 BothRanges = enforceCommsRange,
             };
             lock (log.Lock)
@@ -231,15 +225,9 @@ namespace Automata.VirtualNetwork
                 log.LastSentAt = msg.SentAt;
             }
             message.Receipt = msg;
-            if (Log.DebugEnabled) Log.Debug("VNet: {0} {1} #{2} from {3} ({4:F0} m) to {5}", message.Channel, message.Payload != null ? message.Payload.GetType().Name : "null",
-                          message.MessageId, message.SenderId, sender.Range, message.RecipientBlockType);
+            if (Log.DebugEnabled) Log.Debug("VNet: {0} {1} #{2} from {3} (grid '{4}') to {5}", message.Channel, message.Payload != null ? message.Payload.GetType().Name : "null",
+                          message.MessageId, message.SenderId, sender.GridName, message.RecipientBlockType);
             return ErrorCode.None;
-        }
-
-        /// <summary>For code that has the antenna block, not a registration (a throwaway one is made).</summary>
-        public ErrorCode BroadcastMessage<T>(IMyRadioAntenna antenna, Message<T> message, bool enforceCommsRange = false) where T : class, IMessagePayload
-        {
-            return BroadcastMessage(antenna != null ? AntennaReg.Make(antenna) : null, message, enforceCommsRange);
         }
 
         private static PayloadType GetPayloadType(IMessagePayload payload)
@@ -273,13 +261,13 @@ namespace Automata.VirtualNetwork
 
         #region Reading
         /// <summary>
-        /// Takes what came to 'readerId' (a block of type 'readerType', on the antenna 'reader': see <see cref="AntennaReg.Sync"/>)
+        /// Takes what came to 'readerId' (a block of type 'readerType', on the grid 'reader': see <see cref="GridAntennaReg.Ensure"/>)
         /// on 'channel' since its last read, at most 'maxMessages'. A reader reads a channel with one payload filter.
         /// </summary>
         public ErrorCode ReadMessages<T>(
             long readerId,
             IAIBlockType readerType,
-            AntennaReg reader,
+            GridAntennaReg reader,
             Channel channel,
             List<Message<T>> outMessages,
             int maxMessages = 10,
@@ -291,8 +279,8 @@ namespace Automata.VirtualNetwork
                 return ErrorCode.ShutdownInProgress;
             if (clear)
                 outMessages.Clear();
-            if (maxMessages <= 0 || reader == null || !reader.Working)
-                return reader == null || !reader.Working ? ErrorCode.RecipientNotValid : ErrorCode.TryAgainLater;
+            if (maxMessages <= 0 || reader == null || reader.GridId == 0)
+                return reader == null || reader.GridId == 0 ? ErrorCode.RecipientNotValid : ErrorCode.TryAgainLater;
 
             var log = _channels[(int)channel];
             ulong nowMs = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow);
@@ -303,7 +291,7 @@ namespace Automata.VirtualNetwork
             {
                 long cursor;
                 log.Cursors.TryGetValue(readerId, out cursor);
-                // Early exits, before any work (no registration, no scan): the channel never had a message / nothing new since
+                // Early exits, before any work (no scan): the channel never had a message / nothing new since
                 // this reader's last read / everything new has expired already
                 if (log.LastSeq <= cursor) return ErrorCode.TryAgainLater;
                 if (log.LastSentAt < cutoff)
@@ -311,7 +299,6 @@ namespace Automata.VirtualNetwork
                     log.Cursors[readerId] = log.LastSeq;
                     return ErrorCode.TryAgainLater;
                 }
-                Relays.Register(reader);
                 var items = log.Items;
                 for (int i = FirstAfter(items, cursor); i < items.Count && taken < maxMessages; i++)
                 {
@@ -321,7 +308,7 @@ namespace Automata.VirtualNetwork
                     if (m.RecipientBlockType != IAIBlockType.None && (m.RecipientBlockType & readerType) == 0) continue;
                     if (messageFilters != PayloadType.None && (m.PayloadType & messageFilters) == 0) continue;
                     if (!CanShare(m.SenderOwnerId, reader.OwnerId)) continue;
-                    if (!InRange(m, reader)) { outOfRange++; continue; }
+                    if (!InRange(m, reader, readerType)) { outOfRange++; continue; }
                     var payload = m.Payload as T;   // the sender's object, shared: read-only
                     if (payload == null)
                     {
@@ -362,24 +349,19 @@ namespace Automata.VirtualNetwork
         }
 
         /// <summary>
-        /// Is the reader where the message went? Within the sender's radius (as sent: a radio is heard beyond its own
-        /// range, so only the sender's counts - or both, for messages sent with enforceCommsRange), else if the relay
-        /// network carries it.
+        /// Is the reader where the message went? The sender's grid reaches the reader's (same group of grids: always; else
+        /// through the antenna network, see <see cref="RelayGraph"/>; a drone on either end also counts the groups its
+        /// connectors hold). Radio edges need both antennas to reach each other, so reach is symmetric (enforceCommsRange is moot).
         /// </summary>
-        private bool InRange(TimestampedMessage m, AntennaReg reader)
+        private const bool DOCKED_DRONE_TALKS_TO_ALL = true;
+
+        private bool InRange(TimestampedMessage m, GridAntennaReg reader, IAIBlockType readerType)
         {
-            if (m.SenderAntennaId == reader.AntennaId) return true;   // one antenna, several blocks
-            double d2 = Vector3D.DistanceSquared(m.SenderPosition, reader.Pos);
-            bool direct = d2 <= m.SenderRange * m.SenderRange;
-            if (m.BothRanges)
-            {
-                if (direct && d2 <= reader.Range * reader.Range) return true;
-                return Relays.Reaches(m.SenderGridId, reader.GridId, m.SenderOwnerId) && Relays.Reaches(reader.GridId, m.SenderGridId, reader.OwnerId);
-            }
-            // Simulate IGC: an antenna can RECEIVE even if its transmit range is lower, but what it sends doesn't get there
-            if (direct) return true;
-            // Relayed: the same base (connected grids), or other bases / drones in between (TODO/13)
-            return Relays.Reaches(m.SenderGridId, reader.GridId, m.SenderOwnerId);
+            // A docked drone is reached through (and reaches) the groups its connectors hold: with the orchestrator only, or
+            // with every block type (job reports go to the computers too)
+            bool senderDrone = m.SenderBlockType == IAIBlockType.Drone && (DOCKED_DRONE_TALKS_TO_ALL || readerType == IAIBlockType.Orchestrator);
+            bool readerDrone = readerType == IAIBlockType.Drone && (DOCKED_DRONE_TALKS_TO_ALL || m.SenderBlockType == IAIBlockType.Orchestrator);
+            return Relays.Reaches(m.SenderGridId, reader.GridId, m.SenderOwnerId, senderDrone, readerDrone);
         }
 
         // Owner or faction of the sender (cached; cleared with the cleanup)
@@ -405,14 +387,6 @@ namespace Automata.VirtualNetwork
                 var log = _channels[i];
                 lock (log.Lock) log.Cursors.Remove(readerId);
             }
-        }
-        #endregion
-
-        #region Antennas
-        /// <summary>A block's antenna is off / gone: out of the relay network until it registers again (with its next send / read).</summary>
-        public void DeregisterAntenna(long antennaId)
-        {
-            Relays.Deregister(antennaId);
         }
         #endregion
 
@@ -445,7 +419,7 @@ namespace Automata.VirtualNetwork
         #region Save
         /// <summary>
         /// World save (session SaveData): every message in flight, any channel, the payloads encoded here and nowhere else,
-        /// and the relay graph's antennas. Expired messages are dropped first.
+        /// and the relay graph's grids. Expired messages are dropped first.
         /// </summary>
         public byte[] Serialize()
         {
@@ -470,31 +444,29 @@ namespace Automata.VirtualNetwork
                             Channel = msg.Channel,
                             RecipientBlockType = msg.RecipientBlockType,
                             PayloadTypeValue = msg.PayloadTypeValue,
-                            SenderAntennaId = msg.SenderAntennaId,
-                            SenderPosition = Vector3DData.FromVector3D(msg.SenderPosition),
-                            SenderRange = msg.SenderRange,
                             SenderGridId = msg.SenderGridId,
+                            SenderBlockType = msg.SenderBlockType,
                             BothRanges = msg.BothRanges,
                             Deliveries = msg.Deliveries,
                         });
                     }
                 }
             }
-            if (Log.DebugEnabled) Log.Debug("VNet: snapshot of {0} message(s), {1} antenna(s) for the save", saved.Count, Relays.Count);
+            if (Log.DebugEnabled) Log.Debug("VNet: snapshot of {0} message(s), {1} grid(s) for the save", saved.Count, Relays.Count);
             return MyUtilitiesDelegate.SerializeToBinary<MessageQueueSnapshot>(
-                new MessageQueueSnapshot { Messages = saved, SavedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow), Antennas = Relays.Snapshot() });
+                new MessageQueueSnapshot { Messages = saved, SavedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow), Grids = Relays.Snapshot() });
         }
 
         /// <summary>
         /// World load (session start): the saved messages back in their channels, with the age they had at the save, and
-        /// the relay graph's antennas (its world scan is due a minute later, not at once).
+        /// the relay graph's grids (its world scan is due a minute later, not at once).
         /// </summary>
         public void Deserialize(byte[] data)
         {
             if (data == null || data.Length == 0) return;
             var snapshot = MyUtilitiesDelegate.SerializeFromBinary<MessageQueueSnapshot>(data);
             if (snapshot == null) return;
-            Relays.Restore(snapshot.Antennas, MyAPIGateway.Session.GameplayFrameCounter);
+            Relays.Restore(snapshot.Grids, MyAPIGateway.Session.GameplayFrameCounter);
             if (snapshot.Messages == null) return;
             // The world sat saved for a while: messages keep the age they had at the save (else all would be expired)
             ulong now = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow);
@@ -520,10 +492,8 @@ namespace Automata.VirtualNetwork
                     Channel = saved.Channel,
                     RecipientBlockType = saved.RecipientBlockType,
                     PayloadTypeValue = saved.PayloadTypeValue,
-                    SenderAntennaId = saved.SenderAntennaId,
-                    SenderPosition = saved.SenderPosition.ToVector3D(),
-                    SenderRange = saved.SenderRange,
                     SenderGridId = saved.SenderGridId,
+                    SenderBlockType = saved.SenderBlockType,
                     BothRanges = saved.BothRanges,
                     Deliveries = saved.Deliveries,
                 };

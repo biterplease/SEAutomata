@@ -78,7 +78,7 @@ namespace Automata.Construction
         private static readonly MyStringId StrAssigned = MyStringId.GetOrCompute("assigned");
         private static readonly MyStringId StrOnHoldSeconds = MyStringId.GetOrCompute("on hold {0}s");
         private static readonly MyStringId StrPending = MyStringId.GetOrCompute("pending");
-        private static readonly MyStringId StrWarnNoAntenna = MyStringId.GetOrCompute("Warning: no broadcasting antenna on the grid");
+        private static readonly MyStringId StrWarnNoAntenna = MyStringId.GetOrCompute("Warning: no broadcasting antenna on the grid (only blocks on this grid hear it)");
         #endregion
 
         #region Timing
@@ -96,7 +96,7 @@ namespace Automata.Construction
         private long entityId;
         private MessageQueue messaging;
         private IMyRadioAntenna antenna;
-        private AntennaReg antennaReg;
+        private GridAntennaReg antennaReg;
         private bool ready;
         private int lastScan = int.MinValue / 2, lastAntennaSearch = int.MinValue / 2;
         private int lastFullScan = int.MinValue / 2;
@@ -248,7 +248,12 @@ namespace Automata.Construction
             if (!ready) return;
             try
             {
-                if (IsServer) { Step(); double tl = Util.PerfStats.Start(); UpdateLcd(); Util.PerfStats.Stop(Util.PerfStats.LcdBuild, tl); }
+                if (IsServer) {
+                    Step();
+                    double tl = Util.PerfStats.Start();
+                    UpdateLcd();
+                    Util.PerfStats.Stop(Util.PerfStats.LcdBuild, tl);
+                }
                 block.RefreshCustomInfo();
             }
             catch (Exception ex)
@@ -400,6 +405,7 @@ namespace Automata.Construction
         #region Loop
         private void Step()
         {
+            
             int now = MyAPIGateway.Session.GameplayFrameCounter;
             if (!retrySeen) CheckRetryRequest();   // loaded: the saved request counts as seen
             if (messaging == null) messaging = AutomataSession.GetMessageQueue();
@@ -415,7 +421,7 @@ namespace Automata.Construction
                 status = Loc.T(!settings.Enabled ? StrOffTerminal : StrNotWorking);
                 return;
             }
-            if (antenna == null || now - lastAntennaSearch >= 600)
+            if (now - lastAntennaSearch >= 600)
             {
                 lastAntennaSearch = now;
                 FindAntenna();
@@ -470,7 +476,7 @@ namespace Automata.Construction
 
         private bool EnsureAntenna()
         {
-            return AntennaReg.Ensure(messaging, ref antennaReg, antenna);
+            return GridAntennaReg.Ensure(messaging, ref antennaReg, block);
         }
         #endregion
 
@@ -797,7 +803,7 @@ namespace Automata.Construction
                 job.LastAnnounced = now;
                 job.Message.MessageId = IdGenerator.GenerateId(ref messageCounter, entityId);
                 job.Message.CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow);
-                var error = messaging.BroadcastMessage(antennaReg, job.Message, false);
+                var error = messaging.BroadcastMessage(antennaReg, job.Message, false, MessageQueue.IAIBlockType.ConstructionComputer);
                 job.Announced = false;
                 job.Pending = error == ErrorCode.None;
                 if (error != ErrorCode.None) job.LastResult = error.ToString();
