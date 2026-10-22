@@ -235,8 +235,7 @@ namespace Automata.Drone
                 siteYielding = true;
                 siteYieldStart = now;
                 siteYieldFor = blocker._entityId;
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: shared site: holding for drone {1} ({2:F1} m away)", _entityId, blocker._entityId,
-                          Vector3D.Distance(blocker.HullCentreWorld, myFrom));
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: shared site: holding for drone {1} ({2:F1} m away)", _entityId, blocker._entityId, Vector3D.Distance(blocker.HullCentreWorld, myFrom));
             }
             // Holding is no stall: the progress clocks wait
             taskProgressFrame = now;
@@ -248,8 +247,7 @@ namespace Automata.Drone
         {
             if (!siteYielding) return;
             siteYielding = false;
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: shared site: going on after {1:F0} s ({2})", _entityId,
-                      (MyAPIGateway.Session.GameplayFrameCounter - siteYieldStart) / 60.0, why);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: shared site: going on after {1:F0} s ({2})", _entityId, (MyAPIGateway.Session.GameplayFrameCounter - siteYieldStart) / 60.0, why);
             siteYieldFor = 0;
         }
 

@@ -50,8 +50,6 @@ namespace Automata.Drone
                 l => l.Terminal_DrawNavigationTargets, (l, v) => l.Terminal_DrawNavigationTargets = v);
             AddToggleActions("DrawObservationArea", MyStrings.DrawObservationArea,
                 l => l.Terminal_ObservationAreaDraw, (l, v) => l.Terminal_ObservationAreaDraw = v);
-            AddToggleActions("UseBroadcastController", MyStrings.UseBroadcastController,
-                l => l.Terminal_UseBroadcastController, (l, v) => l.Terminal_UseBroadcastController = v);
             AddAction("GoHome", Loc.T(MyStrings.GoHome), ICON_START, l => l.Terminal_GoHome(), null);
             AddAction("Stop", Loc.T(MyStrings.Stop), ICON_START, l => l.Terminal_StopOrders(), null);
         }
@@ -587,9 +585,6 @@ namespace Automata.Drone
                 c.SupportsMultipleBlocks = true;
                 MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
             }
-            AddCheckbox("Checkbox_UseBroadcastController", MyStrings.UseBroadcastController,
-                MyStrings.BLANK,
-                l => l.Terminal_UseBroadcastController, (l, v) => l.Terminal_UseBroadcastController = v);
             AddButton("Button_GoHome", MyStrings.GoHome,
                 MyStrings.GoHomeTip,
                 l => l.Terminal_GoHome(), HomeConnectorVisibleCondition, true);

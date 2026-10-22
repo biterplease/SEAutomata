@@ -44,8 +44,7 @@ namespace Automata.Drone
                     if (job.Tasks[i].Type != Orchestrator.TaskType.NavigateToolTo || job.Tasks[i + 1].Kind != Orchestrator.TaskKind.Tool) continue;
                     if (sw.Elapsed.TotalMilliseconds > SITE_PROBE_MS)
                     {
-                        if (Log.DebugEnabled) Log.Debug("Drone {0}: pre-load check: {1} block(s) without a site, time up ({2:F1} ms): loading as planned",
-                                  Entity.EntityId, probedUnreachable.Count, sw.Elapsed.TotalMilliseconds);
+                        if (Log.DebugEnabled) Log.Debug("Drone {0}: pre-load check: {1} block(s) without a site, time up ({2:F1} ms): loading as planned", Entity.EntityId, probedUnreachable.Count, sw.Elapsed.TotalMilliseconds);
                         return true;
                     }
                     var nav = job.Tasks[i];
@@ -59,8 +58,7 @@ namespace Automata.Drone
                     if (failure != Orchestrator.TaskFailure.Unreachable)
                     {
                         if (probedUnreachable.Count > 0)
-                            if (Log.DebugEnabled) Log.Debug("Drone {0}: pre-load check: {1} block(s) without a site before one with ({2:F1} ms)", Entity.EntityId,
-                                      probedUnreachable.Count, sw.Elapsed.TotalMilliseconds);
+                            if (Log.DebugEnabled) Log.Debug("Drone {0}: pre-load check: {1} block(s) without a site before one with ({2:F1} ms)", Entity.EntityId, probedUnreachable.Count, sw.Elapsed.TotalMilliseconds);
                         return true;   // a site (or another problem the job's own run handles)
                     }
                     var key = new KeyValuePair<long, Vector3I>(tool.TargetEntityId, tool.TargetBlock.ToVector3I());
@@ -70,8 +68,7 @@ namespace Automata.Drone
             }
             finally { strafeNext = strafeWas; siteProbing = false; }
             if (checkedCount == 0) return true;
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: pre-load check: none of {1} block(s) has a work site ({2:F1} ms): job given back", Entity.EntityId,
-                      checkedCount, sw.Elapsed.TotalMilliseconds);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: pre-load check: none of {1} block(s) has a work site ({2:F1} ms): job given back", Entity.EntityId, checkedCount, sw.Elapsed.TotalMilliseconds);
             jobAbortReason = Loc.F(StrNoBlockReachable, checkedCount);
             return false;
         }

@@ -38,17 +38,8 @@ namespace Automata.Orchestrator
         private static readonly MyStringId StrOreHauler = MyStringId.GetOrCompute("ore hauler");
         private static readonly MyStringId StrMiningDrone = MyStringId.GetOrCompute("mining drone");
         private static readonly MyStringId StrJobOrderedByAPlayer = MyStringId.GetOrCompute("{1}: ordered by a player\n  {2}");
-        private static readonly MyStringId StrTagged = MyStringId.GetOrCompute("tagged {0} ({1})");
         private static readonly MyStringId StrJobCancelledNotConfirmedIn = MyStringId.GetOrCompute("{1}: cancelled, not confirmed in {2} s");
         private static readonly MyStringId StrNotConfirmedInTime = MyStringId.GetOrCompute("not confirmed in time");
-        private static readonly MyStringId StrScoutSpotJobAcceptedOre = MyStringId.GetOrCompute("Scout spot job accepted: {0} ore scouts on the way.");
-        private static readonly MyStringId StrScoutSpotJobAcceptedAn = MyStringId.GetOrCompute("Scout spot job accepted: an ore scout is on the way.");
-        private static readonly MyStringId StrScoutAreaJobAcceptedOre = MyStringId.GetOrCompute("Scout area job accepted: {0} ore scout(s) on the way{1}.");
-        private static readonly MyStringId StrSectorsCancelled = MyStringId.GetOrCompute(", {0} sector(s) cancelled");
-        private static readonly MyStringId StrCombatEngageAcceptedCombatDrones = MyStringId.GetOrCompute("Combat engage accepted: {0} combat drones on the way to {1}.");
-        private static readonly MyStringId StrCombatEngageAcceptedACombat = MyStringId.GetOrCompute("Combat engage accepted: a combat drone is on the way to {0}.");
-        private static readonly MyStringId StrCombatEscortAcceptedCombatDrones = MyStringId.GetOrCompute("Combat escort accepted: {0} combat drones on the way to escort {1}.");
-        private static readonly MyStringId StrCombatEscortAcceptedACombat = MyStringId.GetOrCompute("Combat escort accepted: a combat drone is on the way to escort {0}.");
         private static readonly MyStringId StrAutomataDesignatorOrderOrchestrator = MyStringId.GetOrCompute("Automata: {0} designator order {1} (orchestrator '{2}')");
         #endregion
 
@@ -152,8 +143,7 @@ namespace Automata.Orchestrator
             knownJobs[key] = int.MaxValue;
             jobQueue.Add(new QueuedJob { Announcement = ja, Key = key, SenderOwner = block.OwnerId, Received = now });
             AddEvent(Loc.F(StrJobOrderedByAPlayer, jobId, type, what));
-            Log.Info("Orchestrator {0}: player job {1} ({2}, order {3}, player {4}): {5} task(s), {6}{7}", entityId, jobId, type, orderId, identity,
-                     tasks.Count, what, requiredDrone != 0 ? ", tagged drone " + requiredDrone : "");
+            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: player job {1} ({2}, order {3}, player {4}): {5} task(s), {6}{7}", entityId, jobId, type, orderId, identity, tasks.Count, what, requiredDrone != 0 ? ", tagged drone " + requiredDrone : "");
             return jobId;
         }
 
@@ -168,15 +158,6 @@ namespace Automata.Orchestrator
         {
             PlayerJob pj;
             return key.Key == entityId && playerJobs.TryGetValue(key.Value, out pj) ? pj.RequiredDrone : 0;
-        }
-
-        /// <summary>"Use broadcast controller": a drone tagged with a designator ("tagged 'name' (engage)").</summary>
-        public void BroadcastTagged(string droneName, string mode)
-        {
-            if (settings == null || !settings.UseBroadcastController) return;
-            string via;
-            bool sent = BroadcastControllerSender.Send(block, Loc.F(StrTagged, droneName, mode), out via);
-            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: tagged {1} ({2}), broadcast {3}: {4}", entityId, droneName, mode, sent ? "sent via" : "not sent", via);
         }
 
         private bool IsPlayerJob(KeyValuePair<long, uint> key)
@@ -243,7 +224,7 @@ namespace Automata.Orchestrator
                     if (jobQueue[q].Key.Equals(key)) jobQueue.RemoveAt(q);
                 foreach (var open in auctions.Values)
                     if (open.JobKey.Equals(key)) closing.Add(open.Auction.AuctionId);
-                for (int c = 0; c < closing.Count; c++) { auctions.Remove(closing[c]); _auctionJobs.Remove(closing[c]); }
+                for (int c = 0; c < closing.Count; c++) { QueueClosed(auctions[closing[c]], null); auctions.Remove(closing[c]); _auctionJobs.Remove(closing[c]); }
                 closing.Clear();
                 knownJobs.Remove(key);
                 droppedCount++;
@@ -279,40 +260,8 @@ namespace Automata.Orchestrator
             // Spot check / engage: green; area sweep / escort: blue
             ScoutPointer.Feedback(order.Identity, order.Type == JobType.DesignatorScoutArea || order.Type == JobType.DesignatorEscort
                                                   ? DesignatorSignal.ConfirmedBlue : DesignatorSignal.ConfirmedGreen);
-            BroadcastAccepted(order);
             LogDesignatorOrder(order);
-            Log.Info("Orchestrator {0}: player order {1} confirmed ({2} job(s), {3} cancelled)", entityId, order.OrderId, order.Assigned, order.Cancelled);
-        }
-
-        // "Use broadcast controller": the accepted order as a chat line through a Broadcast Controller on this construct
-        private void BroadcastAccepted(PlayerOrder order)
-        {
-            if (!settings.UseBroadcastController) return;
-            string text;
-            switch (order.Type)
-            {
-                case JobType.DesignatorScoutPoint:
-                    text = order.Assigned > 1 ? Loc.F(StrScoutSpotJobAcceptedOre, order.Assigned)
-                                              : Loc.T(StrScoutSpotJobAcceptedAn);
-                    break;
-                case JobType.DesignatorScoutArea:
-                    text = Loc.F(StrScoutAreaJobAcceptedOre, order.Assigned,
-                                         order.Cancelled > 0 ? Loc.F(StrSectorsCancelled, order.Cancelled) : "");
-                    break;
-                case JobType.DesignatorEngage:
-                    text = order.Assigned > 1 ? Loc.F(StrCombatEngageAcceptedCombatDrones, order.Assigned, order.Name)
-                                              : Loc.F(StrCombatEngageAcceptedACombat, order.Name);
-                    break;
-                case JobType.DesignatorEscort:
-                    text = order.Assigned > 1 ? Loc.F(StrCombatEscortAcceptedCombatDrones, order.Assigned, order.Name)
-                                              : Loc.F(StrCombatEscortAcceptedACombat, order.Name);
-                    break;
-                default:
-                    return;
-            }
-            string via;
-            bool sent = BroadcastControllerSender.Send(block, text, out via);
-            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: order {1} accepted, broadcast {2}: {3}", entityId, order.OrderId, sent ? "sent via" : "not sent", via);
+            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: player order {1} confirmed ({2} job(s), {3} cancelled)", entityId, order.OrderId, order.Assigned, order.Cancelled);
         }
 
         private readonly List<uint> recallJobIds = new List<uint>();
@@ -347,7 +296,7 @@ namespace Automata.Orchestrator
                     if (jobQueue[q].Key.Equals(key)) jobQueue.RemoveAt(q);
                 foreach (var open in auctions.Values)
                     if (open.JobKey.Equals(key)) closing.Add(open.Auction.AuctionId);
-                for (int c = 0; c < closing.Count; c++) { auctions.Remove(closing[c]); _auctionJobs.Remove(closing[c]); }
+                for (int c = 0; c < closing.Count; c++) { QueueClosed(auctions[closing[c]], null); auctions.Remove(closing[c]); _auctionJobs.Remove(closing[c]); }
                 closing.Clear();
                 knownJobs.Remove(key);
                 droppedCount++;
@@ -356,8 +305,7 @@ namespace Automata.Orchestrator
             }
             recallJobIds.Clear();
             if (taken.Count > 0) drones = Drone.DroneControllerBlock.RecallJobs(entityId, taken, by);
-            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: order {1} recalled at its marker ({2}): {3} drone(s) recalled, {4} job(s) cancelled", entityId, best.OrderId, by,
-                      drones, cancelled);
+            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: order {1} recalled at its marker ({2}): {3} drone(s) recalled, {4} job(s) cancelled", entityId, best.OrderId, by, drones, cancelled);
             return true;
         }
 
@@ -369,7 +317,7 @@ namespace Automata.Orchestrator
             playerJobs.Remove(jobId);
             PlayerOrder order;
             if (!playerOrders.TryGetValue(pj.OrderId, out order)) return;
-            Log.Info("Orchestrator {0}: player job {1} (order {2}) ended: {3}", entityId, jobId, pj.OrderId, reason);
+            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: player job {1} (order {2}) ended: {3}", entityId, jobId, pj.OrderId, reason);
             if (pj.Assigned) order.Assigned--;
             if (--order.Jobs > 0) return;
             HideGps(order);

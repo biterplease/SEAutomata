@@ -332,8 +332,7 @@ namespace Automata.Pathfinding
                         Link l = Between(na, nb.Id);
                         if (l != null)
                         {
-                            if (Log.DebugEnabled) Log.Debug("Pathfinding memory: link {0} -> {1} ({2:F0} m) blocked by {3}: dropped", na.Id, nb.Id, Vector3D.Distance(a, b),
-                                      e != null ? e.DisplayName : "?");
+                            if (Log.DebugEnabled) Log.Debug("Pathfinding memory: link {0} -> {1} ({2:F0} m) blocked by {3}: dropped", na.Id, nb.Id, Vector3D.Distance(a, b), e != null ? e.DisplayName : "?");
                             RemoveLink(l.Id);
                         }
                         ok = false;
@@ -553,7 +552,7 @@ namespace Automata.Pathfinding
                         b.Links.Add(l.Id);
                     }
                 }
-                Log.Info("Pathfinding memory: {0} points, {1} links loaded", nodes.Count, links.Count);
+                if (Log.DebugEnabled) Log.Debug("Pathfinding memory: {0} points, {1} links loaded", nodes.Count, links.Count);
             }
             catch (Exception ex)
             {

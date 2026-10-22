@@ -24,7 +24,6 @@ namespace Automata.Drone
     {
         private static readonly MyStringId StrNoRouteRepositioning = MyStringId.GetOrCompute("No route: repositioning {0:F0} m and planning again ({1}/{2})");
         private static readonly MyStringId StrNoRouteAfterRepositions = MyStringId.GetOrCompute("no route after {0} repositions");
-        private static readonly MyStringId StrDroneNoRouteStopped = MyStringId.GetOrCompute("Drone {0}: no route after {1} repositions, stopped; trying again in {2} s.");
 
         private const int RECOVER_MAX = 3;
         private const double RECOVER_EXCLUDE_MIN = 10;   // m: no spot this close to a place already tried from (or the hull radius x 1.5)
@@ -191,8 +190,7 @@ namespace Automata.Drone
             bool late = Sandbox.ModAPI.MyAPIGateway.Session.GameplayFrameCounter >= recoverDeadline;
             if (left > recoverArrive && !late) return;
             recoverReplanPending = false;
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: {1} ({2}/{3}): planning again", Entity.EntityId,
-                      late ? string.Format("not at the reposition spot in time ({0:F1} m short)", left) : "at the reposition spot", recoverAttempts, RECOVER_MAX);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: {1} ({2}/{3}): planning again", Entity.EntityId, late ? string.Format("not at the reposition spot in time ({0:F1} m short)", left) : "at the reposition spot", recoverAttempts, RECOVER_MAX);
             lastReplanFrame = Sandbox.ModAPI.MyAPIGateway.Session.GameplayFrameCounter;
             if (!Replan()) RouteStopped(Loc.T(StrNoRouteAheadStopped));
         }
@@ -210,7 +208,6 @@ namespace Automata.Drone
             recoverVisited.Clear();
             errorReason = why;
             Report(StrERRORStopped, why);
-            Broadcast(Loc.F(StrDroneNoRouteStopped, Nicknames.Of(Entity), RECOVER_MAX, RouteRetryTicks / 60));
             StopJob(why);
             ClearFlightOrder();
             ClearAllThrustOverrides();

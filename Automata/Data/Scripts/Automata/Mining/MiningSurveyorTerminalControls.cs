@@ -66,7 +66,7 @@ namespace Automata.Mining
             Done = true;
             AutomataProgrammableBlocks.HideVanillaOnce();
             CreateControls();
-            Log.Info("Created MS terminal controls");
+            if (Log.DebugEnabled) Log.Debug("Created MS terminal controls");
         }
 
         static MiningSurveyorBlock GetBlock(IMyTerminalBlock b)
@@ -226,7 +226,6 @@ namespace Automata.Mining
             NicknameControl.Add<IMyProgrammableBlock, MiningSurveyorBlock>(IdPrefix + "Nick", GetBlock, l => l.Nickname, (l, v) => l.Terminal_Nickname = v);
             LcdTagControl.Add(IdPrefix + "LcdTag", GetBlock, l => l.Terminal_LcdTag, (l, v) => l.Terminal_LcdTag = v, "[MiningSurveyor]");
             LcdControls.Add(IdPrefix, GetBlock, l => l.Terminal_LcdStyle, l => l.Terminal_LcdEdited(), true);
-            BroadcastControllerControl.Add(IdPrefix + "UseBroadcastController", GetBlock, l => l.Terminal_UseBroadcastController, (l, v) => l.Terminal_UseBroadcastController = v);
         }
 
         static void OreListContent(IMyTerminalBlock b, List<MyTerminalControlListBoxItem> items, List<MyTerminalControlListBoxItem> selected)

@@ -163,8 +163,7 @@ namespace Automata.VirtualNetwork
             {
                 topo++;
                 indexDirty = true;
-                if (Log.DebugEnabled) Log.Debug("VNet relay: grid {0} '{1}'{2}: {3} radio antenna(s), {4} laser antenna(s) ({5})", reg.GridId, reg.GridName,
-                          reg.IsStatic ? " (static)" : "", reg.RadioAntennas.Count, reg.LaserAntennas.Count, reg.Working() ? "on the network" : "no working antenna");
+                if (Log.DebugEnabled) Log.Debug("VNet relay: grid {0} '{1}'{2}: {3} radio antenna(s), {4} laser antenna(s) ({5})", reg.GridId, reg.GridName, reg.IsStatic ? " (static)" : "", reg.RadioAntennas.Count, reg.LaserAntennas.Count, reg.Working() ? "on the network" : "no working antenna");
                 Vector3DData p0;
                 if (reg.TryGetPosition(out p0)) { st.Anchor = p0; st.AnchorSet = true; }
                 else st.AnchorSet = false;
@@ -550,7 +549,7 @@ namespace Automata.VirtualNetwork
             groupsFrame = frame;
             indexDirty = true;
             topo++;
-            Log.Info("VNet relay: {0} grid(s) restored from the save", regs.Count);
+            if (Log.DebugEnabled) Log.Debug("VNet relay: {0} grid(s) restored from the save", regs.Count);
         }
         #endregion
 

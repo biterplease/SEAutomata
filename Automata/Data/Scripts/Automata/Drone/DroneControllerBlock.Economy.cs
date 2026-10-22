@@ -196,8 +196,7 @@ namespace Automata.Drone
                 else ecoPhase = EcoPhase.Point;
                 ecoPhaseStart = now;
                 if (vLat.Length() > ECO_START_LATERAL) StartTrim(o, now);   // sideways at the start: that first
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: economy flight, leg {1:F0} m: {2} group {3:F1} m/s², cruise {4:F0} m/s (sees {7:F0} m ahead along {8}), flip ~{5:F0} s, {6}",
-                          Entity.EntityId, len, ecoGroup, ecoAccel, ecoCruise, FlipSeconds(), ecoPhase, view, ecoLook);
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: economy flight, leg {1:F0} m: {2} group {3:F1} m/s², cruise {4:F0} m/s (sees {7:F0} m ahead along {8}), flip ~{5:F0} s, {6}", Entity.EntityId, len, ecoGroup, ecoAccel, ecoCruise, FlipSeconds(), ecoPhase, view, ecoLook);
             }
 
             if (ecoPhase == EcoPhase.Quad) return QuadAttitude(o, ref fwd, ref up, d, remaining, crossTrack, vHand);
@@ -294,8 +293,7 @@ namespace Automata.Drone
             double max = bestDot > 0.7 ? EffectiveMax(ecoGroup) : 0;
             if (max < weight * ECO_G_LIFT_MARGIN || weight <= 0)
             {
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: economy flight (gravity) not started: lift group {1} {2:F0} N for a weight of {3:F0} N (needs {4:F1}x), {5:P0} level",
-                          Entity.EntityId, ecoGroup, max, weight, ECO_G_LIFT_MARGIN, bestDot);
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: economy flight (gravity) not started: lift group {1} {2:F0} N for a weight of {3:F0} N (needs {4:F1}x), {5:P0} level", Entity.EntityId, ecoGroup, max, weight, ECO_G_LIFT_MARGIN, bestDot);
                 return false;
             }
             double cfg = settings.AlignToPGravity
@@ -303,12 +301,10 @@ namespace Automata.Drone
             ecoTilt = Math.Min(Math.Min(cfg, ECO_G_TILT_MAX), Math.Acos(Math.Min(1.0, weight * ECO_G_HOVER_SHARE / max)));
             if (ecoTilt < ECO_G_TILT_MIN)
             {
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: economy flight (gravity) not started: tilt limit {1:F0}° is too little to fly sideways (lift group {2:F0} N, weight {3:F0} N)",
-                          Entity.EntityId, MathHelperD.ToDegrees(ecoTilt), max, weight);
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: economy flight (gravity) not started: tilt limit {1:F0}° is too little to fly sideways (lift group {2:F0} N, weight {3:F0} N)", Entity.EntityId, MathHelperD.ToDegrees(ecoTilt), max, weight);
                 return false;
             }
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: economy flight (gravity), leg {1:F0} m: {2} group {3:F0} N for {4:F0} N of weight, tilt up to {5:F0}°",
-                      Entity.EntityId, len, ecoGroup, max, weight, MathHelperD.ToDegrees(ecoTilt));
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: economy flight (gravity), leg {1:F0} m: {2} group {3:F0} N for {4:F0} N of weight, tilt up to {5:F0}°", Entity.EntityId, len, ecoGroup, max, weight, MathHelperD.ToDegrees(ecoTilt));
             return true;
         }
 
@@ -419,15 +415,13 @@ namespace Automata.Drone
             if (!FlipDue(remaining - Math.Max(0, vAlong) * ECO_PREFLIP_SECONDS, vAlong, vHand)) return;
             ecoPreflipAsked = true;
             routeJitForce = true;
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: economy flight: {1} stretch(es) of the route not seen yet, checking them before the flip ({2:F0} m left)",
-                      Entity.EntityId, routeUnseen, remaining);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: economy flight: {1} stretch(es) of the route not seen yet, checking them before the flip ({2:F0} m left)", Entity.EntityId, routeUnseen, remaining);
         }
 
         private void EcoFlip(FlightOrder o, int now)
         {
             if (routeUnseen > 0)
-                Log.Warning("Drone {0}: economy flight: turning round with {1} stretch(es) of the route not seen (the check before the flip found no time)",
-                            Entity.EntityId, routeUnseen);
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: economy flight: turning round with {1} stretch(es) of the route not seen (the check before the flip found no time)", Entity.EntityId, routeUnseen);
             EcoSet(EcoPhase.Flip, now);
         }
 
@@ -488,8 +482,7 @@ namespace Automata.Drone
             double speed = flightState.RelativeVelocity.Length();
             if (dist < 1 || speed < 1) return;
             ecoTrimV = c / dist * speed;
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: economy flight: off course ({1:F0} m/s to correct), new course to the leg's end {2:F0} m on", Entity.EntityId,
-                      (ecoTrimV - flightState.RelativeVelocity).Length(), dist);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: economy flight: off course ({1:F0} m/s to correct), new course to the leg's end {2:F0} m on", Entity.EntityId, (ecoTrimV - flightState.RelativeVelocity).Length(), dist);
             EcoSet(EcoPhase.Trim, now);
         }
 
@@ -499,10 +492,7 @@ namespace Automata.Drone
             Vector3D d, crossTrack, vLat;
             double len, remaining, vAlong;
             if (!EcoLeg(o, out d, out len, out remaining, out crossTrack, out vAlong, out vLat) || len < (flightState.InGravity ? ECO_G_MIN_LEG : ECO_MIN_LEG)) return;
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: economy flight not used on this {1:F0} m leg: gravity {2}, watched {3}, owner {4}, hold attitude {5}, phase {6}, " +
-                      "speed {7:F2} m/s (max 0.5), boring {8}, yielding {9}, mass {10:F0}",
-                      Entity.EntityId, len, flightState.InGravity, o.Watched, routeOwner, o.HoldAttitudeInTransit, o.Phase,
-                      flightState.FrameVelocity.Length(), boring, siteYielding, physicalMass);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: economy flight not used on this {1:F0} m leg: gravity {2}, watched {3}, owner {4}, hold attitude {5}, phase {6}, " + "speed {7:F2} m/s (max 0.5), boring {8}, yielding {9}, mass {10:F0}", Entity.EntityId, len, flightState.InGravity, o.Watched, routeOwner, o.HoldAttitudeInTransit, o.Phase, flightState.FrameVelocity.Length(), boring, siteYielding, physicalMass);
         }
 
         /// <summary>The velocity side of economy flight (after the attitude): burns, coasting, drift corrections.</summary>
@@ -659,8 +649,7 @@ namespace Automata.Drone
         private void EcoSet(EcoPhase phase, int now)
         {
             if (phase == ecoPhase) return;
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: economy flight: {1} -> {2} ({3:F0} m/s along)", Entity.EntityId, ecoPhase, phase,
-                      Vector3D.Dot(flightState.RelativeVelocity, ecoOrder != null ? EcoDir(ecoOrder) : Vector3D.Zero));
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: economy flight: {1} -> {2} ({3:F0} m/s along)", Entity.EntityId, ecoPhase, phase, Vector3D.Dot(flightState.RelativeVelocity, ecoOrder != null ? EcoDir(ecoOrder) : Vector3D.Zero));
             ecoPhase = phase;
             ecoPhaseStart = now;
             ecoBursting = false;

@@ -53,3 +53,9 @@ Because the `MessageQueue` runs in real-time, it must stay in sync across all cl
 - So **payloads are read-only from the moment they are sent**, on both sides: a sender builds a new payload to change anything (auction rebroadcasts resend the same one), a receiver copies what it wants to change (`Job` takes its own task list: `JobAnnouncement.ToJob`, the drone's `new List<Task>(tasks)`). Audited 2026-10-15: nobody writes to a payload or its inventories / task lists after sending or receiving. `JobAnnouncement.FromJob` copies the job's task list.
 - The only encoding is the world save: `MessageQueue.Serialize()` (session `SaveData`, server) and `Deserialize(bytes)` (session `Init`, server), file `Automata_Messages.bin` in the world storage. Payloads are encoded by type tag (`DecodePayload` mirrors `GetPayloadType`: add a new payload class to both). Message ages are kept across the save (with a 10 s life few survive it).
 - Blocks no longer save their messages in flight (the `Outbox` of their save data is gone; the orchestrator's `Winners` / `Failures` are not messages yet and stay).
+
+## Directed messages (2026-10-21)
+- `Message<T>.RecipientId` (0 = everyone): `ReadMessages` skips a message for another reader before the type mask / share / range work; saved (`SavedMessage` ProtoMember 21). `AuctionWinnerAnnouncement.RecipientId` carries it too.
+- `PLAYER_ALERT` / `PlayerAlert` (PayloadType 32768): chat line to the orchestrator. `JobStatusReport.LastPosition`: keepalive position.
+- LC job announcements are cached (`Cached`, rebuilt only when the dock / position / static flag changed).
+- All `Log.Info` / `Log.Warning` are `Log.Debug` (single-line `if (Log.DebugEnabled) Log.Debug(...)`, so `deploy_local_nolog` strips them); `Log.Error` stays.

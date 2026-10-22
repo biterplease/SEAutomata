@@ -248,12 +248,12 @@ namespace Automata
                 _messageQueue = MessageQueue.Instance;
                 LoadMessages();   // in-flight messages of the last save (server)
                 Log.Info("Log level: {0}", _serverConfig.Logging.LogLevel.ToString());
-                Log.Info("Build: {0}", BuildLabel(MOD_VERSION_DEBUG));
+                if (Log.DebugEnabled) Log.Debug("Build: {0}", BuildLabel(MOD_VERSION_DEBUG));
 
                 _updateInterval = _serverConfig.Session.UpdateInterval;
 
                 Log.Info("Mod loaded successfully");
-                Log.Info("Update interval: {0} ticks", _updateInterval);
+                if (Log.DebugEnabled) Log.Debug("Update interval: {0} ticks", _updateInterval);
                 LogisticsComputerTerminalControls.DoOnce(ModContext);
                 // DroneControllerTerminalControls.DoOnce(ModContext);
 
@@ -574,7 +574,7 @@ namespace Automata
                 int c = a.Category.CompareTo(b.Category);
                 return c != 0 ? c : string.Compare(a.DisplayName ?? a.Key.String, b.DisplayName ?? b.Key.String, StringComparison.OrdinalIgnoreCase);
             });
-            Log.Info("Items indexed: {0} ({1} listed), {2} ores, {3} blocks", componentLookup.Count, itemCatalog.Count, oreLookup.Count, blockLookup.Count);
+            if (Log.DebugEnabled) Log.Debug("Items indexed: {0} ({1} listed), {2} ores, {3} blocks", componentLookup.Count, itemCatalog.Count, oreLookup.Count, blockLookup.Count);
         }
 
         private static ItemCategory Categorize(MyPhysicalItemDefinition item, HashSet<MyDefinitionId> playerAmmo)

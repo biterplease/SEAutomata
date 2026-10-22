@@ -34,7 +34,7 @@ namespace Automata.Construction
             AutomataProgrammableBlocks.HideVanillaOnce();
             CreateControls();
             CreateActions();
-            Log.Info("Created CC terminal controls");
+            if (Log.DebugEnabled) Log.Debug("Created CC terminal controls");
         }
 
         static ConstructionComputerBlock GetBlock(IMyTerminalBlock b)
@@ -123,9 +123,6 @@ namespace Automata.Construction
             AddAction(IdPrefix + "_ToggleConstructionField_OFF", Loc.Compose(MyStrings.Toggle, MyStrings.Draw, MyStrings.ConstructionField, MyStrings.Off), ICON_OFF, b => { if (b.Terminal_DrawArea) { b.Terminal_DrawArea = false; } }, (b, sb) => sb.Append(Loc.T(MyStrings.Off)));
             AddAction(IdPrefix + "_ToggleConstructionField_ON_OFF", Loc.Compose(MyStrings.Toggle, MyStrings.Draw, MyStrings.ConstructionField, MyStrings.On_Off), ICON_TOGGLE, b => { b.Terminal_DrawArea = !b.Terminal_DrawArea; }, (b, sb) => sb.Append(b.Terminal_DrawArea ? Loc.T(MyStrings.On) : Loc.T(MyStrings.Off)));
 
-            AddAction(IdPrefix + "_ToggleUseBroadcastController_ON", Loc.Compose(MyStrings.Toggle, MyStrings.UseBroadcastController, MyStrings.On), ICON_ON, b => { if (!b.Terminal_UseBroadcastController) { b.Terminal_UseBroadcastController = true; } }, (b, sb) => sb.Append(Loc.T(MyStrings.On)));
-            AddAction(IdPrefix + "_ToggleUseBroadcastController_OFF", Loc.Compose(MyStrings.Toggle, MyStrings.UseBroadcastController, MyStrings.Off), ICON_OFF, b => { if (b.Terminal_UseBroadcastController) { b.Terminal_UseBroadcastController = false; } }, (b, sb) => sb.Append(Loc.T(MyStrings.Off)));
-            AddAction(IdPrefix + "_ToggleUseBroadcastController_ON_OFF", Loc.Compose(MyStrings.Toggle, MyStrings.UseBroadcastController, MyStrings.On_Off), ICON_TOGGLE, b => { b.Terminal_UseBroadcastController = !b.Terminal_UseBroadcastController; }, (b, sb) => sb.Append(b.Terminal_UseBroadcastController ? Loc.T(MyStrings.On) : Loc.T(MyStrings.Off)));
         }
 
 
@@ -255,7 +252,6 @@ namespace Automata.Construction
             NicknameControl.Add<IMyProgrammableBlock, ConstructionComputerBlock>(IdPrefix + "Nick", GetBlock, l => l.Nickname, (l, v) => l.Terminal_Nickname = v);
             LcdTagControl.Add(IdPrefix + "LcdTag", GetBlock, l => l.Terminal_LcdTag, (l, v) => l.Terminal_LcdTag = v, "[ConstructionComputer]");
             LcdControls.Add(IdPrefix, GetBlock, l => l.Terminal_LcdStyle, l => l.Terminal_LcdEdited(), false);
-            BroadcastControllerControl.Add(IdPrefix + "UseBroadcastController", GetBlock, l => l.Terminal_UseBroadcastController, (l, v) => l.Terminal_UseBroadcastController = v);
         }
     }
 }

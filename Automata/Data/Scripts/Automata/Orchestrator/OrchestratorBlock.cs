@@ -156,6 +156,7 @@ namespace Automata.Orchestrator
         /// <summary>Jobs heard of (announcer, job id) -> frame until which their announcements are ignored.</summary>
         private readonly Dictionary<KeyValuePair<long, uint>, int> knownJobs = new Dictionary<KeyValuePair<long, uint>, int>();
         private readonly List<Message<AuctionWinnerAnnouncement>> winnerOutbox = new List<Message<AuctionWinnerAnnouncement>>();
+        private readonly List<Message<AuctionWinnerAnnouncement>> closedOutbox = new List<Message<AuctionWinnerAnnouncement>>();   // sent once
         private readonly List<Message<JobAnnouncementFailed>> failureOutbox = new List<Message<JobAnnouncementFailed>>();
         /// <summary>Announcements waiting for an auction slot (first come, first auctioned).</summary>
         private sealed class QueuedJob
@@ -212,7 +213,7 @@ namespace Automata.Orchestrator
             ready = true;
             if (!All.Contains(this)) All.Add(this);
             NeedsUpdate |= MyEntityUpdateEnum.EACH_10TH_FRAME;
-            Log.Info("Orchestrator {0}: '{1}' on '{2}'", entityId, block.CustomName, block.CubeGrid.DisplayName);
+            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: '{1}' on '{2}'", entityId, block.CustomName, block.CubeGrid.DisplayName);
         }
 
         public override void UpdateBeforeSimulation10()
@@ -527,6 +528,7 @@ namespace Automata.Orchestrator
                 SendFailures();
                 ReadJobReports(now);
                 ReadKeepalives(now);
+                ReadPlayerAlerts();
                 ForgetJobs(now);
             }
             catch (Exception ex)
@@ -566,15 +568,13 @@ namespace Automata.Orchestrator
             if (first == primary) return;
             if (first != null)
             {
-                Log.Info("Orchestrator {0}: dormant, orchestrator {1} ('{2}') runs this network ({3} queued job(s) dropped: their announcers repeat them)",
-                         entityId, first.entityId, first.block.CustomName, jobQueue.Count);
+                if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: dormant, orchestrator {1} ('{2}') runs this network ({3} queued job(s) dropped: their announcers repeat them)", entityId, first.entityId, first.block.CustomName, jobQueue.Count);
                 jobQueue.Clear();
                 AddEvent(Loc.F(StrDormantRunsTheNetwork, first.block.CustomName));
             }
             else
             {
-                Log.Info("Orchestrator {0}: running the network ({1})", entityId,
-                         primary != null ? "orchestrator " + primary.entityId + " stopped or left it" : "first in it");
+                if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: running the network ({1})", entityId, primary != null ? "orchestrator " + primary.entityId + " stopped or left it" : "first in it");
                 AddEvent(Loc.T(StrRunningTheNetwork));
             }
             primary = first;
@@ -606,8 +606,7 @@ namespace Automata.Orchestrator
                     if (a.IsFunctional && a.Enabled && a.EnableBroadcasting && (ownAntenna == null || AntennaUtil.Range(a) > AntennaUtil.Range(ownAntenna)))
                         ownAntenna = a;
             if (ownAntenna != before)
-                if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: antenna {1} ({2} grid(s) searched)", entityId,
-                          ownAntenna != null ? "'" + ownAntenna.CustomName + "'" : "none", grids.Count);
+                if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: antenna {1} ({2} grid(s) searched)", entityId, ownAntenna != null ? "'" + ownAntenna.CustomName + "'" : "none", grids.Count);
         }
 
         private bool EnsureAntenna()
@@ -634,8 +633,7 @@ namespace Automata.Orchestrator
                     {
                         // Repeated: running, assigned, yielded... (logged once per job)
                         if (ignoreLogged.Add(key))
-                            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: job {1} from {2}: announced again, ignored ({3})", entityId, ja.JobId, msg.SenderId,
-                                      until == int.MaxValue ? "queued / auctioned" : "remembered " + (until - now) / 60 + " s more");
+                            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: job {1} from {2}: announced again, ignored ({3})", entityId, ja.JobId, msg.SenderId, until == int.MaxValue ? "queued / auctioned" : "remembered " + (until - now) / 60 + " s more");
                         continue;
                     }
                     ignoreLogged.Remove(key);
@@ -648,10 +646,7 @@ namespace Automata.Orchestrator
                     }
                     knownJobs[key] = int.MaxValue;   // queued / auctioned: until it ends
                     jobQueue.Add(new QueuedJob { Announcement = ja, Key = key, SenderOwner = msg.SenderOwnerId, Received = now });
-                    if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: queued job {1} ({2}) from {3} {4} on {5}: {6} item(s), {7} task(s); {8} queued, {9} auction(s) open",
-                              entityId, ja.JobId, ja.Type.Label(ja.WeldCategory), ja.EntityType, msg.SenderId, AnnouncementChannels[c],
-                              ja.ComponentsInventory != null ? ja.ComponentsInventory.GetTotalItemCount() : 0, ja.Tasks != null ? ja.Tasks.Count : 0,
-                              jobQueue.Count, auctions.Count);
+                    if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: queued job {1} ({2}) from {3} {4} on {5}: {6} item(s), {7} task(s); {8} queued, {9} auction(s) open", entityId, ja.JobId, ja.Type.Label(ja.WeldCategory), ja.EntityType, msg.SenderId, AnnouncementChannels[c], ja.ComponentsInventory != null ? ja.ComponentsInventory.GetTotalItemCount() : 0, ja.Tasks != null ? ja.Tasks.Count : 0, jobQueue.Count, auctions.Count);
                 }
                 announcementInbox.Clear();
             }
@@ -741,7 +736,7 @@ namespace Automata.Orchestrator
             _auctionJobs[auction.AuctionId] = job;
             string label = ja.Type.Label(auction.WeldCategory);
             AddEvent(Loc.F(StrJobAuctionFor, label));
-            Log.Info("Orchestrator {0}: job {1} ({2}) from {3}: auction {4} for {5}", entityId, ja.JobId, label, key.Key, auction.AuctionId, Describe(items));
+            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: job {1} ({2}) from {3}: auction {4} for {5}", entityId, ja.JobId, label, key.Key, auction.AuctionId, Describe(items));
         }
 
         private Message<Auction> AuctionMessage(Auction auction)
@@ -768,8 +763,7 @@ namespace Automata.Orchestrator
                 open.Message.MessageId = IdGenerator.GenerateId(ref messageCounter, entityId);
                 open.Message.CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow);
                 var error = messaging.BroadcastMessage(antennaReg, open.Message, false, MessageQueue.IAIBlockType.Orchestrator);
-                if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: auction {1} (job {2}, {3}) broadcast: {4}", entityId, open.Auction.AuctionId, open.Auction.JobId,
-                          LabelOf(open.Auction), error == ErrorCode.None ? "sent" : error.ToString());
+                if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: auction {1} (job {2}, {3}) broadcast: {4}", entityId, open.Auction.AuctionId, open.Auction.JobId, LabelOf(open.Auction), error == ErrorCode.None ? "sent" : error.ToString());
             }
         }
         #endregion
@@ -799,8 +793,7 @@ namespace Automata.Orchestrator
                     || (open.Auction.OnlyDroneEntityId != 0 && bid.EntityType == AutomataEntityType.DroneControllerBlock
                         && bid.EntityId != open.Auction.OnlyDroneEntityId))
                 {
-                    if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: auction {1}: bid from {2} {3} not acceptable (caps {4}, {5})", entityId, bid.AuctionId, bid.EntityType,
-                              bid.EntityId, bid.Capabilities, bid.InventoryFulfillmentFlags);
+                    if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: auction {1}: bid from {2} {3} not acceptable (caps {4}, {5})", entityId, bid.AuctionId, bid.EntityType, bid.EntityId, bid.Capabilities, bid.InventoryFulfillmentFlags);
                     continue;
                 }
                 // One bid per bidder (the latest)
@@ -808,11 +801,7 @@ namespace Automata.Orchestrator
                 for (int k = 0; k < open.Bids.Count; k++)
                     if (open.Bids[k].EntityId == bid.EntityId) { open.Bids[k] = bid; replaced = true; break; }
                 if (!replaced) open.Bids.Add(bid);
-                if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: auction {1}: {2} bid from {3} {4}: {5}{6}", entityId, bid.AuctionId, replaced ? "new" : "first",
-                          bid.EntityType, bid.EntityId, bid.EntityType == AutomataEntityType.DroneControllerBlock
-                              ? string.Format("cargo {0:F2} m3, lift {1:F0} kg", (double)bid.MaxCargoVolume, (double)bid.MaxLoadIn1G)
-                              : bid.InventoryFulfillmentFlags + " " + Describe(bid.BidInventory),
-                          bid.IOLocationData != null ? " at port " + bid.IOLocationData.EntityId : "");
+                if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: auction {1}: {2} bid from {3} {4}: {5}{6}", entityId, bid.AuctionId, replaced ? "new" : "first", bid.EntityType, bid.EntityId, bid.EntityType == AutomataEntityType.DroneControllerBlock ? string.Format("cargo {0:F2} m3, lift {1:F0} kg", (double)bid.MaxCargoVolume, (double)bid.MaxLoadIn1G) : bid.InventoryFulfillmentFlags + " " + Describe(bid.BidInventory), bid.IOLocationData != null ? " at port " + bid.IOLocationData.EntityId : "");
             }
             bidInbox.Clear();
         }
@@ -901,14 +890,14 @@ namespace Automata.Orchestrator
                 if (!HasDroneBid(open) && now - open.Started >= noBidTicks)
                 {
                     // A player's order: not auctioned again (cancelled, ExpirePlayerJobs)
-                    if (RequeuePlayerJob(open, now, Loc.T(StrNoBids))) { closing.Add(open.Auction.AuctionId); continue; }
+                    if (RequeuePlayerJob(open, now, Loc.T(StrNoBids))) { QueueClosed(open, null); closing.Add(open.Auction.AuctionId); continue; }
                     failedCount++;
                     QueueFailure(open.JobKey, open.Auction.JobId, open.Auction.AuctionId, Loc.F(open.Bids.Count == 0 ? StrNoBidsWithin : StrNoDroneBidWithin, noBidTicks / 60), FailedHoldSeconds);
                     heldJobs[open.JobKey] = new HeldJob { NoLc = false, Until = now + FailedHoldSeconds * 60 };
                     AddEvent(Loc.F(StrJobFailedNoBids, LabelOf(open.Auction)));
-                    Log.Info("Orchestrator {0}: auction {1} (job {2}, {3}) failed: no bids within {4} s, announcer {5} told", entityId,
-                             open.Auction.AuctionId, open.Auction.JobId, LabelOf(open.Auction), noBidTicks / 60, open.JobKey.Key);
+                    if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: auction {1} (job {2}, {3}) failed: no bids within {4} s, announcer {5} told", entityId, open.Auction.AuctionId, open.Auction.JobId, LabelOf(open.Auction), noBidTicks / 60, open.JobKey.Key);
                     knownJobs[open.JobKey] = now + RETRY_MEMORY_TICKS;   // announced again after the hold: a new auction
+                    QueueClosed(open, null);
                     closing.Add(open.Auction.AuctionId);
                     continue;
                 }
@@ -932,8 +921,7 @@ namespace Automata.Orchestrator
                                                                   Position = open.Auction.PositionData.ToVector3D() };
                         heldJobs.Remove(open.JobKey);
                         AddEvent(WonText(open, assignments, sources));
-                        Log.Info("Orchestrator {0}: auction {1} (job {2}, {3}) won by drone {4}: {5}", entityId, open.Auction.AuctionId,
-                                 open.Auction.JobId, LabelOf(open.Auction), droneId, why);
+                        if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: auction {1} (job {2}, {3}) won by drone {4}: {5}", entityId, open.Auction.AuctionId, open.Auction.JobId, LabelOf(open.Auction), droneId, why);
                         knownJobs[open.JobKey] = now + JOB_MEMORY_TICKS;   // assigned: its repeats are ignored (the drones report back)
                         PlayerJobAssigned(open.JobKey, now, droneId);
                         closing.Add(open.Auction.AuctionId);
@@ -942,19 +930,18 @@ namespace Automata.Orchestrator
                     if (why != open.LastWhy)
                     {
                         open.LastWhy = why;
-                        if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: auction {1} (job {2}) waiting: {3} ({4} bid(s))", entityId, open.Auction.AuctionId,
-                                  open.Auction.JobId, why, open.Bids.Count);
+                        if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: auction {1} (job {2}) waiting: {3} ({4} bid(s))", entityId, open.Auction.AuctionId, open.Auction.JobId, why, open.Bids.Count);
                     }
-                    if (expired && RequeuePlayerJob(open, now, why)) { closing.Add(open.Auction.AuctionId); continue; }
+                    if (expired && RequeuePlayerJob(open, now, why)) { QueueClosed(open, null); closing.Add(open.Auction.AuctionId); continue; }
                     if (expired)
                     {
                         droppedCount++;
                         NoteHeld(open, why, DROPPED_HOLD_SECONDS, now);
                         AddEvent(Loc.F(StrJobDropped, LabelOf(open.Auction), why));
-                        Log.Info("Orchestrator {0}: auction {1} (job {2}, {3}) dropped: {4}", entityId, open.Auction.AuctionId, open.Auction.JobId,
-                                 LabelOf(open.Auction), why);
+                        if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: auction {1} (job {2}, {3}) dropped: {4}", entityId, open.Auction.AuctionId, open.Auction.JobId, LabelOf(open.Auction), why);
                         QueueFailure(open.JobKey, open.Auction.JobId, open.Auction.AuctionId, why, DROPPED_HOLD_SECONDS);
                         knownJobs[open.JobKey] = now + RETRY_MEMORY_TICKS;   // the announcer's next announcement starts it over
+                        QueueClosed(open, null);
                         closing.Add(open.Auction.AuctionId);
                     }
                 }
@@ -1071,9 +1058,7 @@ namespace Automata.Orchestrator
                         if (endPort == null || announcerPort == null)
                         {
                             if (FirstFitLog(a.AuctionId, drone.EntityId))
-                            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: auction {1}: drone {2} (connectors {3}) fits no connector at {4} ({5})", entityId, a.AuctionId,
-                                      drone.EntityId, Faces(drone), endPort == null ? "LC " + end.EntityId : "the requester",
-                                      DockFit.Describe(endPort == null ? end.DockSite : a.DockSite));
+                            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: auction {1}: drone {2} (connectors {3}) fits no connector at {4} ({5})", entityId, a.AuctionId, drone.EntityId, Faces(drone), endPort == null ? "LC " + end.EntityId : "the requester", DockFit.Describe(endPort == null ? end.DockSite : a.DockSite));
                             continue;
                         }
                         load = FitToDrone(portion, drone);
@@ -1095,8 +1080,7 @@ namespace Automata.Orchestrator
                     carried.AddItems(load);
                     endsUsed.Add(end.EntityId);
                     trips++;
-                    if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: auction {1}: trip {2}: drone {3} (connectors {8}), {4} LC {5} (port {6}, requester port {9}) -> {7}", entityId, a.AuctionId, trips,
-                              drone.EntityId, delivery ? "from" : "to", end.EntityId, endPort.EntityId, Describe(load), Faces(drone), announcerPort.EntityId);
+                    if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: auction {1}: trip {2}: drone {3} (connectors {8}), {4} LC {5} (port {6}, requester port {9}) -> {7}", entityId, a.AuctionId, trips, drone.EntityId, delivery ? "from" : "to", end.EntityId, endPort.EntityId, Describe(load), Faces(drone), announcerPort.EntityId);
                 }
             }
             if (trips == 0) { why = Loc.T(StrTheDronesCanTCarry); return false; }
@@ -1447,9 +1431,33 @@ namespace Automata.Orchestrator
             return true;
         }
 
+        // Awards go to the blocks that need them, one directed message each (a drone: its own tasks only; the logistics
+        // computers it docks at and the announcer: all of them), tracked until delivered (SendWinners). The bidders that
+        // got nothing receive a small "closed" packet (an award without tasks) once, so they bid again at once.
         private void QueueWinner(OpenAuction open, Dictionary<long, List<Task>> assignments, uint droneBid, List<long> sources = null)
         {
-            winnerOutbox.Add(new Message<AuctionWinnerAnnouncement>
+            sources = sources ?? SourcesOf(open, assignments);
+            bool shared = IsSharedSite(open, assignments);
+            var told = new HashSet<long>();
+            foreach (var kv in assignments)
+            {
+                var own = new Dictionary<long, List<Task>>(1);
+                own[kv.Key] = kv.Value;
+                if (told.Add(kv.Key)) winnerOutbox.Add(AwardMessage(open, own, droneBid, sources, shared, kv.Key, MessageQueue.IAIBlockType.Drone));
+            }
+            for (int i = 0; i < sources.Count; i++)
+                if (told.Add(sources[i])) winnerOutbox.Add(AwardMessage(open, assignments, droneBid, sources, shared, sources[i], MessageQueue.IAIBlockType.LogisticsComputer));
+            long announcer = open.JobKey.Key;
+            if (announcer != entityId && told.Add(announcer))   // (a player's order: this orchestrator is the announcer)
+                winnerOutbox.Add(AwardMessage(open, assignments, droneBid, sources, shared, announcer, MessageQueue.IAIBlockType.ConstructionComputer
+                                                  | MessageQueue.IAIBlockType.MiningSurveyor | MessageQueue.IAIBlockType.LogisticsComputer));
+            QueueClosed(open, told);
+        }
+
+        private Message<AuctionWinnerAnnouncement> AwardMessage(OpenAuction open, Dictionary<long, List<Task>> assignments, uint droneBid, List<long> sources, bool shared,
+                                                                long recipient, MessageQueue.IAIBlockType recipientType)
+        {
+            return new Message<AuctionWinnerAnnouncement>
             {
                 Payload = new AuctionWinnerAnnouncement
                 {
@@ -1460,20 +1468,36 @@ namespace Automata.Orchestrator
                     AuctionId = open.Auction.AuctionId,
                     BidId = droneBid,
                     AnnouncerEntityId = open.JobKey.Key,
-                    ComponentSources = sources ?? SourcesOf(open, assignments),
+                    ComponentSources = sources,
                     JobType = open.Auction.JobType,
-                    SharedSite = IsSharedSite(open, assignments),
+                    SharedSite = shared,
                     WeldCategory = open.Auction.WeldCategory,
+                    RecipientId = recipient,
                 },
                 MessageId = IdGenerator.GenerateId(ref messageCounter, entityId),
                 CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
                 SenderId = entityId,
                 SenderOwnerId = block.OwnerId,
-                RecipientBlockType = MessageQueue.IAIBlockType.Drone | MessageQueue.IAIBlockType.LogisticsComputer
-                                     | MessageQueue.IAIBlockType.ConstructionComputer
-                                     | MessageQueue.IAIBlockType.MiningSurveyor,         // the announcer stops repeating the job
+                RecipientBlockType = recipientType,
+                RecipientId = recipient,
                 Channel = Channel.ORCHESTRATOR_AUCTION_WINNER_ANNOUNCEMENT,
-            });
+            };
+        }
+
+        // The auction ended: every bidder not in 'except' is told once (an award with no tasks: the drone / logistics computer
+        // that lost frees itself and bids on, a logistics computer releases its promise). Not tracked: a missed one is
+        // freed by the bidders' own timeout.
+        private void QueueClosed(OpenAuction open, HashSet<long> except)
+        {
+            for (int i = 0; i < open.Bids.Count; i++)
+            {
+                var b = open.Bids[i];
+                if (b == null || b.EntityId == entityId || (except != null && except.Contains(b.EntityId))) continue;
+                if (except == null) except = new HashSet<long>();
+                except.Add(b.EntityId);
+                closedOutbox.Add(AwardMessage(open, new Dictionary<long, List<Task>>(0), 0, null, false, b.EntityId,
+                                              b.EntityType == AutomataEntityType.DroneControllerBlock ? MessageQueue.IAIBlockType.Drone : MessageQueue.IAIBlockType.LogisticsComputer));
+            }
         }
 
         /// <summary>
@@ -1498,6 +1522,9 @@ namespace Automata.Orchestrator
 
         private void SendWinners()
         {
+            for (int i = 0; i < closedOutbox.Count; i++)
+                messaging.BroadcastMessage(antennaReg, closedOutbox[i], false, MessageQueue.IAIBlockType.Orchestrator);
+            closedOutbox.Clear();
             for (int i = winnerOutbox.Count - 1; i >= 0; i--)
             {
                 var msg = winnerOutbox[i];
@@ -1505,14 +1532,13 @@ namespace Automata.Orchestrator
                 if (messaging.InFlight(msg)) continue;   // a reader may still take it
                 if ((DateTime.UtcNow - msg.Payload.CreatedTime).TotalSeconds > 30)
                 {
-                    Log.Warning("Orchestrator {0}: winners of auction {1} never delivered", entityId, msg.Payload.AuctionId);
+                    if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: award of auction {1} never delivered to {2}", entityId, msg.Payload.AuctionId, msg.RecipientId);
                     winnerOutbox.RemoveAt(i);
                     continue;
                 }
                 var error = messaging.BroadcastMessage(antennaReg, msg, false, MessageQueue.IAIBlockType.Orchestrator);
                 if (error == ErrorCode.None)
-                    if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: winners of auction {1} (job {2}) sent: {3}", entityId, msg.Payload.AuctionId, msg.Payload.JobId,
-                              DescribeAssignments(msg.Payload.TaskAssignments));
+                    if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: winners of auction {1} (job {2}) sent: {3}", entityId, msg.Payload.AuctionId, msg.Payload.JobId, DescribeAssignments(msg.Payload.TaskAssignments));
             }
         }
 
@@ -1554,8 +1580,7 @@ namespace Automata.Orchestrator
                 if (messaging.InFlight(msg)) continue;
                 if (DateTime.UtcNow > TimeUtil.TimestampToDateTime(msg.CreatedAt).AddSeconds(30)) { failureOutbox.RemoveAt(i); continue; }
                 var error = messaging.BroadcastMessage(antennaReg, msg, false, MessageQueue.IAIBlockType.Orchestrator);
-                if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: failure of job {1} to {2}: {3}", entityId, msg.Payload.JobId, msg.Payload.AnnouncerEntityId,
-                          error == ErrorCode.None ? "sent" : error.ToString());
+                if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: failure of job {1} to {2}: {3}", entityId, msg.Payload.JobId, msg.Payload.AnnouncerEntityId, error == ErrorCode.None ? "sent" : error.ToString());
             }
         }
 
@@ -1584,6 +1609,7 @@ namespace Automata.Orchestrator
                 for (int c = 0; c < closing.Count; c++)
                 {
                     QueueFailure(new KeyValuePair<long, uint>(0, w.JobId), w.JobId, closing[c], Loc.T(StrWithdrawnByItsAnnouncer), 0);
+                    QueueClosed(auctions[closing[c]], null);
                     auctions.Remove(closing[c]);
                     _auctionJobs.Remove(closing[c]);
                     had = true;
@@ -1593,7 +1619,7 @@ namespace Automata.Orchestrator
                 if (had)
                 {
                     AddEvent(Loc.F(StrJobWithdrawn, w.Reason));
-                    Log.Info("Orchestrator {0}: job {1} of {2} withdrawn: {3}", entityId, w.JobId, w.AnnouncerEntityId, w.Reason);
+                    if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: job {1} of {2} withdrawn: {3}", entityId, w.JobId, w.AnnouncerEntityId, w.Reason);
                 }
             }
             withdrawInbox.Clear();
@@ -1626,8 +1652,7 @@ namespace Automata.Orchestrator
                 if (had)
                 {
                     AddEvent(Loc.F(StrJobLeftToOrchestrator, Nicknames.Of(m.SenderId)));
-                    Log.Info("Orchestrator {0}: job {1} from {2} left to orchestrator {3} (lower id, auction {4})", entityId, a.JobId,
-                             a.AnnouncerEntityId, m.SenderId, a.AuctionId);
+                    if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: job {1} from {2} left to orchestrator {3} (lower id, auction {4})", entityId, a.JobId, a.AnnouncerEntityId, m.SenderId, a.AuctionId);
                 }
             }
             peerAuctionInbox.Clear();
@@ -1639,20 +1664,47 @@ namespace Automata.Orchestrator
         private readonly Util.DroneWatch droneWatch = new Util.DroneWatch();
         private int completedCount, abortedCount;
 
-        // The drones on its own jobs (designator orders): unheard for a minute, said once (DroneWatch)
+        // The drones on every awarded job: unheard for 10 minutes, said once, the only chat sender (DroneWatch)
         private void ReadKeepalives(int now)
         {
             messaging.ReadMessages(entityId, MessageQueue.IAIBlockType.Orchestrator, antennaReg, Channel.JOB_KEEPALIVE, keepaliveInbox, 50, true, PayloadType.JobStatusReport);
             for (int i = 0; i < keepaliveInbox.Count; i++)
             {
                 var r = keepaliveInbox[i].Payload;
-                if (r == null || r.AnnouncerEntityId != entityId || r.DroneEntityId != keepaliveInbox[i].SenderId
+                if (r == null || r.OrchestratorEntityId != entityId || r.DroneEntityId != keepaliveInbox[i].SenderId
                     || !AnchorDirectory.IsAllowed(block.OwnerId, keepaliveInbox[i].SenderOwnerId)) continue;
-                droneWatch.Heard(r.DroneEntityId, r.JobId, now, AddEvent);
+                droneWatch.Heard(r.DroneEntityId, r.JobId, now, AddEvent, r.LastPosition);
                 NoteSeen(r.DroneEntityId, AutomataEntityType.DroneControllerBlock, now);
             }
             keepaliveInbox.Clear();
             droneWatch.Check(now, block, settings.UseBroadcastController, "Orchestrator {0}", entityId, AddEvent);
+        }
+
+        // The only chat sender: the alerts the other blocks sent it (PLAYER_ALERT, directed), as lines through a Broadcast Controller
+        // on this construct ("use broadcast controller"). The same line is not repeated within 30 s.
+        private readonly List<Message<PlayerAlert>> alertInbox = new List<Message<PlayerAlert>>();
+        private readonly Dictionary<string, int> alertSent = new Dictionary<string, int>();
+        private const int ALERT_REPEAT_TICKS = 30 * 60;
+
+        private void ReadPlayerAlerts()
+        {
+            messaging.ReadMessages(entityId, MessageQueue.IAIBlockType.Orchestrator, antennaReg, Channel.PLAYER_ALERT, alertInbox, 20, true, PayloadType.PlayerAlert);
+            if (alertInbox.Count == 0) return;
+            int now = MyAPIGateway.Session.GameplayFrameCounter;
+            for (int i = 0; i < alertInbox.Count; i++)
+            {
+                var a = alertInbox[i].Payload;
+                if (a == null || string.IsNullOrEmpty(a.Text) || !AnchorDirectory.IsAllowed(block.OwnerId, alertInbox[i].SenderOwnerId)) continue;
+                int last;
+                if (alertSent.TryGetValue(a.Text, out last) && now - last < ALERT_REPEAT_TICKS) continue;
+                if (alertSent.Count > 64) alertSent.Clear();
+                alertSent[a.Text] = now;
+                AddEvent(a.Text);
+                string via = "broadcast off";
+                bool sent = settings.UseBroadcastController && BroadcastControllerSender.Send(block, a.Text, out via);
+                if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: alert '{1}' {2}: {3}", entityId, a.Text, sent ? "sent via" : "not sent", via);
+            }
+            alertInbox.Clear();
         }
 
         private void ReadJobReports(int now)
@@ -1667,7 +1719,7 @@ namespace Automata.Orchestrator
                     if (r == null || r.OrchestratorEntityId != entityId || r.DroneEntityId != reportInbox[i].SenderId) continue;
                     if (!AnchorDirectory.IsAllowed(block.OwnerId, reportInbox[i].SenderOwnerId)) continue;
                     NoteSeen(r.DroneEntityId, AutomataEntityType.DroneControllerBlock, now);
-                    if (r.AnnouncerEntityId == entityId) droneWatch.Done(r.DroneEntityId);
+                    droneWatch.Done(r.DroneEntityId);
                     var key = new KeyValuePair<long, uint>(r.AnnouncerEntityId, r.JobId);
                     ActiveJob active;
                     if (activeJobs.TryGetValue(key, out active)) active.Drones--;
@@ -1683,8 +1735,7 @@ namespace Automata.Orchestrator
                     string label = r.JobType.Label(r.WeldCategory);
                     AddEvent(string.IsNullOrEmpty(r.Reason) ? Loc.F(StrJobDroneOutcome, label, Nicknames.Of(r.DroneEntityId), r.Outcome)
                                                              : Loc.F(StrJobDroneOutcomeReason, label, Nicknames.Of(r.DroneEntityId), r.Outcome, r.Reason));
-                    Log.Info("Orchestrator {0}: job {1} ({8}) from {2}: drone {3} {4} ({5}), {6}/{7} block(s)", entityId, r.JobId, r.AnnouncerEntityId,
-                             r.DroneEntityId, r.Outcome, r.Reason, r.BlocksDone, r.BlocksTotal, label);
+                    if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: job {1} ({8}) from {2}: drone {3} {4} ({5}), {6}/{7} block(s)", entityId, r.JobId, r.AnnouncerEntityId, r.DroneEntityId, r.Outcome, r.Reason, r.BlocksDone, r.BlocksTotal, label);
                 }
                 reportInbox.Clear();
             }
@@ -1751,8 +1802,7 @@ namespace Automata.Orchestrator
             for (int i = 0; i < winnerOutbox.Count; i++) s.Winners.Add(winnerOutbox[i].Payload);
             for (int i = 0; i < failureOutbox.Count; i++) s.Failures.Add(failureOutbox[i].Payload);
             CapturePlayerJobs(s);
-            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: state saved: {1} queued, {2} auction(s), {3} known job(s), {4} unsent", entityId, s.Queue.Count,
-                      s.Auctions.Count, s.KnownJobs.Count, s.Winners.Count + s.Failures.Count);
+            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: state saved: {1} queued, {2} auction(s), {3} known job(s), {4} unsent", entityId, s.Queue.Count, s.Auctions.Count, s.KnownJobs.Count, s.Winners.Count + s.Failures.Count);
             return s;
         }
 
@@ -1820,6 +1870,7 @@ namespace Automata.Orchestrator
                         SenderOwnerId = block.OwnerId,
                         RecipientBlockType = MessageQueue.IAIBlockType.Drone | MessageQueue.IAIBlockType.LogisticsComputer
                                              | MessageQueue.IAIBlockType.ConstructionComputer | MessageQueue.IAIBlockType.MiningSurveyor,
+                        RecipientId = w.RecipientId,
                         Channel = Channel.ORCHESTRATOR_AUCTION_WINNER_ANNOUNCEMENT,
                     });
                 }
@@ -1840,8 +1891,7 @@ namespace Automata.Orchestrator
                         Channel = Channel.JOB_ANNOUNCEMENT_FAILED,
                     });
                 }
-            Log.Info("Orchestrator {0}: state restored: {1} queued, {2} auction(s), {3} known job(s), {4} unsent",
-                     entityId, jobQueue.Count, auctions.Count, knownJobs.Count, winnerOutbox.Count + failureOutbox.Count);
+            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: state restored: {1} queued, {2} auction(s), {3} known job(s), {4} unsent", entityId, jobQueue.Count, auctions.Count, knownJobs.Count, winnerOutbox.Count + failureOutbox.Count);
         }
         #endregion
 
@@ -2101,8 +2151,7 @@ namespace Automata.Orchestrator
                 {
                     if (!AnyLcVolumeLeft(remainingLcVolume)) break;
                     // Volume left, but no connector this drone can dock at: the next drone
-                    if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: auction {1}: drone {2} (connectors {3}) fits no component source's connector", entityId,
-                              bidRound.AuctionId, drone.EntityId, Faces(drone));
+                    if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: auction {1}: drone {2} (connectors {3}) fits no component source's connector", entityId, bidRound.AuctionId, drone.EntityId, Faces(drone));
                     continue;
                 }
 
@@ -2383,8 +2432,7 @@ namespace Automata.Orchestrator
                 }
                 if (ToolCantReach(drone, bidRound))
                 {
-                    if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: auction {1}: drone {2} left out: its tool would have to work upside down and it can't",
-                              entityId, bidRound.AuctionId, drone.EntityId);
+                    if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: auction {1}: drone {2} left out: its tool would have to work upside down and it can't", entityId, bidRound.AuctionId, drone.EntityId);
                     continue;
                 }
 

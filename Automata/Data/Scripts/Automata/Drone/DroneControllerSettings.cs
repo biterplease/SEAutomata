@@ -242,9 +242,7 @@ namespace Automata.Drone
                 [ProtoMember(59)]
                 public bool SurveyForOres;
 
-                /// <summary>A few events worth a chat line go out through a Broadcast Controller on the drone (Util/BroadcastControllerSender).</summary>
-                [ProtoMember(60)]
-                public bool UseBroadcastController;
+                // (ProtoMember 60 was UseBroadcastController: only the orchestrator writes to chat)
 
                 /// <summary>m from the drone: enemies its AI Defensive block detects within this launch it (0 = never on its
                 /// own, designator jobs only). At most the vanilla detection range, 2000 m.</summary>

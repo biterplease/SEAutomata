@@ -12,6 +12,7 @@ using VRageMath;
 using Automata.Pathfinding;
 using Automata.Util;
 using Automata.Util.Logging;
+using Automata.VirtualNetwork;
 using VRage.Utils;
 
 namespace Automata.Drone
@@ -227,7 +228,7 @@ namespace Automata.Drone
             var pb = p != null ? p.AsBool() : null;
             if (pb == null)
             {
-                Log.Warning("Drone {0}: combat: {1} has no '{2}' property", Entity.EntityId, b.CustomName, AI_BEHAVIOUR_PROPERTY);
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: combat: {1} has no '{2}' property", Entity.EntityId, b.CustomName, AI_BEHAVIOUR_PROPERTY);
                 return !on;
             }
             if (pb.GetValue(b) != on) pb.SetValue(b, on);
@@ -267,9 +268,7 @@ namespace Automata.Drone
 
         private void SeeThreat(IMyEntity e, int now)
         {
-            if (e.EntityId != threatId)
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: combat: threat {1} ({2}) at {3:F0} m", Entity.EntityId, e.EntityId, e.DisplayName,
-                          Vector3D.Distance(e.GetPosition(), flightState.Position));
+            if (e.EntityId != threatId && Log.DebugEnabled) Log.Debug("Drone {0}: combat: threat {1} ({2}) at {3:F0} m", Entity.EntityId, e.EntityId, e.DisplayName, Vector3D.Distance(e.GetPosition(), flightState.Position));
             threatId = e.EntityId;
             threatPosition = e.GetPosition();
             threatSeenFrame = now;
@@ -586,9 +585,7 @@ namespace Automata.Drone
         /// <summary>AI off, mode change, close: behaviours off, search unlocked, phase idle (the flight is stopped by the caller).</summary>
         private void EndCombat(string why)
         {
-            if (combatPhase != CombatPhase.Idle || combatSearchLocked || designatorCombat != DesignatorCombat.None)
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: combat: ended ({1}) in {2}{3}", Entity.EntityId, why, combatPhase,
-                          designatorCombat != DesignatorCombat.None ? " (" + designatorCombat + " job)" : "");
+            if (combatPhase != CombatPhase.Idle || combatSearchLocked || designatorCombat != DesignatorCombat.None && Log.DebugEnabled) Log.Debug("Drone {0}: combat: ended ({1}) in {2}{3}", Entity.EntityId, why, combatPhase, designatorCombat != DesignatorCombat.None ? " (" + designatorCombat + " job)" : "");
             if (combatPhase == CombatPhase.Handover || IsCombatMode || designatorCombat != DesignatorCombat.None) CombatBehavioursOff();
             LockOffensiveSearch(false);
             combatPhase = CombatPhase.Idle;
@@ -832,13 +829,62 @@ namespace Automata.Drone
             finally { engageGrids.Clear(); }
         }
 
-        // "Use broadcast controller": a chat line through a Broadcast Controller on the drone
+        // A line for the player: sent to the orchestrator (directed), the only block that writes to chat; it starts with this
+        // drone's nickname. Kept and sent again until the orchestrator took it (at most ALERT_TTL_SECONDS); none known: dropped.
+        private const int ALERT_TTL_SECONDS = 120;
+        private const int ALERT_PENDING_MAX = 6;
+        private long knownOrchestratorId;
+        private readonly List<string> unsentAlerts = new List<string>();
+        private readonly List<DateTime> unsentAlertTimes = new List<DateTime>();
+        private readonly List<Message<PlayerAlert>> unsentAlertSent = new List<Message<PlayerAlert>>();
+
         private void Broadcast(string text)
         {
-            if (settings == null || !settings.UseBroadcastController) return;
-            string via;
-            bool sent = BroadcastControllerSender.Send(block, text, out via);
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: broadcast '{1}' {2}: {3}", Entity.EntityId, text, sent ? "sent via" : "not sent", via);
+            if (!IsServer || string.IsNullOrEmpty(text)) return;
+            if (unsentAlerts.Count >= ALERT_PENDING_MAX) RemoveUnsentAlert(0);
+            unsentAlerts.Add(Nicknames.Of(_entityId) + ": " + text);
+            unsentAlertTimes.Add(DateTime.UtcNow);
+            unsentAlertSent.Add(null);
+            FlushAlerts();
+        }
+
+        private void FlushAlerts()
+        {
+            if (unsentAlerts.Count == 0) return;
+            var queue = AutomataSession.GetMessageQueue();
+            long to = jobOrchestratorId != 0 ? jobOrchestratorId : knownOrchestratorId;
+            for (int i = unsentAlerts.Count - 1; i >= 0; i--)
+            {
+                var sent = unsentAlertSent[i];
+                if (sent != null && sent.Delivered) { RemoveUnsentAlert(i); continue; }
+                if (queue != null && sent != null && queue.InFlight(sent)) continue;
+                if ((DateTime.UtcNow - unsentAlertTimes[i]).TotalSeconds > ALERT_TTL_SECONDS)
+                {
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: alert '{1}' dropped (nobody took it)", _entityId, unsentAlerts[i]);
+                    RemoveUnsentAlert(i);
+                    continue;
+                }
+                if (to == 0 || queue == null || !EnsureNetworkRegistration(queue)) continue;
+                var msg = new Message<PlayerAlert>
+                {
+                    Payload = new PlayerAlert { SenderEntityId = _entityId, Text = unsentAlerts[i] },
+                    MessageId = IdGenerator.GenerateId(ref jobMessageCounter, _entityId),
+                    CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
+                    SenderId = _entityId,
+                    SenderOwnerId = block.OwnerId,
+                    RecipientId = to,
+                    RecipientBlockType = VirtualNetwork.MessageQueue.IAIBlockType.Orchestrator,
+                    Channel = Channel.PLAYER_ALERT,
+                };
+                if (queue.BroadcastMessage(antennaReg, msg, false, VirtualNetwork.MessageQueue.IAIBlockType.Drone) == ErrorCode.None) unsentAlertSent[i] = msg;
+            }
+        }
+
+        private void RemoveUnsentAlert(int i)
+        {
+            unsentAlerts.RemoveAt(i);
+            unsentAlertTimes.RemoveAt(i);
+            unsentAlertSent.RemoveAt(i);
         }
 
         // A GPS name for chat (no ':' allowed in it)
@@ -1019,7 +1065,7 @@ namespace Automata.Drone
             combatHomeTryFrame = now - COMBAT_HOME_RETRY_TICKS;
             combatRetargetFrame = now - COMBAT_RETARGET_TICKS;
             combatBehaviourCheckFrame = now;
-            Log.Info("Drone {0}: combat: resumed in {1} (threat {2})", Entity.EntityId, combatPhase, threatId);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: combat: resumed in {1} (threat {2})", Entity.EntityId, combatPhase, threatId);
             if (combatPhase == CombatPhase.Handover && (!GetBehaviour(aiFlight) || !GetBehaviour(aiOffensive)))
                 CombatStartRecover(now, Loc.T(StrAINotActiveAfterLoad));
             else if (combatPhase == CombatPhase.Handover)

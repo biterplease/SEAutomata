@@ -669,8 +669,7 @@ namespace Automata.Drone
             if (corridor)
             {
                 approachLocal = connectorLocal + WorldToAnchorDir(ref hm, aH) * CORRIDOR_SLIDE;
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: dock corridor at {1}{2}: {3}", Entity.EntityId, target.CustomName,
-                          heading > 0 ? string.Format(" (heading turned {0}°)", heading * 90) : "", corridorHow);
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: dock corridor at {1}{2}: {3}", Entity.EntityId, target.CustomName, heading > 0 ? string.Format(" (heading turned {0}°)", heading * 90) : "", corridorHow);
             }
             else
             {
@@ -685,8 +684,7 @@ namespace Automata.Drone
                     Report(StrDockNoWayInCorrectedPose, target.CustomName, lineBlocker, corridorHow);
                     return null;
                 }
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: no dock corridor at {1} ({2}): approach point {3:F1} m out", Entity.EntityId, target.CustomName,
-                          corridorHow, Vector3D.Distance(approachLocal, connectorLocal));
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: no dock corridor at {1} ({2}): approach point {3:F1} m out", Entity.EntityId, target.CustomName, corridorHow, Vector3D.Distance(approachLocal, connectorLocal));
             }
             corridorIgnore = null;
             prep.DockOffset = dockOffset;
@@ -962,9 +960,7 @@ namespace Automata.Drone
             if (++dockDiagCalls >= DOCK_DIAG_CALLS)
             {
                 dockDiagCalls = 0;
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: docking at {1}: {2} {3}, {4:F1} m to its target, {5:F2} m/s relative, connector {6}, {7} leg(s) queued, wait {8} s",
-                          Entity.EntityId, dockingHomeId, final ? "final order" : "route leg", o.Phase, Vector3D.Distance(ReferencePoint(o), o.Target.ToVector3D()),
-                          flightState.RelativeVelocity.Length(), c.Status, queuedLegs.Count, dockingWaitTicks / 60);
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: docking at {1}: {2} {3}, {4:F1} m to its target, {5:F2} m/s relative, connector {6}, {7} leg(s) queued, wait {8} s", Entity.EntityId, dockingHomeId, final ? "final order" : "route leg", o.Phase, Vector3D.Distance(ReferencePoint(o), o.Target.ToVector3D()), flightState.RelativeVelocity.Length(), c.Status, queuedLegs.Count, dockingWaitTicks / 60);
             }
             // With a corridor the pose is checked before the drone goes in (the corridor depends on it), not at its end
             if (dockCorridor && !dockPoseVerified && !final && !dockCorridorLegs.Contains(o) && ReplanDockIfMoved()) return;
@@ -1056,8 +1052,7 @@ namespace Automata.Drone
                 double turnedFree = HeadingFreeTurn(forward.ToVector3D(), up.ToVector3D(), o.ForwardLocal.ToVector3D(), o.UpLocal.ToVector3D());
                 if (!sameMount || turnedFree > 3 || moved > 0.5)
                 {
-                    if (Log.DebugEnabled) Log.Debug("Drone {0}: dock pose re-computed in the corridor of {1}: {2:F2} m / {3:F0}° off, mount {4} -> {5}: kept the planned one",
-                              Entity.EntityId, target.CustomName, moved, turned, FindConnectorMount(dockingConnectorId), mi);
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: dock pose re-computed in the corridor of {1}: {2:F2} m / {3:F0}° off, mount {4} -> {5}: kept the planned one", Entity.EntityId, target.CustomName, moved, turned, FindConnectorMount(dockingConnectorId), mi);
                     return;
                 }
                 approachLocal = connectorLocal + WorldToAnchorDir(ref hm, aH) * CORRIDOR_SLIDE;
@@ -1072,8 +1067,7 @@ namespace Automata.Drone
                 Vector3D hullFromConnector = Vector3D.TransformNormal(HullCentreLocal - mount.LocalPoint, frameWorld);
                 approachLocal = WorldToAnchorPoint(ref hm, WithTurnRoom(AnchorToWorldPoint(ref hm, approachLocal), aH, hullFromConnector, ref frameWorld));
             }
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: dock pose re-computed close to {1}: target {2:F2} m off, attitude {3:F0}° off, mount {4} -> {5}",
-                      Entity.EntityId, target.CustomName, moved, turned, FindConnectorMount(dockingConnectorId), mi);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: dock pose re-computed close to {1}: target {2:F2} m off, attitude {3:F0}° off, mount {4} -> {5}", Entity.EntityId, target.CustomName, moved, turned, FindConnectorMount(dockingConnectorId), mi);
             o.TargetLocal = Vector3DData.FromVector3D(connectorLocal);
             o.ApproachFromLocal = Vector3DData.FromVector3D(approachLocal);
             o.ReferenceOffset = Vector3DData.FromVector3D(mount.LocalPoint);
@@ -1129,8 +1123,7 @@ namespace Automata.Drone
             double turned = HeadingFreeTurn(forward.ToVector3D(), up.ToVector3D(), o.ForwardLocal.ToVector3D(), o.UpLocal.ToVector3D());
             bool sameMount = mount.Block != null && mount.Block.EntityId == dockingConnectorId;
             if (sameMount && moved < 0.1 && turned < 1) return false;
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: dock pose re-computed close to {1} before its corridor: {2:F2} m / {3:F0}° off, mount {4} -> {5}: planned again",
-                      Entity.EntityId, target.CustomName, moved, turned, FindConnectorMount(dockingConnectorId), mi);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: dock pose re-computed close to {1} before its corridor: {2:F2} m / {3:F0}° off, mount {4} -> {5}: planned again", Entity.EntityId, target.CustomName, moved, turned, FindConnectorMount(dockingConnectorId), mi);
             ResetRoute();
             if (!StartDocking(target, mi, offset, forward, up, true))
             {
@@ -1178,8 +1171,7 @@ namespace Automata.Drone
             o.TargetLocal = Vector3DData.FromVector3D(o.TargetLocal.ToVector3D() + WorldToAnchorDir(ref hm, gap));
             o.Arrived = false;
             RefreshAnchoredOrder(o);
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: dock correction {1}/{2}: target moved {3:F2} m (measured gap between the connection points)",
-                      Entity.EntityId, dockCorrections, DOCK_CORRECTIONS_MAX, gap.Length());
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: dock correction {1}/{2}: target moved {3:F2} m (measured gap between the connection points)", Entity.EntityId, dockCorrections, DOCK_CORRECTIONS_MAX, gap.Length());
             return true;
         }
 
@@ -1290,8 +1282,7 @@ namespace Automata.Drone
                     if (t.IsWorking) thrustersWorking++;
                 }
             if (thrustersOn > 0) Report(StrPreFlightThrustersOn, thrustersOn);
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: pre-flight systems: gyros {1}/{2} working ({3} switched back on, {4} damaged, {5} without power), thrusters {6}/{7} working",
-                      Entity.EntityId, working, gyroscopes.Count, switchedOn, damaged, unpowered, thrustersWorking, thrustersTotal);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: pre-flight systems: gyros {1}/{2} working ({3} switched back on, {4} damaged, {5} without power), thrusters {6}/{7} working", Entity.EntityId, working, gyroscopes.Count, switchedOn, damaged, unpowered, thrustersWorking, thrustersTotal);
             if (working == 0) Report(StrPreFlightNoWorkingGyroscope, damaged, unpowered);
             // Obstacles are only seen through working sensors (all around) / cameras (their facing): flying without
             // is flying into what nothing saw

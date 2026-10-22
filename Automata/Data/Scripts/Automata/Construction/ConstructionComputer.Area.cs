@@ -286,16 +286,12 @@ namespace Automata.Construction
                         result[at] = target;
                         predicted += added;
                         if (!planned)
-                            if (Log.DebugEnabled) Log.Debug("Scan {0}: projection {1} nearly stalled: line of {2} block(s) predicted from {3} at {4}",
-                                      entityId, c.Projector.CustomName, added, target.BlockName, target.Cell);
+                            if (Log.DebugEnabled) Log.Debug("Scan {0}: projection {1} nearly stalled: line of {2} block(s) predicted from {3} at {4}", entityId, c.Projector.CustomName, added, target.BlockName, target.Cell);
                     }
                     _lineBoxes.Clear();
                 }
             _outDone.Clear();
-            if (Log.DebugEnabled) Log.Debug("Scan {0}: {1} grids{2}; {3} skipped; {4} projections in the area ({13} with nothing buildable, ignored); {5} candidates (pool {6}), "
-                      + "skipped: {7} walled in, {8} projected not buildable yet, {14} projected obstructed, {9} without a face; {10} targets (max {11}, {15} predicted, {16} welded through a neighbour); {12:F2} ms",
-                      entityId, gridsScanned, gridText, refused, projectionsSeen, _candidates.Count, pool, walledIn, unbuildable, noFace,
-                      count, maxJobs, Util.PerfStats.Since(scanStart), projectionsIdle, obstructed, predicted, _weldThroughCount);
+            if (Log.DebugEnabled) Log.Debug("Scan {0}: {1} grids{2}; {3} skipped; {4} projections in the area ({13} with nothing buildable, ignored); {5} candidates (pool {6}), " + "skipped: {7} walled in, {8} projected not buildable yet, {14} projected obstructed, {9} without a face; {10} targets (max {11}, {15} predicted, {16} welded through a neighbour); {12:F2} ms", entityId, gridsScanned, gridText, refused, projectionsSeen, _candidates.Count, pool, walledIn, unbuildable, noFace, count, maxJobs, Util.PerfStats.Since(scanStart), projectionsIdle, obstructed, predicted, _weldThroughCount);
             _planOrder.Clear();
             _candidates.Clear();
             return count;
@@ -528,9 +524,7 @@ namespace Automata.Construction
             int before = plan.PlannedCount, lines = plan.LineCount;
             for (int i = 0; i < _seeds.Count; i++) plan.PlanFrom(_seeds[i]);
             if (fresh || plan.PlannedCount != before)
-                if (Log.DebugEnabled) Log.Debug("Scan {0}: projection {1}: plan {2}: {3} of {4} block(s) to build in {5} line(s) (+{6}; blocks per stage: {7}){9}, {8:F1} ms",
-                          entityId, projector.CustomName, fresh ? "made" : "extended", plan.PlannedCount, plan.EligibleCount, plan.LineCount,
-                          plan.LineCount - lines, plan.StageSummary(), Util.PerfStats.Since(t), units ? ", in 3x3x3 units" : "");
+                if (Log.DebugEnabled) Log.Debug("Scan {0}: projection {1}: plan {2}: {3} of {4} block(s) to build in {5} line(s) (+{6}; blocks per stage: {7}){9}, {8:F1} ms", entityId, projector.CustomName, fresh ? "made" : "extended", plan.PlannedCount, plan.EligibleCount, plan.LineCount, plan.LineCount - lines, plan.StageSummary(), Util.PerfStats.Since(t), units ? ", in 3x3x3 units" : "");
 
             // Projections no longer scanned
             _planForget.Clear();

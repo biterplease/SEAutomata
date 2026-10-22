@@ -59,7 +59,7 @@ namespace Automata.Drone
         CombatRetreatOnFlee,
         CombatRetreatOnLowPower,
         SurveyForOres,
-        UseBroadcastController,
+        UseBroadcastController_Removed,   // (kept: the ordinals are on the wire)
         EscortFollowDistance,
         WeldIgnoreColor,
         IgnoredOres,              // Text: keys, one per line
@@ -232,7 +232,6 @@ namespace Automata.Drone
                 case DroneSettingKey.CombatRetreatOnFlee:         p.Number = s.CombatRetreatOnFlee ? 1 : 0; break;
                 case DroneSettingKey.CombatRetreatOnLowPower:     p.Number = s.CombatRetreatOnLowPower ? 1 : 0; break;
                 case DroneSettingKey.SurveyForOres:               p.Number = s.SurveyForOres ? 1 : 0; break;
-                case DroneSettingKey.UseBroadcastController:      p.Number = s.UseBroadcastController ? 1 : 0; break;
                 case DroneSettingKey.EconomyFlight:               p.Number = s.EconomyFlight ? 1 : 0; break;
             }
         }
@@ -243,7 +242,7 @@ namespace Automata.Drone
             if (settings == null) return;
             if (double.IsNaN(p.Number) || double.IsInfinity(p.Number))
             {
-                Log.Warning("Net: drone {0} setting {1} from {2} rejected (not a number)", Entity.EntityId, p.Key, senderSteamId);
+                if (Log.DebugEnabled) Log.Debug("Net: drone {0} setting {1} from {2} rejected (not a number)", Entity.EntityId, p.Key, senderSteamId);
                 return;
             }
             if (IsServer)
@@ -251,7 +250,7 @@ namespace Automata.Drone
                 long identity;
                 if (!SenderHasAccess(senderSteamId, out identity))
                 {
-                    Log.Warning("Net: drone {0} setting {1} from {2} rejected (no terminal access)", Entity.EntityId, p.Key, senderSteamId);
+                    if (Log.DebugEnabled) Log.Debug("Net: drone {0} setting {1} from {2} rejected (no terminal access)", Entity.EntityId, p.Key, senderSteamId);
                     return;
                 }
                 // Clients select these through actions (validated against the owner/faction filtered lists)
@@ -259,7 +258,7 @@ namespace Automata.Drone
                 // Operation mode only changes with the AI off (as the terminal enforces)
                 if (p.Key == DroneSettingKey.OperationModeValue && settings.IsEnabled)
                 {
-                    Log.Warning("Net: drone {0} operation mode from {1} rejected (AI is on)", Entity.EntityId, senderSteamId);
+                    if (Log.DebugEnabled) Log.Debug("Net: drone {0} operation mode from {1} rejected (AI is on)", Entity.EntityId, senderSteamId);
                     // The sender already shows its value: put the real one back
                     var current = new DroneSettingPacket { EntityId = Entity.EntityId, Key = DroneSettingKey.OperationModeValue };
                     FillSettingPacket(current);
@@ -346,7 +345,6 @@ namespace Automata.Drone
                 case DroneSettingKey.CombatRetreatOnFlee:         Terminal_CombatRetreatOnFlee = flag; break;
                 case DroneSettingKey.CombatRetreatOnLowPower:     Terminal_CombatRetreatOnLowPower = flag; break;
                 case DroneSettingKey.SurveyForOres:               Terminal_SurveyForOres = flag; break;
-                case DroneSettingKey.UseBroadcastController:      Terminal_UseBroadcastController = flag; break;
                 case DroneSettingKey.EconomyFlight:               Terminal_EconomyFlight = flag; break;
             }
         }
@@ -373,7 +371,7 @@ namespace Automata.Drone
             long identity;
             if (!SenderHasAccess(senderSteamId, out identity))
             {
-                Log.Warning("Net: drone {0} action {1} from {2} rejected (no terminal access)", Entity.EntityId, p.Action, senderSteamId);
+                if (Log.DebugEnabled) Log.Debug("Net: drone {0} action {1} from {2} rejected (no terminal access)", Entity.EntityId, p.Action, senderSteamId);
                 return;
             }
             if (!initialized || settings == null)
@@ -383,7 +381,7 @@ namespace Automata.Drone
             }
             if ((p.HasVectorA && !IsFinite(p.VectorA)) || (p.HasVectorB && !IsFinite(p.VectorB)))
             {
-                Log.Warning("Net: drone {0} action {1} from {2} rejected (bad coordinates)", Entity.EntityId, p.Action, senderSteamId);
+                if (Log.DebugEnabled) Log.Debug("Net: drone {0} action {1} from {2} rejected (bad coordinates)", Entity.EntityId, p.Action, senderSteamId);
                 return;
             }
             if (p.Action == DroneAction.RequestAnchorList)

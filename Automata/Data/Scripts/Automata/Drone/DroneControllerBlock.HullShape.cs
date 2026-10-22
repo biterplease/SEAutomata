@@ -153,8 +153,7 @@ namespace Automata.Drone
             shapeRaw.Clear();
             double vol = 0;
             for (int i = 0; i < hullShape.Count; i++) vol += hullShape[i].Volume;
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: shape for weld sites: {1} boxes, {2:F1} m³ of its {3:F1} m³ bounding box", Entity.EntityId,
-                      hullShape.Count, vol, localHullBox.Max.X >= localHullBox.Min.X ? localHullBox.Volume : all.Volume);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: shape for weld sites: {1} boxes, {2:F1} m³ of its {3:F1} m³ bounding box", Entity.EntityId, hullShape.Count, vol, localHullBox.Max.X >= localHullBox.Min.X ? localHullBox.Volume : all.Volume);
         }
 
         private static int Clamp(int v, int n) { return v < 0 ? 0 : v >= n ? n - 1 : v; }

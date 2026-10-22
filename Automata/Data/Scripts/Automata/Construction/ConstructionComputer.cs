@@ -26,16 +26,11 @@ namespace Automata.Construction
         /// Queue of discovered, but yet unporsed Jobs.
         /// </summary>
         private MyConcurrentQueue<Orchestrator.Job> jobQueue = new MyConcurrentQueue<Orchestrator.Job>();
-        private bool isEnabled = false;
         private long entityId;
         private Vector3 naturalGravity;
         private IMyEntity Entity;
-        private int _lastUpdateFrame = 0;
         private int _lastScanFrameAttempt = 0;
         public int PerScanLimits { get; set; }
-        private int _perScanLimits;
-        private int _consecutiveErrors = 0;
-        private long _lastErrorRecoveryAttemptFrame = 0;
         private long _lastMaintenanceFrame = 0;
         private int _maintenanceIntervalTicks;
         private int _scanRetryIntervalTicks;
@@ -63,8 +58,6 @@ namespace Automata.Construction
 
         private IMyGravityProviderSystemDelegate gravityProviderSystemDelegate;
         private IMySessionDelegate sessionDelegate;
-        private Quaternion _quaternionCache;
-        private QuaternionD _quaternionDCache;
         private MessageQueue messageQueue;
         private int _messageCounter = 0;
 
@@ -399,7 +392,7 @@ namespace Automata.Construction
                 }
             }
             if (jobsCreated > 0)
-                Log.Info("Scan complete: {0} blocks scanned, {1} jobs found", scannedBlocks, jobsCreated);
+                if (Log.DebugEnabled) Log.Debug("Scan complete: {0} blocks scanned, {1} jobs found", scannedBlocks, jobsCreated);
             
             return jobsCreated;
         }
@@ -560,4 +553,4 @@ namespace Automata.Construction
 
 
     }
-}
+}

@@ -149,8 +149,6 @@ namespace Automata.Drone
 
 
         private long _entityId;
-        private int _messageCounter = 0;
-        private int _bidCounter = 0;
         private IMyEntity entity;
         private IMyCubeBlock block;
         private IMyGamePruningStructureDelegate pruningStructureDelegate;
@@ -165,7 +163,6 @@ namespace Automata.Drone
         private Capabilities capabilities;
         private string errorReason;                        // why the drone is in State.Error (LCD alert line)
         private readonly StringBuilder sb = new StringBuilder(64);
-        private BehaviourProfile behaviourProfile;
         private State currentState = State.Initializing;
         private bool initialized = false;
         private string lastHullLogged;   // debug: the hull line last logged
@@ -182,7 +179,6 @@ namespace Automata.Drone
         }
         private readonly int[] thrusterBaseline = new int[6];   // functional thrusters per direction, as built / docked
         private string damageNote, lastDamageNote;             // partial thruster loss (reported once per change)
-        private int _consecutiveErrors = 0;
 
         private IMyShipController shipController;
         private IMyShipWelder welder;
@@ -225,16 +221,12 @@ namespace Automata.Drone
         private float physicalMass = 0.0f;
         private float baseMass = 0.0f;
 
-        private Orchestrator.Job currentTask;
         private Queue<Orchestrator.Task> taskQueue = new Queue<Orchestrator.Task>();
-        private ushort currentTaskId = 0;
 
         #region Fields - Power Monitoring
         private bool needsHydrogenRefuel = false;
         private bool needsBatteryRecharge = false;
-        private float lastH2Level = 100f;
         public float currentH2Level = 100f;
-        private float lastBatteryLevel = 100f;
         public float currentBatteryLevel = 100f;
         #endregion
 
@@ -247,12 +239,9 @@ namespace Automata.Drone
         #endregion
         
         #region Fields - Navigation
-        private Vector3D taskPosition;
         private List<Vector3D> currentPath = new List<Vector3D>();
         // private PathfindingManager pathfindingManager;
         private FlightOrder activeFlightOrder;
-        private Vector3D currentWaypoint;
-        private Vector3DData navigationTarget;
         private Vector3D? navDebugTarget;
         private Vector3D? navDebugTargetApproachFrom;
 
@@ -620,6 +609,7 @@ namespace Automata.Drone
                 if (settings.IsEnabled) UpdatePowerGuard();   // out in the field without power to fly: stopped, checked at a low rate
                 MonitorPower();                     // levels for the header always; acts only with the AI on
                 FlushJobReports();                  // outcomes of orchestrator jobs not heard yet
+                FlushAlerts();                      // chat lines for the orchestrator not taken yet
                 SendJobKeepalive();                 // still on a construction / mining job: its announcer keeps it
                 PublishSurveys();                   // ore scans waiting for a surveyor in range
                 if (settings.IsEnabled)
@@ -837,7 +827,7 @@ namespace Automata.Drone
             {
                 settings.OperationMode = OperationMode.ManagedByOrchestrator;
                 settings.BehaviourProfile = BehaviourProfile.IsCombatDrone;
-                Log.Info("Drone {0}: 'Combat handover' mode migrated: managed by orchestrator, Combat drone profile", Entity != null ? Entity.EntityId : 0);
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: 'Combat handover' mode migrated: managed by orchestrator, Combat drone profile", Entity != null ? Entity.EntityId : 0);
             }
             settings.CombatHandoverDistance = MathHelper.Clamp(settings.CombatHandoverDistance, COMBAT_HANDOVER_MIN, COMBAT_HANDOVER_MAX);
             settings.AutoLaunchRadius = MathHelper.Clamp(settings.AutoLaunchRadius, 0f, AUTO_LAUNCH_RADIUS_MAX);
@@ -1210,7 +1200,6 @@ namespace Automata.Drone
             combinedThrustProfile = CalculateThrustProfile(shipController, capabilityMass, allThrusters, airDensity, airAtmosphere, potential);
 
             capabilities = Capabilities.None;
-            behaviourProfile = BehaviourProfile.None;
             if (connectors.Count > 0) capabilities |= Capabilities.CanDock;
             if (welder != null) capabilities |= Capabilities.CanWeld;
             if (grinder != null) capabilities |= Capabilities.CanGrind;
@@ -1399,7 +1388,6 @@ namespace Automata.Drone
 
        public void Shutdown()
         {
-            currentTask = null;
             taskQueue.Clear();
             currentPath.Clear();
             if (welder?.Enabled == true) welder.Enabled = false;
@@ -1411,7 +1399,6 @@ namespace Automata.Drone
             ResetIntegralTerms();
             ReleaseGyroscopes();
             // DisableGyroscopeOverride();
-            _consecutiveErrors = 0;
             currentState = State.Standby;
         }
 
@@ -2218,8 +2205,7 @@ namespace Automata.Drone
             if (t < 0 || siteYielding || boring || activeFlightOrder == null) return false;
             t %= WIGGLE_CYCLE_TICKS;
             if (t >= WIGGLE_TICKS) return false;
-            if (t == 0 && Log.DebugEnabled) Log.Debug("Drone {0}: not moving under thrust ({1:F2} m/s asked, {2:F2} moved): shaking its attitude {3:F0}°",
-                                                      Entity.EntityId, pushAsked, pushMoved, MathHelperD.ToDegrees(WIGGLE_ANGLE));
+            if (t == 0 && Log.DebugEnabled) Log.Debug("Drone {0}: not moving under thrust ({1:F2} m/s asked, {2:F2} moved): shaking its attitude {3:F0}°", Entity.EntityId, pushAsked, pushMoved, MathHelperD.ToDegrees(WIGGLE_ANGLE));
             int step = t / WIGGLE_STEP_TICKS;
             Vector3D f = Vector3D.Normalize(fwd), u = Vector3D.Normalize(up);
             Vector3D axis = step < 2 ? u : step < 4 ? Vector3D.Normalize(Vector3D.Cross(f, u)) : f;   // yaw, pitch, roll
@@ -2542,11 +2528,7 @@ namespace Automata.Drone
             if (++pushBlockedTicks == PUSH_BLOCKED_TICKS)
             {
                 MatrixD wm = flightState.WorldMatrix;
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: pressed against something: asks {1:F2} m/s (F {2:F2} U {3:F2} R {4:F2}), moves {5:F2} m/s that way for {6} s; "
-                          + "thrust obstructed {7}, gear locked {8}, connector locked {9}; {10}",
-                          Entity.EntityId, c, Vector3D.Dot(dir, wm.Forward), Vector3D.Dot(dir, wm.Up), Vector3D.Dot(dir, wm.Right), pushMoved,
-                          PUSH_BLOCKED_TICKS / 60, thrustObstructedDir >= 0 ? ((Base6Directions.Direction)thrustObstructedDir).ToString() : "no",
-                          AnyGearLocked(), DockedConnector() != null || AnyConnectorLocked(), ThrustAndContactDiag());
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: pressed against something: asks {1:F2} m/s (F {2:F2} U {3:F2} R {4:F2}), moves {5:F2} m/s that way for {6} s; " + "thrust obstructed {7}, gear locked {8}, connector locked {9}; {10}", Entity.EntityId, c, Vector3D.Dot(dir, wm.Forward), Vector3D.Dot(dir, wm.Up), Vector3D.Dot(dir, wm.Right), pushMoved, PUSH_BLOCKED_TICKS / 60, thrustObstructedDir >= 0 ? ((Base6Directions.Direction)thrustObstructedDir).ToString() : "no", AnyGearLocked(), DockedConnector() != null || AnyConnectorLocked(), ThrustAndContactDiag());
             }
         }
 
@@ -2675,7 +2657,6 @@ namespace Automata.Drone
             if (speedBoundShare < 0.5 || speedCapName == null) return;
             string text = Loc.F(StrTimedOutHeldAtIts, what, speedCapName, speedCapValue);
             Report(text);
-            Broadcast(text);
         }
         #endregion
 
@@ -2864,8 +2845,7 @@ namespace Automata.Drone
                 if (++obstructedTicks[active] > GAIN_OBSTRUCTED_TICKS && thrustObstructedDir != active)
                 {
                     thrustObstructedDir = active;
-                    if (Log.DebugEnabled) Log.Debug("Drone {0}: thrust obstructed: {1} group at {2:P0} throttle gives {3:F2} m/s² of the {4:F2} expected",
-                              Entity.EntityId, (Base6Directions.Direction)active, groupThrottle[active], measured, expected);
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: thrust obstructed: {1} group at {2:P0} throttle gives {3:F2} m/s² of the {4:F2} expected", Entity.EntityId, (Base6Directions.Direction)active, groupThrottle[active], measured, expected);
                 }
                 return;
             }
@@ -2901,8 +2881,7 @@ namespace Automata.Drone
             if (!changed) return;
             for (int i = 0; i < 6; i++)
                 reportedThrustGain[i] = thrustGain[i];
-            if (Log.DebugEnabled) Log.Debug("Drone {6}: thrust gain F{0:F2} B{1:F2} L{2:F2} R{3:F2} U{4:F2} D{5:F2}",
-                thrustGain[0], thrustGain[1], thrustGain[2], thrustGain[3], thrustGain[4], thrustGain[5], _entityId);
+            if (Log.DebugEnabled) Log.Debug("Drone {6}: thrust gain F{0:F2} B{1:F2} L{2:F2} R{3:F2} U{4:F2} D{5:F2}", thrustGain[0], thrustGain[1], thrustGain[2], thrustGain[3], thrustGain[4], thrustGain[5], _entityId);
         }
         #endregion
 

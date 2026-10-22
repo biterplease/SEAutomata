@@ -52,7 +52,7 @@ namespace Automata.Util
             }
             catch (Exception ex)
             {
-                Log.Warning("{0} {1}: settings not readable, defaults used ({2})", GetType().Name, Entity.EntityId, ex.Message);
+                if (Log.DebugEnabled) Log.Debug("{0} {1}: settings not readable, defaults used ({2})", GetType().Name, Entity.EntityId, ex.Message);
             }
             return false;
         }
@@ -89,7 +89,7 @@ namespace Automata.Util
                 long identity = MyAPIGateway.Players.TryGetIdentityId(senderSteamId);
                 if (identity == 0 || block == null || !block.HasPlayerAccess(identity))
                 {
-                    Log.Warning("Net: {0} {1}: settings from {2} rejected (no terminal access)", GetType().Name, Entity.EntityId, senderSteamId);
+                    if (Log.DebugEnabled) Log.Debug("Net: {0} {1}: settings from {2} rejected (no terminal access)", GetType().Name, Entity.EntityId, senderSteamId);
                     return;
                 }
                 info.Relay = RelayMode.ToOthers;
@@ -98,13 +98,13 @@ namespace Automata.Util
             {
                 if (!LoadSettingsXml(p.Xml))
                 {
-                    Log.Warning("Net: {0} {1}: settings from {2} not readable", GetType().Name, Entity.EntityId, senderSteamId);
+                    if (Log.DebugEnabled) Log.Debug("Net: {0} {1}: settings from {2} not readable", GetType().Name, Entity.EntityId, senderSteamId);
                     return;
                 }
             }
             catch (Exception ex)
             {
-                Log.Warning("Net: {0} {1}: settings from {2} not readable ({3})", GetType().Name, Entity.EntityId, senderSteamId, ex.Message);
+                if (Log.DebugEnabled) Log.Debug("Net: {0} {1}: settings from {2} not readable ({3})", GetType().Name, Entity.EntityId, senderSteamId, ex.Message);
                 return;
             }
             if (Log.DebugEnabled) Log.Debug("Net: {0} {1}: settings received from {2}", GetType().Name, Entity.EntityId, senderSteamId);

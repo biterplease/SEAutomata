@@ -283,8 +283,7 @@ namespace Automata.Pointer
                 }
             }
             p.Pivot = p.Entity.PositionComp.LocalAABB.Center;
-            if (Log.DebugEnabled) Log.Debug("Pointer: part {0} on {1}: {2}, box {3}", dummyName, rifle.DefinitionId != null ? rifle.DefinitionId.Value.SubtypeName : "?",
-                      p.Own ? @"own entity, Models\Items\" + file + ".mwm" : "the game's subpart", p.Entity.PositionComp.LocalAABB.Size);
+            if (Log.DebugEnabled) Log.Debug("Pointer: part {0} on {1}: {2}, box {3}", dummyName, rifle.DefinitionId != null ? rifle.DefinitionId.Value.SubtypeName : "?", p.Own ? @"own entity, Models\Items\" + file + ".mwm" : "the game's subpart", p.Entity.PositionComp.LocalAABB.Size);
             return true;
         }
 

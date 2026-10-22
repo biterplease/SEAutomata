@@ -240,8 +240,7 @@ namespace Automata.Pathfinding
             lanes[lane.Number] = lane;
             dirty = true;
             listVersion++;
-            Log.Info("Lanes: {0} made from {1} ({2:F0} m, spacing {3:F1} m, hull {4:F1} m); tube checks queued", lane.PairName,
-                     expected ? "a flight" : BUSY_TRIPS + " trips within " + BUSY_WINDOW_MINUTES + " min", lane.Length, lane.Spacing, lane.Hull);
+            if (Log.DebugEnabled) Log.Debug("Lanes: {0} made from {1} ({2:F0} m, spacing {3:F1} m, hull {4:F1} m); tube checks queued", lane.PairName, expected ? "a flight" : BUSY_TRIPS + " trips within " + BUSY_WINDOW_MINUTES + " min", lane.Length, lane.Spacing, lane.Hull);
         }
 
         // Trim an end of the flown line: short of a base (outside its sphere plus a margin), or above a work point at an
@@ -703,7 +702,7 @@ namespace Automata.Pathfinding
             l.Reason = why;
             dirty = true;
             listVersion++;
-            Log.Info("Lanes: {0} suspended: {1}", l.PairName, why);
+            if (Log.DebugEnabled) Log.Debug("Lanes: {0} suspended: {1}", l.PairName, why);
         }
 
         private void FailCheck(Lane l, string why)
@@ -729,7 +728,7 @@ namespace Automata.Pathfinding
                 if (minute - l.LastUsed > config.FlightLaneExpirationMinutes) gone.Add(l.Number);
             for (int i = 0; i < gone.Count; i++)
             {
-                Log.Info("Lanes: {0} expired (unused {1} min)", lanes[gone[i]].PairName, config.FlightLaneExpirationMinutes);
+                if (Log.DebugEnabled) Log.Debug("Lanes: {0} expired (unused {1} min)", lanes[gone[i]].PairName, config.FlightLaneExpirationMinutes);
                 lanes.Remove(gone[i]);
             }
             if (gone.Count > 0) { dirty = true; listVersion++; }
@@ -798,7 +797,7 @@ namespace Automata.Pathfinding
                     l.State = LaneState.Active;
                     l.FailedChecks = 0;
                     listVersion++;
-                    Log.Info("Lanes: {0} active", l.PairName);
+                    if (Log.DebugEnabled) Log.Debug("Lanes: {0} active", l.PairName);
                 }
                 dirty = true;
             }
@@ -836,7 +835,7 @@ namespace Automata.Pathfinding
             holds[HoldKey(owner, l.EndA, l.EndB)] = NowMinutes + (long)config.FlightLaneExpirationMinutes;
             dirty = true;
             listVersion++;
-            Log.Info("Lanes: {0} deleted by a player (not made again for {1} min)", l.PairName, config.FlightLaneExpirationMinutes);
+            if (Log.DebugEnabled) Log.Debug("Lanes: {0} deleted by a player (not made again for {1} min)", l.PairName, config.FlightLaneExpirationMinutes);
             return true;
         }
 
@@ -851,7 +850,7 @@ namespace Automata.Pathfinding
             l.NextCheckFrame = 0;
             dirty = true;
             listVersion++;
-            Log.Info("Lanes: {0} resumed by a player (checked again first)", l.PairName);
+            if (Log.DebugEnabled) Log.Debug("Lanes: {0} resumed by a player (checked again first)", l.PairName);
             return true;
         }
 
@@ -938,7 +937,7 @@ namespace Automata.Pathfinding
                     for (int i = 0; i < h; i++) holds[r.ReadString()] = r.ReadInt64();
                 }
                 listVersion++;
-                Log.Info("Lanes: {0} lane pair(s) loaded", lanes.Count);
+                if (Log.DebugEnabled) Log.Debug("Lanes: {0} lane pair(s) loaded", lanes.Count);
             }
             catch (Exception ex)
             {

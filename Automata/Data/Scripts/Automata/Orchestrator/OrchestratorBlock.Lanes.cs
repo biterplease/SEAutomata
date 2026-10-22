@@ -107,12 +107,12 @@ namespace Automata.Orchestrator
                     break;
                 }
             }
-            Log.Info("Orchestrator {0}: lane command {1} {2}", entityId, parts[1], number);
+            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: lane command {1} {2}", entityId, parts[1], number);
         }
 
         private void AddLaneEvent(string text)
         {
-            Log.Info("Orchestrator {0}: {1}", entityId, text);
+            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: {1}", entityId, text);
         }
 
         private static void Flatten(List<Vector3D> pts, List<double> into)

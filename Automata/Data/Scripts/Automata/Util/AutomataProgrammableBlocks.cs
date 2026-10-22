@@ -57,7 +57,7 @@ namespace Automata.Util
             MyAPIGateway.TerminalControls.GetActions<IMyProgrammableBlock>(out actions);
             foreach (var a in actions)
                 if (actionsToHide.Contains(a.Id)) a.Enabled = TerminalChainedDelegate.Create(a.Enabled, NotAutomata);
-            Log.Info("Programmable block controls hidden on Automata blocks: {0}", hidden);
+            if (Log.DebugEnabled) Log.Debug("Programmable block controls hidden on Automata blocks: {0}", hidden);
         }
     }
 }

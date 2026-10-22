@@ -133,8 +133,7 @@ namespace Automata.Pathfinding
                 && Vector3D.DistanceSquared(d.Region.Max - d.Region.Min, region.Max - region.Min) < MOVED * MOVED) return;
             queue.WarmUp(region);
             warmed[id] = new Done { Region = region, Frame = now };
-            if (Log.DebugEnabled) Log.Debug("Pathfinding: scene warm-up queued for {0}: {1:F0} x {2:F0} x {3:F0} m", id,
-                      region.Max.X - region.Min.X, region.Max.Y - region.Min.Y, region.Max.Z - region.Min.Z);
+            if (Log.DebugEnabled) Log.Debug("Pathfinding: scene warm-up queued for {0}: {1:F0} x {2:F0} x {3:F0} m", id, region.Max.X - region.Min.X, region.Max.Y - region.Min.Y, region.Max.Z - region.Min.Z);
         }
     }
 }

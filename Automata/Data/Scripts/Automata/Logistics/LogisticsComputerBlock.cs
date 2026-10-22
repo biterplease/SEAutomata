@@ -154,6 +154,9 @@ namespace Automata.Logistics
             public bool Finished;    // every drone reported, or one gave up: closed at the next check (need recomputed)
             public bool Announced;   // the last announcement reached an orchestrator
             public Message<JobAnnouncement> Sent;   // the announcement in flight: told whether it was taken once its life is up
+            public Message<JobAnnouncement> Cached;   // the last announcement built: sent again while the connector it names is unchanged
+            public long CachedDock;
+            public VRageMath.Vector3D CachedAt;
             public string LastResult;
         }
         private OpenJob requestJob, pushJob;
@@ -195,8 +198,7 @@ namespace Automata.Logistics
             ready = true;
             if (!All.Contains(this)) All.Add(this);
             NeedsUpdate |= MyEntityUpdateEnum.EACH_100TH_FRAME;
-            Log.Info("LC {0}: '{1}' on '{2}': {3} Min/Max entries, modes {4}", entityId, block.CustomName, block.CubeGrid.DisplayName,
-                     settings.Quotas.Count, settings.WorkMode);
+            if (Log.DebugEnabled) Log.Debug("LC {0}: '{1}' on '{2}': {3} Min/Max entries, modes {4}", entityId, block.CustomName, block.CubeGrid.DisplayName, settings.Quotas.Count, settings.WorkMode);
         }
 
         public override void UpdateAfterSimulation100()
@@ -337,7 +339,7 @@ namespace Automata.Logistics
             ReadFailures(now);
             ReadJobReports(now);
             ReadKeepalives(now);
-            droneWatch.Check(now, block, settings.UseBroadcastController, "LC {0}", entityId, null);
+            droneWatch.Check(now, block, false, "LC {0}", entityId, null);
             RepeatAnnouncement(requestJob, now);
             RepeatAnnouncement(pushJob, now);
             ReadAuctions(now);
@@ -398,9 +400,7 @@ namespace Automata.Logistics
             {
                 var names = new List<string>();
                 for (int g = 0; g < grids.Count; g++) names.Add(grids[g].DisplayName + (grids[g].GridSizeEnum == VRage.Game.MyCubeSize.Large ? " (large)" : " (small)"));
-                Log.Debug("LC {0}: rescan ({6}): {1} grid(s) [{2}], {3} inventory blocks, {4} network(s), antenna {5}", entityId, grids.Count,
-                          string.Join(", ", names), inventoryBlocks.Count, networks.Count, antenna != null ? "'" + antenna.CustomName + "'" : "none",
-                          dirtyWhy ?? (dirty ? "changes" : "periodic"));
+                Log.Debug("LC {0}: rescan ({6}): {1} grid(s) [{2}], {3} inventory blocks, {4} network(s), antenna {5}", entityId, grids.Count, string.Join(", ", names), inventoryBlocks.Count, networks.Count, antenna != null ? "'" + antenna.CustomName + "'" : "none", dirtyWhy ?? (dirty ? "changes" : "periodic"));
             }
         }
 
@@ -583,9 +583,7 @@ namespace Automata.Logistics
                          || (job.Assigned == 0 && job.LastChange > job.Opened && now - job.LastChange > DELIVERY_SETTLE_TICKS)
                          || (job.Assigned == 0 && now - job.Opened > JOB_STALE_TICKS);
                 if (!done) return job;
-                if (Log.DebugEnabled) Log.Debug("LC {0}: job {1} ({2}) closed: {3}", entityId, job.JobId, job.Type,
-                          needed.IsEmpty() ? "satisfied" : job.Finished ? "drones reported, the rest is asked again"
-                          : job.LastChange > job.Opened ? "items moved, the rest is asked again" : "nobody took it");
+                if (Log.DebugEnabled) Log.Debug("LC {0}: job {1} ({2}) closed: {3}", entityId, job.JobId, job.Type, needed.IsEmpty() ? "satisfied" : job.Finished ? "drones reported, the rest is asked again" : job.LastChange > job.Opened ? "items moved, the rest is asked again" : "nobody took it");
                 job = null;
             }
             if (needed.IsEmpty()) return null;
@@ -640,9 +638,22 @@ namespace Automata.Logistics
             var dock = FreeDock(primary);
             if (dock == null) { job.LastResult = Loc.T(StrNoFreeConnector); if (Log.DebugEnabled) Log.Debug("LC {0}: job {1}: no free connector to announce", entityId, job.JobId); return; }
             Vector3D at = dock.PositionData.ToVector3D();
+            Message<JobAnnouncement> msg = job.Cached;
+            if (msg != null && job.CachedDock == dock.EntityId && job.CachedAt == at && msg.Payload.IsStaticGrid == block.CubeGrid.IsStatic)
+            {
+                // Same connector, same place: the very same announcement again (payloads are read-only once sent)
+                msg.MessageId = IdGenerator.GenerateId(ref messageCounter, entityId);
+                msg.CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow);
+                var again = messaging.BroadcastMessage(antennaReg, msg, false, MessageQueue.IAIBlockType.LogisticsComputer);
+                job.Announced = false;
+                job.Sent = again == ErrorCode.None ? msg : null;
+                if (again != ErrorCode.None) job.LastResult = again.ToString();
+                if (Log.DebugEnabled) Log.Debug("LC {0}: job {1} ({2}) announced again at connector {3}: {4}", entityId, job.JobId, job.Type, dock.EntityId, again);
+                return;
+            }
             float interference;
             float g = MyAPIGateway.Physics.CalculateNaturalGravityAt(at, out interference).Length();
-            var msg = new Message<JobAnnouncement>
+            msg = new Message<JobAnnouncement>
             {
                 Payload = new JobAnnouncement
                 {
@@ -670,11 +681,13 @@ namespace Automata.Logistics
                 Channel = job.Type == Orchestrator.JobType.DeliverMissingInventory ? Channel.LOGISTIC_REQUEST : Channel.LOGISTIC_PUSH,
             };
             var error = messaging.BroadcastMessage(antennaReg, msg, false, MessageQueue.IAIBlockType.LogisticsComputer);
+            job.Cached = msg;
+            job.CachedDock = dock.EntityId;
+            job.CachedAt = at;
             job.Announced = false;
             job.Sent = error == ErrorCode.None ? msg : null;
             if (error != ErrorCode.None) job.LastResult = error.ToString();
-            if (Log.DebugEnabled) Log.Debug("LC {0}: job {1} ({2}) announced at connector {3}: {4} ({5})", entityId, job.JobId, job.Type, dock.EntityId,
-                      DescribeItems(job.Items), error);
+            if (Log.DebugEnabled) Log.Debug("LC {0}: job {1} ({2}) announced at connector {3}: {4} ({5})", entityId, job.JobId, job.Type, dock.EntityId, DescribeItems(job.Items), error);
         }
         #endregion
 
@@ -975,8 +988,7 @@ namespace Automata.Logistics
             entry.AppendLoc(StrLogBid, BidKind(a), ConnectorName(dock.EntityId));
             Nicknames.AppendPayload(entry, Loc.T(StrLogPayload), items);
             log.Add(entry.ToString());
-            if (Log.DebugEnabled) Log.Debug("LC {0}: bid on auction {1} ({2}) from {3}, port {4} ({8}): {5} {6} ({7})", entityId, a.AuctionId, a.JobType,
-                      network.Nickname, dock.EntityId, fulfillment, DescribeItems(items), error, DockFit.Describe(msg.Payload.DockSite));
+            if (Log.DebugEnabled) Log.Debug("LC {0}: bid on auction {1} ({2}) from {3}, port {4} ({8}): {5} {6} ({7})", entityId, a.AuctionId, a.JobType, network.Nickname, dock.EntityId, fulfillment, DescribeItems(items), error, DockFit.Describe(msg.Payload.DockSite));
         }
 
         // Awards: its own job awarded (not announced again for a while); a commitment stays for the auction it won (a
@@ -1055,8 +1067,7 @@ namespace Automata.Logistics
                         else
                         {
                             held.Frame = now;
-                            if (Log.DebugEnabled) Log.Debug("LC {0}: auction {1}: drone {2} {3}, {4} drone(s) still hold the reservation", entityId, r.AuctionId,
-                                      r.DroneEntityId, r.Outcome, held.Drones.Count);
+                            if (Log.DebugEnabled) Log.Debug("LC {0}: auction {1}: drone {2} {3}, {4} drone(s) still hold the reservation", entityId, r.AuctionId, r.DroneEntityId, r.Outcome, held.Drones.Count);
                         }
                     }
                     if (r.AnnouncerEntityId != entityId) continue;
@@ -1070,8 +1081,7 @@ namespace Automata.Logistics
                         lastQuotaCheck = int.MinValue / 2;   // closed / re-opened at once
                     }
                     job.LastResult = Loc.F(StrDroneOutcome, r.Outcome);
-                    if (Log.DebugEnabled) Log.Debug("LC {0}: job {1} ({2}): drone {3} {4} ({5}); {6}", entityId, job.JobId, job.Type, r.DroneEntityId, r.Outcome, r.Reason,
-                              job.Finished ? "closing" : job.DronesOut + " drone(s) still out");
+                    if (Log.DebugEnabled) Log.Debug("LC {0}: job {1} ({2}): drone {3} {4} ({5}); {6}", entityId, job.JobId, job.Type, r.DroneEntityId, r.Outcome, r.Reason, job.Finished ? "closing" : job.DronesOut + " drone(s) still out");
                 }
                 reportInbox.Clear();
             }
@@ -1117,8 +1127,7 @@ namespace Automata.Logistics
                 if (job == null || job.Assigned != 0 || (job.HeldUntil != 0 && job.HeldUntil > now)) continue;
                 job.HeldUntil = now + Math.Max(10, f.HoldSeconds) * 60;
                 job.LastResult = Loc.F(StrOnHoldReason, f.Reason);
-                if (Log.DebugEnabled) Log.Debug("LC {0}: job {1} ({2}) on hold for {3} s: orchestrator {4}: {5}", entityId, job.JobId, job.Type, f.HoldSeconds,
-                          f.OrchestratorEntityId, f.Reason);
+                if (Log.DebugEnabled) Log.Debug("LC {0}: job {1} ({2}) on hold for {3} s: orchestrator {4}: {5}", entityId, job.JobId, job.Type, f.HoldSeconds, f.OrchestratorEntityId, f.Reason);
             }
             failureInbox.Clear();
         }
@@ -1229,8 +1238,7 @@ namespace Automata.Logistics
             foreach (var c in commitments)
                 s.Commitments.Add(new CommitmentState { AuctionId = c.Key, Items = c.Value.Items, Volume = c.Value.Volume, AgeTicks = BlockSave.Age(c.Value.Frame),
                                                          Supply = c.Value.Supply, Network = c.Value.Network, Won = c.Value.Won, JobId = c.Value.JobId });
-            if (Log.DebugEnabled) Log.Debug("LC {0}: state saved: request {1}, push {2}, {3} promise(s)", entityId,
-                      requestJob != null ? requestJob.JobId : 0, pushJob != null ? pushJob.JobId : 0, s.Commitments.Count);
+            if (Log.DebugEnabled) Log.Debug("LC {0}: state saved: request {1}, push {2}, {3} promise(s)", entityId, requestJob != null ? requestJob.JobId : 0, pushJob != null ? pushJob.JobId : 0, s.Commitments.Count);
             return s;
         }
 
@@ -1289,8 +1297,7 @@ namespace Automata.Logistics
                     commitments[c.AuctionId] = new Commitment { Items = c.Items, Volume = c.Volume, Frame = BlockSave.FrameFromAge(c.AgeTicks),
                                                                 Supply = c.Supply, Network = c.Network, Won = c.Won, JobId = c.JobId };
                 }
-            Log.Info("LC {0}: state restored: request {1}, push {2}, {3} promise(s)", entityId,
-                     requestJob != null ? requestJob.JobId : 0, pushJob != null ? pushJob.JobId : 0, commitments.Count);
+            if (Log.DebugEnabled) Log.Debug("LC {0}: state restored: request {1}, push {2}, {3} promise(s)", entityId, requestJob != null ? requestJob.JobId : 0, pushJob != null ? pushJob.JobId : 0, commitments.Count);
         }
         #endregion
 
@@ -1459,7 +1466,7 @@ namespace Automata.Logistics
                 n++;
             }
             lastQuotaCheck = int.MinValue / 2;
-            Log.Info("LC {0}: retry of held jobs requested: {1} job(s) to announce again", entityId, n);
+            if (Log.DebugEnabled) Log.Debug("LC {0}: retry of held jobs requested: {1} job(s) to announce again", entityId, n);
         }
         #endregion
 
@@ -1594,12 +1601,6 @@ namespace Automata.Logistics
         {
             get { return settings.LcdTag ?? ""; }
             set { if (settings.LcdTag == value) return; settings.LcdTag = value; SettingsEdited(); }
-        }
-
-        public bool Terminal_UseBroadcastController
-        {
-            get { return settings.UseBroadcastController; }
-            set { if (settings.UseBroadcastController == value) return; settings.UseBroadcastController = value; SettingsEdited(); }
         }
         #endregion
     }

@@ -63,9 +63,6 @@ namespace Automata.Pathfinding
         /// block's cells blocks. Weld work sites (built neighbours of the block worked on). Null: cell boxes.
         /// </summary>
         public IMyCubeGrid RealShapeGrid;
-        // ObservedRange: the all-around part (sensors / instruments not required), worked out once per query
-        internal bool ViewKnown;
-        internal double View;
         /// <summary>
         /// Set by Lazy Theta* when only a held attitude found a way (Controller then has that attitude): every leg of
         /// the route keeps it (AssignAttitudes), the turn to it is at the start.
@@ -178,8 +175,7 @@ namespace Automata.Pathfinding
             }
             if (config.PathSearchWorkers > 0 && config.AllowLazyTheta && (MyAPIGateway.Multiplayer == null || MyAPIGateway.Multiplayer.IsServer))
                 Instance.Searches = new PathSearchQueue(Instance, config);
-            Log.Info("Pathfinding: chain straight line > {0} > {1} > repositioning", config.UsePathMemory ? "memory" : "(memory off)",
-                     config.AllowLazyTheta ? "Lazy Theta*" : "(Lazy Theta* off)");
+            if (Log.DebugEnabled) Log.Debug("Pathfinding: chain straight line > {0} > {1} > repositioning", config.UsePathMemory ? "memory" : "(memory off)", config.AllowLazyTheta ? "Lazy Theta*" : "(Lazy Theta* off)");
         }
 
         /// <summary>World save (session SaveData): the memory goes to world storage.</summary>
@@ -503,12 +499,12 @@ namespace Automata.Pathfinding
         {
             Vector3D d = goal - start;
             double len = d.Length();
-            double range = len > 1e-3 ? ObservedRange(ref q, d / len) : q.View;
+            double range = len > 1e-3 ? ObservedRange(ref q, d / len) : 0;
             int sOn = 0, sAll = q.Sensors != null ? q.Sensors.Count : 0, cOn = 0, cAll = q.Cameras != null ? q.Cameras.Count : 0;
             for (int i = 0; i < sAll; i++) if (InstrumentOn(q.Sensors[i], q.SleepingIds)) sOn++;
             for (int i = 0; i < cAll; i++) if (InstrumentOn(q.Cameras[i], q.SleepingIds)) cOn++;
-            return string.Format(" [sight {0:F0} m that way ({1:F0} m all around), sensors {2}/{3} on, cameras {4}/{5} on, start {6:F0} m from the controller]",
-                                 range, q.View, sOn, sAll, cOn, cAll, Vector3D.Distance(start, q.Controller.Translation));
+            return string.Format(" [sight {0:F0} m that way, sensors {1}/{2} on, cameras {3}/{4} on, start {5:F0} m from the controller]",
+                                 range, sOn, sAll, cOn, cAll, Vector3D.Distance(start, q.Controller.Translation));
         }
 
         private static bool AnyOn<T>(List<T> blocks, List<long> sleeping) where T : class, IMyFunctionalBlock
@@ -1515,10 +1511,7 @@ namespace Automata.Pathfinding
             for (int k = 1; k < points.Count - 1; k++) waypoints.Add(points[k]);
             int added = points.Count - 2;
             points.Clear();
-            if (Log.DebugEnabled) Log.Debug("Pathfinding: {0:F0} m, {1} waypoints, {2} stretches not fully seen (assumed clear){7}, {3} checks, {4} blocks, {5} rays, {6:F2} ms; stage {8} (straight {9:F2} ms{10})",
-                      Vector3D.Distance(start, goal), added, unseen, planChecks, blocksTested, planRays, watch.Elapsed.TotalMilliseconds,
-                      unseen > 0 ? DescribeView(ref q, start, goal) : "", stage, t1 - t0,
-                      (stage != "straight" ? string.Format(", memory {0:F2} ms", t2 - t1) : "") + (stage.StartsWith("theta") ? string.Format(", Lazy Theta* {0:F2} ms", t3 - t2) : ""));
+            if (Log.DebugEnabled) Log.Debug("Pathfinding: {0:F0} m, {1} waypoints, {2} stretches not fully seen (assumed clear){7}, {3} checks, {4} blocks, {5} rays, {6:F2} ms; stage {8} (straight {9:F2} ms{10})", Vector3D.Distance(start, goal), added, unseen, planChecks, blocksTested, planRays, watch.Elapsed.TotalMilliseconds, unseen > 0 ? DescribeView(ref q, start, goal) : "", stage, t1 - t0, (stage != "straight" ? string.Format(", memory {0:F2} ms", t2 - t1) : "") + (stage.StartsWith("theta") ? string.Format(", Lazy Theta* {0:F2} ms", t3 - t2) : ""));
             return added > 0 ? RouteResult.Detour : RouteResult.Direct;
         }
 
@@ -1712,7 +1705,7 @@ namespace Automata.Pathfinding
                 double t = (double)k / n;
                 Vector3D u = (u1 * Math.Sin((1 - t) * turn) + u2 * Math.Sin(t * turn)) / sin;
                 Vector3D p = k == n ? t2 : centre + u * radius;
-                Vector3D h, o1, o2;
+                Vector3D h;
                 IMyEntity e;
                 Vector3D th;
                 if (BudgetSpent || SegmentBlocked(ref q, ref q.Controller, prev, p, 0.5, out h, out e)
@@ -1731,8 +1724,7 @@ namespace Automata.Pathfinding
 
         private RouteResult Fail(Vector3D start, Vector3D goal, string why)
         {
-            if (Log.DebugEnabled) Log.Debug("Pathfinding: no route {0:F0} m ({1}), {2} checks, {3} rays, {4:F2} ms", Vector3D.Distance(start, goal), why,
-                      planChecks, planRays, watch.Elapsed.TotalMilliseconds);
+            if (Log.DebugEnabled) Log.Debug("Pathfinding: no route {0:F0} m ({1}), {2} checks, {3} rays, {4:F2} ms", Vector3D.Distance(start, goal), why, planChecks, planRays, watch.Elapsed.TotalMilliseconds);
             points.Clear();
             return RouteResult.Blocked;
         }

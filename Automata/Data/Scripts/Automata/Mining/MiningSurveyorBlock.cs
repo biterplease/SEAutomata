@@ -205,8 +205,7 @@ namespace Automata.Mining
             ready = true;
             if (!All.Contains(this)) All.Add(this);
             NeedsUpdate |= MyEntityUpdateEnum.EACH_10TH_FRAME;
-            Log.Info("MS {0}: '{1}' on '{2}': {3} order(s), {4} saved deposit(s)", entityId, block.CustomName, block.CubeGrid.DisplayName,
-                     settings.Orders.Count, pendingState != null && pendingState.Deposits != null ? pendingState.Deposits.Count : 0);
+            if (Log.DebugEnabled) Log.Debug("MS {0}: '{1}' on '{2}': {3} order(s), {4} saved deposit(s)", entityId, block.CustomName, block.CubeGrid.DisplayName, settings.Orders.Count, pendingState != null && pendingState.Deposits != null ? pendingState.Deposits.Count : 0);
         }
 
         public override void UpdateBeforeSimulation10()
@@ -333,7 +332,7 @@ namespace Automata.Mining
             gpsDirty = true;
             ordersDirty = true;
             AddEvent(Loc.F(StrDeletedDeposits, n));
-            Log.Info("MS {0}: known deposits deleted on request: {1} deposit(s)", entityId, n);
+            if (Log.DebugEnabled) Log.Debug("MS {0}: known deposits deleted on request: {1} deposit(s)", entityId, n);
         }
 
         private int lastRetryRequest;
@@ -367,7 +366,7 @@ namespace Automata.Mining
             }
             ordersDirty = true;
             AddEvent(Loc.F(StrRetryJobSAnnouncedAgain, n));
-            Log.Info("MS {0}: retry requested: {1} unassigned job(s) announced again", entityId, n);
+            if (Log.DebugEnabled) Log.Debug("MS {0}: retry requested: {1} unassigned job(s) announced again", entityId, n);
         }
         #endregion
 
@@ -425,7 +424,7 @@ namespace Automata.Mining
                 ReadReports();
                 ReadKeepalives(now);
             }
-            droneWatch.Check(now, block, settings.UseBroadcastController, "MS {0}", entityId, AddEvent);
+            droneWatch.Check(now, block, false, "MS {0}", entityId, AddEvent);
             ExpireJobs(now);
             if (online)
             {
@@ -575,7 +574,7 @@ namespace Automata.Mining
                 depleted.Add(d);
                 changed = true;
                 AddEvent(Loc.F(StrAtMDepleted, ShortOre(d.Ore), Vector3D.Distance(d.Position, block.GetPosition()), source));
-                Log.Info("MS {0}: deposit {1} at {2} depleted ({3})", entityId, d.Ore, d.Position, source);
+                if (Log.DebugEnabled) Log.Debug("MS {0}: deposit {1} at {2} depleted ({3})", entityId, d.Ore, d.Position, source);
             }
             for (int h = 0; h < hits.Count; h++)
             {
@@ -787,8 +786,7 @@ namespace Automata.Mining
             };
             AddEvent(Loc.F(StrJobKgAtMBore, jobId, kg, ShortOre(deposit.Ore),
                                    Vector3D.Distance(deposit.Position, block.GetPosition()), Vector3D.Distance(surface, deposit.Position)));
-            Log.Info("MS {0}: job {1}: {2:F0} kg {3} at {4}, bore from {5} ({6:F0} m)", entityId, jobId, kg, deposit.Ore, deposit.Position, surface,
-                     Vector3D.Distance(surface, deposit.Position));
+            if (Log.DebugEnabled) Log.Debug("MS {0}: job {1}: {2:F0} kg {3} at {4}, bore from {5} ({6:F0} m)", entityId, jobId, kg, deposit.Ore, deposit.Position, surface, Vector3D.Distance(surface, deposit.Position));
             return new MiningJob { JobId = jobId, Ore = deposit.Ore, Deposit = deposit.Position, Kg = kg, Message = AnnouncementMessage(ja) };
         }
 
@@ -985,7 +983,7 @@ namespace Automata.Mining
             gpsIdentity = block.OwnerId;
             int n = AddDepositGps(requestedHashes);
             AddEvent(Loc.F(StrDepositsShownAsGps, n));
-            Log.Info("MS {0}: show known deposits requested: {1} marker(s) of {2} deposit(s)", entityId, n, deposits.Count);
+            if (Log.DebugEnabled) Log.Debug("MS {0}: show known deposits requested: {1} marker(s) of {2} deposit(s)", entityId, n, deposits.Count);
         }
 
         // Temporary GPS markers (nearest deposits first, up to MaxGpsMarkers) for the owner; their hashes into 'hashes'
@@ -1084,8 +1082,7 @@ namespace Automata.Mining
                 }
             ordersDirty = true;   // progress of orders edited while saved is restarted
             gpsDirty = true;
-            Log.Info("MS {0}: state restored: {1} deposit(s), {2} depleted, {3} order(s), {4} job(s)", entityId,
-                     deposits.Count, depleted.Count, progress.Count, jobs.Count);
+            if (Log.DebugEnabled) Log.Debug("MS {0}: state restored: {1} deposit(s), {2} depleted, {3} order(s), {4} job(s)", entityId, deposits.Count, depleted.Count, progress.Count, jobs.Count);
         }
         #endregion
 
@@ -1303,12 +1300,6 @@ namespace Automata.Mining
         {
             get { return settings.LcdTag ?? ""; }
             set { if (settings.LcdTag == value) return; settings.LcdTag = value; SettingsEdited(); }
-        }
-
-        public bool Terminal_UseBroadcastController
-        {
-            get { return settings.UseBroadcastController; }
-            set { if (settings.UseBroadcastController == value) return; settings.UseBroadcastController = value; SettingsEdited(); }
         }
         #endregion
     }

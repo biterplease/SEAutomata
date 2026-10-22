@@ -73,7 +73,7 @@ namespace Automata.Logistics
             Done = true;
             AutomataProgrammableBlocks.HideVanillaOnce();
             CreateControls();
-            Log.Info("Created LC terminal controls");
+            if (Log.DebugEnabled) Log.Debug("Created LC terminal controls");
         }
 
         private static LogisticsComputerBlock GetBlock(IMyTerminalBlock block)
@@ -248,7 +248,6 @@ namespace Automata.Logistics
             NicknameControl.Add<IMyProgrammableBlock, LogisticsComputerBlock>(IdPrefix + "Nick", GetBlock, l => l.Nickname, (l, v) => l.Terminal_Nickname = v);
             LcdTagControl.Add(IdPrefix + "LcdTag", GetBlock, l => l.Terminal_LcdTag, (l, v) => l.Terminal_LcdTag = v, "[LogisticComputer]");
             LcdControls.Add(IdPrefix, GetBlock, l => l.Terminal_LcdStyle, l => l.Terminal_LcdEdited(), true);
-            BroadcastControllerControl.Add(IdPrefix + "UseBroadcastController", GetBlock, l => l.Terminal_UseBroadcastController, (l, v) => l.Terminal_UseBroadcastController = v);
         }
 
         static readonly Dictionary<ItemCategory, MyStringId> CategoryNames = new Dictionary<ItemCategory, MyStringId>
