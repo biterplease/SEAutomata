@@ -2919,10 +2919,24 @@ namespace Automata.Drone
             return "?";
         }
 
+        private readonly List<IMyCubeGrid> constructGrids = new List<IMyCubeGrid>();
+
+        // Is this drone's construct (mechanical group) the one grid 'gridId' belongs to?
+        private bool OnConstructOf(long gridId)
+        {
+            constructGrids.Clear();
+            MyAPIGateway.GridGroups.GetGroup(block.CubeGrid, GridLinkTypeEnum.Mechanical, constructGrids);
+            bool found = false;
+            for (int i = 0; i < constructGrids.Count && !found; i++) found = constructGrids[i].EntityId == gridId;
+            constructGrids.Clear();
+            return found;
+        }
+
         private string WhyNotJob(Auction auction)
         {
             var caps = BidCapabilities;
             if (auction.OnlyDroneEntityId != 0 && auction.OnlyDroneEntityId != _entityId) return "ordered for another (tagged) drone";
+            if (auction.NoBidGridId != 0 && OnConstructOf(auction.NoBidGridId)) return "ordered by a target designator on this drone's own construct";
             if (batteryPercent == 0 && h2Percent <= 0) return "no power (batteries empty)";
             // Local jobs only (a relay / laser link reaches other bases): not for a job ordered for this drone by name
             string far = OutsideLocalRadius(auction);

@@ -275,7 +275,6 @@ namespace Automata.Orchestrator
         private void UpdateLcd()
         {
             Prune(MyAPIGateway.Session.GameplayFrameCounter);
-            UpdateDesignatorLcd();
             if (!lcd.Wanted(block, settings.LcdTag)) return;   // nobody looks at an LCD: nothing more is built
             if (Terminal_LcdStyle.ShowHeader) BuildHeader(); else header.Clear();
             lcd.Publish(Terminal_LcdStyle, header, log);
@@ -515,6 +514,7 @@ namespace Automata.Orchestrator
                 if (primary == null)
                 {
                     ReadAnnouncements(now);
+                    ReadDesignatorOrders(now);
                     ReadPeerAuctions(now);
                     StartQueuedAuctions(now);
                 }
@@ -526,6 +526,7 @@ namespace Automata.Orchestrator
                 ExpirePlayerJobs(now);   // designator orders not confirmed in time
                 SendWinners();
                 SendFailures();
+                SendOrderUpdates();
                 ReadJobReports(now);
                 ReadKeepalives(now);
                 ReadPlayerAlerts();
@@ -720,6 +721,7 @@ namespace Automata.Orchestrator
                 AnnouncerEntityId = key.Key,
                 ToolFaceWeights = ja.ToolFaceWeights,
                 OnlyDroneEntityId = PlayerJobDrone(key),
+                NoBidGridId = PlayerJobOriginGrid(key),
                 WeldCategory = ja.Type == JobType.Weld ? ja.WeldCategory : JobTypeExtensions.WELD_ANY,
                 Sequential = ja.Sequential,
             };

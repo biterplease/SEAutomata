@@ -37,10 +37,6 @@ namespace Automata.Orchestrator
         private static readonly MyStringId StrLaneVisualizeTip = MyStringId.GetOrCompute("Draws selected lane pair.");
         private static readonly MyStringId StrLanesClear = MyStringId.GetOrCompute("Clear all lanes");
         private static readonly MyStringId StrLanesClearArmed = MyStringId.GetOrCompute("Press again to clear all");
-        private static readonly MyStringId StrDesignatorCamera = MyStringId.GetOrCompute("Designator camera");
-        private static readonly MyStringId StrDesignatorLcdTag = MyStringId.GetOrCompute("Designator LCD tag");
-        private static readonly MyStringId StrDesignatorLcdTagTip = MyStringId.GetOrCompute("Place this tag on an LCD, select the AutomataLog app to see designator output.");
-        private static readonly MyStringId StrDesignatorCameraTip = MyStringId.GetOrCompute("Camera the \"Designator:\" toolbar actions aim with (15 km). On this grid, or via rotor / hinge / piston.");
         #endregion
 
         public static ServerConfig.OrchestratorBlockConfig BlockConfig = ServerConfig.Instance.OrchestratorServerSettings;
@@ -59,48 +55,6 @@ namespace Automata.Orchestrator
                                            l => l.Terminal_UseBroadcastController, (l, v) => l.Terminal_UseBroadcastController = v);
             CreateStagingControls();
             CreateLaneControls();
-            CreateDesignatorControls();
-        }
-
-        static void CreateDesignatorControls()
-        {
-            var sep = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSeparator, IMyProgrammableBlock>("");
-            sep.Visible = Visible;
-            Add(sep);
-            {
-                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlListbox, IMyProgrammableBlock>(IdPrefix + "DesignatorCamera");
-                c.Title = StrDesignatorCamera;
-                c.Tooltip = StrDesignatorCameraTip;
-                c.Visible = Visible;
-                c.SupportsMultipleBlocks = false;
-                c.Multiselect = false;
-                c.VisibleRowsCount = 4;
-                c.ListContent = (b, items, selected) => { var l = GetBlock(b); if (l != null) l.Terminal_CameraList(items, selected); };
-                c.ItemSelected = (b, selected) => { var l = GetBlock(b); if (l != null) l.Terminal_SelectCamera(selected); };
-                Add(c);
-            }
-            LcdTagControl.Add(IdPrefix + "DesignatorLcdTag", GetBlock, l => l.Terminal_DesignatorLcdTag, (l, v) => l.Terminal_DesignatorLcdTag = v,
-                              "[Designator]", StrDesignatorLcdTag, StrDesignatorLcdTagTip);
-            DesignatorAction("Tag", "TAG", Pointer.DesignatorOrder.Tag, "Textures\\GUI\\Icons\\Actions\\Start.dds");
-            DesignatorAction("Spot", "SPOT", Pointer.DesignatorOrder.Spot, "Textures\\GUI\\Icons\\Actions\\Start.dds");
-            DesignatorAction("Area", "AREA", Pointer.DesignatorOrder.Area, "Textures\\GUI\\Icons\\Actions\\Start.dds");
-            DesignatorAction("Engage", "ENGAGE", Pointer.DesignatorOrder.Engage, "Textures\\GUI\\Icons\\Actions\\Start.dds");
-            DesignatorAction("Escort", "ESCORT", Pointer.DesignatorOrder.Escort, "Textures\\GUI\\Icons\\Actions\\Start.dds");
-            DesignatorAction("Recall", "RECALL", Pointer.DesignatorOrder.Recall, "Textures\\GUI\\Icons\\Actions\\Reverse.dds");
-            DesignatorAction("Clear", "CLEAR", Pointer.DesignatorOrder.Clear, "Textures\\GUI\\Icons\\Actions\\Decrease.dds");
-        }
-
-        // Toolbar only ("Designator: TAG" ...): pressed by a player, done by the server with the designator camera
-        static void DesignatorAction(string id, string name, Pointer.DesignatorOrder order, string icon)
-        {
-            var a = MyAPIGateway.TerminalControls.CreateAction<IMyProgrammableBlock>(IdPrefix + "Designator" + id);
-            a.Name = new System.Text.StringBuilder("Designator: " + name);
-            a.Icon = icon;
-            a.ValidForGroups = false;
-            a.Enabled = Visible;   // orchestrators only
-            a.Action = b => { var l = GetBlock(b); if (l != null) l.Terminal_Designate(order); };
-            a.Writer = (b, sb) => sb.Append(name);
-            MyAPIGateway.TerminalControls.AddAction<IMyProgrammableBlock>(a);
         }
 
         static IMyTerminalControlButton laneClearButton;

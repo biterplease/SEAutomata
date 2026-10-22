@@ -153,6 +153,12 @@
   <data name="Description_Automata_ConstructionComputer" xml:space="preserve">
     <value>Plans welding and grinding work. Allows drones to collaborate efficiently in a single work area.</value>
   </data>
+  <data name="DisplayName_Automata_TargetDesignator" xml:space="preserve">
+    <value>Automata Target Designator</value>
+  </data>
+  <data name="Description_Automata_TargetDesignator" xml:space="preserve">
+    <value>Marks targets and areas from a camera for the orchestrator. Place its toolbar actions to tag, scout, engage, escort or recall drones.</value>
+  </data>
 
 
 

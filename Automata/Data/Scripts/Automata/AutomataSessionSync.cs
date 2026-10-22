@@ -20,6 +20,8 @@ namespace Automata
         ConstructionComputerBlock = 8,
         [ProtoEnum]
         MiningSurveyorBlock = 16,
+        [ProtoEnum]
+        TargetDesignatorBlock = 32,
     }
     [ProtoContract(SkipConstructor = true, UseProtoMembersOnly = true)]
     public struct RegisterEntity

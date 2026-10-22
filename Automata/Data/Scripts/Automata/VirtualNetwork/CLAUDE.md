@@ -57,5 +57,6 @@ Because the `MessageQueue` runs in real-time, it must stay in sync across all cl
 ## Directed messages (2026-10-21)
 - `Message<T>.RecipientId` (0 = everyone): `ReadMessages` skips a message for another reader before the type mask / share / range work; saved (`SavedMessage` ProtoMember 21). `AuctionWinnerAnnouncement.RecipientId` carries it too.
 - `PLAYER_ALERT` / `PlayerAlert` (PayloadType 32768): chat line to the orchestrator. `JobStatusReport.LastPosition`: keepalive position.
+- Target Designator (2026-10-22): `PayloadType` stays `ushort`: the unused DroneReport (1) was reused for the new `PayloadType.DesignatorOrderUpdate` (nothing ever sent or saved the old ones; free bits now 4, 8, 64, 128), channels `DESIGNATOR_JOB_ANNOUNCEMENT` (designator -> running orchestrator, a `JobAnnouncement` with order fields 21-27) and `DESIGNATOR_ORDER_UPDATE` (orchestrator -> designator, directed). `IAIBlockType.TargetDesignator` (32) / `AutomataEntityType.TargetDesignatorBlock` (32); `InRange` treats a designator like a drone for docked reach. `Auction.NoBidGridId` (ProtoMember 25).
 - LC job announcements are cached (`Cached`, rebuilt only when the dock / position / static flag changed).
-- All `Log.Info` / `Log.Warning` are `Log.Debug` (single-line `if (Log.DebugEnabled) Log.Debug(...)`, so `deploy_local_nolog` strips them); `Log.Error` stays.
+- Log levels: leave `Log.Info` / `Log.Warning` calls as they are (the owner keeps some on purpose); only new code chooses its level.

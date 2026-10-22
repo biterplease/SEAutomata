@@ -55,5 +55,23 @@
             <Component BuilderType="MyObjectBuilder_ModStorageComponent" SubtypeId="AutomataMod" ForceCreate="true"/>
          </DefaultComponents>
       </Container>
+      <Container>
+         <Id>
+            <TypeId>MyProgrammableBlock</TypeId>
+            <SubtypeId>AutomataLargeTargetDesignator</SubtypeId>
+         </Id>
+         <DefaultComponents>
+            <Component BuilderType="MyObjectBuilder_ModStorageComponent" SubtypeId="AutomataMod" ForceCreate="true"/>
+         </DefaultComponents>
+      </Container>
+      <Container>
+         <Id>
+            <TypeId>MyProgrammableBlock</TypeId>
+            <SubtypeId>AutomataSmallTargetDesignator</SubtypeId>
+         </Id>
+         <DefaultComponents>
+            <Component BuilderType="MyObjectBuilder_ModStorageComponent" SubtypeId="AutomataMod" ForceCreate="true"/>
+         </DefaultComponents>
+      </Container>
    </EntityContainers>
 </Definitions>

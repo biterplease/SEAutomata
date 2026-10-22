@@ -66,6 +66,7 @@ namespace Automata.Orchestrator
             public int Assigned;           // of those, with a drone
             public int Cancelled;          // jobs cancelled unconfirmed
             public bool Confirmed;
+            public long OriginBlock;       // the target designator block that sent it (0: hand-held); told how it goes
         }
 
         private readonly Dictionary<uint, PlayerJob> playerJobs = new Dictionary<uint, PlayerJob>();
@@ -99,52 +100,6 @@ namespace Automata.Orchestrator
         {
             return p == Drone.BehaviourProfile.IsOreScout ? Loc.T(StrOreScout) : p == Drone.BehaviourProfile.IsCombatDrone ? Loc.T(StrCombatDrone)
                  : p == Drone.BehaviourProfile.IsOreHauler ? Loc.T(StrOreHauler) : p == Drone.BehaviourProfile.IsMiningDrone ? Loc.T(StrMiningDrone) : p.ToString();
-        }
-
-        /// <summary>A new order: its marker (pending color) shows at once; its jobs follow (SubmitPlayerJob).</summary>
-        public uint BeginPlayerOrder(long identity, PointerKind kind, Vector3D position, string marker)
-        {
-            uint orderId = IdGenerator.GenerateId(ref playerJobCounter, entityId);
-            var order = new PlayerOrder { OrderId = orderId, Identity = identity, Kind = kind, Position = position, Name = marker };
-            playerOrders[orderId] = order;
-            ShowGps(order);
-            return orderId;
-        }
-
-        /// <summary>
-        /// A job a player ordered (designator): queued like an announcement of its own (announcer = this
-        /// orchestrator). orderId 0: a new order (BeginPlayerOrder, marker named 'marker'); otherwise one more job of
-        /// that order (area sweep sectors). Returns the job id.
-        /// </summary>
-        public uint SubmitPlayerJob(JobType type, List<Task> tasks, Vector3D site, string what, long identity, PointerKind kind, string marker,
-                                    ref uint orderId, long requiredDrone = 0)
-        {
-            int now = MyAPIGateway.Session.GameplayFrameCounter;
-            PlayerOrder order;
-            if (orderId == 0 || !playerOrders.TryGetValue(orderId, out order))
-            {
-                orderId = BeginPlayerOrder(identity, kind, site, marker);
-                order = playerOrders[orderId];
-            }
-            uint jobId = IdGenerator.GenerateId(ref playerJobCounter, entityId);
-            float g = ScoutPlanner.Gravity(site);
-            var ja = new JobAnnouncement
-            {
-                JobId = jobId, Type = type, EntityType = AutomataEntityType.OrchestratorBlock, CreatedTime = DateTime.UtcNow,
-                ComponentsInventory = new DiscreteInventory(), PositionData = Vector3DData.FromVector3D(site), NaturalGravity = g,
-                IsInSpace = g < JobAnnouncement.SPACE_GRAVITY, IsInAtmosphere = g >= JobAnnouncement.SPACE_GRAVITY,
-                Tasks = tasks, RequesterEntityId = entityId,
-            };
-            if (order.Type == JobType.None) order.Type = type;
-            order.Jobs++;
-            playerJobs[jobId] = new PlayerJob { JobId = jobId, OrderId = orderId, Announcement = ja, RequiredDrone = requiredDrone,
-                                                ExpiresAt = DateTime.UtcNow.AddSeconds(PointerConfig().ConfirmTimeoutSeconds) };
-            var key = new KeyValuePair<long, uint>(entityId, jobId);
-            knownJobs[key] = int.MaxValue;
-            jobQueue.Add(new QueuedJob { Announcement = ja, Key = key, SenderOwner = block.OwnerId, Received = now });
-            AddEvent(Loc.F(StrJobOrderedByAPlayer, jobId, type, what));
-            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: player job {1} ({2}, order {3}, player {4}): {5} task(s), {6}{7}", entityId, jobId, type, orderId, identity, tasks.Count, what, requiredDrone != 0 ? ", tagged drone " + requiredDrone : "");
-            return jobId;
         }
 
         private static Config.ServerConfig.ScoutPointerConfig PointerConfig()
@@ -245,6 +200,7 @@ namespace Automata.Orchestrator
                 if (order.Jobs <= 0)
                 {
                     ScoutPointer.Feedback(order.Identity, DesignatorSignal.Error);
+                    SendOrderUpdate(order, 0, DesignatorOrderState.Cancelled, Loc.F(StrOrderCancelled, order.Name));
                 }
                 else CheckOrder(order);
             }
@@ -260,7 +216,7 @@ namespace Automata.Orchestrator
             // Spot check / engage: green; area sweep / escort: blue
             ScoutPointer.Feedback(order.Identity, order.Type == JobType.DesignatorScoutArea || order.Type == JobType.DesignatorEscort
                                                   ? DesignatorSignal.ConfirmedBlue : DesignatorSignal.ConfirmedGreen);
-            LogDesignatorOrder(order);
+            SendOrderUpdate(order, 0, DesignatorOrderState.Confirmed, DesignatorOrderLine(order));
             if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: player order {1} confirmed ({2} job(s), {3} cancelled)", entityId, order.OrderId, order.Assigned, order.Cancelled);
         }
 
@@ -379,7 +335,7 @@ namespace Automata.Orchestrator
                 {
                     JobId = pj.JobId, OrderId = pj.OrderId, Identity = o.Identity, Kind = o.Kind, Position = Vector3DData.FromVector3D(o.Position),
                     Name = o.Name, Announcement = pj.Announcement, ExpiresInSeconds = BlockSave.SecondsLeft(pj.ExpiresAt), Assigned = pj.Assigned,
-                    RequiredDrone = pj.RequiredDrone,
+                    RequiredDrone = pj.RequiredDrone, OriginBlock = o.OriginBlock,
                 });
             }
         }
@@ -395,7 +351,7 @@ namespace Automata.Orchestrator
                 if (!playerOrders.TryGetValue(p.OrderId, out o))
                 {
                     o = new PlayerOrder { OrderId = p.OrderId, Identity = p.Identity, Kind = p.Kind, Type = p.Announcement.Type,
-                                          Position = p.Position.ToVector3D(), Name = p.Name };
+                                          Position = p.Position.ToVector3D(), Name = p.Name, OriginBlock = p.OriginBlock };
                     playerOrders[p.OrderId] = o;
                 }
                 o.Jobs++;
@@ -425,5 +381,6 @@ namespace Automata.Orchestrator
         [ProtoMember(8)] public double ExpiresInSeconds;
         [ProtoMember(9)] public bool Assigned;
         [ProtoMember(10)] public long RequiredDrone;
+        [ProtoMember(11)] public long OriginBlock;
     }
 }

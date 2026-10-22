@@ -58,14 +58,11 @@ namespace Automata.VirtualNetwork
     public enum PayloadType : ushort
     {
         None = 0,
-        DroneReport = 1,
+        // Free bits (payloads that never existed or were removed; no saved message carries them): 4, 8, 64, 128.
+        DesignatorOrderUpdate = 1,
         TaskAssignment = 2,
-        LogisticsUpdate = 4,
-        InventoryRequisition = 8,
         RelayMessage = 16,
         TaskAborted = 32,
-        TaskAnnouncement = 64,
-        TaskFulfillmentLost = 128,
         JobAnnouncement = 256,
         MiningSurveyDataBroadcast = 512,
         Auction = 1024,
@@ -124,6 +121,14 @@ namespace Automata.VirtualNetwork
         /// is the only block that writes to chat.</summary>
         [ProtoEnum]
         PLAYER_ALERT,
+        /// <summary>Target designator block -> orchestrators: a player's order (JobAnnouncement with the order fields, EntityType
+        /// TargetDesignatorBlock). The orchestrator ingests it as a player job and answers on DESIGNATOR_ORDER_UPDATE.</summary>
+        [ProtoEnum]
+        DESIGNATOR_JOB_ANNOUNCEMENT,
+        /// <summary>Orchestrator -> the designator block that sent an order (directed): received / confirmed / cancelled
+        /// (DesignatorOrderUpdate).</summary>
+        [ProtoEnum]
+        DESIGNATOR_ORDER_UPDATE,
     }
 
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
@@ -213,6 +218,21 @@ namespace Automata.VirtualNetwork
         /// <summary>The blocks are built one after another (a projection line: each attaches to the one before): every
         /// trip goes to one drone, in turn, instead of several drones at once.</summary>
         [ProtoMember(20)] public bool Sequential;
+        // Designator orders (Channel.DESIGNATOR_JOB_ANNOUNCEMENT; hand-held ones are put straight into the orchestrator)
+        /// <summary>The player's order this job belongs to (the sender's ids; an area sweep is one order, a job per sector).</summary>
+        [ProtoMember(21)] public uint OrderId;
+        /// <summary>The player who pointed it (identity id).</summary>
+        [ProtoMember(22)] public long Identity;
+        [ProtoMember(23)] public Pointer.PointerKind Kind;
+        /// <summary>The order's GPS marker name.</summary>
+        [ProtoMember(24)] public string Marker;
+        /// <summary>What it is, for the orchestrator's log ("Spot check 2/3").</summary>
+        [ProtoMember(25)] public string What;
+        /// <summary>A tagged drone's order: only that drone may take it (0: any drone of the profile).</summary>
+        [ProtoMember(26)] public long RequiredDrone;
+        /// <summary>The designator block that sent it (0: a hand-held one): answered on DESIGNATOR_ORDER_UPDATE; a Drone Controller
+        /// on its construct never takes the job.</summary>
+        [ProtoMember(27)] public long OriginBlockId;
 
         /// <summary>Summary fields from the job's first work site and total inventory.</summary>
         public static JobAnnouncement FromJob(Orchestrator.Job job, AutomataEntityType entityType, bool isStaticGrid)
@@ -293,6 +313,8 @@ namespace Automata.VirtualNetwork
         [ProtoMember(23)] public byte WeldCategory;
         /// <summary>See JobAnnouncement.Sequential.</summary>
         [ProtoMember(24)] public bool Sequential;
+        /// <summary>A designator order sent by a target designator block: a drone on that grid's construct (mechanical group) never bids.</summary>
+        [ProtoMember(25)] public long NoBidGridId;
     }
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class Bid : IMessagePayload
@@ -485,5 +507,28 @@ namespace Automata.VirtualNetwork
     {
         [ProtoMember(1)] public long SenderEntityId;
         [ProtoMember(2)] public string Text;
+    }
+
+    public enum DesignatorOrderState : byte
+    {
+        /// <summary>An orchestrator took the order.</summary>
+        Received = 0,
+        /// <summary>Every job of the order has a drone.</summary>
+        Confirmed = 1,
+        /// <summary>Not taken in time / no drone: the order's jobs are cancelled.</summary>
+        Cancelled = 2,
+    }
+
+    /// <summary>Orchestrator -> designator block (DESIGNATOR_ORDER_UPDATE, directed): how its order is doing; 'Text' is the line for the
+    /// designator's LCD (empty: none).</summary>
+    [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
+    public class DesignatorOrderUpdate : IMessagePayload
+    {
+        [ProtoMember(1)] public uint OrderId;
+        /// <summary>The job id the designator gave the announcement (0: the whole order).</summary>
+        [ProtoMember(2)] public uint JobId;
+        [ProtoMember(3)] public DesignatorOrderState State;
+        [ProtoMember(4)] public string Text;
+        [ProtoMember(5)] public long OrchestratorEntityId;
     }
 }

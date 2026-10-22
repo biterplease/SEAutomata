@@ -111,6 +111,7 @@ namespace Automata.VirtualNetwork
             LogisticsComputer = 4,
             ConstructionComputer = 8,
             MiningSurveyor = 16,
+            TargetDesignator = 32,
         }
 
         /// <summary>One channel: its messages in order of sending, and where each reader got to.</summary>
@@ -259,6 +260,8 @@ namespace Automata.VirtualNetwork
                 return PayloadType.JobStatusReport;
             if (payload is PlayerAlert)
                 return PayloadType.PlayerAlert;
+            if (payload is DesignatorOrderUpdate)
+                return PayloadType.DesignatorOrderUpdate;
             return PayloadType.None;
         }
 
@@ -365,8 +368,9 @@ namespace Automata.VirtualNetwork
         {
             // A docked drone is reached through (and reaches) the groups its connectors hold: with the orchestrator only, or
             // with every block type (job reports go to the computers too)
-            bool senderDrone = m.SenderBlockType == IAIBlockType.Drone && (DOCKED_DRONE_TALKS_TO_ALL || readerType == IAIBlockType.Orchestrator);
-            bool readerDrone = readerType == IAIBlockType.Drone && (DOCKED_DRONE_TALKS_TO_ALL || m.SenderBlockType == IAIBlockType.Orchestrator);
+            // (a target designator is mobile like a drone - a "fleet leader" - and docks like one)
+            bool senderDrone = (m.SenderBlockType == IAIBlockType.Drone || m.SenderBlockType == IAIBlockType.TargetDesignator) && (DOCKED_DRONE_TALKS_TO_ALL || readerType == IAIBlockType.Orchestrator);
+            bool readerDrone = (readerType == IAIBlockType.Drone || readerType == IAIBlockType.TargetDesignator) && (DOCKED_DRONE_TALKS_TO_ALL || m.SenderBlockType == IAIBlockType.Orchestrator);
             return Relays.Reaches(m.SenderGridId, reader.GridId, m.SenderOwnerId, senderDrone, readerDrone);
         }
 
@@ -537,6 +541,7 @@ namespace Automata.VirtualNetwork
                     case PayloadType.JobAnnouncementFailed: return MyUtilitiesDelegate.SerializeFromBinary<JobAnnouncementFailed>(data);
                     case PayloadType.JobStatusReport: return MyUtilitiesDelegate.SerializeFromBinary<JobStatusReport>(data);
                     case PayloadType.PlayerAlert: return MyUtilitiesDelegate.SerializeFromBinary<PlayerAlert>(data);
+                    case PayloadType.DesignatorOrderUpdate: return MyUtilitiesDelegate.SerializeFromBinary<DesignatorOrderUpdate>(data);
                     default: return null;
                 }
             }
