@@ -41,3 +41,10 @@ job, `DeliveredKg` / `DronesOut` settle the order on the last drone's report.
 
 ## Collect phase steers to the ore (2026-10-11)
 While collecting, every 5th `RunMine` call reads the nearest voxel of the job's ore from the drill point (`NearestOre`, 16 m). More than 2 m off the bore line (and more than `MINE_REACH` 4 m away): the bore's end moves to that voxel + 2 m along the same direction (`DispatchBore` again, at most 12 per bore; attitude and the straight way out unchanged). The 15 s no-ore timer only runs once the drill point is within 4 m of an ore voxel (or no ore voxel is within 16 m, or it has not got closer for 30 s). Before: the bore went on along the line aimed at the deposit's average position; with the nearest voxel several metres off it, 15 s ended the bore with 0 kg (Big mino).
+
+## Silent GPS markers (2026-10-22)
+The game plays its GPS sound only for a marker on the HUD when it is added (`MyGpsCollection.AddGpsOnClient`, `PlaySoundOnCreation && ShowOnHud`); `SetShowOnHud` afterwards is silent. `AddGpsSilent`: created hidden + not temporary, added, then shown. Showing clears the game's expiry (`DiscardAt`), so the block removes its own markers:
+- "Show GPS" (checkbox): `UpdateGps` diffs the wanted markers (`WantedGps`: nearest `MaxGpsMarkers` deposits, keyed by the game's hash = name + position) against `gpsHashes` every refresh: only new ones added, gone ones removed (it used to remove and re-add all every 10 s: a burst of sounds each time).
+- "Show known deposits" (button): kept `GPS_ONCE_TICKS` (180 s, the game's own temporary expiry), then removed; a marker both lists track is shared (removed only when neither does).
+- Description ends with `GpsTag` (" [MS <entity id>]"): the first update after load removes this block's markers it doesn't track (saved now that they don't expire).
+

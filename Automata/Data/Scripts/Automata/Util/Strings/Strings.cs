@@ -223,5 +223,6 @@ namespace Automata.Util.Strings
         public static readonly MyStringId Rover = MyStringId.GetOrCompute("Rover");
         public static readonly MyStringId TaskTimeout = MyStringId.GetOrCompute("Task timeout");
         public static readonly MyStringId WeldPriority = MyStringId.GetOrCompute("Weld priority");
+        public static readonly MyStringId KnownOreDeposits = MyStringId.GetOrCompute("Known ore deposits");
     }
 }

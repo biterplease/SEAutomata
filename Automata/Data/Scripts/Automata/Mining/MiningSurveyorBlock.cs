@@ -89,6 +89,7 @@ namespace Automata.Mining
         private const int ASSIGNED_TTL_TICKS = 30 * 60 * 60;     // awarded, then no sign of the drone (award / keepalive every 60 s) this long: counted back
         private const double DEPLETED_MEMORY_SECONDS = 3600;     // a depleted deposit isn't brought back by older scans
         private const int GPS_REFRESH_TICKS = 600;
+        private const int GPS_ONCE_TICKS = 180 * 60;             // the button's markers stay this long (the game's expiry for temporary markers)
         private const int KNOWN_ORES_TICKS = 600;                // the terminal's ore list sent to players at most this often
         #endregion
         private const double BORE_SEARCH_METERS = 400;
@@ -146,6 +147,8 @@ namespace Automata.Mining
         private readonly List<int> gpsHashes = new List<int>(), requestedHashes = new List<int>();
         private long gpsIdentity;
         private bool gpsDirty = true;
+        private bool gpsCleaned;                                 // this block's markers left from before a reload were removed
+        private int requestedUntil;                              // the button's markers are removed at this frame
         private readonly BlockLog log = new BlockLog();
 
         private readonly List<Message<MiningSurveyDataBroadcast>> surveyInbox = new List<Message<MiningSurveyDataBroadcast>>();
@@ -234,7 +237,7 @@ namespace Automata.Mining
             {
                 if (block != null) block.AppendingCustomInfo -= AppendInfo;
                 All.Remove(this);
-                if (IsServer) { RemoveGps(); RemoveGps(requestedHashes); }
+                if (IsServer) { RemoveGps(); RemoveGps(requestedHashes, null); }
                 if (messaging != null) { messaging.ReaderClosed(entityId); }
                 if (Log.DebugEnabled) Log.Debug("MS {0}: closed ({1} deposit(s), {2} job(s))", entityId, deposits.Count, jobs.Count);
             }
@@ -397,6 +400,7 @@ namespace Automata.Mining
             {
                 status = !settings.Enabled ? Loc.T(StrOffTerminal) : Loc.T(StrNotWorkingPowerDamage);
                 if (gpsHashes.Count > 0) RemoveGps();
+                if (requestedHashes.Count > 0 && now >= requestedUntil) RemoveGps(requestedHashes, gpsHashes);
                 return;
             }
             if (ordersDirty) ParseOrders();
@@ -959,8 +963,20 @@ namespace Automata.Mining
             SettingsEdited();   // saved and sent to the players
         }
 
+        // GPS markers are added silently: created hidden, then shown (the game plays its GPS sound only for a marker that is on
+        // the HUD when it is added; showing it afterwards makes no sound). Showing it also drops the game's expiry of temporary
+        // markers, so this block removes its own: the checkbox ones when they no longer match, the button ones after
+        // GPS_ONCE_TICKS, and any left over from before a reload (tagged with this block's id in their description).
+        // The checkbox markers are diffed against the deposits each refresh: only new ones are added, gone ones removed.
         private void UpdateGps(int now)
         {
+            if (!gpsCleaned && block.OwnerId != 0)
+            {
+                gpsCleaned = true;
+                gpsIdentity = block.OwnerId;
+                RemoveStaleGps();
+            }
+            if (requestedHashes.Count > 0 && now >= requestedUntil) RemoveGps(requestedHashes, gpsHashes);
             if (!settings.ShowGps || block.OwnerId == 0)
             {
                 if (gpsHashes.Count > 0) RemoveGps();
@@ -969,50 +985,108 @@ namespace Automata.Mining
             if (!gpsDirty && now - lastGps < GPS_REFRESH_TICKS && gpsIdentity == block.OwnerId) return;
             lastGps = now;
             gpsDirty = false;
-            RemoveGps();
-            gpsIdentity = block.OwnerId;   // the owner only: deposits are never shown to anyone else
-            AddDepositGps(gpsHashes);
+            if (gpsIdentity != block.OwnerId)
+            {
+                RemoveGps();
+                RemoveGps(requestedHashes, null);
+                gpsIdentity = block.OwnerId;   // the owner only: deposits are never shown to anyone else
+            }
+            var wanted = WantedGps();
+            for (int i = gpsHashes.Count - 1; i >= 0; i--)
+            {
+                int h = gpsHashes[i];
+                if (wanted.ContainsKey(h)) continue;
+                if (!requestedHashes.Contains(h)) MyAPIGateway.Session.GPS.RemoveGps(gpsIdentity, h);
+                gpsHashes.RemoveAt(i);
+            }
+            int added = 0;
+            foreach (var kv in wanted)
+            {
+                if (gpsHashes.Contains(kv.Key)) continue;
+                if (!requestedHashes.Contains(kv.Key)) { AddGpsSilent(kv.Value); added++; }
+                gpsHashes.Add(kv.Key);
+            }
+            if (added > 0 && Log.DebugEnabled) Log.Debug("MS {0}: GPS: {1} marker(s) added, {2} shown", entityId, added, gpsHashes.Count);
         }
 
-        /// <summary>The "Show known deposits" button: the known deposits as temporary GPS markers once (the game drops them after a few
-        /// minutes), the previous ones of the button replaced. Owner only, like the checkbox.</summary>
+        /// <summary>The "Show known deposits" button: the known deposits as GPS markers for GPS_ONCE_TICKS, the previous ones
+        /// of the button replaced. Owner only, like the checkbox.</summary>
         private void ShowDepositsOnce()
         {
-            RemoveGps(requestedHashes);
+            RemoveGps(requestedHashes, gpsHashes);
             if (block.OwnerId == 0) return;
-            gpsIdentity = block.OwnerId;
-            int n = AddDepositGps(requestedHashes);
-            AddEvent(Loc.F(StrDepositsShownAsGps, n));
-            if (Log.DebugEnabled) Log.Debug("MS {0}: show known deposits requested: {1} marker(s) of {2} deposit(s)", entityId, n, deposits.Count);
+            if (gpsIdentity != block.OwnerId)
+            {
+                RemoveGps();
+                gpsIdentity = block.OwnerId;
+            }
+            var wanted = WantedGps();
+            foreach (var kv in wanted)
+            {
+                if (!gpsHashes.Contains(kv.Key)) AddGpsSilent(kv.Value);   // (a checkbox marker already there is shared)
+                requestedHashes.Add(kv.Key);
+            }
+            requestedUntil = MyAPIGateway.Session.GameplayFrameCounter + GPS_ONCE_TICKS;
+            AddEvent(Loc.F(StrDepositsShownAsGps, wanted.Count));
+            if (Log.DebugEnabled) Log.Debug("MS {0}: show known deposits requested: {1} marker(s) of {2} deposit(s)", entityId, wanted.Count, deposits.Count);
         }
 
-        // Temporary GPS markers (nearest deposits first, up to MaxGpsMarkers) for the owner; their hashes into 'hashes'
-        private int AddDepositGps(List<int> hashes)
+        // Markers for the nearest deposits (up to MaxGpsMarkers), by the hash the game gives them (name + position)
+        private Dictionary<int, IMyGps> WantedGps()
         {
             Vector3D here = block.GetPosition();
             var shown = new List<Deposit>(deposits);
             shown.Sort((a, b) => Vector3D.DistanceSquared(a.Position, here).CompareTo(Vector3D.DistanceSquared(b.Position, here)));
             int max = Math.Min(shown.Count, MiningConfig.MaxGpsMarkers);
+            var wanted = new Dictionary<int, IMyGps>();
+            string description = Loc.F(StrGpsDescription, block.CustomName) + GpsTag;
             for (int i = 0; i < max; i++)
             {
                 var d = shown[i];
-                var gps = MyAPIGateway.Session.GPS.Create(ShortOre(d.Ore) + " (" + block.CustomName + ")",
-                                                          Loc.F(StrGpsDescription, block.CustomName), d.Position, true, true);
+                var gps = MyAPIGateway.Session.GPS.Create(ShortOre(d.Ore) + " (" + block.CustomName + ")", description, d.Position, false, false);
                 gps.GPSColor = Color.Gold;
-                MyAPIGateway.Session.GPS.AddGps(gpsIdentity, gps);
-                hashes.Add(gps.Hash);
+                wanted[gps.Hash] = gps;
             }
-            return max;
+            return wanted;
         }
+
+        private void AddGpsSilent(IMyGps gps)
+        {
+            MyAPIGateway.Session.GPS.AddGps(gpsIdentity, gps);                   // hidden: no sound
+            MyAPIGateway.Session.GPS.SetShowOnHud(gpsIdentity, gps.Hash, true);   // shown: no sound either
+        }
+
+        // This block's markers in the owner's GPS list (description ends with its tag) that it no longer tracks: left from
+        // before a reload (they are saved now that they don't expire)
+        private void RemoveStaleGps()
+        {
+            var list = MyAPIGateway.Session.GPS.GetGpsList(gpsIdentity);
+            if (list == null) return;
+            string tag = GpsTag;
+            int removed = 0;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var g = list[i];
+                if (g == null || g.Description == null || !g.Description.EndsWith(tag, StringComparison.Ordinal)) continue;
+                if (gpsHashes.Contains(g.Hash) || requestedHashes.Contains(g.Hash)) continue;
+                MyAPIGateway.Session.GPS.RemoveGps(gpsIdentity, g.Hash);
+                removed++;
+            }
+            if (removed > 0 && Log.DebugEnabled) Log.Debug("MS {0}: GPS: {1} marker(s) left from before removed", entityId, removed);
+        }
+
+        private string GpsTag { get { return " [MS " + entityId + "]"; } }
 
         private void RemoveGps()
         {
-            RemoveGps(gpsHashes);
+            RemoveGps(gpsHashes, requestedHashes);
         }
 
-        private void RemoveGps(List<int> hashes)
+        // Removes these markers ('keep': markers also tracked there stay in the GPS list)
+        private void RemoveGps(List<int> hashes, List<int> keep)
         {
-            for (int i = 0; i < hashes.Count; i++) MyAPIGateway.Session.GPS.RemoveGps(gpsIdentity, hashes[i]);
+            for (int i = 0; i < hashes.Count; i++)
+                if (keep == null || !keep.Contains(hashes[i])) MyAPIGateway.Session.GPS.RemoveGps(gpsIdentity, hashes[i]);
             hashes.Clear();
         }
         #endregion

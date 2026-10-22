@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Text;
 
 using Sandbox.Game.Localization;
 using Sandbox.ModAPI;
@@ -10,6 +11,7 @@ using VRage.ModAPI;
 using VRage.Utils;
 
 using Automata.Util;
+using Automata.Util.Strings;
 using Automata.Util.Logging;
 
 namespace Automata.Mining
@@ -60,15 +62,41 @@ namespace Automata.Mining
         static IMyTerminalControlListbox oreList, orderList;
         static IMyTerminalControlTextbox editBox;
 
+        const string ICON_TOGGLE = @"Textures\GUI\Icons\Actions\Toggle.dds";
+        const string ICON_ON = @"Textures\GUI\Icons\Actions\SwitchOn.dds";
+        const string ICON_OFF = @"Textures\GUI\Icons\Actions\SwitchOff.dds";
+        const string ICON_RESET = @"Textures\GUI\Icons\Actions\Reset.dds";
+
         public static void DoOnce(IMyModContext context)
         {
             if (Done) return;
             Done = true;
             AutomataProgrammableBlocks.HideVanillaOnce();
             CreateControls();
+            CreateActions();
             if (Log.DebugEnabled) Log.Debug("Created MS terminal controls");
         }
 
+        static void AddAction(string id, string name, string icon, Action<MiningSurveyorBlock> action, Action<MiningSurveyorBlock, StringBuilder> writer)
+        {
+            var a = MyAPIGateway.TerminalControls.CreateAction<IMyProgrammableBlock>(IdPrefix + id);
+            a.Name = new StringBuilder(name);
+            a.ValidForGroups = true;
+            a.Icon = icon;
+            a.Action = (b) => { var l = GetBlock(b); if (l != null) action(l); };
+            a.Writer = (b, sb) => { var l = GetBlock(b); if (l != null && writer != null) writer(l, sb); };
+            a.Enabled = Visible;
+            MyAPIGateway.TerminalControls.AddAction<IMyProgrammableBlock>(a);
+        }
+
+        static void CreateActions()
+        {
+            AddAction(IdPrefix + "_Action_ShowKnownOreDeposits_ON", Loc.Compose(MyStrings.Toggle, MyStrings.Show, MyStrings.KnownOreDeposits, MyStrings.On), ICON_ON, b => { if (!b.Terminal_ShowGps) { b.Terminal_ShowGps = true; } }, (b, sb) => sb.Append(Loc.Compose(MyStrings.Show, MyStrings.On, sep: ":")));
+            AddAction(IdPrefix + "_Action_ShowKnownOreDeposits_OFF", Loc.Compose(MyStrings.Toggle, MyStrings.Show, MyStrings.KnownOreDeposits, MyStrings.Off), ICON_OFF, b => { if (b.Terminal_ShowGps) { b.Terminal_ShowGps = false; } }, (b, sb) => sb.Append(Loc.Compose(MyStrings.Show, MyStrings.Off, sep: ":")));
+            AddAction(IdPrefix + "_Action_ShowKnownOreDeposits_ON_OFF", Loc.Compose(MyStrings.Toggle, MyStrings.Show, MyStrings.KnownOreDeposits, MyStrings.On_Off), ICON_TOGGLE, b => { b.Terminal_ShowGps = !b.Terminal_ShowGps; }, (b, sb) => sb.Append(b.Terminal_IsEnabled ? Loc.Compose(MyStrings.Show, MyStrings.On, sep: ":") : Loc.Compose(MyStrings.Show, MyStrings.Off, sep: ":")));
+            
+            AddAction(IdPrefix + "_Action_DeleteDeposits", Loc.T(StrDeleteDeposits), ICON_RESET, b => { b.Terminal_DeleteDeposits(); }, null);
+        }
         static MiningSurveyorBlock GetBlock(IMyTerminalBlock b)
         {
             return b != null && b.GameLogic != null ? b.GameLogic.GetAs<MiningSurveyorBlock>() : null;
@@ -151,7 +179,7 @@ namespace Automata.Mining
             Checkbox("CheckboxShowGps", StrCheckboxShowGps,
                      StrCheckboxShowGpsTip,
                      l => l.Terminal_ShowGps, (l, v) => l.Terminal_ShowGps = v);
-            Button("ShowDeposits", StrShowDeposits, StrShowDepositsTip, l => l.Terminal_ShowDeposits());
+                Button("ShowDeposits", StrShowDeposits, StrShowDepositsTip, l => l.Terminal_ShowDeposits());
             Checkbox("CheckboxKeepConstant", StrCheckboxKeepConstant,
                      StrCheckboxKeepConstantTip,
                      l => l.Terminal_KeepOrdersConstant, (l, v) => l.Terminal_KeepOrdersConstant = v);
