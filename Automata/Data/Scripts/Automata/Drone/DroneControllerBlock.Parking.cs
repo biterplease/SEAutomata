@@ -36,6 +36,8 @@ namespace Automata.Drone
         private static readonly MyStringId StrVoxel = MyStringId.GetOrCompute("voxel");
         private static readonly MyStringId StrReturnNoRouteBackTo = MyStringId.GetOrCompute("Return: no route back to where it left from");
         private static readonly MyStringId StrReturnToWhereItLeft = MyStringId.GetOrCompute("Return: to where it left from ({0:F0} m)");
+        private static readonly MyStringId StrReturnFallback = MyStringId.GetOrCompute("Return: can't rest the usual way, back to where it left from ({0:F0} m)");
+        private static readonly MyStringId StrReturnNowhere = MyStringId.GetOrCompute("Return: can't rest and doesn't know where it left from: holding here, retrying");
         private static readonly MyStringId StrParkNoWorkingLandingGear = MyStringId.GetOrCompute("Park: no working landing gear");
         private static readonly MyStringId StrParkNoFreeSpotFound = MyStringId.GetOrCompute("Park: no free spot found ({0})");
         private static readonly MyStringId StrParkNoRouteToThe = MyStringId.GetOrCompute("Park: no route to the spot ({0}, {1})");
@@ -103,7 +105,7 @@ namespace Automata.Drone
         }
 
         /// <summary>At rest: docked at home, or (park mode) parked on its gears.</summary>
-        private bool IsAtRest() { return IsDockedAtHome() || IsParkedOnGears() || HoveringAtDeparture() || (RestsAtAnyConnector && AnyConnectorsConnected()); }
+        private bool IsAtRest() { return IsDockedAtHome() || IsParkedOnGears() || HoveringAtDeparture() || (RestsAtAnyConnector && AnyConnectorsConnected()) || AtDepartureFallback(); }
 
         private bool IsGoingToRest
         {
@@ -114,8 +116,22 @@ namespace Automata.Drone
             }
         }
 
-        /// <summary>Home connector, or (park mode) a connector to refuel at when low, else a parking spot.</summary>
+        /// <summary>
+        /// Home connector, or (park mode) a connector to refuel at when low, else a parking spot. When that fails (home
+        /// connector not resolvable, no route, no spot / connector near): back over where it last left from, so a drone
+        /// never stays out where its job ended (out of antenna range, its reports and scans undelivered). The idle
+        /// retry (<see cref="ReturnWhenIdle"/>) tries the usual way again from there.
+        /// </summary>
         private bool GoRest()
+        {
+            if (GoRestUsual()) { departureFallback = false; return true; }
+            if (settings == null || !settings.HasDeparture) { Report(StrReturnNowhere); return false; }
+            departureFallback = true;
+            if (NearDeparture()) return true;   // already there: at rest (AtDepartureFallback)
+            return FlyToDeparture(StrReturnFallback);
+        }
+
+        private bool GoRestUsual()
         {
             // Outside a job with cargo aboard: dock somewhere to clear it first (a housekeeping job that rests after)
             if (currentJob == null && TryStartHousekeeping()) return true;
@@ -151,9 +167,12 @@ namespace Automata.Drone
         }
 
         // Pre-flight, letting go (connector / gears): this is where it came from, and the grid it was on (no home connector only)
+        // (every drone: the fallback rest when its usual one fails, see GoRest; only drones without a home connector use
+        // the departure grid for parking / charging, DepartureGrid)
         private void RememberDeparture()
         {
-            if (settings == null || HasHomeConnector) return;
+            if (settings == null) return;
+            departureFallback = false;
             CaptureFlightState();
             RefreshDroneGrids();
             settings.DepartureSpot = Vector3DData.FromVector3D(flightState.Position);
@@ -165,15 +184,32 @@ namespace Automata.Drone
         private bool HoveringAtDeparture()
         {
             if (!ReturnsToDeparture || ParkMode) return false;   // gear: it parks instead
+            return NearDeparture();
+        }
+
+        private bool NearDeparture()
+        {
+            if (settings == null || !settings.HasDeparture) return false;
             Vector3D spot = settings.DepartureSpot.ToVector3D();
             double near = Math.Max(DEPARTURE_NEAR, WaypointTol);
             return Vector3D.DistanceSquared(flightState.Position, spot) < near * near;
         }
 
+        // The usual rest failed and it went back over its departure spot instead (GoRest): set until it rests the usual
+        // way, takes off again or starts a job
+        private bool departureFallback;
+        private bool AtDepartureFallback() { return departureFallback && NearDeparture(); }
+
         // No landing gear (or no spot near it): fly back over the departure spot and hold there
         private bool GoDeparture()
         {
             if (!ReturnsToDeparture) return false;
+            return FlyToDeparture(StrReturnToWhereItLeft);
+        }
+
+        private bool FlyToDeparture(MyStringId what)
+        {
+            if (settings == null || !settings.HasDeparture) return false;
             CaptureFlightState();
             Vector3D spot = settings.DepartureSpot.ToVector3D();
             Vector3D up = flightState.InGravity ? flightState.GravityUp : flightState.WorldMatrix.Up;
@@ -181,8 +217,34 @@ namespace Automata.Drone
             if (!FlyPlayerRoute(wps)) { Report(StrReturnNoRouteBackTo); return false; }
             goingToDeparture = true;
             if (preflightStage == 0) SetState(State.ReturningToBase);
-            Report(StrReturnToWhereItLeft, Vector3D.Distance(flightState.Position, spot));
+            Report(what, Vector3D.Distance(flightState.Position, spot));
             return true;
+        }
+
+        #region Timing
+        private const int RETURN_RETRY_TICKS = 30 * 60;   // an orchestrator job ended away from rest: GoRest again this often while idle
+        #endregion
+        private bool owesReturn;                          // set when an orchestrator job ends away from rest; cleared at rest / by a new job or player order
+        private int lastReturnTryFrame = int.MinValue / 2;
+
+        /// <summary>
+        /// Idle after an orchestrator job, not at rest (its GoRest failed: no route, home not resolvable, nowhere to land), or
+        /// resting at its departure spot as the fallback: tries GoRest again every RETURN_RETRY_TICKS.
+        /// </summary>
+        private void ReturnWhenIdle()
+        {
+            if (!owesReturn || !IsServer) return;
+            bool atRest = IsAtRest();
+            if (atRest && !departureFallback) { owesReturn = false; return; }
+            if (currentJob != null || cPhase != ConstructionPhase.Idle || activeFlightOrder != null || dockingHomeId != 0 || parkPhase != ParkPhase.None
+                || preflightStage != 0 || pendingBidAuctionId != 0 || combatPhase != CombatPhase.Idle || IsGoingToRest) return;
+            int now = MyAPIGateway.Session.GameplayFrameCounter;
+            if (now - lastReturnTryFrame < RETURN_RETRY_TICKS) return;
+            lastReturnTryFrame = now;
+            if (atRest && !GoRestUsual()) return;   // at the departure spot (fallback): the usual way again, quietly holding if it still fails
+            if (atRest) { departureFallback = false; return; }
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: idle away from rest after a job: going back", Entity.EntityId);
+            GoRest();
         }
         #endregion
 

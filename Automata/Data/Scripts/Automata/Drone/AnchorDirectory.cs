@@ -228,6 +228,24 @@ namespace Automata.Drone
             return b;
         }
 
+        /// <summary>Why <see cref="Resolve"/> gives null for this id (diagnostics, English); null when it resolves.</summary>
+        public static string WhyNot(IMyCubeBlock drone, long entityId)
+        {
+            if (drone == null || entityId == 0) return "none set";
+            IMyEntity e;
+            if (!MyAPIGateway.Entities.TryGetEntityById(entityId, out e)) return string.Format("block {0} not found (removed, or the grid was replaced)", entityId);
+            var b = e as IMyTerminalBlock;
+            if (b == null || b.Closed) return string.Format("entity {0} is not a block", entityId);
+            if (b.CubeGrid?.Physics == null) return string.Format("'{0}': its grid has no physics (projection / not loaded)", b.CustomName);
+            if (!b.IsFunctional) return string.Format("'{0}' is not functional (damaged / unfinished)", b.CustomName);
+            if (!(b is IMyShipConnector) && !(b is IMyBeacon)) return string.Format("'{0}' is not a connector or beacon", b.CustomName);
+            if (!IsAllowed(drone.OwnerId, b.OwnerId)) return string.Format("'{0}' has another owner / faction (drone owner {1}, block owner {2})", b.CustomName, drone.OwnerId, b.OwnerId);
+            double r = DroneConfig().ConnectorNameSearchRadius;
+            double d = Vector3D.Distance(drone.WorldMatrix.Translation, b.WorldMatrix.Translation);
+            if (d > r) return string.Format("'{0}' is {1:F0} m away (ConnectorNameSearchRadius {2:F0} m)", b.CustomName, d, r);
+            return null;
+        }
+
         /// <summary>
         /// UI filter: the player looking at the terminal must also be the block's owner or in its faction
         /// (a drone shared with "All" must not reveal its owner's bases). True when there is no local player.

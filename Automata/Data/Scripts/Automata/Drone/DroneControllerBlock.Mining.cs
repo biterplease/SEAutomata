@@ -743,6 +743,8 @@ namespace Automata.Drone
             taskScanner.Cancel();
             ClearFlightOrder();
             if (!IsAtRest()) GoRest();
+            owesReturn = !IsAtRest() || departureFallback;   // no way back now: ReturnWhenIdle tries again
+            lastReturnTryFrame = MyAPIGateway.Session.GameplayFrameCounter;
             return true;
         }
         #endregion

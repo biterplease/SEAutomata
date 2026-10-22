@@ -138,6 +138,8 @@ namespace Automata.Drone
             currentJob = job;
             jobAbortReason = null;
             jobSource = source;
+            owesReturn = false;            // the job ends with its own way home (FinishJob sets it again if that fails)
+            departureFallback = false;     // a fallback rest is not "at rest" for the job's ReturnHome: the usual way is tried first
             jobBlocksDone = 0;
             lastJobFailure = null;
             ClearSiteRejects(0, Vector3I.Zero);
@@ -270,10 +272,14 @@ namespace Automata.Drone
                 if (Log.DebugEnabled) Log.Debug("Drone {0}: trip made no progress, next scan in {1} s", Entity.EntityId, AutomataSession.GetConfig().ConstructionComputer.DroneScanIntervalSeconds);
             }
             else lastConstructionScanFrame = int.MinValue / 2;   // stand-alone: next trip right away
-            // Orchestrator jobs: back home to standby (the task list normally ends there already)
-            if (source == JobSource.Orchestrator && !IsAtRest() && (HasHomeConnector || ParkMode || ReturnsToDeparture || RestsAtAnyConnector)
-                && activeFlightOrder == null && !IsGoingToRest)
-                GoRest();
+            // Orchestrator jobs: back home to standby (the task list normally ends there already); still away (no way home
+            // now): ReturnWhenIdle tries again, the departure spot being the fallback (GoRest)
+            if (source == JobSource.Orchestrator && (!IsAtRest() || departureFallback))
+            {
+                owesReturn = true;
+                lastReturnTryFrame = MyAPIGateway.Session.GameplayFrameCounter;
+                if (activeFlightOrder == null && !IsGoingToRest) GoRest();
+            }
             // Cargo still aboard (a failed job, nothing to unload at its end): cleared before the next job
             if (source != JobSource.Housekeeping && currentJob == null) TryStartHousekeeping();
         }

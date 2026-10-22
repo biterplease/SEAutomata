@@ -343,3 +343,11 @@ Hold phases hand the drone to the game's dampeners and skip the flight tick: doc
 
 ## Chat alerts, no power (2026-10-21)
 No power to fly: the drone is stopped as before; after `GROUNDED_ALERT_TICKS` (5 min) still stalled, one alert with a GPS point (`groundedSince` / `groundedAlerted`). `DroneSettingKey.UseBroadcastController` is kept as `UseBroadcastController_Removed` (wire ordinals); settings ProtoMember 60 is free.
+
+## Return after a job (2026-10-22)
+Bug seen: a spot-check drone with a home connector id that did not resolve (`GetHomeConnector` null) failed ReturnHome, reported the job Completed (`FinishJob(!homeOnly)`), tried `GoRest` once more and hovered at the target for good, out of antenna range (its scans never delivered).
+- `RememberDeparture` (pre-flight, letting go of a connector / gears) now runs for every drone, not only those without a home connector (`DepartureGrid` still ignores it when there is a home connector).
+- `GoRest` = `GoRestUsual` (home / park / charge / departure as before), else the fallback: fly back over the departure spot (`FlyToDeparture`, `departureFallback`), where `AtDepartureFallback` counts as at rest. No departure known: "holding here, retrying".
+- `owesReturn`: set by `FinishJob` (orchestrator job ended away from rest or at the fallback) and by `Recall`; cleared at a usual rest, by `StartJob`, by a player movement order. `ReturnWhenIdle` (every 100 ticks, idle only) calls `GoRest` again every `RETURN_RETRY_TICKS` (30 s); at the fallback spot it retries the usual rest quietly. Not saved (a reload forgets it).
+- `GoHome` with an id set but not resolvable reports why (`AnchorDirectory.WhyNot`: not found / no physics / not functional / owner / distance).
+

@@ -414,6 +414,7 @@ namespace Automata.Drone
                 Report(StrDebugOrdersNeedManagedBy);
                 return;
             }
+            if (IsMovementAction(p.Action)) owesReturn = false;   // the player moves it now: no return after the last job
             switch (p.Action)
             {
                 case DroneAction.NavigateTo:

@@ -619,6 +619,7 @@ namespace Automata.Drone
                     UpdateConstruction100();
                     UpdateOrchestratorJobs();
                     ClearWhenIdle();
+                    ReturnWhenIdle();
                     // Ownership / range can change mid-flight: re-validate the anchor at a low rate
                     if (anchorBlock != null && activeFlightOrder != null && activeFlightOrder.AnchorEntityId != 0
                         && AnchorDirectory.Resolve(block, activeFlightOrder.AnchorEntityId) == null)

@@ -38,6 +38,7 @@ namespace Automata.Drone
         private static readonly MyStringId StrWarningDockingTiltsTheDrone = MyStringId.GetOrCompute("Warning: docking tilts the drone {0:F0}°");
         private static readonly MyStringId StrHomeSetDockingPoseRecorded = MyStringId.GetOrCompute("Home set: {0} (docking pose recorded)");
         private static readonly MyStringId StrHomeNoHomeConnectorSet = MyStringId.GetOrCompute("Home: no home connector set / in range");
+        private static readonly MyStringId StrHomeNotUsable = MyStringId.GetOrCompute("Home: the home connector can't be used: {0}");
         private static readonly MyStringId StrHomeIsNotWorking = MyStringId.GetOrCompute("Home: {0} is not working");
         private static readonly MyStringId StrHomeAlreadyDocked = MyStringId.GetOrCompute("Home: already docked");
         private static readonly MyStringId StrHomeIsOccupied = MyStringId.GetOrCompute("Home: {0} is occupied");
@@ -472,7 +473,12 @@ namespace Automata.Drone
             if (!initialized || settings == null) return false;
             CaptureFlightState();
             var home = GetHomeConnector();
-            if (home == null) { Report(StrHomeNoHomeConnectorSet); return false; }
+            if (home == null)
+            {
+                if (settings.HomeConnectorId == 0) Report(StrHomeNoHomeConnectorSet);
+                else Report(StrHomeNotUsable, AnchorDirectory.WhyNot(block, settings.HomeConnectorId));
+                return false;
+            }
             if (!home.IsWorking) { Report(StrHomeIsNotWorking, home.CustomName); return false; }
             if (home.IsConnected)
             {
