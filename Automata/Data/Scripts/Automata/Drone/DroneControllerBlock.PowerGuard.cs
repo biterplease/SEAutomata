@@ -13,13 +13,16 @@ namespace Automata.Drone
     public partial class DroneControllerBlock
     {
         private static readonly MyStringId StrNoPowerToFly = MyStringId.GetOrCompute("No power to fly: {0}. Stopped; checked again every {1} s");
-        private static readonly MyStringId StrDroneNoPowerToFly = MyStringId.GetOrCompute("Drone {0}: no power to fly ({1}), stopped where it is.");
+        private static readonly MyStringId StrDroneNoPowerToFly = MyStringId.GetOrCompute("No power to fly ({0}): stalled for {1} min, stopped at GPS:{2}:{3:F0}:{4:F0}:{5:F0}:");
         private static readonly MyStringId StrPowerBack = MyStringId.GetOrCompute("Power back: flying again");
         private static readonly MyStringId StrNoWorkingThruster = MyStringId.GetOrCompute("no thruster working (off, unpowered or unfuelled)");
 
         private const int GROUNDED_RECHECK_TICKS = 30 * 60;   // grounded: power checked again this often
         private string groundedReason;                         // non-null: grounded (in State.Error) for want of power
         private int groundedNextCheck;
+        private const int GROUNDED_ALERT_TICKS = 5 * 60 * 60;   // stalled this long without power: the player is told (once)
+        private int groundedSince;
+        private bool groundedAlerted;
 
         private bool Grounded { get { return groundedReason != null; } }
 
@@ -34,6 +37,7 @@ namespace Automata.Drone
             {
                 if (!Grounded) return;
                 groundedReason = null;
+                groundedAlerted = false;
                 errorReason = null;
                 Report(StrPowerBack);
                 if (currentState == State.Error) SetState(IsParkedNow() ? State.Docked : State.Standby);
@@ -44,11 +48,18 @@ namespace Automata.Drone
             bool already = Grounded;
             groundedReason = why;
             errorReason = Loc.F(StrNoPowerToFly, why, GROUNDED_RECHECK_TICKS / 60);
+            if (already && !groundedAlerted && now - groundedSince >= GROUNDED_ALERT_TICKS)
+            {
+                groundedAlerted = true;
+                var at = block.GetPosition();
+                Broadcast(Loc.F(StrDroneNoPowerToFly, why, GROUNDED_ALERT_TICKS / 3600, at.X, at.Y, at.Z));
+            }
             if (already && currentState == State.Error) return;   // still stopped: nothing new to say
             if (!already)
             {
                 Report(errorReason);
-                Broadcast(Loc.F(StrDroneNoPowerToFly, Nicknames.Of(Entity), why));
+                groundedSince = now;
+                groundedAlerted = false;
             }
             // (also when an order given meanwhile - Go home, Execute - took it out of the error: it can't fly it)
             StopJob(errorReason);

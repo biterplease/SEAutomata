@@ -73,6 +73,7 @@ namespace Automata.VirtualNetwork
         AuctionWinnerAnnouncement = 4096,
         JobAnnouncementFailed = 8192,
         JobStatusReport = 16384,
+        PlayerAlert = 32768,
     }
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public enum Channel : byte
@@ -119,6 +120,10 @@ namespace Automata.VirtualNetwork
         /// is dropped (JobStatusReport: AnnouncerEntityId, JobId, Reason).</summary>
         [ProtoEnum]
         JOB_WITHDRAWN,
+        /// <summary>Any block -> its orchestrator (directed): something the player should hear about (PlayerAlert); the orchestrator
+        /// is the only block that writes to chat.</summary>
+        [ProtoEnum]
+        PLAYER_ALERT,
     }
 
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
@@ -164,6 +169,8 @@ namespace Automata.VirtualNetwork
         public long SenderOwnerId;
         public Channel Channel;
         public MessageQueue.IAIBlockType RecipientBlockType;
+        /// <summary>0: every reader of RecipientBlockType in range; else only the block with this entity id (a directed message: the reader checks one id before any range work).</summary>
+        public long RecipientId;
         /// <summary>The queue's entry for this send (set by BroadcastMessage; not serialized).</summary>
         public MessageQueue.TimestampedMessage Receipt;
         /// <summary>At least one reader (in range) has taken it.</summary>
@@ -372,6 +379,8 @@ namespace Automata.VirtualNetwork
         [ProtoMember(13)] public bool SharedSite;
         /// <summary>Weld jobs: which weld (JobTypeExtensions.WELD_*; 0 unknown).</summary>
         [ProtoMember(14)] public byte WeldCategory;
+        /// <summary>The block this copy of the award is for (a directed message); 0: an award sent to everybody (saved before awards were directed).</summary>
+        [ProtoMember(15)] public long RecipientId;
     }
 
     /// <summary>
@@ -466,5 +475,15 @@ namespace Automata.VirtualNetwork
         [ProtoMember(14)] public List<Vector3IData> UnreachableCells;
         /// <summary>The drone reports its unreachable blocks (an empty list: none): the computer holds those back, not the whole job.</summary>
         [ProtoMember(15)] public bool PerBlock;
+        /// <summary>Keepalives: where the drone was when it sent this (the last known position if it goes silent); null: unknown.</summary>
+        [ProtoMember(16)] public Vector3DData LastPosition;
+    }
+
+    /// <summary>A chat line for the player (PLAYER_ALERT): 'Text' is complete, it starts with the name of whoever meant to say it.</summary>
+    [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
+    public class PlayerAlert : IMessagePayload
+    {
+        [ProtoMember(1)] public long SenderEntityId;
+        [ProtoMember(2)] public string Text;
     }
 }

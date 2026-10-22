@@ -24,7 +24,6 @@ namespace Automata.Drone
     {
         private static readonly MyStringId StrNoRouteRepositioning = MyStringId.GetOrCompute("No route: repositioning {0:F0} m and planning again ({1}/{2})");
         private static readonly MyStringId StrNoRouteAfterRepositions = MyStringId.GetOrCompute("no route after {0} repositions");
-        private static readonly MyStringId StrDroneNoRouteStopped = MyStringId.GetOrCompute("Drone {0}: no route after {1} repositions, stopped; trying again in {2} s.");
 
         private const int RECOVER_MAX = 3;
         private const double RECOVER_EXCLUDE_MIN = 10;   // m: no spot this close to a place already tried from (or the hull radius x 1.5)
@@ -209,7 +208,6 @@ namespace Automata.Drone
             recoverVisited.Clear();
             errorReason = why;
             Report(StrERRORStopped, why);
-            Broadcast(Loc.F(StrDroneNoRouteStopped, Nicknames.Of(Entity), RECOVER_MAX, RouteRetryTicks / 60));
             StopJob(why);
             ClearFlightOrder();
             ClearAllThrustOverrides();

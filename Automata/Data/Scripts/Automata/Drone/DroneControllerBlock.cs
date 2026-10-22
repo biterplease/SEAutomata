@@ -620,6 +620,7 @@ namespace Automata.Drone
                 if (settings.IsEnabled) UpdatePowerGuard();   // out in the field without power to fly: stopped, checked at a low rate
                 MonitorPower();                     // levels for the header always; acts only with the AI on
                 FlushJobReports();                  // outcomes of orchestrator jobs not heard yet
+                FlushAlerts();                      // chat lines for the orchestrator not taken yet
                 SendJobKeepalive();                 // still on a construction / mining job: its announcer keeps it
                 PublishSurveys();                   // ore scans waiting for a surveyor in range
                 if (settings.IsEnabled)
@@ -2670,7 +2671,6 @@ namespace Automata.Drone
             if (speedBoundShare < 0.5 || speedCapName == null) return;
             string text = Loc.F(StrTimedOutHeldAtIts, what, speedCapName, speedCapValue);
             Report(text);
-            Broadcast(text);
         }
         #endregion
 

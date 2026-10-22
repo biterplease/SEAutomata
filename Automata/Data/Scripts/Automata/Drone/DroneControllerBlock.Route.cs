@@ -22,7 +22,7 @@ namespace Automata.Drone
         #region UI strings
         private static readonly MyStringId StrNavNoRouteToWaypoint = MyStringId.GetOrCompute("Nav: no route to waypoint {0}");
         private static readonly MyStringId StrRouteBlockedMAheadStopped = MyStringId.GetOrCompute("Route blocked {0:F0} m ahead: stopped");
-        private static readonly MyStringId StrCrashedInLane = MyStringId.GetOrCompute("{0}: crashed in lane {1}");
+        private static readonly MyStringId StrCrashedInLane = MyStringId.GetOrCompute("Crashed in lane {0}");
         private static readonly MyStringId StrNoRouteAheadStopped = MyStringId.GetOrCompute("No route ahead: stopped");
         #endregion
 
@@ -1098,8 +1098,8 @@ namespace Automata.Drone
                     string lane = pm.Lanes.Crashed(Entity.EntityId);
                     if (lane != null)
                     {
-                        string text = Loc.F(StrCrashedInLane, Nickname, lane);
-                        Log.Info("Drone {0}: {1} ({2:F0} -> {3:F0} m/s)", Entity.EntityId, text, prev, speed);
+                        string text = Loc.F(StrCrashedInLane, lane);
+                        if (Log.DebugEnabled) Log.Debug("Drone {0}: {1} ({2:F0} -> {3:F0} m/s)", Entity.EntityId, text, prev, speed);
                         Broadcast(text);
                     }
                 }

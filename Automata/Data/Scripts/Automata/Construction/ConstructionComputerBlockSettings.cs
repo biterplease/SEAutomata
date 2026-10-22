@@ -44,7 +44,6 @@ namespace Automata.Construction
         [ProtoMember(25)] public Util.LcdStyle Lcd = new Util.LcdStyle();
         /// <summary>LCDs whose name contains this show the computer's status.</summary>
         [ProtoMember(15)] public string LcdTag = "[ConstructionComputer]";
-        /// <summary>A few events worth a chat line go out through a Broadcast Controller on the construct (Util/BroadcastControllerSender).</summary>
-        [ProtoMember(16)] public bool UseBroadcastController;
+        // (ProtoMember 16 was UseBroadcastController: only the orchestrator writes to chat)
     }
 }

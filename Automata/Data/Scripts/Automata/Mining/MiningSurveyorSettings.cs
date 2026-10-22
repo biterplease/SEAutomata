@@ -24,8 +24,7 @@ namespace Automata.Mining
         [ProtoMember(6)] public List<string> KnownOres = new List<string>();
         /// <summary>LCDs whose name contains this show the surveyor's status.</summary>
         [ProtoMember(7)] public string LcdTag = "[MiningSurveyor]";
-        /// <summary>A few events worth a chat line go out through a Broadcast Controller on the construct (Util/BroadcastControllerSender).</summary>
-        [ProtoMember(8)] public bool UseBroadcastController;
+        // (ProtoMember 8 was UseBroadcastController: only the orchestrator writes to chat)
         /// <summary>"Retry jobs" (terminal): bumped by the button, the server acts on a change.</summary>
         [ProtoMember(10)] public int RetryRequest;
         /// <summary>"Show known deposits" (terminal): bumped by the button, the server acts on a change.</summary>

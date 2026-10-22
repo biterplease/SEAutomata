@@ -409,18 +409,6 @@ namespace Automata.Drone
         }
         #endregion
 
-        public bool Terminal_UseBroadcastController
-        {
-            get { return settings != null && settings.UseBroadcastController; }
-            set
-            {
-                if (settings == null || settings.UseBroadcastController == value) return;
-                settings.UseBroadcastController = value;
-                SaveSettings();
-                SyncSetting(DroneSettingKey.UseBroadcastController);
-            }
-        }
-
         private static bool IsKnownProfile(BehaviourProfile v)
         {
             switch (v)

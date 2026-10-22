@@ -56,7 +56,7 @@ Job announcements are queued (de-duplicated per announcer + job id) and auctione
 
 ## Designator jobs (2026-10-05)
 - Jobs a player orders with a target designator are named `Designator...`: `DesignatorScoutPoint` (industrial spot check: any drone with an ore detector, ore scouts rank first), `DesignatorScoutArea` (industrial area sweep: ore scouts only), `DesignatorEngage`, `DesignatorEscort` (hostile: combat drones with the three AI blocks only, `HasDefenseSystems`). Single award (drone only), the player's tasks + ReturnHome, confirmed within `ConfirmTimeoutSeconds` or cancelled (`OrchestratorBlock.PlayerJobs.cs`). Combat orders show no GPS marker (the target moves).
-- "Use broadcast controller" (terminal, next to the LCD tag; every Automata block has it): an accepted designator order goes out as a chat line through a working Broadcast Controller of the owner / faction on the orchestrator's construct (`Util/BroadcastControllerSender`, the mod API's `IMyChatBroadcastControllerComponent.SendMessage(string)`); its Broadcast target decides who reads it. Nothing else is sent yet.
+- "Use broadcast controller" (terminal; 2026-10-21: ONLY the orchestrator has it, and it is the only chat writer; the tag / order-accepted lines are gone, the designator LCD covers them). Formerly: an accepted designator order went out as a chat line through a working Broadcast Controller of the owner / faction on the orchestrator's construct (`Util/BroadcastControllerSender`, the mod API's `IMyChatBroadcastControllerComponent.SendMessage(string)`); its Broadcast target decides who reads it. Nothing else is sent yet.
 
 ## Audit fixes (2026-10-06)
 - Dedupe: int.MaxValue entries (queued / auctioned) are checked every pass and forgotten when neither is running (they used to ignore a job forever after dormancy / a failed start / a load). Ignored repeats are logged once per job.
@@ -120,7 +120,7 @@ Header line "Active Drones: N, LC: N, CC: N, MS: N": `seenEntities` (id -> type,
 Designator recall (green): the aimed drone's grid first (as before); none of the player's drones there: `OrchestratorBlock.RecallOrderAt` takes the confirmed non-combat order whose GPS marker is within 8 m of the hit (`RECALL_MARKER_RADIUS` in `ScoutPointer`). Jobs of the order not taken yet are cancelled (queue, auctions, `knownJobs`); drones working the others are recalled (`DroneControllerBlock.RecallJobs(announcer, jobIds)`: `jobAnnouncerId` + `currentJob.JobId`), their "recalled" report ends the job and, with the last, the marker. No hit (open space): error as before.
 
 ## Drone keepalives (2026-10-11)
-Subscribes to JOB_KEEPALIVE; keepalives for its own jobs (designator orders) feed `droneWatch` (`Util.DroneWatch`, also in CC / MS / LC) and the active gauge. 60 s unheard: "Drone NAME has not been heard of for 60s!" (event, log, broadcast controller when on). Final reports end the watch.
+Subscribes to JOB_KEEPALIVE (directed to it, `OrchestratorEntityId == entityId`); keepalives for every job it awarded feed `droneWatch` (`Util.DroneWatch`, also in CC / MS / LC) and the active gauge. 60 s unheard: "Drone NAME has not been heard of for 60s!" (event, log, broadcast controller when on). Final reports end the watch.
 
 ## Camera designator (2026-10-15, `OrchestratorBlock.Designator.cs`)
 Toolbar actions "Designator: TAG / SPOT / AREA / ENGAGE / ESCORT / RECALL / CLEAR" (PB actions, orchestrators only): the client
@@ -142,3 +142,7 @@ tag memories of players allowed with the owner), last tagged drone. Log (`design
 per drone. Targets that are Automata drones show their nickname (`ScoutPointer.TargetName`).
 Hand-held designators: `HANDHELD_RANGE` 5 km (client ray; server refuses hits farther than 5.1 km from the player).
 Blueprints: industrial = HandDrill cost (any assembler / survival kit); hostile = HandDrill3 chain cost, full Assembler only.
+
+## Alerts, targeted awards (2026-10-21)
+- `PLAYER_ALERT` (directed `PlayerAlert`) from any block: `ReadPlayerAlerts` adds it to the events and writes it to chat when "use broadcast controller" is on; the same line is not repeated within 30 s. Its own missing-drone alert: 10 min unheard (`DroneWatch.SILENT_TICKS`), "<orchestrator nickname>: Drone X has not been heard of for 10 min! Last known position GPS:...".
+- Awards are directed (`RecipientId`): one per winning drone (its own assignments only), per source LC, per announcer. Losers (and every other bidder when an auction ends without them) get an empty-assignment award from `closedOutbox` so they bid again at once. See VirtualNetwork/CLAUDE.md.

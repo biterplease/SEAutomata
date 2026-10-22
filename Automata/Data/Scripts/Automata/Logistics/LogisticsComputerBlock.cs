@@ -154,6 +154,9 @@ namespace Automata.Logistics
             public bool Finished;    // every drone reported, or one gave up: closed at the next check (need recomputed)
             public bool Announced;   // the last announcement reached an orchestrator
             public Message<JobAnnouncement> Sent;   // the announcement in flight: told whether it was taken once its life is up
+            public Message<JobAnnouncement> Cached;   // the last announcement built: sent again while the connector it names is unchanged
+            public long CachedDock;
+            public VRageMath.Vector3D CachedAt;
             public string LastResult;
         }
         private OpenJob requestJob, pushJob;
@@ -336,7 +339,7 @@ namespace Automata.Logistics
             ReadFailures(now);
             ReadJobReports(now);
             ReadKeepalives(now);
-            droneWatch.Check(now, block, settings.UseBroadcastController, "LC {0}", entityId, null);
+            droneWatch.Check(now, block, false, "LC {0}", entityId, null);
             RepeatAnnouncement(requestJob, now);
             RepeatAnnouncement(pushJob, now);
             ReadAuctions(now);
@@ -635,9 +638,22 @@ namespace Automata.Logistics
             var dock = FreeDock(primary);
             if (dock == null) { job.LastResult = Loc.T(StrNoFreeConnector); if (Log.DebugEnabled) Log.Debug("LC {0}: job {1}: no free connector to announce", entityId, job.JobId); return; }
             Vector3D at = dock.PositionData.ToVector3D();
+            Message<JobAnnouncement> msg = job.Cached;
+            if (msg != null && job.CachedDock == dock.EntityId && job.CachedAt == at && msg.Payload.IsStaticGrid == block.CubeGrid.IsStatic)
+            {
+                // Same connector, same place: the very same announcement again (payloads are read-only once sent)
+                msg.MessageId = IdGenerator.GenerateId(ref messageCounter, entityId);
+                msg.CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow);
+                var again = messaging.BroadcastMessage(antennaReg, msg, false, MessageQueue.IAIBlockType.LogisticsComputer);
+                job.Announced = false;
+                job.Sent = again == ErrorCode.None ? msg : null;
+                if (again != ErrorCode.None) job.LastResult = again.ToString();
+                if (Log.DebugEnabled) Log.Debug("LC {0}: job {1} ({2}) announced again at connector {3}: {4}", entityId, job.JobId, job.Type, dock.EntityId, again);
+                return;
+            }
             float interference;
             float g = MyAPIGateway.Physics.CalculateNaturalGravityAt(at, out interference).Length();
-            var msg = new Message<JobAnnouncement>
+            msg = new Message<JobAnnouncement>
             {
                 Payload = new JobAnnouncement
                 {
@@ -665,6 +681,9 @@ namespace Automata.Logistics
                 Channel = job.Type == Orchestrator.JobType.DeliverMissingInventory ? Channel.LOGISTIC_REQUEST : Channel.LOGISTIC_PUSH,
             };
             var error = messaging.BroadcastMessage(antennaReg, msg, false, MessageQueue.IAIBlockType.LogisticsComputer);
+            job.Cached = msg;
+            job.CachedDock = dock.EntityId;
+            job.CachedAt = at;
             job.Announced = false;
             job.Sent = error == ErrorCode.None ? msg : null;
             if (error != ErrorCode.None) job.LastResult = error.ToString();
@@ -1582,12 +1601,6 @@ namespace Automata.Logistics
         {
             get { return settings.LcdTag ?? ""; }
             set { if (settings.LcdTag == value) return; settings.LcdTag = value; SettingsEdited(); }
-        }
-
-        public bool Terminal_UseBroadcastController
-        {
-            get { return settings.UseBroadcastController; }
-            set { if (settings.UseBroadcastController == value) return; settings.UseBroadcastController = value; SettingsEdited(); }
         }
         #endregion
     }

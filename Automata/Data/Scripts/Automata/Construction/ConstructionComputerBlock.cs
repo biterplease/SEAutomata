@@ -429,7 +429,7 @@ namespace Automata.Construction
             ReadFailures(now);
             ReadJobReports(now);
             ReadKeepalives(now);
-            droneWatch.Check(now, block, settings.UseBroadcastController, "CC {0}", entityId, AddEvent);
+            droneWatch.Check(now, block, false, "CC {0}", entityId, AddEvent);
             if (now - lastScan >= settings.ScanIntervalSeconds * 60)
             {
                 lastScan = now;
@@ -1323,12 +1323,6 @@ namespace Automata.Construction
         {
             get { return settings.LcdTag ?? ""; }
             set { if (settings.LcdTag == value) return; settings.LcdTag = value; SettingsEdited(); }
-        }
-
-        public bool Terminal_UseBroadcastController
-        {
-            get { return settings.UseBroadcastController; }
-            set { if (settings.UseBroadcastController == value) return; settings.UseBroadcastController = value; SettingsEdited(); }
         }
         #endregion
     }

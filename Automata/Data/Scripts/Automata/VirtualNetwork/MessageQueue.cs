@@ -58,6 +58,7 @@ namespace Automata.VirtualNetwork
             [ProtoMember(18)] public bool BothRanges;
             [ProtoMember(19)] public int Deliveries;
             [ProtoMember(20)] public IAIBlockType SenderBlockType;
+            [ProtoMember(21)] public long RecipientId;
             public SavedMessage() { }
         }
         /// <summary>
@@ -77,6 +78,8 @@ namespace Automata.VirtualNetwork
             public uint MessageId;
             public Channel Channel;
             public IAIBlockType RecipientBlockType;
+            /// <summary>0: any reader of the block type (a broadcast); else only the block with this entity id reads it (a directed message).</summary>
+            public long RecipientId;
             public ushort PayloadTypeValue;
             #region Where it was sent from
             public long SenderGridId;
@@ -212,6 +215,7 @@ namespace Automata.VirtualNetwork
                 MessageId = message.MessageId,
                 Payload = message.Payload,
                 RecipientBlockType = message.RecipientBlockType,
+                RecipientId = message.RecipientId,
                 PayloadType = GetPayloadType(message.Payload),
                 SenderGridId = sender.GridId,
                 SenderBlockType = senderType,
@@ -253,6 +257,8 @@ namespace Automata.VirtualNetwork
                 return PayloadType.JobAnnouncementFailed;
             if (payload is JobStatusReport)
                 return PayloadType.JobStatusReport;
+            if (payload is PlayerAlert)
+                return PayloadType.PlayerAlert;
             return PayloadType.None;
         }
 
@@ -304,6 +310,7 @@ namespace Automata.VirtualNetwork
                     var m = items[i];
                     cursor = m.Seq;
                     if (m.SentAt < cutoff || m.SenderId == readerId) continue;
+                    if (m.RecipientId != 0 && m.RecipientId != readerId) continue;   // a directed message: not for this reader
                     if (m.RecipientBlockType != IAIBlockType.None && (m.RecipientBlockType & readerType) == 0) continue;
                     if (messageFilters != PayloadType.None && (m.PayloadType & messageFilters) == 0) continue;
                     if (!CanShare(m.SenderOwnerId, reader.OwnerId)) continue;
@@ -323,6 +330,7 @@ namespace Automata.VirtualNetwork
                         CreatedAt = m.CreatedAt,
                         SentAt = m.SentAt,
                         RecipientBlockType = m.RecipientBlockType,
+                        RecipientId = m.RecipientId,
                         SenderId = m.SenderId,
                         SenderOwnerId = m.SenderOwnerId,
                         Channel = m.Channel,
@@ -441,6 +449,7 @@ namespace Automata.VirtualNetwork
                             MessageId = msg.MessageId,
                             Channel = msg.Channel,
                             RecipientBlockType = msg.RecipientBlockType,
+                            RecipientId = msg.RecipientId,
                             PayloadTypeValue = msg.PayloadTypeValue,
                             SenderGridId = msg.SenderGridId,
                             SenderBlockType = msg.SenderBlockType,
@@ -489,6 +498,7 @@ namespace Automata.VirtualNetwork
                     MessageId = saved.MessageId,
                     Channel = saved.Channel,
                     RecipientBlockType = saved.RecipientBlockType,
+                    RecipientId = saved.RecipientId,
                     PayloadTypeValue = saved.PayloadTypeValue,
                     SenderGridId = saved.SenderGridId,
                     SenderBlockType = saved.SenderBlockType,
@@ -526,6 +536,7 @@ namespace Automata.VirtualNetwork
                     case PayloadType.AuctionWinnerAnnouncement: return MyUtilitiesDelegate.SerializeFromBinary<AuctionWinnerAnnouncement>(data);
                     case PayloadType.JobAnnouncementFailed: return MyUtilitiesDelegate.SerializeFromBinary<JobAnnouncementFailed>(data);
                     case PayloadType.JobStatusReport: return MyUtilitiesDelegate.SerializeFromBinary<JobStatusReport>(data);
+                    case PayloadType.PlayerAlert: return MyUtilitiesDelegate.SerializeFromBinary<PlayerAlert>(data);
                     default: return null;
                 }
             }

@@ -29,8 +29,7 @@ namespace Automata.Logistics
         [ProtoMember(6)] public string LcdTag = "[LogisticsComputer]";
         /// <summary>Bumped by the terminal's "Retry held jobs" button (the server retries when it changes).</summary>
         [ProtoMember(7)] public int RetryRequest;
-        /// <summary>A few events worth a chat line go out through a Broadcast Controller on the construct (Util/BroadcastControllerSender).</summary>
-        [ProtoMember(8)] public bool UseBroadcastController;
+        // (ProtoMember 8 was UseBroadcastController: only the orchestrator writes to chat)
         /// <summary>The name its logs (and other blocks' logs) show; empty: the block's name.</summary>
         [ProtoMember(9)] public string Nickname = "";
         [ProtoMember(10)] public Util.LcdStyle Lcd = new Util.LcdStyle();

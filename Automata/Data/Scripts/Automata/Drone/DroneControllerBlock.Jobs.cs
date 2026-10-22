@@ -55,7 +55,6 @@ namespace Automata.Drone
         private static readonly MyStringId StrLoadedItemsAt = MyStringId.GetOrCompute("Loaded {0} items at {1}");
         private static readonly MyStringId StrBlockDone = MyStringId.GetOrCompute("Block {0}/{1}: {2} done ({3})");
         private static readonly MyStringId StrDockWaiting = MyStringId.GetOrCompute("Dock: {0} {1}, waiting");
-        private static readonly MyStringId StrCantReachChat = MyStringId.GetOrCompute("Can't reach {0}: {1}");
         private static readonly MyStringId StrDockUsingInstead = MyStringId.GetOrCompute("Dock: {0} instead ({1} {2})");
         private static readonly MyStringId StrDockStillInUseAfter = MyStringId.GetOrCompute("Dock: {0} still in use after {1} min, giving up");
         private static readonly MyStringId StrDockFreeAfterS = MyStringId.GetOrCompute("Dock: {0} free after {1:F0} s");
@@ -497,56 +496,7 @@ namespace Automata.Drone
             Report(StrBlockTaskFailed, BlockNumber(taskIndex), currentJob.BlockCount,
                    taskIndex + 1, currentJob.Tasks.Count, task.Type, taskFailure);
             lastJobFailure = task.Type + ": " + taskFailure;
-            if (taskFailure == Orchestrator.TaskFailure.Unreachable) BroadcastUnreachable(ref task);
             taskFailure = Orchestrator.TaskFailure.None;
-        }
-
-        #region Timing
-        private const int UNREACHABLE_BROADCAST_TICKS = 10 * 60 * 60;   // the same spot is announced at most this often
-        #endregion
-        private readonly Dictionary<Vector3I, int> unreachableBroadcasts = new Dictionary<Vector3I, int>();
-
-        /// <summary>
-        /// "Use broadcast controller": a position the drone was sent to and can't reach is announced in chat with a GPS
-        /// point (what, where), so the player can see what is in the way. Each spot (10 m cells) once per
-        /// UNREACHABLE_BROADCAST_TICKS: a drone retrying the same site doesn't spam.
-        /// </summary>
-        private void BroadcastUnreachable(ref Orchestrator.Task task)
-        {
-            if (settings == null || !settings.UseBroadcastController) return;
-            Vector3D at;
-            string what = task.Type.ToString();
-            if (task.Type == Orchestrator.TaskType.DockAt)
-            {
-                var c = task.TargetEntityId != 0 ? AnchorDirectory.Resolve(block, task.TargetEntityId) as IMyShipConnector : null;
-                if (c == null) return;
-                at = c.GetPosition();
-                what = "dock " + c.CustomName;
-            }
-            else if (task.Type == Orchestrator.TaskType.ReturnHome)
-            {
-                var home = GetHomeConnector();
-                if (home == null) return;
-                at = home.GetPosition();
-                what = "home " + home.CustomName;
-            }
-            else
-            {
-                IMyTerminalBlock anchor;
-                MatrixD am;
-                if (!ResolveTaskFrame(task.RelativeBeaconEntityId, out anchor, out am)) return;
-                at = TaskToWorld(anchor, ref am, task.Position);
-                if (at.LengthSquared() < 1) return;
-            }
-            int now = MyAPIGateway.Session.GameplayFrameCounter;
-            var cell = Vector3I.Floor(at / 10.0);
-            int last;
-            if (unreachableBroadcasts.TryGetValue(cell, out last) && now - last < UNREACHABLE_BROADCAST_TICKS) return;
-            if (unreachableBroadcasts.Count > 64) unreachableBroadcasts.Clear();
-            unreachableBroadcasts[cell] = now;
-            var inv = System.Globalization.CultureInfo.InvariantCulture;
-            string name = (Nicknames.Of(_entityId) + " can't reach").Replace(':', ' ');
-            Broadcast(Loc.F(StrCantReachChat, what, string.Format(inv, "GPS:{0}:{1:F1}:{2:F1}:{3:F1}:", name, at.X, at.Y, at.Z)));
         }
 
         // 1-based block of the job the task at 'index' belongs to (its NavigateToolTo counted), 0 before the first
@@ -2896,6 +2846,8 @@ namespace Automata.Drone
         {
             queue.ReadMessages(_entityId, MessageQueue.IAIBlockType.Drone, antennaReg, Channel.ORCHESTRATOR_AUCTION_START, auctionInbox, 10, true, PayloadType.Auction);
             int now = MyAPIGateway.Session.GameplayFrameCounter;
+            for (int i = 0; i < auctionInbox.Count; i++)   // who the auctions come from: where its chat lines go
+                if (AnchorDirectory.IsAllowed(block.OwnerId, auctionInbox[i].SenderOwnerId)) knownOrchestratorId = auctionInbox[i].SenderId;
             ForgetOldAuctions(now);
             if (pendingBidAuctionId != 0)
             {
@@ -2911,8 +2863,7 @@ namespace Automata.Drone
             }
             if (!IsAvailableForJobs || pendingBidAuctionId != 0)
             {
-                if (auctionInbox.Count > 0 && Log.DebugEnabled) Log.Debug("Drone {0}: {1} auction(s) read, no bid: {2}", _entityId, auctionInbox.Count,
-                              pendingBidAuctionId != 0 ? "waiting for the outcome of auction " + pendingBidAuctionId : WhyNotAvailable());
+                if (auctionInbox.Count > 0 && Log.DebugEnabled) Log.Debug("Drone {0}: {1} auction(s) read, no bid: {2}", _entityId, auctionInbox.Count, pendingBidAuctionId != 0 ? "waiting for the outcome of auction " + pendingBidAuctionId : WhyNotAvailable());
                 auctionInbox.Clear();
                 return;
             }
@@ -3154,7 +3105,7 @@ namespace Automata.Drone
         }
 
         #region Timing
-        private const int JOB_KEEPALIVE_TICKS = 20 * 60;       // working on an awarded job: tell its announcer this often (it warns after 60 s unheard)
+        private const int JOB_KEEPALIVE_TICKS = 60 * 60;       // working on an awarded job: tell its announcer and the orchestrator this often (the orchestrator warns after 10 min unheard)
         #endregion
         private int lastKeepaliveFrame = int.MinValue / 2;
 
@@ -3168,6 +3119,13 @@ namespace Automata.Drone
             var queue = AutomataSession.GetMessageQueue();
             if (queue == null || !EnsureNetworkRegistration(queue)) return;
             lastKeepaliveFrame = now;
+            // Directed: the announcer (keeps the job alive) and the orchestrator (watches the drone), the last known position goes along
+            SendKeepaliveTo(queue, jobAnnouncerId);
+            if (jobOrchestratorId != 0 && jobOrchestratorId != jobAnnouncerId) SendKeepaliveTo(queue, jobOrchestratorId);
+        }
+
+        private void SendKeepaliveTo(VirtualNetwork.MessageQueue queue, long recipient)
+        {
             queue.BroadcastMessage(antennaReg, new Message<JobStatusReport>
             {
                 Payload = new JobStatusReport
@@ -3175,11 +3133,13 @@ namespace Automata.Drone
                     AnnouncerEntityId = jobAnnouncerId, JobId = currentJob.JobId, AuctionId = jobAuctionId, OrchestratorEntityId = jobOrchestratorId,
                     DroneEntityId = _entityId, Outcome = JobOutcome.Working, BlocksDone = jobBlocksDone, BlocksTotal = currentJob.BlockCount,
                     JobType = jobAwardType, OreKg = minedOreKg, WeldCategory = jobAwardWeld,
+                    LastPosition = Vector3DData.FromVector3D(block.GetPosition()),
                 },
                 MessageId = IdGenerator.GenerateId(ref jobMessageCounter, _entityId),
                 CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
                 SenderId = _entityId,
                 SenderOwnerId = block.OwnerId,
+                RecipientId = recipient,
                 RecipientBlockType = VirtualNetwork.MessageQueue.IAIBlockType.ConstructionComputer | VirtualNetwork.MessageQueue.IAIBlockType.MiningSurveyor
                                      | VirtualNetwork.MessageQueue.IAIBlockType.LogisticsComputer | VirtualNetwork.MessageQueue.IAIBlockType.Orchestrator,
                 Channel = Channel.JOB_KEEPALIVE,
