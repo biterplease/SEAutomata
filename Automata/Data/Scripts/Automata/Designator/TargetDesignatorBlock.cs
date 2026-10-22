@@ -63,7 +63,6 @@ namespace Automata.Designator
         /// <summary>Designators loaded on this machine.</summary>
         public static readonly List<TargetDesignatorBlock> All = new List<TargetDesignatorBlock>();
 
-        private IMyTerminalBlock _block;
         private long entityId;
         private TargetDesignatorSettings settings = new TargetDesignatorSettings();
         private bool ready;
@@ -88,15 +87,14 @@ namespace Automata.Designator
         private readonly List<uint> pendingGone = new List<uint>();
         private readonly List<Message<DesignatorOrderUpdate>> updateInbox = new List<Message<DesignatorOrderUpdate>>();
 
-        public long OwnerId { get { return _block != null ? _block.OwnerId : 0; } }
-        public IMyTerminalBlock Block { get { return _block; } }
+        public long OwnerId { get { return block != null ? block.OwnerId : 0; } }
+        public IMyTerminalBlock Block { get { return block; } }
 
         #region Block
         public override void Init(MyObjectBuilder_EntityBase objectBuilder)
         {
             base.Init(objectBuilder);
-            _block = (IMyTerminalBlock)Entity;
-            block = _block;   // SettingsBlockLogic's: settings from other players check terminal access on it
+            block = (IMyTerminalBlock)Entity;
             entityId = Entity.EntityId;
             NeedsUpdate |= MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
         }
@@ -104,14 +102,14 @@ namespace Automata.Designator
         public override void UpdateOnceBeforeFrame()
         {
             base.UpdateOnceBeforeFrame();
-            if (_block.CubeGrid == null || _block.CubeGrid.Physics == null) return;   // projections / ghosts
+            if (block.CubeGrid == null || block.CubeGrid.Physics == null) return;   // projections / ghosts
             TargetDesignatorTerminalControls.DoOnce();
             LoadFromStorage();
-            _block.AppendingCustomInfo += AppendInfo;
+            block.AppendingCustomInfo += AppendInfo;
             ready = true;
             if (!All.Contains(this)) All.Add(this);
             NeedsUpdate |= MyEntityUpdateEnum.EACH_10TH_FRAME;
-            if (Log.DebugEnabled) Log.Debug("Designator {0}: '{1}' on '{2}'", entityId, _block.CustomName, _block.CubeGrid.DisplayName);
+            if (Log.DebugEnabled) Log.Debug("Designator {0}: '{1}' on '{2}'", entityId, block.CustomName, block.CubeGrid.DisplayName);
         }
 
         public override void UpdateBeforeSimulation10()
@@ -122,7 +120,7 @@ namespace Automata.Designator
             if (++infoCounter >= 10)
             {
                 infoCounter = 0;
-                _block.RefreshCustomInfo();
+                block.RefreshCustomInfo();
                 UpdateLcd();
             }
         }
@@ -131,7 +129,7 @@ namespace Automata.Designator
         {
             try
             {
-                if (_block != null) _block.AppendingCustomInfo -= AppendInfo;
+                if (block != null) block.AppendingCustomInfo -= AppendInfo;
                 All.Remove(this);
                 if (messaging != null) messaging.ReaderClosed(entityId);
             }
@@ -205,13 +203,13 @@ namespace Automata.Designator
         public void Terminal_CameraItems(List<MyTerminalControlComboBoxItem> items)
         {
             items.Add(new MyTerminalControlComboBoxItem { Key = 0L, Value = StrNoCamera });
-            if (_block == null) return;
+            if (block == null) return;
             group.Clear();
-            MyAPIGateway.GridGroups.GetGroup(_block.CubeGrid, GridLinkTypeEnum.Mechanical, group);
+            MyAPIGateway.GridGroups.GetGroup(block.CubeGrid, GridLinkTypeEnum.Mechanical, group);
             for (int g = 0; g < group.Count; g++)
                 foreach (var cam in group[g].GetFatBlocks<IMyCameraBlock>())
                 {
-                    if (cam.Closed || !Drone.AnchorDirectory.IsAllowed(_block.OwnerId, cam.OwnerId)) continue;
+                    if (cam.Closed || !Drone.AnchorDirectory.IsAllowed(block.OwnerId, cam.OwnerId)) continue;
                     items.Add(new MyTerminalControlComboBoxItem { Key = cam.EntityId, Value = MyStringId.GetOrCompute(cam.CustomName) });
                 }
             group.Clear();
@@ -223,13 +221,13 @@ namespace Automata.Designator
             get
             {
                 long current = settings.CameraId;
-                if (current == 0 || _block == null) return 0;
+                if (current == 0 || block == null) return 0;
                 bool found = false;
                 group.Clear();
-                MyAPIGateway.GridGroups.GetGroup(_block.CubeGrid, GridLinkTypeEnum.Mechanical, group);
+                MyAPIGateway.GridGroups.GetGroup(block.CubeGrid, GridLinkTypeEnum.Mechanical, group);
                 for (int g = 0; g < group.Count && !found; g++)
                     foreach (var cam in group[g].GetFatBlocks<IMyCameraBlock>())
-                        if (cam.EntityId == current && !cam.Closed && Drone.AnchorDirectory.IsAllowed(_block.OwnerId, cam.OwnerId)) { found = true; break; }
+                        if (cam.EntityId == current && !cam.Closed && Drone.AnchorDirectory.IsAllowed(block.OwnerId, cam.OwnerId)) { found = true; break; }
                 group.Clear();
                 return found ? current : 0;
             }
@@ -263,9 +261,9 @@ namespace Automata.Designator
             var cam = MyAPIGateway.Entities.TryGetEntityById(id, out e) ? e as IMyCameraBlock : null;
             if (cam == null || cam.Closed) { why = Loc.T(StrCameraGone); return null; }
             if (!cam.IsWorking) { why = Loc.F(StrCameraOff, cam.CustomName); return null; }
-            if (!Drone.AnchorDirectory.IsAllowed(_block.OwnerId, cam.OwnerId)) { why = Loc.F(StrCameraForeign, cam.CustomName); return null; }
+            if (!Drone.AnchorDirectory.IsAllowed(block.OwnerId, cam.OwnerId)) { why = Loc.F(StrCameraForeign, cam.CustomName); return null; }
             group.Clear();
-            MyAPIGateway.GridGroups.GetGroup(_block.CubeGrid, GridLinkTypeEnum.Mechanical, group);
+            MyAPIGateway.GridGroups.GetGroup(block.CubeGrid, GridLinkTypeEnum.Mechanical, group);
             bool attached = group.Contains(cam.CubeGrid);
             group.Clear();
             if (!attached) { why = Loc.F(StrCameraDetached, cam.CustomName); return null; }
@@ -284,10 +282,10 @@ namespace Automata.Designator
         /// </summary>
         public IMyCubeGrid RootGrid()
         {
-            if (_block == null || _block.CubeGrid == null) return null;
+            if (block == null || block.CubeGrid == null) return null;
             group.Clear();
-            MyAPIGateway.GridGroups.GetGroup(_block.CubeGrid, GridLinkTypeEnum.Mechanical, group);
-            IMyCubeGrid best = _block.CubeGrid;
+            MyAPIGateway.GridGroups.GetGroup(block.CubeGrid, GridLinkTypeEnum.Mechanical, group);
+            IMyCubeGrid best = block.CubeGrid;
             double volume = -1;
             for (int g = 0; g < group.Count; g++)
             {
@@ -309,7 +307,7 @@ namespace Automata.Designator
         {
             if (!IsServer || ja == null) return false;
             if (messaging == null) messaging = AutomataSession.GetMessageQueue();
-            if (messaging == null || !GridAntennaReg.Ensure(messaging, ref antennaReg, _block))
+            if (messaging == null || !GridAntennaReg.Ensure(messaging, ref antennaReg, block))
             {
                 log.Add(Loc.F(StrNoNetwork, ja.What));
                 return false;
@@ -322,7 +320,7 @@ namespace Automata.Designator
                 MessageId = IdGenerator.GenerateId(ref messageCounter, entityId),
                 CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
                 SenderId = entityId,
-                SenderOwnerId = _block.OwnerId,
+                SenderOwnerId = block.OwnerId,
                 RecipientBlockType = MessageQueue.IAIBlockType.Orchestrator,
                 Channel = Channel.DESIGNATOR_JOB_ANNOUNCEMENT,
             };
@@ -349,7 +347,7 @@ namespace Automata.Designator
         private void UpdateOrders()
         {
             if (messaging == null) messaging = AutomataSession.GetMessageQueue();
-            if (messaging != null && GridAntennaReg.Ensure(messaging, ref antennaReg, _block))
+            if (messaging != null && GridAntennaReg.Ensure(messaging, ref antennaReg, block))
             {
                 messaging.ReadMessages(entityId, MessageQueue.IAIBlockType.TargetDesignator, antennaReg, Channel.DESIGNATOR_ORDER_UPDATE, updateInbox, 20, true,
                                        PayloadType.DesignatorOrderUpdate);
@@ -386,13 +384,13 @@ namespace Automata.Designator
         // Every second, only while someone looks at its screen / an LCD with its tag
         private void UpdateLcd()
         {
-            if (!lcd.Wanted(_block, settings.LcdTag)) return;
+            if (!lcd.Wanted(block, settings.LcdTag)) return;
             header.Clear();
             if (Terminal_LcdStyle.ShowHeader)
             {
                 int industrial, combat;
                 long last;
-                ScoutPointer.TagSummary(_block.OwnerId, out industrial, out combat, out last);
+                ScoutPointer.TagSummary(block.OwnerId, out industrial, out combat, out last);
                 header.Add(Loc.F(StrTitle, Nicknames.Of(Entity)));
                 header.Add(Loc.T(StrTags));
                 header.Add(BlockLcd.Columns(Loc.F(StrIndustrial, industrial), Loc.F(StrCombat, combat), 24));
