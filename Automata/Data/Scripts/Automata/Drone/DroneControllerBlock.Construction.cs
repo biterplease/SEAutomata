@@ -260,8 +260,7 @@ namespace Automata.Drone
                     s.SharedSite = jobSharedSite;
                 }
             }
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: state saved: job {1} at task {2}, pending bid {3}", Entity.EntityId, s.Job != null ? s.Job.JobId : 0,
-                      s.TaskIndex, s.PendingBidAuctionId);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: state saved: job {1} at task {2}, pending bid {3}", Entity.EntityId, s.Job != null ? s.Job.JobId : 0, s.TaskIndex, s.PendingBidAuctionId);
             return s;
         }
 
@@ -314,8 +313,7 @@ namespace Automata.Drone
                     for (int i = 0; i < o.Frames.Count; i++) workedGrids.Add(o.Frames[i].Key < 0 ? ~o.Frames[i].Key : o.Frames[i].Key);
                 }
             }
-            Log.Info("Drone {0}: save applied: work tilt {1:F0}°, {2} unreachable block(s), {3} sweep frame(s)",
-                     Entity.EntityId, maxWorkTiltDegrees, unreachableBlocks.Count, o != null && o.Frames != null ? o.Frames.Count : 0);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: save applied: work tilt {1:F0}°, {2} unreachable block(s), {3} sweep frame(s)", Entity.EntityId, maxWorkTiltDegrees, unreachableBlocks.Count, o != null && o.Frames != null ? o.Frames.Count : 0);
             if (save.Job != null) ResumeSavedJob(save.Job);
             if (save.Combat != null) ResumeCombat(save.Combat);
         }
@@ -336,7 +334,7 @@ namespace Automata.Drone
             if (s.Job == null || s.Job.Tasks == null || s.Job.Tasks.Count == 0) return;
             if (currentJob != null || settings == null || !settings.IsEnabled)
             {
-                Log.Info("Drone {0}: saved job {1} not resumed ({2})", Entity.EntityId, s.Job.JobId, currentJob != null ? "busy" : "AI off");
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: saved job {1} not resumed ({2})", Entity.EntityId, s.Job.JobId, currentJob != null ? "busy" : "AI off");
                 return;
             }
             int index = System.Math.Min(System.Math.Max(0, s.TaskIndex), s.Job.Tasks.Count - 1);
@@ -360,8 +358,7 @@ namespace Automata.Drone
             jobSharedSite = s.SharedSite && (JobSource)s.Source == JobSource.Orchestrator;
             jobBlocksDone = s.BlocksDone;
             fieldContinuations = s.FieldContinuations;
-            Log.Info("Drone {0}: job {1} ({2}) resumed after load at task {3} ({4}), saved at {5}", Entity.EntityId, s.Job.JobId, (JobSource)s.Source,
-                     index, s.Job.Tasks[index].Type, s.TaskIndex);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: job {1} ({2}) resumed after load at task {3} ({4}), saved at {5}", Entity.EntityId, s.Job.JobId, (JobSource)s.Source, index, s.Job.Tasks[index].Type, s.TaskIndex);
         }
         #endregion
         #endregion
@@ -405,8 +402,7 @@ namespace Automata.Drone
             for (int i = 0; i < scannedTargets.Count; i++) workedGrids.Add(scannedTargets[i].GridEntityId);
             int parked = SkipRecentlyUnreachable();
             count = scannedTargets.Count;
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: construction scan found {1} blocks{2}", Entity.EntityId, count,
-                      parked > 0 ? string.Format(" ({0} more unreachable lately, retried later)", parked) : "");
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: construction scan found {1} blocks{2}", Entity.EntityId, count, parked > 0 ? string.Format(" ({0} more unreachable lately, retried later)", parked) : "");
             if (count != lastReportedJobCount)
             {
                 lastReportedJobCount = count;
@@ -528,8 +524,7 @@ namespace Automata.Drone
                 if (t.Kind != Orchestrator.TaskKind.Tool) continue;
                 if (n++ < 30) sb.Append(' ').Append(t.TargetBlock.ToVector3I().ToString()).Append(t.IsProjected ? "p" : "");
             }
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: trip: {1} {2} blocks (load limit {3:F0} kg, {4:F2} m3), in order:{5}{6}", Entity.EntityId, n, job.JobType,
-                      maxMass, maxVolume, sb, n > 30 ? " ..." : "");
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: trip: {1} {2} blocks (load limit {3:F0} kg, {4:F2} m3), in order:{5}{6}", Entity.EntityId, n, job.JobType, maxMass, maxVolume, sb, n > 30 ? " ..." : "");
         }
 
         #region Home conveyor network and cargo

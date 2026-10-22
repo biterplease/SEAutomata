@@ -152,8 +152,7 @@ namespace Automata.Orchestrator
             knownJobs[key] = int.MaxValue;
             jobQueue.Add(new QueuedJob { Announcement = ja, Key = key, SenderOwner = block.OwnerId, Received = now });
             AddEvent(Loc.F(StrJobOrderedByAPlayer, jobId, type, what));
-            Log.Info("Orchestrator {0}: player job {1} ({2}, order {3}, player {4}): {5} task(s), {6}{7}", entityId, jobId, type, orderId, identity,
-                     tasks.Count, what, requiredDrone != 0 ? ", tagged drone " + requiredDrone : "");
+            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: player job {1} ({2}, order {3}, player {4}): {5} task(s), {6}{7}", entityId, jobId, type, orderId, identity, tasks.Count, what, requiredDrone != 0 ? ", tagged drone " + requiredDrone : "");
             return jobId;
         }
 
@@ -356,8 +355,7 @@ namespace Automata.Orchestrator
             }
             recallJobIds.Clear();
             if (taken.Count > 0) drones = Drone.DroneControllerBlock.RecallJobs(entityId, taken, by);
-            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: order {1} recalled at its marker ({2}): {3} drone(s) recalled, {4} job(s) cancelled", entityId, best.OrderId, by,
-                      drones, cancelled);
+            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: order {1} recalled at its marker ({2}): {3} drone(s) recalled, {4} job(s) cancelled", entityId, best.OrderId, by, drones, cancelled);
             return true;
         }
 
@@ -369,7 +367,7 @@ namespace Automata.Orchestrator
             playerJobs.Remove(jobId);
             PlayerOrder order;
             if (!playerOrders.TryGetValue(pj.OrderId, out order)) return;
-            Log.Info("Orchestrator {0}: player job {1} (order {2}) ended: {3}", entityId, jobId, pj.OrderId, reason);
+            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: player job {1} (order {2}) ended: {3}", entityId, jobId, pj.OrderId, reason);
             if (pj.Assigned) order.Assigned--;
             if (--order.Jobs > 0) return;
             HideGps(order);

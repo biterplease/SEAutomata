@@ -58,7 +58,7 @@ namespace Automata.Util.Logging
         {
             if (logPathfinding && IsLevelEnabled(LogLevel.Debug))
             {
-                _logger?.Write("[IAI.Pathfinding] " + string.Format(msg, args));
+                _logger?.Write("[Automata.Pathfinding] " + string.Format(msg, args));
             }
         }
 
@@ -66,7 +66,7 @@ namespace Automata.Util.Logging
         {
             if (logDroneNetwork)
             {
-                WriteIfEnabled(level, "[IAI.DroneNetwork] " + msg, args);
+                WriteIfEnabled(level, "[Automata.DroneNetwork] " + msg, args);
             }
         }
 
@@ -74,7 +74,7 @@ namespace Automata.Util.Logging
         {
             if (logDroneOrders && IsLevelEnabled(LogLevel.Info))
             {
-                _logger?.Write("[IAI.DroneOrders] " + string.Format(msg, args));
+                _logger?.Write("[Automata.DroneOrders] " + string.Format(msg, args));
             }
         }
 
@@ -111,7 +111,7 @@ namespace Automata.Util.Logging
                 }
                 else
                 {
-                    _logger?.Write($"[IAI.{level.ToString().ToUpper()}] {formattedMsg}");
+                    _logger?.Write($"[Automata.{level.ToString().ToUpper()}] {formattedMsg}");
                 }
             }
         }

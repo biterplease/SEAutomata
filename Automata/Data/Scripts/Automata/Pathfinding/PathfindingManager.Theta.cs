@@ -105,8 +105,7 @@ namespace Automata.Pathfinding
             string why2;
             if (ThetaStageWithin(ref q, start, goal, left, Math.Max(16, (int)(exp * left / ms)), out why2))
             {
-                if (!offThread && Log.DebugEnabled) Log.Debug("Pathfinding: boxed in at the start: a way out with {0:F2} m clearance within {1:F0} m of it ({2})",
-                          q.EscapeBerth, q.EscapeRadius, why);
+                if (!offThread && Log.DebugEnabled) Log.Debug("Pathfinding: boxed in at the start: a way out with {0:F2} m clearance within {1:F0} m of it ({2})", q.EscapeBerth, q.EscapeRadius, why);
                 why = null;
                 return true;
             }
@@ -198,8 +197,7 @@ namespace Automata.Pathfinding
                 {
                     q.HoldAttitude = true;
                     thetaHeldIndex = i;
-                    if (!offThread && Log.DebugEnabled) Log.Debug("Pathfinding: Lazy Theta* found a way holding the drone's attitude{0} (any-attitude search: {1})",
-                              i == 0 ? " as it is" : string.Format(", turned {0:F0}° at the start", TurnDegrees(ref controller, ref f)), why);
+                    if (!offThread && Log.DebugEnabled) Log.Debug("Pathfinding: Lazy Theta* found a way holding the drone's attitude{0} (any-attitude search: {1})", i == 0 ? " as it is" : string.Format(", turned {0:F0}° at the start", TurnDegrees(ref controller, ref f)), why);
                     why = null;
                     return true;
                 }
@@ -619,8 +617,7 @@ namespace Automata.Pathfinding
                 points.AddRange(head);
                 for (int i = 1; i < tail.Count; i++) points.Add(tail[i]);
             }
-            if (!offThread && Log.DebugEnabled) Log.Debug("Pathfinding: Lazy Theta* found {0} points in {1} cells expanded ({2} probes, {3} sight checks, cell {4:F1} m, {5}^3 grid), {6:F1} ms{7}",
-                      found, expansions, thetaProbes, thetaLos, thetaCell, thetaN, sw.Elapsed.TotalMilliseconds, far ? ", the rest by the straight stage" : "");
+            if (!offThread && Log.DebugEnabled) Log.Debug("Pathfinding: Lazy Theta* found {0} points in {1} cells expanded ({2} probes, {3} sight checks, cell {4:F1} m, {5}^3 grid), {6:F1} ms{7}", found, expansions, thetaProbes, thetaLos, thetaCell, thetaN, sw.Elapsed.TotalMilliseconds, far ? ", the rest by the straight stage" : "");
             return true;
         }
 

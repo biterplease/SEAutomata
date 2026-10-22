@@ -34,7 +34,7 @@ namespace Automata.Construction
             AutomataProgrammableBlocks.HideVanillaOnce();
             CreateControls();
             CreateActions();
-            Log.Info("Created CC terminal controls");
+            if (Log.DebugEnabled) Log.Debug("Created CC terminal controls");
         }
 
         static ConstructionComputerBlock GetBlock(IMyTerminalBlock b)

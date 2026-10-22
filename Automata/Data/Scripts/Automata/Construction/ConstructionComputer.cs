@@ -399,7 +399,7 @@ namespace Automata.Construction
                 }
             }
             if (jobsCreated > 0)
-                Log.Info("Scan complete: {0} blocks scanned, {1} jobs found", scannedBlocks, jobsCreated);
+                if (Log.DebugEnabled) Log.Debug("Scan complete: {0} blocks scanned, {1} jobs found", scannedBlocks, jobsCreated);
             
             return jobsCreated;
         }
@@ -560,4 +560,4 @@ namespace Automata.Construction
 
 
     }
-}
+}

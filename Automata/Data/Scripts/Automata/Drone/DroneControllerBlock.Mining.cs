@@ -201,10 +201,7 @@ namespace Automata.Drone
                 boreStart = tool;
                 boreStartSet = true;
                 if (!DispatchBore()) { FinishMine(); return Fail(Orchestrator.TaskFailure.Unreachable, TaskStatus.ToReturnHome); }
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: mine {1}: boring {2:F0} m to the deposit ({3}, {4:F0}° from level), collecting within {5:F1} m of the ore{6}",
-                          Entity.EntityId, boreOre, Vector3D.Distance(tool, boreDeposit), mineAngled ? "angled" : "straight",
-                          flightState.InGravity ? MathHelperD.ToDegrees(Math.Asin(MathHelperD.Clamp(-Vector3D.Dot(boreDir, flightState.GravityUp), -1, 1))) : 0,
-                          boreCollectAt, boreCollecting ? " (there already)" : "");
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: mine {1}: boring {2:F0} m to the deposit ({3}, {4:F0}° from level), collecting within {5:F1} m of the ore{6}", Entity.EntityId, boreOre, Vector3D.Distance(tool, boreDeposit), mineAngled ? "angled" : "straight", flightState.InGravity ? MathHelperD.ToDegrees(Math.Asin(MathHelperD.Clamp(-Vector3D.Dot(boreDir, flightState.GravityUp), -1, 1))) : 0, boreCollectAt, boreCollecting ? " (there already)" : "");
                 return TaskStatus.Running;
             }
             if (!IsConstructionOrderActive()) { FinishMine(); return TaskStatus.Interrupted; }
@@ -222,8 +219,7 @@ namespace Automata.Drone
                     oreGainFrame = now;
                     boreOreBest = double.MaxValue;
                     boreOreBestFrame = now;
-                    if (Log.DebugEnabled) Log.Debug("Drone {0}: mine: within {1:F1} m of the ore{2}: terrain clearing off, collecting", Entity.EntityId, boreCollectAt,
-                              boreEndReached ? " (bore end)" : "");
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: mine: within {1:F1} m of the ore{2}: terrain clearing off, collecting", Entity.EntityId, boreCollectAt, boreEndReached ? " (bore end)" : "");
                 }
             }
             // Collecting: the bore line was aimed at the deposit's average position, the ore voxels can lie off it. The bore's
@@ -248,8 +244,7 @@ namespace Automata.Drone
                         if (DispatchBore())
                         {
                             boreSteers++;
-                            if (Log.DebugEnabled) Log.Debug("Drone {0}: mine: ore voxel {1:F1} m from the drill, {2:F1} m off the bore line: the bore's end moves to it ({3}/{4})",
-                                      Entity.EntityId, nearDist, lateral, boreSteers, MINE_STEERS_MAX);
+                            if (Log.DebugEnabled) Log.Debug("Drone {0}: mine: ore voxel {1:F1} m from the drill, {2:F1} m off the bore line: the bore's end moves to it ({3}/{4})", Entity.EntityId, nearDist, lateral, boreSteers, MINE_STEERS_MAX);
                         }
                         else boreEnd = old;
                     }
@@ -399,8 +394,7 @@ namespace Automata.Drone
                 currentJob.Tasks.Insert(back + 3, Orchestrator.Task.BackOut(0, approach));
                 mineRebores++;
                 mineSiteFixed = true;
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: mine: another bore on {1} ({2}/{3}) {4:F0} m from the last deposit, {5:F0} m of rock", Entity.EntityId, boreOre,
-                          mineRebores, MINE_REBORES_MAX, Vector3D.Distance(ore, boreDeposit), Vector3D.Distance(entry, ore));
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: mine: another bore on {1} ({2}/{3}) {4:F0} m from the last deposit, {5:F0} m of rock", Entity.EntityId, boreOre, mineRebores, MINE_REBORES_MAX, Vector3D.Distance(ore, boreDeposit), Vector3D.Distance(entry, ore));
                 return true;
             }
             if (Log.DebugEnabled) Log.Debug("Drone {0}: mine: no other spot of {1} near the last deposit", Entity.EntityId, boreOre);
@@ -547,8 +541,7 @@ namespace Automata.Drone
             }
             if (bestScore == double.MaxValue)
             {
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: mine: no angled way in within {1:F0} m at {2:F0}° ({3} drill): the planned site", Entity.EntityId,
-                          MINE_BORE_SEARCH, MathHelperD.ToDegrees(angle), face);
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: mine: no angled way in within {1:F0} m at {2:F0}° ({3} drill): the planned site", Entity.EntityId, MINE_BORE_SEARCH, MathHelperD.ToDegrees(angle), face);
                 return;
             }
             // Pooled miners: the orchestrator moved this drone's site (OffsetSite) away from the planned one (the Mine
@@ -579,8 +572,7 @@ namespace Automata.Drone
             }
             mineAngled = true;
             mineAngledDir = bestDir;
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: mine: angled bore {1:F0}° from level ({2} drill, limit {3:F0}°), {4:F0} m of rock from {5}", Entity.EntityId,
-                      MathHelperD.ToDegrees(angle), face, limit, Vector3D.Distance(bestEntry, deposit), bestEntry);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: mine: angled bore {1:F0}° from level ({2} drill, limit {3:F0}°), {4:F0} m of rock from {5}", Entity.EntityId, MathHelperD.ToDegrees(angle), face, limit, Vector3D.Distance(bestEntry, deposit), bestEntry);
         }
 
         // Open air the angled bore's line needs past its entry: the hull's length and some, at most the approach distance
@@ -812,8 +804,7 @@ namespace Automata.Drone
                                                              Voxels = hits[i].Voxels, VoxelId = hits[i].VoxelId });
             surveyBuffer.Add(sweep);
             if (surveyBuffer.Count > SURVEY_BUFFER_MAX) surveyBuffer.RemoveAt(0);
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: ore scan at {1} ({2:F0} m): {3} hit(s), {4} scan(s) waiting for a surveyor", Entity.EntityId, center, radius,
-                      hits.Count, surveyBuffer.Count);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: ore scan at {1} ({2:F0} m): {3} hit(s), {4} scan(s) waiting for a surveyor", Entity.EntityId, center, radius, hits.Count, surveyBuffer.Count);
             lastSurveyPublish = int.MinValue / 2;   // straight away if a surveyor is in range (else held until one is)
             PublishSurveys();
         }

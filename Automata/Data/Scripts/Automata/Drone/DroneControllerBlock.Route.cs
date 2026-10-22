@@ -197,16 +197,14 @@ namespace Automata.Drone
                 legOffset = count;
                 legForwards.Insert(0, startForward);
                 legUps.Insert(0, startUp);
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: no way from where it is; repositioning {1:F0} m ({2}) and going on from there",
-                          Entity.EntityId, Vector3D.Distance(start, s), escapeWhy[i]);
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: no way from where it is; repositioning {1:F0} m ({2}) and going on from there", Entity.EntityId, Vector3D.Distance(start, s), escapeWhy[i]);
                 escapeSpots.Clear();
                 RecoverSucceeded();
                 return true;
             }
             if (points.Count > count) points.RemoveRange(count, points.Count - count);
             escapeSpots.Clear();
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: no way from here or from {1} spots around it{2}", Entity.EntityId, escapeWhy.Count,
-                      tight ? " (the hull doesn't fit here in every attitude)" : "");
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: no way from here or from {1} spots around it{2}", Entity.EntityId, escapeWhy.Count, tight ? " (the hull doesn't fit here in every attitude)" : "");
             if (!tight && TryRetrace(start, goal, points, count, avoidObservationArea, areaOnlyFromOutside, startForward, startUp, looseGoal, pm, ref q))
                 return true;
             // Stuck (a dock / home trip, a NavigateTo, a replan): fly to a spot nearby and plan again there
@@ -326,8 +324,7 @@ namespace Automata.Drone
                 // parked there) is left out, the pathfinder takes the stretch to the next one
                 if (usePathfinder && i < routeScratch.Count && !pm.PointFree(ref q, to))
                 {
-                    if (Log.DebugEnabled) Log.Debug("Drone {0}: observation-area waypoint {1} skipped: {2} there", Entity.EntityId, i + 1,
-                              PathfindingManager.Describe(pm.LastHitBlock));
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: observation-area waypoint {1} skipped: {2} there", Entity.EntityId, i + 1, PathfindingManager.Describe(pm.LastHitBlock));
                     continue;
                 }
                 int before = points.Count;
@@ -363,8 +360,7 @@ namespace Automata.Drone
                     routeEscapeCentre = q.EscapeCentre;
                     routeEscapeRadius = q.EscapeRadius;
                     routeEscapeBerth = q.EscapeBerth;
-                    if (Log.DebugEnabled) Log.Debug("Drone {0}: boxed in here: out with {1:F2} m clearance for the first {2:F0} m (corridor legs)",
-                              Entity.EntityId, q.EscapeBerth, q.EscapeRadius);
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: boxed in here: out with {1:F2} m clearance for the first {2:F0} m (corridor legs)", Entity.EntityId, q.EscapeBerth, q.EscapeRadius);
                 }
                 from = to;
             }
@@ -382,10 +378,7 @@ namespace Automata.Drone
                 double ms, buildMs;
                 pm.PlanStats(out notSeen, out checks, out rays, out blocks, out ms, out lookups, out trees, out indexed, out buildMs);
                 routeUnseen += notSeen;
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: route {1:F0} m, {2} legs: {3:F2} ms, {4} scene checks, {5} blocks tested, {6} rays, {7} stretches not in view yet; "
-                          + "scene: {8} area lookups, {9} block trees built ({10} blocks, {11:F2} ms of the total)",
-                          Entity.EntityId, Vector3D.Distance(start, goal), routeChain.Count - 1, ms, checks, blocks, rays, notSeen,
-                          lookups, trees, indexed, buildMs);
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: route {1:F0} m, {2} legs: {3:F2} ms, {4} scene checks, {5} blocks tested, {6} rays, {7} stretches not in view yet; " + "scene: {8} area lookups, {9} block trees built ({10} blocks, {11:F2} ms of the total)", Entity.EntityId, Vector3D.Distance(start, goal), routeChain.Count - 1, ms, checks, blocks, rays, notSeen, lookups, trees, indexed, buildMs);
             }
             else
                 for (int i = 0; i + 1 < routeChain.Count; i++)
@@ -1029,9 +1022,7 @@ namespace Automata.Drone
             var pf = AutomataSession.GetConfig().Pathfinding;
             lastReplanFrame = MyAPIGateway.Session.GameplayFrameCounter;
             bool ok = pf.AllowRepathing() && ++routeReplans <= pf.MaxRepositionAttempts();
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: leg start ({1:F0} m, {2}): {3} {4:F1} m ahead, {5}", Entity.EntityId, len, scene ? "scene" : "rays",
-                      hitEntity != null ? (hitEntity.DisplayName ?? hitEntity.GetType().Name) : "obstacle", Vector3D.Distance(from, hit),
-                      ok ? "new route" : "giving up");
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: leg start ({1:F0} m, {2}): {3} {4:F1} m ahead, {5}", Entity.EntityId, len, scene ? "scene" : "rays", hitEntity != null ? (hitEntity.DisplayName ?? hitEntity.GetType().Name) : "obstacle", Vector3D.Distance(from, hit), ok ? "new route" : "giving up");
             if (ok && Replan()) return;
             RouteStopped(Loc.F(StrRouteBlockedMAheadStopped, Vector3D.Distance(from, hit)));
         }

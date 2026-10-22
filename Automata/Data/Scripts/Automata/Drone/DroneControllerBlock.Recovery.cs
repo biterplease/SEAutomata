@@ -191,8 +191,7 @@ namespace Automata.Drone
             bool late = Sandbox.ModAPI.MyAPIGateway.Session.GameplayFrameCounter >= recoverDeadline;
             if (left > recoverArrive && !late) return;
             recoverReplanPending = false;
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: {1} ({2}/{3}): planning again", Entity.EntityId,
-                      late ? string.Format("not at the reposition spot in time ({0:F1} m short)", left) : "at the reposition spot", recoverAttempts, RECOVER_MAX);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: {1} ({2}/{3}): planning again", Entity.EntityId, late ? string.Format("not at the reposition spot in time ({0:F1} m short)", left) : "at the reposition spot", recoverAttempts, RECOVER_MAX);
             lastReplanFrame = Sandbox.ModAPI.MyAPIGateway.Session.GameplayFrameCounter;
             if (!Replan()) RouteStopped(Loc.T(StrNoRouteAheadStopped));
         }

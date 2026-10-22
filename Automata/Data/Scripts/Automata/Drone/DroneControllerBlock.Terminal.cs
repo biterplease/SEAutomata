@@ -144,8 +144,7 @@ namespace Automata.Drone
         {
             if (!IsServer || settings == null) return;
             var queue = AutomataSession.GetMessageQueue();
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: mode {1} applied (AI {2}){3}", Entity.EntityId, settings.OperationMode, settings.IsEnabled ? "on" : "off",
-                      settings.OperationMode == OperationMode.ManagedByOrchestrator ? (primaryAntenna != null ? ", antenna '" + primaryAntenna.CustomName + "'" : ", NO antenna") : "");
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: mode {1} applied (AI {2}){3}", Entity.EntityId, settings.OperationMode, settings.IsEnabled ? "on" : "off", settings.OperationMode == OperationMode.ManagedByOrchestrator ? (primaryAntenna != null ? ", antenna '" + primaryAntenna.CustomName + "'" : ", NO antenna") : "");
             if (queue != null)
             {
                 if (settings.OperationMode == OperationMode.ManagedByOrchestrator) SyncAntennaReg(queue);
@@ -729,16 +728,11 @@ namespace Automata.Drone
             long id = Entity.EntityId;
             string tag = "DEBUGLOG " + id;
             Vector3D pos = flightState.Position;
-            if (Log.DebugEnabled) Log.Debug("{0} @frame {1} by {2}: {3} '{4}' state {5}, mode {6}, AI {7}{8}", tag, now, requester, Entity.DisplayName, ((IMyCubeBlock)Entity).CubeGrid.DisplayName,
-                      currentState, settings.OperationMode, settings.IsEnabled ? "on" : "off", string.IsNullOrEmpty(errorReason) ? "" : ", error: " + errorReason);
+            if (Log.DebugEnabled) Log.Debug("{0} @frame {1} by {2}: {3} '{4}' state {5}, mode {6}, AI {7}{8}", tag, now, requester, Entity.DisplayName, ((IMyCubeBlock)Entity).CubeGrid.DisplayName, currentState, settings.OperationMode, settings.IsEnabled ? "on" : "off", string.IsNullOrEmpty(errorReason) ? "" : ", error: " + errorReason);
 
             // Where it is and how it moves
             double height = Pathfinding.PathfindingManager.HeightAboveTerrain(pos);
-            if (Log.DebugEnabled) Log.Debug("{0} pos {1} | speed {2:F2} m/s (relative {3:F2}), spin {4:F2} rad/s | gravity {5:F2} m/s2, {6} | terrain {7} | speed cap {8} {9:F1}", tag,
-                      ConvertVectorToGPS("drone", pos), flightState.LinearVelocity.Length(), flightState.RelativeVelocity.Length(), flightState.AngularVelocity.Length(),
-                      flightState.Gravity.Length(), flightState.InGravity ? "in gravity" : "no gravity",
-                      height == double.MaxValue ? "none below" : height.ToString("F1") + " m below the hull",
-                      string.IsNullOrEmpty(speedCapName) ? "-" : speedCapName, speedCapValue);
+            if (Log.DebugEnabled) Log.Debug("{0} pos {1} | speed {2:F2} m/s (relative {3:F2}), spin {4:F2} rad/s | gravity {5:F2} m/s2, {6} | terrain {7} | speed cap {8} {9:F1}", tag, ConvertVectorToGPS("drone", pos), flightState.LinearVelocity.Length(), flightState.RelativeVelocity.Length(), flightState.AngularVelocity.Length(), flightState.Gravity.Length(), flightState.InGravity ? "in gravity" : "no gravity", height == double.MaxValue ? "none below" : height.ToString("F1") + " m below the hull", string.IsNullOrEmpty(speedCapName) ? "-" : speedCapName, speedCapValue);
 
             // The workload: job, task, where in it
             if (currentJob == null || currentJob.Tasks == null)
@@ -754,17 +748,13 @@ namespace Automata.Drone
                     if (i > 0) plan.Append('>');
                     if (i == taskIndex) plan.Append('[').Append(tasks[i].Type).Append(']'); else plan.Append(tasks[i].Type);
                 }
-                if (Log.DebugEnabled) Log.Debug("{0} job: {1} #{2}, {3} block(s), done {4}, task {5}/{6}, {7}, {8} ticks in the task, {9} since its last progress, last failure {10}", tag,
-                          currentJob.JobType, currentJob.JobId, currentJob.BlockCount, jobBlocksDone, taskIndex + 1, tasks.Count,
-                          taskStarted ? "running" : "not started", now - taskStartFrame, now - taskProgressFrame, taskFailure);
+                if (Log.DebugEnabled) Log.Debug("{0} job: {1} #{2}, {3} block(s), done {4}, task {5}/{6}, {7}, {8} ticks in the task, {9} since its last progress, last failure {10}", tag, currentJob.JobType, currentJob.JobId, currentJob.BlockCount, jobBlocksDone, taskIndex + 1, tasks.Count, taskStarted ? "running" : "not started", now - taskStartFrame, now - taskProgressFrame, taskFailure);
                 if (Log.DebugEnabled) Log.Debug("{0} tasks: {1}", tag, plan);
                 if (taskIndex >= 0 && taskIndex < tasks.Count)
                 {
                     var t = tasks[taskIndex];
                     Vector3D at = t.Position.ToVector3D();
-                    if (Log.DebugEnabled) Log.Debug("{0} task {1}: target {2} ({3:F1} m away), approach from {4}, target entity {5}, completion {6} {7}", tag, t.Type,
-                              ConvertVectorToGPS("task", at), Vector3D.Distance(pos, at), ConvertVectorToGPS("from", t.ApproachFrom.ToVector3D()),
-                              t.TargetEntityId, t.Completion, t.CompletionValue);
+                    if (Log.DebugEnabled) Log.Debug("{0} task {1}: target {2} ({3:F1} m away), approach from {4}, target entity {5}, completion {6} {7}", tag, t.Type, ConvertVectorToGPS("task", at), Vector3D.Distance(pos, at), ConvertVectorToGPS("from", t.ApproachFrom.ToVector3D()), t.TargetEntityId, t.Completion, t.CompletionValue);
                 }
             }
 
@@ -774,10 +764,7 @@ namespace Automata.Drone
             else
             {
                 Vector3D target = o.Target.ToVector3D();
-                if (Log.DebugEnabled) Log.Debug("{0} flight: order {1} phase {2}, target {3} ({4:F1} m), captured {5}, arrived {6}, tolerance {7:F1}, final speed {8:F1}, cap {9:F1}, behaviour {10}{11}; " +
-                          "queued legs {12}, construction legs {13}, owner {14}", tag, o == constructionOrder ? "(construction)" : "", o.Phase, ConvertVectorToGPS("target", target),
-                          Vector3D.Distance(pos, target), o.Captured, o.Arrived, o.ArrivalTolerance, o.FinalSpeed, o.SpeedCap, o.Behavior,
-                          o.LooseArrival ? ", loose arrival" : "", queuedLegs.Count, constructionLegs.Count, routeOwner);
+                if (Log.DebugEnabled) Log.Debug("{0} flight: order {1} phase {2}, target {3} ({4:F1} m), captured {5}, arrived {6}, tolerance {7:F1}, final speed {8:F1}, cap {9:F1}, behaviour {10}{11}; " + "queued legs {12}, construction legs {13}, owner {14}", tag, o == constructionOrder ? "(construction)" : "", o.Phase, ConvertVectorToGPS("target", target), Vector3D.Distance(pos, target), o.Captured, o.Arrived, o.ArrivalTolerance, o.FinalSpeed, o.SpeedCap, o.Behavior, o.LooseArrival ? ", loose arrival" : "", queuedLegs.Count, constructionLegs.Count, routeOwner);
             }
 
             // Mining: the bore and what is aboard
@@ -785,10 +772,7 @@ namespace Automata.Drone
             if (mining || boring || boreOre != MyStringHash.NullOrEmpty)
             {
                 Vector3D tool = drill != null ? ToolPointWorld() : pos;
-                if (Log.DebugEnabled) Log.Debug("{0} mine: ore {1}, boring {2}, collecting {3}, extensions {4}/{5}, tool {6}, deposit {7} ({8:F1} m from the tool), bore end {9} ({10:F1} m), " +
-                          "best {11:F1} m, ticks since cargo grew {12}, ore grew {13}, bore progress {14}", tag, boreOre.String, boring, boreCollecting, boreExtensions,
-                          MINE_BORE_EXTENSIONS, ConvertVectorToGPS("tool", tool), ConvertVectorToGPS("deposit", boreDeposit), Vector3D.Distance(tool, boreDeposit),
-                          ConvertVectorToGPS("end", boreEnd), Vector3D.Distance(tool, boreEnd), boreBest, now - boreGainFrame, now - oreGainFrame, now - boreProgressFrame);
+                if (Log.DebugEnabled) Log.Debug("{0} mine: ore {1}, boring {2}, collecting {3}, extensions {4}/{5}, tool {6}, deposit {7} ({8:F1} m from the tool), bore end {9} ({10:F1} m), " + "best {11:F1} m, ticks since cargo grew {12}, ore grew {13}, bore progress {14}", tag, boreOre.String, boring, boreCollecting, boreExtensions, MINE_BORE_EXTENSIONS, ConvertVectorToGPS("tool", tool), ConvertVectorToGPS("deposit", boreDeposit), Vector3D.Distance(tool, boreDeposit), ConvertVectorToGPS("end", boreEnd), Vector3D.Distance(tool, boreEnd), boreBest, now - boreGainFrame, now - oreGainFrame, now - boreProgressFrame);
                 int drillsOn = 0, clearing = 0;
                 for (int i = 0; i < drills.Count; i++)
                 {
@@ -796,15 +780,11 @@ namespace Automata.Drone
                     if (drills[i].Enabled) drillsOn++;
                     if (drills[i].TerrainClearingMode) clearing++;
                 }
-                if (Log.DebugEnabled) Log.Debug("{0} mine: ore aboard {1:F0} kg of {2}, delivered {3:F0} kg, drills {4}/{5} on, {6} clearing terrain, ore detector {7}, started at {8}", tag, MinedOre(),
-                          boreOre.String, minedOreKg, drillsOn, drills.Count, OreDetectorWorking ? "working" : "not working",
-                          boreStartSet ? ConvertVectorToGPS("start", boreStart) : "-");
+                if (Log.DebugEnabled) Log.Debug("{0} mine: ore aboard {1:F0} kg of {2}, delivered {3:F0} kg, drills {4}/{5} on, {6} clearing terrain, ore detector {7}, started at {8}", tag, MinedOre(), boreOre.String, minedOreKg, drillsOn, drills.Count, OreDetectorWorking ? "working" : "not working", boreStartSet ? ConvertVectorToGPS("start", boreStart) : "-");
             }
 
             // Cargo, mass, power
-            if (Log.DebugEnabled) Log.Debug("{0} cargo: {1:P0} full ({2:F2} m3 in {3} container(s)), load limit {4}, mass {5:F0} kg (base {6:F0}) | battery {7:F0}%{8}, hydrogen {9:F0}%{10}", tag,
-                      CargoFillRatio(), CargoUsedVolume(), cargoContainers.Count, loadLevel == 0 ? "ok" : loadLevel == 1 ? "reached" : "exceeded", physicalMass, baseMass,
-                      currentBatteryLevel, needsBatteryRecharge ? " (needs recharge)" : "", currentH2Level, needsHydrogenRefuel ? " (needs refuel)" : "");
+            if (Log.DebugEnabled) Log.Debug("{0} cargo: {1:P0} full ({2:F2} m3 in {3} container(s)), load limit {4}, mass {5:F0} kg (base {6:F0}) | battery {7:F0}%{8}, hydrogen {9:F0}%{10}", tag, CargoFillRatio(), CargoUsedVolume(), cargoContainers.Count, loadLevel == 0 ? "ok" : loadLevel == 1 ? "reached" : "exceeded", physicalMass, baseMass, currentBatteryLevel, needsBatteryRecharge ? " (needs recharge)" : "", currentH2Level, needsHydrogenRefuel ? " (needs refuel)" : "");
         }
         #endregion
     }

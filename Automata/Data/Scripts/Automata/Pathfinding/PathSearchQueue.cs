@@ -166,8 +166,7 @@ namespace Automata.Pathfinding
                 var scene = new SnapshotScene();
                 workers[i] = new Worker { Scene = scene, Planner = new PathfindingManager(config, scene) };
             }
-            Log.Info("Pathfinding: Lazy Theta* searches on {0} worker thread(s), up to {1:F0} ms each{2}", workers.Length, config.PathSearchMaxMs,
-                     config.PathWarmUp ? ", scene warm-up on" : "");
+            if (Log.DebugEnabled) Log.Debug("Pathfinding: Lazy Theta* searches on {0} worker thread(s), up to {1:F0} ms each{2}", workers.Length, config.PathSearchMaxMs, config.PathWarmUp ? ", scene warm-up on" : "");
         }
 
         #region Asking (the drone's planner)
@@ -222,8 +221,7 @@ namespace Automata.Pathfinding
             };
             queue.Add(job);
             Queued++;
-            if (Log.DebugEnabled) Log.Debug("Pathfinding: search queued for drone {0}: {1:F0} m ({2} waiting, {3} running)", q.Owner,
-                      Vector3D.Distance(start, goal), queue.Count, active.Count);
+            if (Log.DebugEnabled) Log.Debug("Pathfinding: search queued for drone {0}: {1:F0} m ({2} waiting, {3} running)", q.Owner, Vector3D.Distance(start, goal), queue.Count, active.Count);
             return SearchPoll.Pending;
         }
 
@@ -443,9 +441,7 @@ namespace Automata.Pathfinding
             Run++;
             PerfStats.Record(PerfStats.PathSearch, r.Ms);
             PerfStats.Record(PerfStats.PathSearchWait, r.WaitMs);
-            if (Log.DebugEnabled) Log.Debug("Pathfinding: search for drone {0}: {1} in {2:F1} ms on a worker ({3:F0} ms from queued; {4} probes, {5} checks, {6} blocks){7}",
-                      job.Owner, r.Found ? (r.Points.Count + " points") : ("none: " + r.Why), r.Ms, r.WaitMs, r.Probes, r.Checks, r.Blocks,
-                      r.Found && r.Hold ? ", holding the drone's attitude" : "");
+            if (Log.DebugEnabled) Log.Debug("Pathfinding: search for drone {0}: {1} in {2:F1} ms on a worker ({3:F0} ms from queued; {4} probes, {5} checks, {6} blocks){7}", job.Owner, r.Found ? (r.Points.Count + " points") : ("none: " + r.Why), r.Ms, r.WaitMs, r.Probes, r.Checks, r.Blocks, r.Found && r.Hold ? ", holding the drone's attitude" : "");
         }
 
         /// <summary>World unload: nothing is queued or kept; searches in flight stop at their next check.</summary>

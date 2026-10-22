@@ -164,9 +164,7 @@ namespace Automata.Drone
                     if (AmountAt(src, i, type) > 0)
                     {
                         left = true;
-                        if (Log.DebugEnabled) Log.Debug("Drone {0}: clear: {1} {2} stayed in {3} ({4} container(s) on the network{5})", Entity.EntityId,
-                                      (double)AmountAt(src, i, type), type.SubtypeId, ClearSourceName(s), homeNetwork.cargoContainers.Count,
-                                      NetworkFull() ? ", all full" : ", not conveyor-connected or no room for it");
+                        if (Log.DebugEnabled) Log.Debug("Drone {0}: clear: {1} {2} stayed in {3} ({4} container(s) on the network{5})", Entity.EntityId, (double)AmountAt(src, i, type), type.SubtypeId, ClearSourceName(s), homeNetwork.cargoContainers.Count, NetworkFull() ? ", all full" : ", not conveyor-connected or no room for it");
                     }
                 }
             }
@@ -230,8 +228,7 @@ namespace Automata.Drone
             if (found != null)
             {
                 lastCargoPortId = found.EntityId;
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: no cargo connector known: nearest with room is {1} ({2:F0} m)", Entity.EntityId, found.CustomName,
-                          Vector3D.Distance(found.GetPosition(), block.GetPosition()));
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: no cargo connector known: nearest with room is {1} ({2:F0} m)", Entity.EntityId, found.CustomName, Vector3D.Distance(found.GetPosition(), block.GetPosition()));
             }
             return found;
         }

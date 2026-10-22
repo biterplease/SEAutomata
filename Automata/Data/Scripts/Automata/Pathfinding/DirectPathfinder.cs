@@ -31,7 +31,7 @@ namespace Automata.Pathfinding
             {
                 if (++iteration > maxIterations)
                 {
-                    Log.Warning("DirectPathfinder: Max iterations reached");
+                    if (Log.DebugEnabled) Log.Debug("DirectPathfinder: Max iterations reached");
                     break;
                 }
 
@@ -42,7 +42,7 @@ namespace Automata.Pathfinding
                 if (result == PathfindingResult.NeedRaycast)
                 {
                     // Can't proceed without manager doing raycasts
-                    Log.Warning("DirectPathfinder: CalculatePath cannot handle raycast requests");
+                    if (Log.DebugEnabled) Log.Debug("DirectPathfinder: CalculatePath cannot handle raycast requests");
                     output.Add(end);
                     return false;
                 }

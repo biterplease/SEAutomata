@@ -56,8 +56,6 @@ namespace Automata.Pointer
         private static readonly MyStringId StrEngageTarget = MyStringId.GetOrCompute("engage {0}");
         private static readonly MyStringId StrEscortTarget = MyStringId.GetOrCompute("escort {0}");
         private static readonly MyStringId StrSpotCheck = MyStringId.GetOrCompute("spot check");
-        private static readonly MyStringId StrHostile = MyStringId.GetOrCompute("hostile");
-        private static readonly MyStringId StrIndustrial = MyStringId.GetOrCompute("industrial");
         private static readonly MyStringId StrSpotCheckN = MyStringId.GetOrCompute("spot check {0}/{1}");
         private static readonly MyStringId StrSpotCheckMarker = MyStringId.GetOrCompute("Spot check");
         private static readonly MyStringId StrAreaSweepSector = MyStringId.GetOrCompute("area sweep sector {0}/{1}");
@@ -394,9 +392,7 @@ namespace Automata.Pointer
                 packet.HitPosition = Vector3DData.FromVector3D(hitPos);
                 packet.HitEntityId = top != null ? top.EntityId : 0;
                 packet.HitNormal = Vector3DData.FromVector3D(hitNormal);
-                if (Log.DebugEnabled) Log.Debug("Pointer: {0} {1} ({2}) fired: hit {3} at {4:F1} m ({9}), entity {5} '{6}' ({7}), relation {8}", kind, mode, ModeName(kind, mode),
-                              hitPos, Vector3D.Distance(from, hitPos), packet.HitEntityId, top != null ? top.DisplayName : "-",
-                              top != null ? top.GetType().Name : "-", Relation(top, character), how);
+                if (Log.DebugEnabled) Log.Debug("Pointer: {0} {1} ({2}) fired: hit {3} at {4:F1} m ({9}), entity {5} '{6}' ({7}), relation {8}", kind, mode, ModeName(kind, mode), hitPos, Vector3D.Distance(from, hitPos), packet.HitEntityId, top != null ? top.DisplayName : "-", top != null ? top.GetType().Name : "-", Relation(top, character), how);
             }
             else
             {
@@ -705,8 +701,7 @@ namespace Automata.Pointer
             m.LastTagged = id;
             m.LastTaggedAt = DateTime.UtcNow;
             string name = ((IMyTerminalBlock)drone.Entity).CustomName;
-            if (orch != null) orch.BroadcastTagged(name, p.Kind == PointerKind.Combat ? Loc.T(StrHostile) : Loc.T(StrIndustrial));
-            Log.Info("Pointer: [server] player {0}: tagged drone {1} '{2}' ({3}/{4})", identity, id, name, m.Drones.Count, MAX_TAGGED);
+            if (Log.DebugEnabled) Log.Debug("Pointer: [server] player {0}: tagged drone {1} '{2}' ({3}/{4})", identity, id, name, m.Drones.Count, MAX_TAGGED);
             SendTagCount(identity, p.Kind, m.Drones.Count);
             Feedback(identity, DesignatorSignal.TagOk);
         }
@@ -741,8 +736,7 @@ namespace Automata.Pointer
         public static void Received(ScoutPointerPacket p, ulong steamId)
         {
             long identity = MyAPIGateway.Players.TryGetIdentityId(steamId);
-            if (Log.DebugEnabled) Log.Debug("Pointer: [server] player {0} ({1}) {2} {3} ({4}): {5}", identity, steamId, p.Kind, p.Mode, ModeName(p.Kind, p.Mode),
-                      p.Hit ? string.Format("hit {0}, entity {1}", p.HitPosition.ToVector3D(), p.HitEntityId) : "no hit");
+            if (Log.DebugEnabled) Log.Debug("Pointer: [server] player {0} ({1}) {2} {3} ({4}): {5}", identity, steamId, p.Kind, p.Mode, ModeName(p.Kind, p.Mode), p.Hit ? string.Format("hit {0}, entity {1}", p.HitPosition.ToVector3D(), p.HitEntityId) : "no hit");
             var player = FindPlayer(pl => pl.SteamUserId == steamId);
             if (player == null || player.Character == null) return;
             Vector3D at = player.Character.GetPosition();
@@ -827,8 +821,7 @@ namespace Automata.Pointer
                     return;
                 }
                 if (scouts.Count < tagged.Count)
-                    if (Log.DebugEnabled) Log.Debug("Pointer: [server] player {0}: area sweep: {1} of {2} tagged drone(s) are ore scouts, the others left out",
-                              identity, scouts.Count, tagged.Count);
+                    if (Log.DebugEnabled) Log.Debug("Pointer: [server] player {0}: area sweep: {1} of {2} tagged drone(s) are ore scouts, the others left out", identity, scouts.Count, tagged.Count);
                 tagged = scouts;
             }
             string how;
@@ -836,7 +829,7 @@ namespace Automata.Pointer
             for (int s = 0; s < sectors.Count; s++)
                 orch.SubmitPlayerJob(Orchestrator.JobType.DesignatorScoutArea, sectors[s], hit, Loc.F(StrAreaSweepSector, s + 1, sectors.Count),
                                      identity, p.Kind, Loc.T(StrAreaSweep), ref order, s < tagged.Count ? tagged[s] : 0);
-            Log.Info("Pointer: [server] area sweep at {0} for player {1}: {2}", hit, identity, how);
+            if (Log.DebugEnabled) Log.Debug("Pointer: [server] area sweep at {0} for player {1}: {2}", hit, identity, how);
             Feedback(identity, DesignatorSignal.Requested);
             if (tagged.Count > 0) ForgetTags(identity, p.Kind, "order given");
         }
@@ -907,9 +900,7 @@ namespace Automata.Pointer
                 case DesignatorOrder.Escort: packet.Mode = PointerMode.Blue; packet.Kind = PointerKind.Combat; break;
                 default:                     packet.Mode = PointerMode.Green; packet.Kind = PointerKind.Industry; break;
             }
-            if (Log.DebugEnabled) Log.Debug("Pointer: [server] player {0}: camera '{1}' of orchestrator {2}: {3} ({4} {5}): {6}", identity, cam.CustomName, p.OrchestratorId,
-                      p.Order, packet.Kind, packet.Mode, packet.Hit ? string.Format("hit {0} at {1:F0} m ({2}), entity {3}", hitPos,
-                      Vector3D.Distance(from, hitPos), how, packet.HitEntityId) : "no hit within " + CAMERA_RANGE + " m");
+            if (Log.DebugEnabled) Log.Debug("Pointer: [server] player {0}: camera '{1}' of orchestrator {2}: {3} ({4} {5}): {6}", identity, cam.CustomName, p.OrchestratorId, p.Order, packet.Kind, packet.Mode, packet.Hit ? string.Format("hit {0} at {1:F0} m ({2}), entity {3}", hitPos, Vector3D.Distance(from, hitPos), how, packet.HitEntityId) : "no hit within " + CAMERA_RANGE + " m");
             var orch = orchBlock.IsRunning ? orchBlock : CoveringOrchestrator(from, identity);
             Order(packet, identity, from, null, orch);
         }
@@ -995,8 +986,7 @@ namespace Automata.Pointer
                 var standing = target as IMyCubeGrid;
                 bool mobileBase = standing != null && !standing.IsStatic && IsFriendlyGrid(standing, identity);
                 target = mobileBase ? (IMyEntity)standing : shooter;
-                if (Log.DebugEnabled) Log.Debug("Pointer: [server] player {0}: escort request on themselves ({1:F1} m): {2}", identity, dist,
-                          mobileBase ? "the mobile grid they are on, '" + standing.DisplayName + "'" : "their character");
+                if (Log.DebugEnabled) Log.Debug("Pointer: [server] player {0}: escort request on themselves ({1:F1} m): {2}", identity, dist, mobileBase ? "the mobile grid they are on, '" + standing.DisplayName + "'" : "their character");
             }
             var grid = target as IMyCubeGrid;
             var ch = target as IMyCharacter;

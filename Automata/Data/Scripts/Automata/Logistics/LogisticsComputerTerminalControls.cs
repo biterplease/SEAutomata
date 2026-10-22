@@ -73,7 +73,7 @@ namespace Automata.Logistics
             Done = true;
             AutomataProgrammableBlocks.HideVanillaOnce();
             CreateControls();
-            Log.Info("Created LC terminal controls");
+            if (Log.DebugEnabled) Log.Debug("Created LC terminal controls");
         }
 
         private static LogisticsComputerBlock GetBlock(IMyTerminalBlock block)

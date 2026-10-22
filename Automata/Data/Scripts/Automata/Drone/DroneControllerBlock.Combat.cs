@@ -227,7 +227,7 @@ namespace Automata.Drone
             var pb = p != null ? p.AsBool() : null;
             if (pb == null)
             {
-                Log.Warning("Drone {0}: combat: {1} has no '{2}' property", Entity.EntityId, b.CustomName, AI_BEHAVIOUR_PROPERTY);
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: combat: {1} has no '{2}' property", Entity.EntityId, b.CustomName, AI_BEHAVIOUR_PROPERTY);
                 return !on;
             }
             if (pb.GetValue(b) != on) pb.SetValue(b, on);
@@ -267,9 +267,7 @@ namespace Automata.Drone
 
         private void SeeThreat(IMyEntity e, int now)
         {
-            if (e.EntityId != threatId)
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: combat: threat {1} ({2}) at {3:F0} m", Entity.EntityId, e.EntityId, e.DisplayName,
-                          Vector3D.Distance(e.GetPosition(), flightState.Position));
+            if (e.EntityId != threatId && Log.DebugEnabled) Log.Debug("Drone {0}: combat: threat {1} ({2}) at {3:F0} m", Entity.EntityId, e.EntityId, e.DisplayName, Vector3D.Distance(e.GetPosition(), flightState.Position));
             threatId = e.EntityId;
             threatPosition = e.GetPosition();
             threatSeenFrame = now;
@@ -586,9 +584,7 @@ namespace Automata.Drone
         /// <summary>AI off, mode change, close: behaviours off, search unlocked, phase idle (the flight is stopped by the caller).</summary>
         private void EndCombat(string why)
         {
-            if (combatPhase != CombatPhase.Idle || combatSearchLocked || designatorCombat != DesignatorCombat.None)
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: combat: ended ({1}) in {2}{3}", Entity.EntityId, why, combatPhase,
-                          designatorCombat != DesignatorCombat.None ? " (" + designatorCombat + " job)" : "");
+            if (combatPhase != CombatPhase.Idle || combatSearchLocked || designatorCombat != DesignatorCombat.None && Log.DebugEnabled) Log.Debug("Drone {0}: combat: ended ({1}) in {2}{3}", Entity.EntityId, why, combatPhase, designatorCombat != DesignatorCombat.None ? " (" + designatorCombat + " job)" : "");
             if (combatPhase == CombatPhase.Handover || IsCombatMode || designatorCombat != DesignatorCombat.None) CombatBehavioursOff();
             LockOffensiveSearch(false);
             combatPhase = CombatPhase.Idle;
@@ -1019,7 +1015,7 @@ namespace Automata.Drone
             combatHomeTryFrame = now - COMBAT_HOME_RETRY_TICKS;
             combatRetargetFrame = now - COMBAT_RETARGET_TICKS;
             combatBehaviourCheckFrame = now;
-            Log.Info("Drone {0}: combat: resumed in {1} (threat {2})", Entity.EntityId, combatPhase, threatId);
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: combat: resumed in {1} (threat {2})", Entity.EntityId, combatPhase, threatId);
             if (combatPhase == CombatPhase.Handover && (!GetBehaviour(aiFlight) || !GetBehaviour(aiOffensive)))
                 CombatStartRecover(now, Loc.T(StrAINotActiveAfterLoad));
             else if (combatPhase == CombatPhase.Handover)

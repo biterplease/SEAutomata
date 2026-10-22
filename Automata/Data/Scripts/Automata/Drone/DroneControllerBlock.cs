@@ -837,7 +837,7 @@ namespace Automata.Drone
             {
                 settings.OperationMode = OperationMode.ManagedByOrchestrator;
                 settings.BehaviourProfile = BehaviourProfile.IsCombatDrone;
-                Log.Info("Drone {0}: 'Combat handover' mode migrated: managed by orchestrator, Combat drone profile", Entity != null ? Entity.EntityId : 0);
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: 'Combat handover' mode migrated: managed by orchestrator, Combat drone profile", Entity != null ? Entity.EntityId : 0);
             }
             settings.CombatHandoverDistance = MathHelper.Clamp(settings.CombatHandoverDistance, COMBAT_HANDOVER_MIN, COMBAT_HANDOVER_MAX);
             settings.AutoLaunchRadius = MathHelper.Clamp(settings.AutoLaunchRadius, 0f, AUTO_LAUNCH_RADIUS_MAX);
@@ -2218,8 +2218,7 @@ namespace Automata.Drone
             if (t < 0 || siteYielding || boring || activeFlightOrder == null) return false;
             t %= WIGGLE_CYCLE_TICKS;
             if (t >= WIGGLE_TICKS) return false;
-            if (t == 0 && Log.DebugEnabled) Log.Debug("Drone {0}: not moving under thrust ({1:F2} m/s asked, {2:F2} moved): shaking its attitude {3:F0}°",
-                                                      Entity.EntityId, pushAsked, pushMoved, MathHelperD.ToDegrees(WIGGLE_ANGLE));
+            if (t == 0 && Log.DebugEnabled) Log.Debug("Drone {0}: not moving under thrust ({1:F2} m/s asked, {2:F2} moved): shaking its attitude {3:F0}°", Entity.EntityId, pushAsked, pushMoved, MathHelperD.ToDegrees(WIGGLE_ANGLE));
             int step = t / WIGGLE_STEP_TICKS;
             Vector3D f = Vector3D.Normalize(fwd), u = Vector3D.Normalize(up);
             Vector3D axis = step < 2 ? u : step < 4 ? Vector3D.Normalize(Vector3D.Cross(f, u)) : f;   // yaw, pitch, roll
@@ -2542,11 +2541,7 @@ namespace Automata.Drone
             if (++pushBlockedTicks == PUSH_BLOCKED_TICKS)
             {
                 MatrixD wm = flightState.WorldMatrix;
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: pressed against something: asks {1:F2} m/s (F {2:F2} U {3:F2} R {4:F2}), moves {5:F2} m/s that way for {6} s; "
-                          + "thrust obstructed {7}, gear locked {8}, connector locked {9}; {10}",
-                          Entity.EntityId, c, Vector3D.Dot(dir, wm.Forward), Vector3D.Dot(dir, wm.Up), Vector3D.Dot(dir, wm.Right), pushMoved,
-                          PUSH_BLOCKED_TICKS / 60, thrustObstructedDir >= 0 ? ((Base6Directions.Direction)thrustObstructedDir).ToString() : "no",
-                          AnyGearLocked(), DockedConnector() != null || AnyConnectorLocked(), ThrustAndContactDiag());
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: pressed against something: asks {1:F2} m/s (F {2:F2} U {3:F2} R {4:F2}), moves {5:F2} m/s that way for {6} s; " + "thrust obstructed {7}, gear locked {8}, connector locked {9}; {10}", Entity.EntityId, c, Vector3D.Dot(dir, wm.Forward), Vector3D.Dot(dir, wm.Up), Vector3D.Dot(dir, wm.Right), pushMoved, PUSH_BLOCKED_TICKS / 60, thrustObstructedDir >= 0 ? ((Base6Directions.Direction)thrustObstructedDir).ToString() : "no", AnyGearLocked(), DockedConnector() != null || AnyConnectorLocked(), ThrustAndContactDiag());
             }
         }
 
@@ -2864,8 +2859,7 @@ namespace Automata.Drone
                 if (++obstructedTicks[active] > GAIN_OBSTRUCTED_TICKS && thrustObstructedDir != active)
                 {
                     thrustObstructedDir = active;
-                    if (Log.DebugEnabled) Log.Debug("Drone {0}: thrust obstructed: {1} group at {2:P0} throttle gives {3:F2} m/s² of the {4:F2} expected",
-                              Entity.EntityId, (Base6Directions.Direction)active, groupThrottle[active], measured, expected);
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: thrust obstructed: {1} group at {2:P0} throttle gives {3:F2} m/s² of the {4:F2} expected", Entity.EntityId, (Base6Directions.Direction)active, groupThrottle[active], measured, expected);
                 }
                 return;
             }
@@ -2901,8 +2895,7 @@ namespace Automata.Drone
             if (!changed) return;
             for (int i = 0; i < 6; i++)
                 reportedThrustGain[i] = thrustGain[i];
-            if (Log.DebugEnabled) Log.Debug("Drone {6}: thrust gain F{0:F2} B{1:F2} L{2:F2} R{3:F2} U{4:F2} D{5:F2}",
-                thrustGain[0], thrustGain[1], thrustGain[2], thrustGain[3], thrustGain[4], thrustGain[5], _entityId);
+            if (Log.DebugEnabled) Log.Debug("Drone {6}: thrust gain F{0:F2} B{1:F2} L{2:F2} R{3:F2} U{4:F2} D{5:F2}", thrustGain[0], thrustGain[1], thrustGain[2], thrustGain[3], thrustGain[4], thrustGain[5], _entityId);
         }
         #endregion
 

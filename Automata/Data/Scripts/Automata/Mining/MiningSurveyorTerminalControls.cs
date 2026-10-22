@@ -66,7 +66,7 @@ namespace Automata.Mining
             Done = true;
             AutomataProgrammableBlocks.HideVanillaOnce();
             CreateControls();
-            Log.Info("Created MS terminal controls");
+            if (Log.DebugEnabled) Log.Debug("Created MS terminal controls");
         }
 
         static MiningSurveyorBlock GetBlock(IMyTerminalBlock b)

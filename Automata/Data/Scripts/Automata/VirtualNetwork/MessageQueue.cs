@@ -225,8 +225,7 @@ namespace Automata.VirtualNetwork
                 log.LastSentAt = msg.SentAt;
             }
             message.Receipt = msg;
-            if (Log.DebugEnabled) Log.Debug("VNet: {0} {1} #{2} from {3} (grid '{4}') to {5}", message.Channel, message.Payload != null ? message.Payload.GetType().Name : "null",
-                          message.MessageId, message.SenderId, sender.GridName, message.RecipientBlockType);
+            if (Log.DebugEnabled) Log.Debug("VNet: {0} {1} #{2} from {3} (grid '{4}') to {5}", message.Channel, message.Payload != null ? message.Payload.GetType().Name : "null", message.MessageId, message.SenderId, sender.GridName, message.RecipientBlockType);
             return ErrorCode.None;
         }
 
@@ -312,8 +311,7 @@ namespace Automata.VirtualNetwork
                     var payload = m.Payload as T;   // the sender's object, shared: read-only
                     if (payload == null)
                     {
-                        Log.Warning("VNet: {0} #{1} from {2}: payload is {3}, not {4}: dropped", channel, m.MessageId, m.SenderId,
-                                    m.Payload != null ? m.Payload.GetType().Name : "null", typeof(T).Name);
+                        if (Log.DebugEnabled) Log.Debug("VNet: {0} #{1} from {2}: payload is {3}, not {4}: dropped", channel, m.MessageId, m.SenderId, m.Payload != null ? m.Payload.GetType().Name : "null", typeof(T).Name);
                         continue;
                     }
                     m.Deliveries++;
@@ -478,7 +476,7 @@ namespace Automata.VirtualNetwork
                 var payload = DecodePayload((PayloadType)saved.PayloadTypeValue, saved.Data);
                 if (payload == null)
                 {
-                    Log.Warning("VNet: saved message #{0} on {1} ({2}): payload could not be read, dropped", saved.MessageId, saved.Channel, (PayloadType)saved.PayloadTypeValue);
+                    if (Log.DebugEnabled) Log.Debug("VNet: saved message #{0} on {1} ({2}): payload could not be read, dropped", saved.MessageId, saved.Channel, (PayloadType)saved.PayloadTypeValue);
                     continue;
                 }
                 var msg = new TimestampedMessage
@@ -507,7 +505,7 @@ namespace Automata.VirtualNetwork
                 }
                 restored++;
             }
-            Log.Info("VNet: {0} message(s) restored from the save (times moved on {1:F0} s)", restored, shift / 1000.0);
+            if (Log.DebugEnabled) Log.Debug("VNet: {0} message(s) restored from the save (times moved on {1:F0} s)", restored, shift / 1000.0);
         }
 
         // The payload class by its type tag (GetPayloadType's counterpart)
@@ -533,7 +531,7 @@ namespace Automata.VirtualNetwork
             }
             catch (Exception ex)
             {
-                Log.Warning("VNet: payload {0} could not be decoded: {1}", type, ex.Message);
+                if (Log.DebugEnabled) Log.Debug("VNet: payload {0} could not be decoded: {1}", type, ex.Message);
                 return null;
             }
         }

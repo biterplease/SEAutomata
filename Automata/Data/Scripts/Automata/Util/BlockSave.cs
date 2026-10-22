@@ -38,7 +38,7 @@ namespace Automata.Util
             }
             catch (Exception ex)
             {
-                Log.Warning("Save {0}: not readable, defaults used ({1})", entityId, ex.Message);
+                if (Log.DebugEnabled) Log.Debug("Save {0}: not readable, defaults used ({1})", entityId, ex.Message);
                 return null;
             }
         }
@@ -85,7 +85,7 @@ namespace Automata.Util
         public static bool OwnState(long savedEntityId, long entityId, string what)
         {
             if (savedEntityId == 0 || savedEntityId == entityId) return true;
-            Util.Logging.Log.Info("{0} {1}: saved state of {2} not used (a copy)", what, entityId, savedEntityId);
+            if (Log.DebugEnabled) Log.Debug("{0} {1}: saved state of {2} not used (a copy)", what, entityId, savedEntityId);
             return false;
         }
 

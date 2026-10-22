@@ -48,7 +48,7 @@ namespace Automata.Pathfinding
             // Fallback to direct if allowed
             if (context.AllowRepathing)
             {
-                Log.Warning("AStarPathfinder: Failed to find path, falling back to direct");
+                if (Log.DebugEnabled) Log.Debug("AStarPathfinder: Failed to find path, falling back to direct");
                 return DirectPathfinder.CalculatePath(ref context, ref start, ref end, output);
             }
 
@@ -217,7 +217,7 @@ namespace Automata.Pathfinding
                 }
             }
 
-            Log.Warning("AStarPathfinder: No path found to target");
+            if (Log.DebugEnabled) Log.Debug("AStarPathfinder: No path found to target");
             return false;
         }
 
