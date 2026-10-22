@@ -245,9 +245,9 @@ namespace Automata.Mining
             base.Close();
         }
 
-        protected override string SettingsXml()
+        protected override byte[] SettingsBinary()
         {
-            return MyAPIGateway.Utilities.SerializeToXML(settings);
+            return MyAPIGateway.Utilities.SerializeToBinary(settings);
         }
 
         protected override string SaveText()
@@ -267,9 +267,9 @@ namespace Automata.Mining
             return true;
         }
 
-        protected override bool LoadSettingsXml(string xml)
+        protected override bool LoadSettingsBinary(byte[] data)
         {
-            var loaded = MyAPIGateway.Utilities.SerializeFromXML<MiningSurveyorSettings>(xml);
+            var loaded = MyAPIGateway.Utilities.SerializeFromBinary<MiningSurveyorSettings>(data);
             if (loaded == null) return false;
             settings = loaded;
             Normalize();

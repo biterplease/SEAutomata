@@ -96,6 +96,7 @@ namespace Automata.Designator
         {
             base.Init(objectBuilder);
             _block = (IMyTerminalBlock)Entity;
+            block = _block;   // SettingsBlockLogic's: settings from other players check terminal access on it
             entityId = Entity.EntityId;
             NeedsUpdate |= MyEntityUpdateEnum.BEFORE_NEXT_FRAME;
         }
@@ -141,14 +142,14 @@ namespace Automata.Designator
             base.Close();
         }
 
-        protected override string SettingsXml()
+        protected override byte[] SettingsBinary()
         {
-            return MyAPIGateway.Utilities.SerializeToXML(settings);
+            return MyAPIGateway.Utilities.SerializeToBinary(settings);
         }
 
-        protected override bool LoadSettingsXml(string xml)
+        protected override bool LoadSettingsBinary(byte[] data)
         {
-            var loaded = MyAPIGateway.Utilities.SerializeFromXML<TargetDesignatorSettings>(xml);
+            var loaded = MyAPIGateway.Utilities.SerializeFromBinary<TargetDesignatorSettings>(data);
             if (loaded == null) return false;
             settings = loaded;
             return true;

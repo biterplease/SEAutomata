@@ -239,9 +239,9 @@ namespace Automata.Logistics
             base.Close();
         }
 
-        protected override string SettingsXml()
+        protected override byte[] SettingsBinary()
         {
-            return MyAPIGateway.Utilities.SerializeToXML(settings);
+            return MyAPIGateway.Utilities.SerializeToBinary(settings);
         }
 
         protected override string SaveText()
@@ -263,9 +263,9 @@ namespace Automata.Logistics
             return true;
         }
 
-        protected override bool LoadSettingsXml(string xml)
+        protected override bool LoadSettingsBinary(byte[] data)
         {
-            var loaded = MyAPIGateway.Utilities.SerializeFromXML<LogisticsComputerSettings>(xml);
+            var loaded = MyAPIGateway.Utilities.SerializeFromBinary<LogisticsComputerSettings>(data);
             if (loaded == null) return false;
             if (loaded.Quotas == null) loaded.Quotas = new List<string>();
             settings = loaded;

@@ -234,14 +234,14 @@ namespace Automata.Orchestrator
             }
         }
 
-        protected override string SettingsXml()
+        protected override byte[] SettingsBinary()
         {
-            return MyAPIGateway.Utilities.SerializeToXML(settings);
+            return MyAPIGateway.Utilities.SerializeToBinary(settings);
         }
 
-        protected override bool LoadSettingsXml(string xml)
+        protected override bool LoadSettingsBinary(byte[] data)
         {
-            var loaded = MyAPIGateway.Utilities.SerializeFromXML<OrchestratorBlockSettings>(xml);
+            var loaded = MyAPIGateway.Utilities.SerializeFromBinary<OrchestratorBlockSettings>(data);
             if (loaded == null) return false;
             settings = loaded;
             return true;
