@@ -63,9 +63,6 @@ namespace Automata.Pathfinding
         /// block's cells blocks. Weld work sites (built neighbours of the block worked on). Null: cell boxes.
         /// </summary>
         public IMyCubeGrid RealShapeGrid;
-        // ObservedRange: the all-around part (sensors / instruments not required), worked out once per query
-        internal bool ViewKnown;
-        internal double View;
         /// <summary>
         /// Set by Lazy Theta* when only a held attitude found a way (Controller then has that attitude): every leg of
         /// the route keeps it (AssignAttitudes), the turn to it is at the start.
@@ -502,12 +499,12 @@ namespace Automata.Pathfinding
         {
             Vector3D d = goal - start;
             double len = d.Length();
-            double range = len > 1e-3 ? ObservedRange(ref q, d / len) : q.View;
+            double range = len > 1e-3 ? ObservedRange(ref q, d / len) : 0;
             int sOn = 0, sAll = q.Sensors != null ? q.Sensors.Count : 0, cOn = 0, cAll = q.Cameras != null ? q.Cameras.Count : 0;
             for (int i = 0; i < sAll; i++) if (InstrumentOn(q.Sensors[i], q.SleepingIds)) sOn++;
             for (int i = 0; i < cAll; i++) if (InstrumentOn(q.Cameras[i], q.SleepingIds)) cOn++;
-            return string.Format(" [sight {0:F0} m that way ({1:F0} m all around), sensors {2}/{3} on, cameras {4}/{5} on, start {6:F0} m from the controller]",
-                                 range, q.View, sOn, sAll, cOn, cAll, Vector3D.Distance(start, q.Controller.Translation));
+            return string.Format(" [sight {0:F0} m that way, sensors {1}/{2} on, cameras {3}/{4} on, start {5:F0} m from the controller]",
+                                 range, sOn, sAll, cOn, cAll, Vector3D.Distance(start, q.Controller.Translation));
         }
 
         private static bool AnyOn<T>(List<T> blocks, List<long> sleeping) where T : class, IMyFunctionalBlock
@@ -1708,7 +1705,7 @@ namespace Automata.Pathfinding
                 double t = (double)k / n;
                 Vector3D u = (u1 * Math.Sin((1 - t) * turn) + u2 * Math.Sin(t * turn)) / sin;
                 Vector3D p = k == n ? t2 : centre + u * radius;
-                Vector3D h, o1, o2;
+                Vector3D h;
                 IMyEntity e;
                 Vector3D th;
                 if (BudgetSpent || SegmentBlocked(ref q, ref q.Controller, prev, p, 0.5, out h, out e)

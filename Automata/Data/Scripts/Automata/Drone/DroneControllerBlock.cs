@@ -149,8 +149,6 @@ namespace Automata.Drone
 
 
         private long _entityId;
-        private int _messageCounter = 0;
-        private int _bidCounter = 0;
         private IMyEntity entity;
         private IMyCubeBlock block;
         private IMyGamePruningStructureDelegate pruningStructureDelegate;
@@ -165,7 +163,6 @@ namespace Automata.Drone
         private Capabilities capabilities;
         private string errorReason;                        // why the drone is in State.Error (LCD alert line)
         private readonly StringBuilder sb = new StringBuilder(64);
-        private BehaviourProfile behaviourProfile;
         private State currentState = State.Initializing;
         private bool initialized = false;
         private string lastHullLogged;   // debug: the hull line last logged
@@ -182,7 +179,6 @@ namespace Automata.Drone
         }
         private readonly int[] thrusterBaseline = new int[6];   // functional thrusters per direction, as built / docked
         private string damageNote, lastDamageNote;             // partial thruster loss (reported once per change)
-        private int _consecutiveErrors = 0;
 
         private IMyShipController shipController;
         private IMyShipWelder welder;
@@ -225,16 +221,12 @@ namespace Automata.Drone
         private float physicalMass = 0.0f;
         private float baseMass = 0.0f;
 
-        private Orchestrator.Job currentTask;
         private Queue<Orchestrator.Task> taskQueue = new Queue<Orchestrator.Task>();
-        private ushort currentTaskId = 0;
 
         #region Fields - Power Monitoring
         private bool needsHydrogenRefuel = false;
         private bool needsBatteryRecharge = false;
-        private float lastH2Level = 100f;
         public float currentH2Level = 100f;
-        private float lastBatteryLevel = 100f;
         public float currentBatteryLevel = 100f;
         #endregion
 
@@ -247,12 +239,9 @@ namespace Automata.Drone
         #endregion
         
         #region Fields - Navigation
-        private Vector3D taskPosition;
         private List<Vector3D> currentPath = new List<Vector3D>();
         // private PathfindingManager pathfindingManager;
         private FlightOrder activeFlightOrder;
-        private Vector3D currentWaypoint;
-        private Vector3DData navigationTarget;
         private Vector3D? navDebugTarget;
         private Vector3D? navDebugTargetApproachFrom;
 
@@ -1211,7 +1200,6 @@ namespace Automata.Drone
             combinedThrustProfile = CalculateThrustProfile(shipController, capabilityMass, allThrusters, airDensity, airAtmosphere, potential);
 
             capabilities = Capabilities.None;
-            behaviourProfile = BehaviourProfile.None;
             if (connectors.Count > 0) capabilities |= Capabilities.CanDock;
             if (welder != null) capabilities |= Capabilities.CanWeld;
             if (grinder != null) capabilities |= Capabilities.CanGrind;
@@ -1400,7 +1388,6 @@ namespace Automata.Drone
 
        public void Shutdown()
         {
-            currentTask = null;
             taskQueue.Clear();
             currentPath.Clear();
             if (welder?.Enabled == true) welder.Enabled = false;
@@ -1412,7 +1399,6 @@ namespace Automata.Drone
             ResetIntegralTerms();
             ReleaseGyroscopes();
             // DisableGyroscopeOverride();
-            _consecutiveErrors = 0;
             currentState = State.Standby;
         }
 
