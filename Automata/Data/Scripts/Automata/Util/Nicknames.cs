@@ -8,6 +8,7 @@ using VRage.ModAPI;
 using VRage.Utils;
 
 using Automata.Inventory;
+using Automata.Util.Strings;
 
 namespace Automata.Util
 {
@@ -94,10 +95,6 @@ namespace Automata.Util
     /// </summary>
     public static class NicknameControl
     {
-        #region UI strings
-        private static readonly MyStringId StrNickname = MyStringId.GetOrCompute("Nickname");
-        private static readonly MyStringId StrNicknameTip = MyStringId.GetOrCompute("Nickname that will show in LCD logs");
-        #endregion
 
         public const string ID_SUFFIX = "_Nickname";
         private static bool registered;
@@ -107,8 +104,8 @@ namespace Automata.Util
         {
             Register();
             var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlTextbox, TBlock>(id + ID_SUFFIX);
-            c.Title = StrNickname;
-            c.Tooltip = StrNicknameTip;
+            c.Title = MyStrings.Common_Nickname;
+            c.Tooltip = MyStrings.Common_NicknameTooltip;
             c.SupportsMultipleBlocks = false;
             c.Visible = b => logic(b) != null;
             c.Getter = b => { var l = logic(b); return new StringBuilder(l != null ? get(l) ?? "" : ""); };

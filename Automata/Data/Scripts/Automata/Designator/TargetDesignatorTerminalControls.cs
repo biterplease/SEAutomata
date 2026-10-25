@@ -4,6 +4,7 @@ using VRage.Utils;
 
 using Automata.Pointer;
 using Automata.Util;
+using Automata.Util.Strings;
 
 namespace Automata.Designator
 {
@@ -13,10 +14,6 @@ namespace Automata.Designator
     /// </summary>
     public static class TargetDesignatorTerminalControls
     {
-        #region UI strings
-        private static readonly MyStringId StrCamera = MyStringId.GetOrCompute("Designator camera");
-        private static readonly MyStringId StrCameraTip = MyStringId.GetOrCompute("Camera the \"Designator:\" toolbar actions aim with (15 km). On this grid, or via rotor / hinge / piston.");
-        #endregion
 
         const string IdPrefix = AutomataSession.MOD_NAME + "_Designator_";
         static bool Done;
@@ -36,8 +33,8 @@ namespace Automata.Designator
             sep.Visible = Visible;
             MyAPIGateway.TerminalControls.AddControl<IMyProgrammableBlock>(sep);
             var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlCombobox, IMyProgrammableBlock>(IdPrefix + "Camera");
-            c.Title = StrCamera;
-            c.Tooltip = StrCameraTip;
+            c.Title = MyStrings.Designator_DesignatorCamera2;
+            c.Tooltip = MyStrings.Designator_DesignatorCamera2Tooltip;
             c.Visible = b => { var l = GetBlock(b); if (l != null) shown = l; return l != null; };
             c.SupportsMultipleBlocks = false;
             c.ComboBoxContent = list => { if (shown != null) shown.Terminal_CameraItems(list); };   // the content callback gets no block: the one last shown

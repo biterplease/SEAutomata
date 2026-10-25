@@ -12,6 +12,7 @@ using Automata.Pathfinding;
 using Automata.Util.Logging;
 using VRage.Utils;
 using Automata.Util;
+using Automata.Util.Strings;
 
 namespace Automata.Drone
 {
@@ -36,15 +37,6 @@ namespace Automata.Drone
     /// </summary>
     public partial class DroneControllerBlock
     {
-        #region UI strings
-        private static readonly MyStringId StrCorridorTight = MyStringId.GetOrCompute("tight: {0}");
-        private static readonly MyStringId StrCorridorBoth = MyStringId.GetOrCompute("{0:F2} m: {1} | {2:F2} m: {3}");
-        private static readonly MyStringId StrNoPathfinder = MyStringId.GetOrCompute("no pathfinder");
-        private static readonly MyStringId StrNoRoomMOffThe = MyStringId.GetOrCompute("no room {0:F2} m off the connector ({1} within {2:F1} m)");
-        private static readonly MyStringId StrNoRoomToTurnWithin = MyStringId.GetOrCompute("no room to turn within reach: along the axis {0:F1} m clear{1}");
-        private static readonly MyStringId StrMHullMAcross = MyStringId.GetOrCompute("; {0}: {1:F1} m (hull {2:F1} m across{3})");
-        private static readonly MyStringId StrClearanceMCandidatesTurnChecks = MyStringId.GetOrCompute("; clearance {0:F2} m, {1} candidates, {2} turn checks, {3} sweeps, {4:F2} ms");
-        #endregion
 
         private const double CORRIDOR_SLIDE = 0.5;           // m: P1 -> P0, the final slide onto the connector
         private const double CORRIDOR_STEP = 0.25;           // m: candidate heights along the connector axis
@@ -172,8 +164,8 @@ namespace Automata.Drone
             if (tight >= normal - 1e-3) return false;
             string howTight;
             berth = tight;
-            if (FindCorridor(p0, axis, ref att, ref frame, pts, out howTight, tight)) { how = Loc.F(StrCorridorTight, howTight); return true; }
-            how = Loc.F(StrCorridorBoth, normal, how, tight, howTight);
+            if (FindCorridor(p0, axis, ref att, ref frame, pts, out howTight, tight)) { how = Loc.F(MyStrings.Drone_Tight, howTight); return true; }
+            how = Loc.F(MyStrings.Drone_MM, normal, how, tight, howTight);
             return false;
         }
 
@@ -348,7 +340,7 @@ namespace Automata.Drone
         private bool FindCorridor(Vector3D p0, Vector3D axis, ref MatrixD att, ref MatrixD frame, List<Vector3D> pts, out string how, double berth)
         {
             pts.Clear();
-            how = Loc.T(StrNoPathfinder);
+            how = Loc.T(MyStrings.Drone_NoPathfinder);
             PathQuery q;
             PathfindingManager pm;
             if (!CorridorQuery(out q, out pm)) return false;
@@ -378,7 +370,7 @@ namespace Automata.Drone
             var box = new MyOrientedBoundingBoxD(p1, localHullBox.HalfExtents + grow, Quaternion.CreateFromRotationMatrix(rot));
             if (localHullBox.Max.X >= localHullBox.Min.X && !pm.BoxFree(ref q, ref box))
             {
-                how = Loc.F(StrNoRoomMOffThe, CORRIDOR_SLIDE, PathfindingManager.Describe(pm.LastHitBlock), q.Berth);
+                how = Loc.F(MyStrings.Drone_NoRoomMOff, CORRIDOR_SLIDE, PathfindingManager.Describe(pm.LastHitBlock), q.Berth);
                 return false;
             }
             double axisClear = Math.Min(ClearAlong(pm, ref q, ref rot, p1, axis, maxLen), CORRIDOR_AXIS_STEPS * CORRIDOR_STEP);
@@ -450,18 +442,18 @@ namespace Automata.Drone
                 var sb = new System.Text.StringBuilder();
                 string axisBlock;
                 ClearAlong(pm, ref q, ref rot, p1, axis, maxLen, out axisBlock);
-                sb.AppendLoc(StrNoRoomToTurnWithin, axisClear, axisBlock != null ? " (" + axisBlock + ")" : "");
+                sb.AppendLoc(MyStrings.Drone_NoRoomToTurnWithin, axisClear, axisBlock != null ? " (" + axisBlock + ")" : "");
                 for (int d = 0; d < 6; d++)
                 {
                     Vector3D dir = frame.GetDirectionVector((Base6Directions.Direction)d);
                     if (Math.Abs(Vector3D.Dot(dir, axis)) > 0.1) continue;
                     string blocker;
                     double clear = ClearAlong(pm, ref q, ref rot, p1, dir, maxLen, out blocker);
-                    sb.AppendLoc(StrMHullMAcross, (Base6Directions.Direction)d, clear,
+                    sb.AppendLoc(MyStrings.Drone_MHullMAcross, (Base6Directions.Direction)d, clear,
                                     2 * PathfindingManager.HullHalfSizeAlong(ref q, ref rot, Vector3D.Cross(dir, axis)),
                                     blocker != null ? ", " + blocker : "");
                 }
-                sb.AppendLoc(StrClearanceMCandidatesTurnChecks, q.Berth, candidates, turnChecks, sweeps,
+                sb.AppendLoc(MyStrings.Drone_ClearanceMCandidatesTurnChecks, q.Berth, candidates, turnChecks, sweeps,
                                 corridorWatch.Elapsed.TotalMilliseconds);
                 how = sb.ToString();
                 return false;

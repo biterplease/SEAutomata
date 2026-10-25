@@ -9,6 +9,7 @@ using VRageMath;
 using Automata.Config;
 using Automata.Util;
 using Automata.Util.Logging;
+using Automata.Util.Strings;
 
 namespace Automata.Config
 {
@@ -25,21 +26,6 @@ namespace Automata.Config
 
     public class ServerConfig
     {
-        #region UI strings
-        private static readonly MyStringId StrNoConfig = MyStringId.GetOrCompute("No config file found, using defaults");
-        private static readonly MyStringId StrConfigLoaded = MyStringId.GetOrCompute("Server configuration loaded successfully");
-        private static readonly MyStringId StrConfigError = MyStringId.GetOrCompute("Error loading config: {0}");
-        private static readonly MyStringId StrConfigParseFailed = MyStringId.GetOrCompute("Failed to parse config file - using defaults");
-        private static readonly MyStringId StrSummaryHeader = MyStringId.GetOrCompute("=== Automata Server Config ===");
-        private static readonly MyStringId StrSummarySchedPlayer = MyStringId.GetOrCompute("Schedulers - Max per Player: {0}");
-        private static readonly MyStringId StrSummarySchedFaction = MyStringId.GetOrCompute("Schedulers - Max per Faction: {0}");
-        private static readonly MyStringId StrSummaryDronePlayer = MyStringId.GetOrCompute("Drone Controllers - Max per Player: {0}");
-        private static readonly MyStringId StrSummaryDroneFaction = MyStringId.GetOrCompute("Drone Controllers - Max per Faction: {0}");
-        private static readonly MyStringId StrSummaryLogistics = MyStringId.GetOrCompute("Logistics: {0}");
-        private static readonly MyStringId StrUnlimited = MyStringId.GetOrCompute("Unlimited");
-        private static readonly MyStringId StrEnabled = MyStringId.GetOrCompute("Enabled");
-        private static readonly MyStringId StrDisabled = MyStringId.GetOrCompute("Disabled");
-        #endregion
 
         private static ServerConfig _instance;
         public static ServerConfig Instance
@@ -355,17 +341,17 @@ namespace Automata.Config
                 var configText = LoadConfigFile();
                 if (string.IsNullOrEmpty(configText))
                 {
-                    MyAPIGateway.Utilities.ShowMessage(AutomataSession.MOD_NAME, Loc.T(StrNoConfig));
+                    MyAPIGateway.Utilities.ShowMessage(AutomataSession.MOD_NAME, Loc.T(MyStrings.Common_NoConfigFileFoundUsing));
                     return;
                 }
 
                 ParseConfig(configText);
 
-                MyAPIGateway.Utilities.ShowMessage(AutomataSession.MOD_NAME, Loc.T(StrConfigLoaded));
+                MyAPIGateway.Utilities.ShowMessage(AutomataSession.MOD_NAME, Loc.T(MyStrings.Common_ServerConfigurationLoadedSuccessfully));
             }
             catch (Exception ex)
             {
-                MyAPIGateway.Utilities.ShowMessage(AutomataSession.MOD_NAME, Loc.F(StrConfigError, ex.Message));
+                MyAPIGateway.Utilities.ShowMessage(AutomataSession.MOD_NAME, Loc.F(MyStrings.Common_ErrorLoadingConfig, ex.Message));
                 MyLog.Default.WriteLine($"{AutomataSession.MOD_NAME}: LoadConfig exception: {ex}");
             }
         }
@@ -441,7 +427,7 @@ namespace Automata.Config
             var ini = new MyIni();
             if (!ini.TryParse(configText))
             {
-                MyAPIGateway.Utilities.ShowMessage(AutomataSession.MOD_NAME, Loc.T(StrConfigParseFailed));
+                MyAPIGateway.Utilities.ShowMessage(AutomataSession.MOD_NAME, Loc.T(MyStrings.Common_FailedToParseConfigFile));
                 return;
             }
 
@@ -605,15 +591,15 @@ namespace Automata.Config
 
         public string GetConfigSummary()
         {
-            string unlimited = Loc.T(StrUnlimited);
-            var summary = Loc.T(StrSummaryHeader) + "\n";
-            summary += Loc.F(StrSummarySchedPlayer, BlockLimits.MaxSchedulersPerPlayer > 0 ? BlockLimits.MaxSchedulersPerPlayer.ToString() : unlimited) + "\n";
-            summary += Loc.F(StrSummarySchedFaction, BlockLimits.MaxSchedulersPerFaction > 0 ? BlockLimits.MaxSchedulersPerFaction.ToString() : unlimited) + "\n";
-            summary += Loc.F(StrSummaryDronePlayer, BlockLimits.MaxDroneControllersPerPlayer > 0 ? BlockLimits.MaxDroneControllersPerPlayer.ToString() : unlimited) + "\n";
-            summary += Loc.F(StrSummaryDroneFaction, BlockLimits.MaxDroneControllersPerFaction > 0 ? BlockLimits.MaxDroneControllersPerFaction.ToString() : unlimited) + "\n";
+            string unlimited = Loc.T(MyStrings.Keen_Unlimited);
+            var summary = Loc.T(MyStrings.Common_AutomataServerConfig) + "\n";
+            summary += Loc.F(MyStrings.Common_SchedulersMaxPerPlayer, BlockLimits.MaxSchedulersPerPlayer > 0 ? BlockLimits.MaxSchedulersPerPlayer.ToString() : unlimited) + "\n";
+            summary += Loc.F(MyStrings.Common_SchedulersMaxPerFaction, BlockLimits.MaxSchedulersPerFaction > 0 ? BlockLimits.MaxSchedulersPerFaction.ToString() : unlimited) + "\n";
+            summary += Loc.F(MyStrings.Common_DroneControllersMaxPerPlayer, BlockLimits.MaxDroneControllersPerPlayer > 0 ? BlockLimits.MaxDroneControllersPerPlayer.ToString() : unlimited) + "\n";
+            summary += Loc.F(MyStrings.Common_DroneControllersMaxPerFaction, BlockLimits.MaxDroneControllersPerFaction > 0 ? BlockLimits.MaxDroneControllersPerFaction.ToString() : unlimited) + "\n";
             // summary += $"Current Schedulers: {AutomataSession.Instance?.AIDroneSchedulers?.Count ?? 0}\n";
             // summary += $"Current Drone Controllers: {AutomataSession.Instance?.AIDroneControllers?.Count ?? 0}\n";
-            summary += Loc.F(StrSummaryLogistics, Loc.T(LogisticsComputer.AllowLogistics ? StrEnabled : StrDisabled)) + "\n";
+            summary += Loc.F(MyStrings.Common_Logistics, Loc.T(LogisticsComputer.AllowLogistics ? MyStrings.Common_Enabled : MyStrings.Keen_Disabled)) + "\n";
             return summary;
         }
     }

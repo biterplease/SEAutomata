@@ -18,6 +18,7 @@ using Automata.Util;
 using Automata.Util.Logging;
 using Automata.VirtualNetwork;
 using VRage.Utils;
+using Automata.Util.Strings;
 
 namespace Automata.Orchestrator
 {
@@ -38,77 +39,6 @@ namespace Automata.Orchestrator
     [MyEntityComponentDescriptor(typeof(MyObjectBuilder_MyProgrammableBlock), false, "AutomataLargeOrchestrator")]
     public partial class OrchestratorBlock : SettingsBlockLogic, INicknamed
     {
-        #region UI strings
-        private static readonly MyStringId StrError = MyStringId.GetOrCompute("Error: {0}");
-        private static readonly MyStringId StrJobTypeNotHandled = MyStringId.GetOrCompute("job type {0} not handled");
-        private static readonly MyStringId StrNoBidsWithin = MyStringId.GetOrCompute("no bids within {0}s");
-        private static readonly MyStringId StrNoDroneBidWithin = MyStringId.GetOrCompute("no drone bid within {0}s");
-        private static readonly MyStringId StrPlanDelivery = MyStringId.GetOrCompute("{0} trip(s), {1} drone(s), {2} supplier(s): {3} to LC {4}{5}");
-        private static readonly MyStringId StrPlanCollection = MyStringId.GetOrCompute("{0} trip(s), {1} drone(s), {2} taker(s): {3} from LC {4}{5}");
-        private static readonly MyStringId StrPlanLeft = MyStringId.GetOrCompute("; left: {0}");
-        private static readonly MyStringId StrNoConnectorForRoom = MyStringId.GetOrCompute("no drone has a connector for a logistics computer with room ({0})");
-        private static readonly MyStringId StrNoConnectorForOre = MyStringId.GetOrCompute("no drone has a connector for a logistics computer that takes the ore ({0})");
-        private static readonly MyStringId StrNoProfileBid = MyStringId.GetOrCompute("no {0} bid");
-        private static readonly MyStringId StrLeftToOrchestrator = MyStringId.GetOrCompute("left to orchestrator {0}");
-        private static readonly MyStringId StrDroneOutcome = MyStringId.GetOrCompute("drone {0} {1}");
-        private static readonly MyStringId StrDroneOutcomeReason = MyStringId.GetOrCompute("drone {0} {1} ({2})");
-        private static readonly MyStringId StrJobDroneOutcome = MyStringId.GetOrCompute("{0}: drone {1} {2}");
-        private static readonly MyStringId StrJobDroneOutcomeReason = MyStringId.GetOrCompute("{0}: drone {1} {2}\n  {3}");
-        private static readonly MyStringId StrHeaderTitle = MyStringId.GetOrCompute("Orchestrator {0}");
-        private static readonly MyStringId StrHeaderActive = MyStringId.GetOrCompute("Active jobs:   {0}");
-        private static readonly MyStringId StrHeaderHeldLc = MyStringId.GetOrCompute("Jobs Held: No LC:    {0}");
-        private static readonly MyStringId StrHeaderAuctions = MyStringId.GetOrCompute("Open auctions: {0}");
-        private static readonly MyStringId StrHeaderHeldDrone = MyStringId.GetOrCompute("           No Drone: {0}");
-        private static readonly MyStringId StrHeaderSeen = MyStringId.GetOrCompute("Active Drones: {0}, LC: {1}, CC: {2}, MS: {3}");
-        private static readonly MyStringId StrAuctionWonOne = MyStringId.GetOrCompute("Auction won: {0} D: {1}, LC: {2}");
-        private static readonly MyStringId StrAuctionWonMany = MyStringId.GetOrCompute("Auction won: {0}");
-        private static readonly MyStringId StrAuctionWonColumns = MyStringId.GetOrCompute("Drones");
-        private static readonly MyStringId StrAuctionWonColumnsLc = MyStringId.GetOrCompute("LC:");
-        private static readonly MyStringId StrInfoStatus = MyStringId.GetOrCompute("Orchestrator: {0}");
-        private static readonly MyStringId StrInfoAntenna = MyStringId.GetOrCompute("Antenna: {0} ({1:F0} m)");
-        private static readonly MyStringId StrInfoNoAntenna = MyStringId.GetOrCompute("Antenna: none");
-        private static readonly MyStringId StrInfoQueued = MyStringId.GetOrCompute("Queued jobs: {0}, open auctions: {1}");
-        private static readonly MyStringId StrInfoAssigned = MyStringId.GetOrCompute("Assigned: {0}, failed (no bids): {1}, dropped: {2}");
-        private static readonly MyStringId StrInfoReports = MyStringId.GetOrCompute("Drone reports: {0} done, {1} not");
-        private static readonly MyStringId StrInfoAuction = MyStringId.GetOrCompute(" - {0}: {1} bid(s)");
-        private static readonly MyStringId StrStarting = MyStringId.GetOrCompute("Starting");
-        private static readonly MyStringId StrOffNotWorking = MyStringId.GetOrCompute("Off / not working");
-        private static readonly MyStringId StrWaitingForTheMod = MyStringId.GetOrCompute("Waiting for the mod");
-        private static readonly MyStringId StrLoading = MyStringId.GetOrCompute("Loading");
-        private static readonly MyStringId StrNoAntennaFunctionalOnBroadcasting = MyStringId.GetOrCompute("No antenna (functional, on, broadcasting)");
-        private static readonly MyStringId StrAuctioning = MyStringId.GetOrCompute("Auctioning");
-        private static readonly MyStringId StrListeningForJobs = MyStringId.GetOrCompute("Listening for jobs");
-        private static readonly MyStringId StrDormantRunsTheNetwork = MyStringId.GetOrCompute("Dormant: '{0}' runs the network");
-        private static readonly MyStringId StrRunningTheNetwork = MyStringId.GetOrCompute("Running the network");
-        private static readonly MyStringId StrDormantRunsThisNetwork = MyStringId.GetOrCompute("Dormant: '{0}' runs this network");
-        private static readonly MyStringId StrJobNotHandledYet = MyStringId.GetOrCompute("{0}: not handled yet");
-        private static readonly MyStringId StrNoItemsOrNoDock = MyStringId.GetOrCompute("no items or no dock");
-        private static readonly MyStringId StrJobAuctionFor = MyStringId.GetOrCompute("Job Auction: {0}");
-        private static readonly MyStringId StrNoBids = MyStringId.GetOrCompute("no bids");
-        private static readonly MyStringId StrJobFailedNoBids = MyStringId.GetOrCompute("Auction failed: {0}, no bids");
-        private static readonly MyStringId StrJobDropped = MyStringId.GetOrCompute("Auction dropped: {0}\n  {1}");
-        private static readonly MyStringId StrNoDroneBid = MyStringId.GetOrCompute("no drone bid");
-        private static readonly MyStringId StrNoLogisticsComputerOffersThe = MyStringId.GetOrCompute("no logistics computer offers the components");
-        private static readonly MyStringId StrNoTripFitsTheBids = MyStringId.GetOrCompute("no trip fits the bids");
-        private static readonly MyStringId StrDroneSComponentSourceS = MyStringId.GetOrCompute("{0} drone(s), {1} component source(s)");
-        private static readonly MyStringId StrNoLogisticsComputerHasThe = MyStringId.GetOrCompute("no logistics computer has the items");
-        private static readonly MyStringId StrNoLogisticsComputerHasRoom = MyStringId.GetOrCompute("no logistics computer has room for it");
-        private static readonly MyStringId StrTheDronesCanTCarry = MyStringId.GetOrCompute("the drones can't carry any of it");
-        private static readonly MyStringId StrNoLcRoomForParts = MyStringId.GetOrCompute("no logistics computer has room for the parts");
-        private static readonly MyStringId StrTheJobHasNoBlocks = MyStringId.GetOrCompute("the job has no blocks");
-        private static readonly MyStringId StrOfBlockSOverDrone = MyStringId.GetOrCompute("{0} of {1} block(s) over {2} drone(s), parts to {3} logistics computer(s){4}");
-        private static readonly MyStringId StrTheRestNoRoomOn = MyStringId.GetOrCompute(" (the rest: no room on the bidding drones)");
-        private static readonly MyStringId StrTheJobHasNoSite = MyStringId.GetOrCompute("the job has no site");
-        private static readonly MyStringId StrNoLogisticsComputerTakesThe = MyStringId.GetOrCompute("no logistics computer takes the ore");
-        private static readonly MyStringId StrDroneSOfM3Of = MyStringId.GetOrCompute("{0} drone(s), {1:F1} of {2:F1} m3 of ore per trip, to {3} logistics computer(s)");
-        private static readonly MyStringId StrIceTwoStops = MyStringId.GetOrCompute("; {0} drone(s): ice to the O2/H2 generators, the rest to a better refinery");
-        private static readonly MyStringId StrTaskS = MyStringId.GetOrCompute("{0}, {1} task(s)");
-        private static readonly MyStringId StrWithdrawnByItsAnnouncer = MyStringId.GetOrCompute("withdrawn by its announcer");
-        private static readonly MyStringId StrJobWithdrawn = MyStringId.GetOrCompute("Job withdrawn\n  {0}");
-        private static readonly MyStringId StrJobLeftToOrchestrator = MyStringId.GetOrCompute("Job left to orchestrator {0}");
-        private static readonly MyStringId StrNoReportFromTheDrone = MyStringId.GetOrCompute("no report from the drone");
-        private static readonly MyStringId StrNothing = MyStringId.GetOrCompute("nothing");
-        #endregion
 
         #region Timing
         private const int STEP_TICKS = 60;                      // one pass of the loop
@@ -135,7 +65,7 @@ namespace Automata.Orchestrator
         private GridAntennaReg antennaReg;
         private int lastStep = int.MinValue / 2, lastCapabilities = int.MinValue / 2;
         public State currentState { get; private set; }
-        private string status = Loc.T(StrStarting);
+        private string status = Loc.T(MyStrings.Orchestrator_Starting);
 
         private sealed class OpenAuction
         {
@@ -297,9 +227,9 @@ namespace Automata.Orchestrator
             int noLc = 0, noDrone = 0;
             foreach (var h in heldJobs.Values) if (h.NoLc) noLc++; else noDrone++;
             header.Clear();
-            header.Add(Loc.F(StrHeaderTitle, Nicknames.Of(Entity)));
-            header.Add(BlockLcd.Columns(Loc.F(StrHeaderActive, activeJobs.Count), Loc.F(StrHeaderHeldLc, noLc), 24));
-            header.Add(BlockLcd.Columns(Loc.F(StrHeaderAuctions, auctions.Count), Loc.F(StrHeaderHeldDrone, noDrone), 24));
+            header.Add(Loc.F(MyStrings.Orchestrator_OrchestratorArg0, Nicknames.Of(Entity)));
+            header.Add(BlockLcd.Columns(Loc.F(MyStrings.Orchestrator_ActiveJobs, activeJobs.Count), Loc.F(MyStrings.Orchestrator_JobsHeldNoLC, noLc), 24));
+            header.Add(BlockLcd.Columns(Loc.F(MyStrings.Orchestrator_OpenAuctions, auctions.Count), Loc.F(MyStrings.Orchestrator_NoDrone, noDrone), 24));
             int drones = 0, lc = 0, cc = 0, ms = 0;
             foreach (var e in seenEntities.Values)
                 switch (e.Type)
@@ -309,7 +239,7 @@ namespace Automata.Orchestrator
                     case AutomataEntityType.ConstructionComputerBlock: cc++; break;
                     case AutomataEntityType.MiningSurveyorBlock: ms++; break;
                 }
-            header.Add(Loc.F(StrHeaderSeen, drones, lc, cc, ms));
+            header.Add(Loc.F(MyStrings.Orchestrator_ActiveDronesLCCCMS, drones, lc, cc, ms));
         }
 
         private void NoteSeen(long id, AutomataEntityType type, int now)
@@ -334,7 +264,7 @@ namespace Automata.Orchestrator
         // An auction that ends in a hold for its announcer: counted until the hold ends
         private void NoteHeld(OpenAuction open, string why, int holdSeconds, int now)
         {
-            bool noLc = HasDroneBid(open) && why != Loc.T(StrNoTripFitsTheBids) && why != Loc.T(StrNoDroneBid);
+            bool noLc = HasDroneBid(open) && why != Loc.T(MyStrings.Orchestrator_NoTripFitsTheBids) && why != Loc.T(MyStrings.Orchestrator_NoDroneBid);
             heldJobs[open.JobKey] = new HeldJob { NoLc = noLc, Until = now + Math.Max(1, holdSeconds) * 60 };
         }
 
@@ -344,9 +274,9 @@ namespace Automata.Orchestrator
             var drones = new List<long>(assignments.Keys);
             string type = LabelOf(open.Auction);
             if (drones.Count <= 1 && sources.Count <= 1)
-                return Loc.F(StrAuctionWonOne, type, drones.Count > 0 ? Nicknames.Of(drones[0]) : "-", sources.Count > 0 ? Nicknames.Of(sources[0]) : "-");
-            var sb = new StringBuilder(Loc.F(StrAuctionWonMany, type));
-            sb.Append("\n  ").Append(BlockLcd.Columns(Loc.T(StrAuctionWonColumns), Loc.T(StrAuctionWonColumnsLc), 22));
+                return Loc.F(MyStrings.Orchestrator_AuctionWonDLC, type, drones.Count > 0 ? Nicknames.Of(drones[0]) : "-", sources.Count > 0 ? Nicknames.Of(sources[0]) : "-");
+            var sb = new StringBuilder(Loc.F(MyStrings.Orchestrator_AuctionWon, type));
+            sb.Append("\n  ").Append(BlockLcd.Columns(Loc.T(MyStrings.Orchestrator_Drones), Loc.T(MyStrings.Orchestrator_LCColon), 22));
             for (int i = 0; i < Math.Max(drones.Count, sources.Count); i++)
                 sb.Append("\n  ").Append(BlockLcd.Columns(i < drones.Count ? Nicknames.Of(drones[i]) : "", i < sources.Count ? Nicknames.Of(sources[i]) : "", 22));
             return sb.ToString();
@@ -484,15 +414,15 @@ namespace Automata.Orchestrator
             {
                 if (!block.IsWorking)
                 {
-                    status = Loc.T(StrOffNotWorking);
+                    status = Loc.T(MyStrings.Orchestrator_OffNotWorking);
                     currentState = State.Standby;
                     return;
                 }
                 if (messaging == null) messaging = AutomataSession.GetMessageQueue();
-                if (messaging == null) { status = Loc.T(StrWaitingForTheMod); return; }
+                if (messaging == null) { status = Loc.T(MyStrings.Orchestrator_WaitingForTheMod); return; }
                 if (pendingState != null)
                 {
-                    if (!BlockSave.CanRestore) { status = Loc.T(StrLoading); return; }
+                    if (!BlockSave.CanRestore) { status = Loc.T(MyStrings.Orchestrator_Loading); return; }
                     RestoreState(pendingState);
                     pendingState = null;
                 }
@@ -504,13 +434,13 @@ namespace Automata.Orchestrator
                 }
                 if (!EnsureAntenna())
                 {
-                    status = Loc.T(StrNoAntennaFunctionalOnBroadcasting);
+                    status = Loc.T(MyStrings.Orchestrator_NoAntennaFunctionalOnBroadcasting);
                     currentState = State.Error;
                     return;
                 }
                 UpdateDormancy();
                 currentState = auctions.Count > 0 ? State.AssigningTasks : State.Standby;
-                status = primary != null ? DormantStatus() : auctions.Count > 0 ? Loc.T(StrAuctioning) : Loc.T(StrListeningForJobs);
+                status = primary != null ? DormantStatus() : auctions.Count > 0 ? Loc.T(MyStrings.Orchestrator_Auctioning) : Loc.T(MyStrings.Orchestrator_ListeningForJobs);
                 if (primary == null)
                 {
                     ReadAnnouncements(now);
@@ -535,7 +465,7 @@ namespace Automata.Orchestrator
             catch (Exception ex)
             {
                 Log.Error("Orchestrator {0}: update error: {1}", entityId, ex);
-                status = Loc.F(StrError, ex.Message);
+                status = Loc.F(MyStrings.Orchestrator_Error, ex.Message);
                 currentState = State.Error;
             }
         }
@@ -571,12 +501,12 @@ namespace Automata.Orchestrator
             {
                 if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: dormant, orchestrator {1} ('{2}') runs this network ({3} queued job(s) dropped: their announcers repeat them)", entityId, first.entityId, first.block.CustomName, jobQueue.Count);
                 jobQueue.Clear();
-                AddEvent(Loc.F(StrDormantRunsTheNetwork, first.block.CustomName));
+                AddEvent(Loc.F(MyStrings.Orchestrator_DormantRunsTheNetwork, first.block.CustomName));
             }
             else
             {
                 if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: running the network ({1})", entityId, primary != null ? "orchestrator " + primary.entityId + " stopped or left it" : "first in it");
-                AddEvent(Loc.T(StrRunningTheNetwork));
+                AddEvent(Loc.T(MyStrings.Orchestrator_RunningTheNetwork));
             }
             primary = first;
         }
@@ -590,7 +520,7 @@ namespace Automata.Orchestrator
 
         private string DormantStatus()
         {
-            return Loc.F(StrDormantRunsThisNetwork, primary.block != null ? primary.block.CustomName : primary.entityId.ToString());
+            return Loc.F(MyStrings.Orchestrator_DormantRunsThisNetwork, primary.block != null ? primary.block.CustomName : primary.entityId.ToString());
         }
         #endregion
 
@@ -683,8 +613,8 @@ namespace Automata.Orchestrator
                 case JobType.DesignatorEscort:
                     break;
                 default:
-                    AddEvent(Loc.F(StrJobNotHandledYet, ja.Type));
-                    QueueFailure(key, ja.JobId, 0, Loc.F(StrJobTypeNotHandled, ja.Type), FailedHoldSeconds);
+                    AddEvent(Loc.F(MyStrings.Orchestrator_NotHandledYet, ja.Type));
+                    QueueFailure(key, ja.JobId, 0, Loc.F(MyStrings.Orchestrator_JobTypeNotHandled, ja.Type), FailedHoldSeconds);
                     knownJobs[key] = now + RETRY_MEMORY_TICKS;
                     return;
             }
@@ -694,7 +624,7 @@ namespace Automata.Orchestrator
             if ((ja.Type == JobType.DeliverMissingInventory || ja.Type == JobType.CollectInventorySurplus) && (items == null || items.IsEmpty() || ja.Dock == null))
             {
                 if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: job {1} ({2}) ignored: no items or no dock", entityId, ja.JobId, ja.Type);
-                QueueFailure(key, ja.JobId, 0, Loc.T(StrNoItemsOrNoDock), FailedHoldSeconds);
+                QueueFailure(key, ja.JobId, 0, Loc.T(MyStrings.Orchestrator_NoItemsOrNoDock), FailedHoldSeconds);
                 knownJobs[key] = now + RETRY_MEMORY_TICKS;
                 return;
             }
@@ -737,7 +667,7 @@ namespace Automata.Orchestrator
             auctions[auction.AuctionId] = open;
             _auctionJobs[auction.AuctionId] = job;
             string label = ja.Type.Label(auction.WeldCategory);
-            AddEvent(Loc.F(StrJobAuctionFor, label));
+            AddEvent(Loc.F(MyStrings.Orchestrator_JobAuction, label));
             if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: job {1} ({2}) from {3}: auction {4} for {5}", entityId, ja.JobId, label, key.Key, auction.AuctionId, Describe(items));
         }
 
@@ -892,11 +822,11 @@ namespace Automata.Orchestrator
                 if (!HasDroneBid(open) && now - open.Started >= noBidTicks)
                 {
                     // A player's order: not auctioned again (cancelled, ExpirePlayerJobs)
-                    if (RequeuePlayerJob(open, now, Loc.T(StrNoBids))) { QueueClosed(open, null); closing.Add(open.Auction.AuctionId); continue; }
+                    if (RequeuePlayerJob(open, now, Loc.T(MyStrings.Orchestrator_NoBids))) { QueueClosed(open, null); closing.Add(open.Auction.AuctionId); continue; }
                     failedCount++;
-                    QueueFailure(open.JobKey, open.Auction.JobId, open.Auction.AuctionId, Loc.F(open.Bids.Count == 0 ? StrNoBidsWithin : StrNoDroneBidWithin, noBidTicks / 60), FailedHoldSeconds);
+                    QueueFailure(open.JobKey, open.Auction.JobId, open.Auction.AuctionId, Loc.F(open.Bids.Count == 0 ? MyStrings.Orchestrator_NoBidsWithinS : MyStrings.Orchestrator_NoDroneBidWithinS, noBidTicks / 60), FailedHoldSeconds);
                     heldJobs[open.JobKey] = new HeldJob { NoLc = false, Until = now + FailedHoldSeconds * 60 };
-                    AddEvent(Loc.F(StrJobFailedNoBids, LabelOf(open.Auction)));
+                    AddEvent(Loc.F(MyStrings.Orchestrator_AuctionFailedNoBids, LabelOf(open.Auction)));
                     if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: auction {1} (job {2}, {3}) failed: no bids within {4} s, announcer {5} told", entityId, open.Auction.AuctionId, open.Auction.JobId, LabelOf(open.Auction), noBidTicks / 60, open.JobKey.Key);
                     knownJobs[open.JobKey] = now + RETRY_MEMORY_TICKS;   // announced again after the hold: a new auction
                     QueueClosed(open, null);
@@ -939,7 +869,7 @@ namespace Automata.Orchestrator
                     {
                         droppedCount++;
                         NoteHeld(open, why, DROPPED_HOLD_SECONDS, now);
-                        AddEvent(Loc.F(StrJobDropped, LabelOf(open.Auction), why));
+                        AddEvent(Loc.F(MyStrings.Orchestrator_AuctionDropped, LabelOf(open.Auction), why));
                         if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: auction {1} (job {2}, {3}) dropped: {4}", entityId, open.Auction.AuctionId, open.Auction.JobId, LabelOf(open.Auction), why);
                         QueueFailure(open.JobKey, open.Auction.JobId, open.Auction.AuctionId, why, DROPPED_HOLD_SECONDS);
                         knownJobs[open.JobKey] = now + RETRY_MEMORY_TICKS;   // the announcer's next announcement starts it over
@@ -968,7 +898,7 @@ namespace Automata.Orchestrator
                 (open.Bids[i].EntityType == AutomataEntityType.DroneControllerBlock ? drones : lcs).Add(open.Bids[i]);
             var a = open.Auction;
             if (a.JobType == JobType.Weld || a.JobType == JobType.Grind) NotOnOwnGrids(drones, open.Job);   // a drone never works on itself
-            if (drones.Count == 0) { why = Loc.T(StrNoDroneBid); return false; }
+            if (drones.Count == 0) { why = Loc.T(MyStrings.Orchestrator_NoDroneBid); return false; }
             switch (a.JobType)
             {
                 case JobType.DeliverMissingInventory:
@@ -980,14 +910,14 @@ namespace Automata.Orchestrator
                     // Nothing to bring (the blocks only need welding up): no component source, the drone just goes to work
                     if (a.ComponentsInventory == null || a.ComponentsInventory.IsEmpty())
                         return AssignWeldWithoutComponents(open, drones, out assignments, out droneId, out droneBid, out why);
-                    if (lcs.Count == 0) { why = Loc.T(StrNoLogisticsComputerOffersThe); return false; }
+                    if (lcs.Count == 0) { why = Loc.T(MyStrings.Orchestrator_NoLogisticsComputerOffers); return false; }
                     var winningLcs = SelectWinningLCs(lcs, a);
                     var winningDrones = SelectWinningDrones(drones, a);
                     assignments = BuildWeldTaskAssignments(winningDrones, winningLcs, a);
-                    if (assignments.Count == 0) { why = Loc.T(StrNoTripFitsTheBids); return false; }
+                    if (assignments.Count == 0) { why = Loc.T(MyStrings.Orchestrator_NoTripFitsTheBids); return false; }
                     foreach (var k in assignments.Keys) { droneId = k; break; }
                     droneBid = BidIdOf(drones, droneId);
-                    why = Loc.F(StrDroneSComponentSourceS, assignments.Count, winningLcs.Count);
+                    why = Loc.F(MyStrings.Orchestrator_DroneComponentSource, assignments.Count, winningLcs.Count);
                     return true;
                 }
                 case JobType.Grind:
@@ -1000,7 +930,7 @@ namespace Automata.Orchestrator
                 case JobType.DesignatorEscort:
                     return AssignDesignator(open, drones, out assignments, out droneId, out droneBid, out why);
             }
-            why = Loc.T(StrJobTypeNotHandled);
+            why = Loc.F(MyStrings.Orchestrator_JobTypeNotHandled, a.JobType);
             return false;
         }
 
@@ -1032,9 +962,9 @@ namespace Automata.Orchestrator
             Vector3D dock = a.Dock.PositionData.ToVector3D();
             var remaining = new DiscreteInventory(a.ComponentsInventory);
             var ends = RankLogisticsEnds(lcs, remaining, dock);
-            if (ends.Count == 0) { why = delivery ? Loc.T(StrNoLogisticsComputerHasThe) : Loc.T(StrNoLogisticsComputerHasRoom); return false; }
+            if (ends.Count == 0) { why = delivery ? Loc.T(MyStrings.Orchestrator_NoLogisticsComputerHas) : Loc.T(MyStrings.Orchestrator_NoLogisticsComputerHasRoom); return false; }
             var ranked = SelectWinningDrones(drones, a);
-            if (ranked.Count == 0) { why = Loc.T(StrNoDroneBid); return false; }
+            if (ranked.Count == 0) { why = Loc.T(MyStrings.Orchestrator_NoDroneBid); return false; }
             var result = new Dictionary<long, List<Task>>();
             var carried = new DiscreteInventory();
             var endsUsed = new HashSet<long>();
@@ -1085,13 +1015,13 @@ namespace Automata.Orchestrator
                     if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: auction {1}: trip {2}: drone {3} (connectors {8}), {4} LC {5} (port {6}, requester port {9}) -> {7}", entityId, a.AuctionId, trips, drone.EntityId, delivery ? "from" : "to", end.EntityId, endPort.EntityId, Describe(load), Faces(drone), announcerPort.EntityId);
                 }
             }
-            if (trips == 0) { why = Loc.T(StrTheDronesCanTCarry); return false; }
+            if (trips == 0) { why = Loc.T(MyStrings.Orchestrator_TheDronesCantCarryAny); return false; }
             foreach (var tasks in result.Values) tasks.Add(Task.ReturnHome());
             assignments = result;
             foreach (var k in result.Keys) { droneId = k; break; }
             droneBid = BidIdOf(drones, droneId);
-            why = Loc.F(delivery ? StrPlanDelivery : StrPlanCollection, trips, result.Count, endsUsed.Count, Describe(carried), a.RequesterEntityId,
-                        remaining.IsEmpty() ? "" : Loc.F(StrPlanLeft, Describe(remaining)));
+            why = Loc.F(delivery ? MyStrings.Orchestrator_TripDroneSupplierToLC : MyStrings.Orchestrator_TripDroneTakerFromLC, trips, result.Count, endsUsed.Count, Describe(carried), a.RequesterEntityId,
+                        remaining.IsEmpty() ? "" : Loc.F(MyStrings.Orchestrator_Left, Describe(remaining)));
             return true;
         }
 
@@ -1181,7 +1111,7 @@ namespace Automata.Orchestrator
             assignments = null; droneId = 0; droneBid = 0;
             var a = open.Auction;
             var takers = Takers(lcs, a.ComponentsInventory, a.PositionData.ToVector3D());
-            if (takers.Count == 0) { why = Loc.T(StrNoLcRoomForParts); return false; }
+            if (takers.Count == 0) { why = Loc.T(MyStrings.Orchestrator_NoLogisticsComputerHasRoomForTheParts); return false; }
             // The blocks: NavigateToolTo, GrindBlock, BackOut
             var blocks = new List<Task[]>();
             if (open.Job.Tasks != null)
@@ -1192,7 +1122,7 @@ namespace Automata.Orchestrator
                     blocks.Add(back ? new[] { open.Job.Tasks[i], open.Job.Tasks[i + 1], open.Job.Tasks[i + 2] } : new[] { open.Job.Tasks[i], open.Job.Tasks[i + 1] });
                     i += back ? 2 : 1;
                 }
-            if (blocks.Count == 0) { why = Loc.T(StrTheJobHasNoBlocks); return false; }
+            if (blocks.Count == 0) { why = Loc.T(MyStrings.Orchestrator_TheJobHasNoBlocks); return false; }
             double total = (double)a.TotalVolume;
             if (total <= 0 && a.ComponentsInventory != null) total = (double)a.ComponentsInventory.TotalInventoryVolume(AutomataSession.Instance);
             double perBlock = total > 0 ? total / blocks.Count : 0;
@@ -1211,7 +1141,7 @@ namespace Automata.Orchestrator
                 unloadAt[ranked[i].EntityId] = taker.Bid.EntityId;
                 taker.Room -= TripVolume(ranked[i]);
             }
-            if (crew.Count == 0) { why = Loc.F(StrNoConnectorForRoom, DockFit.Describe(takers[0].Bid.DockSite)); return false; }
+            if (crew.Count == 0) { why = Loc.F(MyStrings.Orchestrator_NoDroneHasAConnector, DockFit.Describe(takers[0].Bid.DockSite)); return false; }
             var result = new Dictionary<long, List<Task>>();
             int d = 0;
             double room = TripVolume(crew[0]);
@@ -1260,8 +1190,8 @@ namespace Automata.Orchestrator
             droneBid = BidIdOf(drones, droneId);
             var lcsUsed = new HashSet<long>();
             foreach (var k in result.Keys) lcsUsed.Add(unloadAt[k]);
-            why = Loc.F(StrOfBlockSOverDrone, done, blocks.Count, result.Count,
-                                lcsUsed.Count, done < blocks.Count ? Loc.T(StrTheRestNoRoomOn) : "");
+            why = Loc.F(MyStrings.Orchestrator_OfBlockOverDroneParts, done, blocks.Count, result.Count,
+                                lcsUsed.Count, done < blocks.Count ? Loc.T(MyStrings.Orchestrator_TheRestNoRoom) : "");
             return true;
         }
 
@@ -1286,9 +1216,9 @@ namespace Automata.Orchestrator
                     var t = open.Job.Tasks[i];
                     if (t.Type == TaskType.NavigateToolTo || t.Type == TaskType.Mine || t.Type == TaskType.BackOut) site.Add(t);
                 }
-            if (site.Count == 0) { why = Loc.T(StrTheJobHasNoSite); return false; }
+            if (site.Count == 0) { why = Loc.T(MyStrings.Orchestrator_TheJobHasNoSite); return false; }
             var takers = Takers(lcs, a.ComponentsInventory, a.PositionData.ToVector3D());
-            if (takers.Count == 0) { why = Loc.T(StrNoLogisticsComputerTakesThe); return false; }
+            if (takers.Count == 0) { why = Loc.T(MyStrings.Orchestrator_NoLogisticsComputerTakes); return false; }
             bool ice = IsIceJob(a);
             double total = (double)a.TotalVolume;
             if (total <= 0 && a.ComponentsInventory != null) total = (double)a.ComponentsInventory.TotalInventoryVolume(AutomataSession.Instance);
@@ -1324,11 +1254,11 @@ namespace Automata.Orchestrator
                 if (total > 0) oreLeft = Math.Max(1, oreLeft - (int)Math.Min(int.MaxValue / 2, TripVolume(ranked[i]) / total * OreKg(a.ComponentsInventory)));
                 taker.Room -= TripVolume(ranked[i]);
             }
-            if (result.Count == 0) { why = Loc.F(StrNoConnectorForOre, DockFit.Describe(takers[0].Bid.DockSite)); return false; }
+            if (result.Count == 0) { why = Loc.F(MyStrings.Orchestrator_NoDroneHasAConnectorForALogistics, DockFit.Describe(takers[0].Bid.DockSite)); return false; }
             assignments = result;
             foreach (var k in result.Keys) { droneId = k; break; }
             droneBid = BidIdOf(drones, droneId);
-            why = Loc.F(StrDroneSOfM3Of, result.Count, carried, total, lcsUsed.Count) + (twoStops > 0 ? Loc.F(StrIceTwoStops, twoStops) : "");
+            why = Loc.F(MyStrings.Orchestrator_DroneOfM3OfOre, result.Count, carried, total, lcsUsed.Count) + (twoStops > 0 ? Loc.F(MyStrings.Orchestrator_DroneIceToTheO2, twoStops) : "");
             return true;
         }
 
@@ -1423,13 +1353,13 @@ namespace Automata.Orchestrator
             assignments = null; droneId = 0; droneBid = 0;
             string profile = DesignatorTakerName(open.Auction.JobType);
             var drone = BestDrone(drones, open.Auction.PositionData.ToVector3D(), open.Auction.JobType);
-            if (drone == null) { why = Loc.F(StrNoProfileBid, profile); return false; }
+            if (drone == null) { why = Loc.F(MyStrings.Orchestrator_NoBid, profile); return false; }
             var tasks = new List<Task>(open.Job.Tasks ?? new List<Task>());
             tasks.Add(Task.ReturnHome());
             assignments = new Dictionary<long, List<Task>> { { drone.EntityId, tasks } };
             droneId = drone.EntityId;
             droneBid = drone.BidId;
-            why = Loc.F(StrTaskS, profile, tasks.Count);
+            why = Loc.F(MyStrings.Orchestrator_Arg0CommaArg1Task, profile, tasks.Count);
             return true;
         }
 
@@ -1610,7 +1540,7 @@ namespace Automata.Orchestrator
                     if (open.JobKey.Equals(key)) closing.Add(open.Auction.AuctionId);
                 for (int c = 0; c < closing.Count; c++)
                 {
-                    QueueFailure(new KeyValuePair<long, uint>(0, w.JobId), w.JobId, closing[c], Loc.T(StrWithdrawnByItsAnnouncer), 0);
+                    QueueFailure(new KeyValuePair<long, uint>(0, w.JobId), w.JobId, closing[c], Loc.T(MyStrings.Orchestrator_WithdrawnByItsAnnouncer), 0);
                     QueueClosed(auctions[closing[c]], null);
                     auctions.Remove(closing[c]);
                     _auctionJobs.Remove(closing[c]);
@@ -1620,7 +1550,7 @@ namespace Automata.Orchestrator
                 knownJobs.Remove(key);
                 if (had)
                 {
-                    AddEvent(Loc.F(StrJobWithdrawn, w.Reason));
+                    AddEvent(Loc.F(MyStrings.Orchestrator_JobWithdrawn, w.Reason));
                     if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: job {1} of {2} withdrawn: {3}", entityId, w.JobId, w.AnnouncerEntityId, w.Reason);
                 }
             }
@@ -1645,7 +1575,7 @@ namespace Automata.Orchestrator
                 for (int c = 0; c < closing.Count; c++)
                 {
                     // announcer 0: only the logistics computers that bid act on it (their promises for this auction end)
-                    QueueFailure(new KeyValuePair<long, uint>(0, a.JobId), a.JobId, closing[c], Loc.F(StrLeftToOrchestrator, m.SenderId), 0);
+                    QueueFailure(new KeyValuePair<long, uint>(0, a.JobId), a.JobId, closing[c], Loc.F(MyStrings.Orchestrator_LeftToOrchestrator, m.SenderId), 0);
                     auctions.Remove(closing[c]);
                     _auctionJobs.Remove(closing[c]);
                 }
@@ -1653,7 +1583,7 @@ namespace Automata.Orchestrator
                 knownJobs[key] = now + JOB_MEMORY_TICKS;
                 if (had)
                 {
-                    AddEvent(Loc.F(StrJobLeftToOrchestrator, Nicknames.Of(m.SenderId)));
+                    AddEvent(Loc.F(MyStrings.Orchestrator_JobLeftToOrchestrator, Nicknames.Of(m.SenderId)));
                     if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: job {1} from {2} left to orchestrator {3} (lower id, auction {4})", entityId, a.JobId, a.AnnouncerEntityId, m.SenderId, a.AuctionId);
                 }
             }
@@ -1733,10 +1663,10 @@ namespace Automata.Orchestrator
                         if (knownJobs.TryGetValue(key, out until) && until != int.MaxValue) knownJobs[key] = now + RETRY_MEMORY_TICKS;
                     }
                     if (r.AnnouncerEntityId == entityId)   // a player's order: its marker goes (recalled jobs end here too)
-                        EndPlayerJob(r.JobId, string.IsNullOrEmpty(r.Reason) ? Loc.F(StrDroneOutcome, r.DroneEntityId, r.Outcome) : Loc.F(StrDroneOutcomeReason, r.DroneEntityId, r.Outcome, r.Reason));
+                        EndPlayerJob(r.JobId, string.IsNullOrEmpty(r.Reason) ? Loc.F(MyStrings.Orchestrator_DroneArg0Arg1, r.DroneEntityId, r.Outcome) : Loc.F(MyStrings.Orchestrator_DroneArg0Arg1Arg2, r.DroneEntityId, r.Outcome, r.Reason));
                     string label = r.JobType.Label(r.WeldCategory);
-                    AddEvent(string.IsNullOrEmpty(r.Reason) ? Loc.F(StrJobDroneOutcome, label, Nicknames.Of(r.DroneEntityId), r.Outcome)
-                                                             : Loc.F(StrJobDroneOutcomeReason, label, Nicknames.Of(r.DroneEntityId), r.Outcome, r.Reason));
+                    AddEvent(string.IsNullOrEmpty(r.Reason) ? Loc.F(MyStrings.Orchestrator_Arg0ColonDroneArg1Arg2Lower, label, Nicknames.Of(r.DroneEntityId), r.Outcome)
+                                                             : Loc.F(MyStrings.Orchestrator_Arg0ColonDroneArg1Arg2NewlineArg3, label, Nicknames.Of(r.DroneEntityId), r.Outcome, r.Reason));
                     if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: job {1} ({8}) from {2}: drone {3} {4} ({5}), {6}/{7} block(s)", entityId, r.JobId, r.AnnouncerEntityId, r.DroneEntityId, r.Outcome, r.Reason, r.BlocksDone, r.BlocksTotal, label);
                 }
                 reportInbox.Clear();
@@ -1763,7 +1693,7 @@ namespace Automata.Orchestrator
                 knownJobs.Remove(forget[i]);
                 ignoreLogged.Remove(forget[i]);
                 // An awarded player job never reported (drone lost): its marker goes
-                if (IsPlayerJob(forget[i])) EndPlayerJob(forget[i].Value, Loc.T(StrNoReportFromTheDrone));
+                if (IsPlayerJob(forget[i])) EndPlayerJob(forget[i].Value, Loc.T(MyStrings.Orchestrator_NoReportFromTheDrone));
             }
         }
         #endregion
@@ -2035,7 +1965,7 @@ namespace Automata.Orchestrator
 
         private static string Describe(DiscreteInventory items)
         {
-            if (items == null || items.IsEmpty()) return Loc.T(StrNothing);
+            if (items == null || items.IsEmpty()) return Loc.T(MyStrings.Orchestrator_Nothing);
             var sb = new StringBuilder();
             foreach (var item in items.GetAllItems())
             {
@@ -2071,14 +2001,14 @@ namespace Automata.Orchestrator
             if (!ready) return;
             var sb = info;
             sb.Clear();
-            sb.AppendLoc(StrInfoStatus, status).Append('\n');
-            if (AntennaUtil.Alive(ownAntenna)) sb.AppendLoc(StrInfoAntenna, ownAntenna.CustomName, AntennaUtil.Range(ownAntenna)).Append('\n');
-            else sb.AppendLoc(StrInfoNoAntenna).Append('\n');
-            sb.AppendLoc(StrInfoQueued, jobQueue.Count, auctions.Count).Append('\n');
-            sb.AppendLoc(StrInfoAssigned, assignedCount, failedCount, droppedCount).Append('\n');
-            sb.AppendLoc(StrInfoReports, completedCount, abortedCount).Append('\n');
+            sb.AppendLoc(MyStrings.Orchestrator_OrchestratorColonArg0, status).Append('\n');
+            if (AntennaUtil.Alive(ownAntenna)) sb.AppendLoc(MyStrings.Orchestrator_AntennaM, ownAntenna.CustomName, AntennaUtil.Range(ownAntenna)).Append('\n');
+            else sb.AppendLoc(MyStrings.Orchestrator_AntennaNone).Append('\n');
+            sb.AppendLoc(MyStrings.Orchestrator_QueuedJobsOpenAuctions, jobQueue.Count, auctions.Count).Append('\n');
+            sb.AppendLoc(MyStrings.Orchestrator_AssignedFailedNoBidsDropped, assignedCount, failedCount, droppedCount).Append('\n');
+            sb.AppendLoc(MyStrings.Orchestrator_DroneReportsDoneNot, completedCount, abortedCount).Append('\n');
             foreach (var open in auctions.Values)
-                sb.AppendLoc(StrInfoAuction, open.Auction.JobType, open.Bids.Count).Append('\n');
+                sb.AppendLoc(MyStrings.Orchestrator_Bid, open.Auction.JobType, open.Bids.Count).Append('\n');
             BuildHeader();
             sb.Append('\n');
             for (int i = 0; i < header.Count; i++) sb.Append(header[i]).Append('\n');
@@ -2199,15 +2129,15 @@ namespace Automata.Orchestrator
         {
             assignments = null; droneId = 0; droneBid = 0;
             var ranked = SelectWinningDrones(drones, open.Auction);
-            if (ranked.Count == 0) { why = Loc.T(StrNoDroneBid); return false; }
+            if (ranked.Count == 0) { why = Loc.T(MyStrings.Orchestrator_NoDroneBid); return false; }
             var tasks = new List<Task>();
             AppendWeldWork(tasks, open.Auction, false);
-            if (tasks.Count == 0) { why = Loc.T(StrNoTripFitsTheBids); return false; }
+            if (tasks.Count == 0) { why = Loc.T(MyStrings.Orchestrator_NoTripFitsTheBids); return false; }
             tasks.Add(Task.ReturnHome());
             droneId = ranked[0].EntityId;
             droneBid = BidIdOf(drones, droneId);
             assignments = new Dictionary<long, List<Task>> { { droneId, tasks } };
-            why = Loc.F(StrDroneSComponentSourceS, 1, 0);
+            why = Loc.F(MyStrings.Orchestrator_DroneComponentSource, 1, 0);
             return true;
         }
 

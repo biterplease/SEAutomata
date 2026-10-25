@@ -11,6 +11,7 @@ using Automata.Pathfinding;
 using Automata.Util;
 using Automata.Util.Logging;
 using VRage.Utils;
+using Automata.Util.Strings;
 
 namespace Automata.Drone
 {
@@ -29,32 +30,6 @@ namespace Automata.Drone
     /// </summary>
     public partial class DroneControllerBlock
     {
-        #region UI strings
-        private static readonly MyStringId StrGearsFacing = MyStringId.GetOrCompute("gears facing {0}");
-        private static readonly MyStringId StrSpotWhere = MyStringId.GetOrCompute("{0} ({1} gear on {2})");
-        private static readonly MyStringId StrGridNamed = MyStringId.GetOrCompute("grid '{0}'");
-        private static readonly MyStringId StrVoxel = MyStringId.GetOrCompute("voxel");
-        private static readonly MyStringId StrReturnNoRouteBackTo = MyStringId.GetOrCompute("Return: no route back to where it left from");
-        private static readonly MyStringId StrReturnToWhereItLeft = MyStringId.GetOrCompute("Return: to where it left from ({0:F0} m)");
-        private static readonly MyStringId StrReturnFallback = MyStringId.GetOrCompute("Return: can't rest the usual way, back to where it left from ({0:F0} m)");
-        private static readonly MyStringId StrReturnNowhere = MyStringId.GetOrCompute("Return: can't rest and doesn't know where it left from: holding here, retrying");
-        private static readonly MyStringId StrParkNoWorkingLandingGear = MyStringId.GetOrCompute("Park: no working landing gear");
-        private static readonly MyStringId StrParkNoFreeSpotFound = MyStringId.GetOrCompute("Park: no free spot found ({0})");
-        private static readonly MyStringId StrParkNoRouteToThe = MyStringId.GetOrCompute("Park: no route to the spot ({0}, {1})");
-        private static readonly MyStringId StrParkM = MyStringId.GetOrCompute("Park: {0} ({1:F0} m)");
-        private static readonly MyStringId StrParkingAreaOf = MyStringId.GetOrCompute("parking area of '{0}'");
-        private static readonly MyStringId StrOrchestrator = MyStringId.GetOrCompute("orchestrator");
-        private static readonly MyStringId StrOnGrid = MyStringId.GetOrCompute("on '{0}'");
-        private static readonly MyStringId StrOnVoxel = MyStringId.GetOrCompute("on voxel");
-        private static readonly MyStringId StrRouteBlocked = MyStringId.GetOrCompute("route blocked");
-        private static readonly MyStringId StrFlightOrderGone = MyStringId.GetOrCompute("flight order gone");
-        private static readonly MyStringId StrPark = MyStringId.GetOrCompute("Park");
-        private static readonly MyStringId StrTimeout = MyStringId.GetOrCompute("timeout");
-        private static readonly MyStringId StrNoGearCouldLock = MyStringId.GetOrCompute("no gear could lock");
-        private static readonly MyStringId StrParkedOnLandingGear = MyStringId.GetOrCompute("Parked on landing gear");
-        private static readonly MyStringId StrParkFailedWaiting = MyStringId.GetOrCompute("Park: failed ({0}): waiting");
-        private static readonly MyStringId StrRechargeDockingAt = MyStringId.GetOrCompute("Recharge: docking at {0}");
-        #endregion
 
         private const int PARK_CANDIDATES_MAX = 400;        // rays probed per search (per grid)
         private const double PARK_WALL_MAX_DOT = 0.34;      // a wall: normal within ~20° of horizontal
@@ -125,10 +100,10 @@ namespace Automata.Drone
         private bool GoRest()
         {
             if (GoRestUsual()) { departureFallback = false; return true; }
-            if (settings == null || !settings.HasDeparture) { Report(StrReturnNowhere); return false; }
+            if (settings == null || !settings.HasDeparture) { Report(MyStrings.Drone_ReturnCantRestAndDoesnt); return false; }
             departureFallback = true;
             if (NearDeparture()) return true;   // already there: at rest (AtDepartureFallback)
-            return FlyToDeparture(StrReturnFallback);
+            return FlyToDeparture(MyStrings.Drone_ReturnCantRestTheUsual);
         }
 
         private bool GoRestUsual()
@@ -204,7 +179,7 @@ namespace Automata.Drone
         private bool GoDeparture()
         {
             if (!ReturnsToDeparture) return false;
-            return FlyToDeparture(StrReturnToWhereItLeft);
+            return FlyToDeparture(MyStrings.Drone_ReturnToWhereItLeft);
         }
 
         private bool FlyToDeparture(MyStringId what)
@@ -214,7 +189,7 @@ namespace Automata.Drone
             Vector3D spot = settings.DepartureSpot.ToVector3D();
             Vector3D up = flightState.InGravity ? flightState.GravityUp : flightState.WorldMatrix.Up;
             var wps = new List<Vector3D> { spot + up * DEPARTURE_HOVER };
-            if (!FlyPlayerRoute(wps)) { Report(StrReturnNoRouteBackTo); return false; }
+            if (!FlyPlayerRoute(wps)) { Report(MyStrings.Drone_ReturnNoRouteBack); return false; }
             goingToDeparture = true;
             if (preflightStage == 0) SetState(State.ReturningToBase);
             Report(what, Vector3D.Distance(flightState.Position, spot));
@@ -263,7 +238,7 @@ namespace Automata.Drone
             q.SeeAll = true;   // a spot is chosen from what is there, not from what the drone sees from afar
 
             RefreshGearPads();
-            if (gearPads.Count == 0) { Report(StrParkNoWorkingLandingGear); return false; }
+            if (gearPads.Count == 0) { Report(MyStrings.Drone_ParkNoWorkingLandingGear); return false; }
             // Managed by an orchestrator with its parking protocol on: its directive - Parking area: area > its grid >
             // any friendly grid > voxel; Park on grid: its grid > any friendly grid > voxel; Voxel: voxel near it only
             // (no grids). Otherwise (no protocol, or not managed by an orchestrator): any friendly grid > voxel.
@@ -283,7 +258,7 @@ namespace Automata.Drone
             }
             if (!found)
             {
-                Report(StrParkNoFreeSpotFound, GearSummary());
+                Report(MyStrings.Drone_ParkNoFreeSpotFound, GearSummary());
                 if (ReturnsToDeparture) return GoDeparture();   // nowhere to land near where it left from: hover there
                 return false;
             }
@@ -294,7 +269,7 @@ namespace Automata.Drone
             var failure = FlyRoute(null, ref none, spot, approach, DroneRadius(), Vector3D.Zero, ref frame, false);
             if (failure != Orchestrator.TaskFailure.None)
             {
-                Report(StrParkNoRouteToThe, ps.Where, failure);
+                Report(MyStrings.Drone_ParkNoRoute, ps.Where, failure);
                 parkRejected.Add(spot);
                 return false;
             }
@@ -307,7 +282,7 @@ namespace Automata.Drone
             parkArrivedFrame = 0;
             parkedSpots[Entity.EntityId] = new BoundingSphereD(spot + Vector3D.TransformNormal(HullCentreLocal, frame), HullRadiusLevel());
             if (preflightStage == 0) SetState(State.ReturningToBase);
-            Report(StrParkM, ps.Where, Vector3D.Distance(flightState.Position, spot));
+            Report(MyStrings.Drone_ParkM, ps.Where, Vector3D.Distance(flightState.Position, spot));
             return true;
         }
 
@@ -352,7 +327,7 @@ namespace Automata.Drone
         {
             var sb = new System.Text.StringBuilder();
             for (int i = 0; i < gearPads.Count; i++) sb.Append(i > 0 ? "/" : "").Append(gearPads[i].Facing);
-            return Loc.F(StrGearsFacing, sb);
+            return Loc.F(MyStrings.Drone_GearsFacing, sb);
         }
 
         /// <summary>
@@ -512,7 +487,7 @@ namespace Automata.Drone
                         parkRays.Add(new ParkRay { From = centre + right * x + fwd * z - up * hy, Dir = up, Length = hy * 2 });
             }
             var inv = MatrixD.Invert(box);
-            string where = Loc.F(StrParkingAreaOf, orch.Entity is IMyTerminalBlock ? ((IMyTerminalBlock)orch.Entity).CustomName : Loc.T(StrOrchestrator));
+            string where = Loc.F(MyStrings.Drone_ParkingAreaOf, orch.Entity is IMyTerminalBlock ? ((IMyTerminalBlock)orch.Entity).CustomName : Loc.T(MyStrings.Drone_Orchestrator));
             int tried;
             bool ok = TryParkRays(pm, ref q, null, gUp, fwd, box.Up, s =>
             {
@@ -622,7 +597,7 @@ namespace Automata.Drone
                                 parkRays.Add(new ParkRay { From = centre + right * x + fwd * z - up * (r + 2), Dir = up, Length = r * 2 + 2 });
                 }
                 int tried;
-                bool ok = TryParkRays(pm, ref q, grid, gUp, fwd, grid.WorldMatrix.Up, null, Loc.F(StrOnGrid, grid.DisplayName), out spot, out tried);
+                bool ok = TryParkRays(pm, ref q, grid, gUp, fwd, grid.WorldMatrix.Up, null, Loc.F(MyStrings.Drone_OnArg0, grid.DisplayName), out spot, out tried);
                 total += tried;
                 if (ok)
                 {
@@ -680,7 +655,7 @@ namespace Automata.Drone
                 for (int i = 0; i < voxelHits.Count; i++) parkRays.Add(voxelHits[i].Ray);
                 voxelHits.Clear();
                 int tried;
-                bool ok = TryParkRays(pm, ref q, null, gUp, fwd, up, null, Loc.T(StrOnVoxel), out spot, out tried, true, PARK_VOXEL_MIN_FACING);
+                bool ok = TryParkRays(pm, ref q, null, gUp, fwd, up, null, Loc.T(MyStrings.Drone_OnVoxel), out spot, out tried, true, PARK_VOXEL_MIN_FACING);
                 total += tried;
                 if (ok)
                 {
@@ -843,7 +818,7 @@ namespace Automata.Drone
                     double approach = 0;
                     if (voxel && !VoxelSpotClear(controller, frame, n, out approach)) continue;
                     spot = new ParkSpot { Controller = controller, Frame = frame, Normal = n, Approach = approach,
-                                          Where = Loc.F(StrSpotWhere, where, pad.Facing, Describe(on)) };
+                                          Where = Loc.F(MyStrings.Drone_GearOn, where, pad.Facing, Describe(on)) };
                     return true;
                 }
             }
@@ -960,7 +935,7 @@ namespace Automata.Drone
         {
             if (e == null) return "-";
             var g = e as IMyCubeGrid;
-            return g != null ? Loc.F(StrGridNamed, g.DisplayName) : Loc.T(StrVoxel);
+            return g != null ? Loc.F(MyStrings.Drone_Grid, g.DisplayName) : Loc.T(MyStrings.Drone_Voxel);
         }
 
         // UpdateBeforeSimulation10, server, AI on
@@ -985,10 +960,10 @@ namespace Automata.Drone
             var o = activeFlightOrder;
             if (o == null && preflightStage == 0)
             {
-                ParkFailed(routeFailed ? Loc.T(StrRouteBlocked) : Loc.T(StrFlightOrderGone));
+                ParkFailed(routeFailed ? Loc.T(MyStrings.Drone_RouteBlocked) : Loc.T(MyStrings.Drone_FlightOrderGone));
                 return;
             }
-            if (now - parkStartFrame > PARK_TIMEOUT_TICKS) { NoteSpeedTimeout(Loc.T(StrPark)); ParkFailed(Loc.T(StrTimeout)); return; }
+            if (now - parkStartFrame > PARK_TIMEOUT_TICKS) { NoteSpeedTimeout(Loc.T(MyStrings.Drone_Park)); ParkFailed(Loc.T(MyStrings.Drone_Timeout)); return; }
             // A replan (something in the way) builds a new final order: follow it
             if (constructionOrder != null && constructionOrder != parkOrder)
             {
@@ -1011,7 +986,7 @@ namespace Automata.Drone
                 if (o.Arrived)
                 {
                     if (parkArrivedFrame == 0) parkArrivedFrame = now;
-                    else if (now - parkArrivedFrame > PARK_LOCK_WAIT_TICKS) ParkFailed(Loc.T(StrNoGearCouldLock));
+                    else if (now - parkArrivedFrame > PARK_LOCK_WAIT_TICKS) ParkFailed(Loc.T(MyStrings.Drone_NoGearCouldLock));
                 }
             }
         }
@@ -1031,7 +1006,7 @@ namespace Automata.Drone
             SleepSystems();
             isParked = true;
             SetState(State.Docked);
-            Report(StrParkedOnLandingGear);
+            Report(MyStrings.Drone_ParkedOnLandingGear);
             SaveSettings();
         }
 
@@ -1042,7 +1017,7 @@ namespace Automata.Drone
             if (Log.DebugEnabled) Log.Debug("Drone {0}: park: failed ({1}), attempt {2}", Entity.EntityId, why, parkFails);
             EndPark(why);
             if (parkFails < 3) { if (GoPark()) return; }
-            Report(StrParkFailedWaiting, why);
+            Report(MyStrings.Drone_ParkFailedWaiting, why);
             parkFails = 0;
             parkRejected.Clear();
             SetState(State.Standby);
@@ -1143,7 +1118,7 @@ namespace Automata.Drone
             {
                 if (DockAtConnector(chargeCandidates[i], false))   // (in turn: an answer now)
                 {
-                    Report(StrRechargeDockingAt, chargeCandidates[i].CustomName);
+                    Report(MyStrings.Drone_RechargeDockingAt, chargeCandidates[i].CustomName);
                     chargeCandidates.Clear();
                     return true;
                 }

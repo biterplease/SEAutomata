@@ -44,7 +44,6 @@ While collecting, every 5th `RunMine` call reads the nearest voxel of the job's 
 
 ## Silent GPS markers (2026-10-22)
 The game plays its GPS sound only for a marker on the HUD when it is added (`MyGpsCollection.AddGpsOnClient`, `PlaySoundOnCreation && ShowOnHud`); `SetShowOnHud` afterwards is silent. `AddGpsSilent`: created hidden + not temporary, added, then shown. Showing clears the game's expiry (`DiscardAt`), so the block removes its own markers:
-- "Show GPS" (checkbox): `UpdateGps` diffs the wanted markers (`WantedGps`: nearest `MaxGpsMarkers` deposits, keyed by the game's hash = name + position) against `gpsHashes` every refresh: only new ones added, gone ones removed (it used to remove and re-add all every 10 s: a burst of sounds each time).
-- "Show known deposits" (button): kept `GPS_ONCE_TICKS` (180 s, the game's own temporary expiry), then removed; a marker both lists track is shared (removed only when neither does).
+- "Show deposits as GPS" (on/off switch, no button): `UpdateGps` diffs the wanted markers (`WantedGps`: nearest `MaxGpsMarkers` deposits, keyed by the game's hash = name + position) against `gpsHashes` every refresh: only new ones added, gone ones removed (it used to remove and re-add all every 10 s: a burst of sounds each time). The server turns the switch itself off `GPS_ON_TICKS` (180 s) after it went on (`CheckGpsTimer`: `settings.ShowGps = false` + `SettingsEdited()`, so the players see it), or the player switches it off; either way the markers are removed.
 - Description ends with `GpsTag` (" [MS <entity id>]"): the first update after load removes this block's markers it doesn't track (saved now that they don't expire).
 

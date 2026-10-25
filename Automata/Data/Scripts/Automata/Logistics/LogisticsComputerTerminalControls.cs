@@ -23,40 +23,6 @@ namespace Automata.Logistics
     /// </summary>
     public static class LogisticsComputerTerminalControls
     {
-        #region UI strings
-        private static readonly MyStringId StrCategoryComponent = MyStringId.GetOrCompute("Component");
-        private static readonly MyStringId StrCategoryTool = MyStringId.GetOrCompute("Tool");
-        private static readonly MyStringId StrCategoryPlayerWeapon = MyStringId.GetOrCompute("Player weapon");
-        private static readonly MyStringId StrCategoryPlayerAmmo = MyStringId.GetOrCompute("Player weapon ammo");
-        private static readonly MyStringId StrCategoryBlockAmmo = MyStringId.GetOrCompute("Block ammo");
-        private static readonly MyStringId StrCategoryIngot = MyStringId.GetOrCompute("Ingot");
-        private static readonly MyStringId StrCategoryOre = MyStringId.GetOrCompute("Ore");
-        private static readonly MyStringId StrCategoryOther = MyStringId.GetOrCompute("Other");
-        private static readonly MyStringId StrModeProvideForLogistics = MyStringId.GetOrCompute("Provide for logistics");
-        private static readonly MyStringId StrModeProvideForLogisticsTip = MyStringId.GetOrCompute("Offer this grid's items to other logistics computers' requests.");
-        private static readonly MyStringId StrModeProvideForConstruction = MyStringId.GetOrCompute("Provide for construction");
-        private static readonly MyStringId StrModeProvideForConstructionTip = MyStringId.GetOrCompute("Offer components for weld jobs, and volume to accept ground-block components.");
-        private static readonly MyStringId StrModePush = MyStringId.GetOrCompute("Push (above Max)");
-        private static readonly MyStringId StrModePushTip = MyStringId.GetOrCompute("Items above their Max are announced as surplus.");
-        private static readonly MyStringId StrModeRequest = MyStringId.GetOrCompute("Request (below Min)");
-        private static readonly MyStringId StrModeRequestTip = MyStringId.GetOrCompute("Items below their Min are requested.");
-        private static readonly MyStringId StrAcceptOreWithoutRefinery = MyStringId.GetOrCompute("Accept ores/ice");
-        private static readonly MyStringId StrAcceptOreWithoutRefineryTip = MyStringId.GetOrCompute("Bid volume for ore/ice without refineries or O2/H2 generators");
-        private static readonly MyStringId StrQuotaEditAndAdd = MyStringId.GetOrCompute("Edit and add");
-        private static readonly MyStringId StrQuotaEdit = MyStringId.GetOrCompute("Edit");
-        private static readonly MyStringId StrQuotaRemove = MyStringId.GetOrCompute("Remove");
-        private static readonly MyStringId StrQuotaAddManually = MyStringId.GetOrCompute("Add manually");
-        private static readonly MyStringId StrQuotaClear = MyStringId.GetOrCompute("Clear all");
-        private static readonly MyStringId StrRetryHeld = MyStringId.GetOrCompute("Retry held jobs");
-        private static readonly MyStringId StrWorkModes = MyStringId.GetOrCompute("Work modes");
-        private static readonly MyStringId StrItemsItemMinMax = MyStringId.GetOrCompute("Items (item:min:max)");
-        private static readonly MyStringId StrMinMax0NotSet = MyStringId.GetOrCompute("Min / Max (0 = not set)");
-        private static readonly MyStringId StrEnableTip = MyStringId.GetOrCompute("Enable this Logistics Computer AI behaviour.");
-        private static readonly MyStringId StrItems = MyStringId.GetOrCompute("Items");
-        private static readonly MyStringId StrMinMax = MyStringId.GetOrCompute("Min / Max");
-        private static readonly MyStringId StrEntry = MyStringId.GetOrCompute("Entry");
-        private static readonly MyStringId StrEntryTip = MyStringId.GetOrCompute("item:min:max, e.g. SteelPlate:100:5000 or Ingot/Iron:0:20000");
-        #endregion
 
         public static ServerConfig.LogisticsComputerConfig BlockConfig = ServerConfig.Instance.LogisticsComputer;
 
@@ -152,7 +118,7 @@ namespace Automata.Logistics
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlOnOffSwitch, IMyProgrammableBlock>(IdPrefix + "OnOffEnabled");
                 c.Title = MySpaceTexts.BlockPropertyTitle_EnableAI;
-                c.Tooltip = StrEnableTip;
+                c.Tooltip = MyStrings.Logistics_EnableThisLogisticsComputerAITooltip;
                 c.SupportsMultipleBlocks = true;
                 c.Visible = CustomVisibleCondition;
                 c.OnText = MySpaceTexts.SwitchText_On;
@@ -162,34 +128,34 @@ namespace Automata.Logistics
                 Add(c);
             }
             Separator();
-            Label("", StrWorkModes);
-            Checkbox("CheckboxLCOpModeProvideForLogistics", StrModeProvideForLogistics,
-                     StrModeProvideForLogisticsTip,
+            Label("", MyStrings.Logistics_WorkModes);
+            Checkbox("CheckboxLCOpModeProvideForLogistics", MyStrings.Logistics_ProvideForLogistics,
+                     MyStrings.Logistics_ProvideForLogisticsTooltip,
                      b => CustomVisibleCondition(b) && BlockConfig.AllowLogistics, b => BlockConfig.AllowLogistics,
                      l => l.Terminal_WorkModeProvideForLogistics, (l, v) => l.Terminal_WorkModeProvideForLogistics = v);
-            Checkbox("CheckboxLCOpModeProvideForConstruction", StrModeProvideForConstruction,
-                     StrModeProvideForConstructionTip,
+            Checkbox("CheckboxLCOpModeProvideForConstruction", MyStrings.Logistics_ProvideForConstruction,
+                     MyStrings.Logistics_ProvideForConstructionTooltip,
                      CustomVisibleCondition, b => BlockConfig.AllowLogistics,
                      l => l.Terminal_WorkModeProvideForConstruction, (l, v) => l.Terminal_WorkModeProvideForConstruction = v);
-            Checkbox("CheckboxLCOpModePush", StrModePush,
-                     StrModePushTip,
+            Checkbox("CheckboxLCOpModePush", MyStrings.Logistics_PushAboveMax,
+                     MyStrings.Logistics_PushAboveMaxTooltip,
                      b => CustomVisibleCondition(b) && BlockConfig.AllowLogistics && BlockConfig.AllowNetworkPush,
                      b => BlockConfig.AllowLogistics && BlockConfig.AllowNetworkPush,
                      l => l.Terminal_WorkModePush, (l, v) => l.Terminal_WorkModePush = v);
-            Checkbox("CheckboxLCOpModeRequest", StrModeRequest,
-                     StrModeRequestTip,
+            Checkbox("CheckboxLCOpModeRequest", MyStrings.Logistics_RequestBelowMin,
+                     MyStrings.Logistics_RequestBelowMinTooltip,
                      b => CustomVisibleCondition(b) && BlockConfig.AllowLogistics && BlockConfig.AllowNetworkRequests,
                      b => BlockConfig.AllowLogistics && BlockConfig.AllowNetworkRequests,
                      l => l.Terminal_WorkModeRequest, (l, v) => l.Terminal_WorkModeRequest = v);
-            Checkbox("CheckboxLCAcceptOreWithoutRefinery", StrAcceptOreWithoutRefinery,
-                     StrAcceptOreWithoutRefineryTip,
+            Checkbox("CheckboxLCAcceptOreWithoutRefinery", MyStrings.Logistics_AcceptOresIce,
+                     MyStrings.Logistics_AcceptOresIceTooltip,
                      CustomVisibleCondition, b => BlockConfig.AllowLogistics,
                      l => l.Terminal_AcceptOreWithoutRefinery, (l, v) => l.Terminal_AcceptOreWithoutRefinery = v);
             Separator();
-            Label(IdPrefix + "LabelItems", StrItemsItemMinMax);
+            Label(IdPrefix + "LabelItems", MyStrings.Logistics_ItemsItemMinMax);
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlListbox, IMyProgrammableBlock>(IdPrefix + "ItemList");
-                c.Title = StrItems;
+                c.Title = MyStrings.Logistics_Items;
                 c.Tooltip = MyStrings.BLANK;
                 c.SupportsMultipleBlocks = false;
                 c.Visible = CustomVisibleCondition;
@@ -206,10 +172,10 @@ namespace Automata.Logistics
                 itemList = c;
                 Add(c);
             }
-            Label(IdPrefix + "LabelQuotas", StrMinMax0NotSet);
+            Label(IdPrefix + "LabelQuotas", MyStrings.Logistics_MinMax0NotSet);
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlListbox, IMyProgrammableBlock>(IdPrefix + "QuotaList");
-                c.Title = StrMinMax;
+                c.Title = MyStrings.Logistics_MinMax;
                 c.Tooltip = MyStrings.BLANK;
                 c.SupportsMultipleBlocks = false;
                 c.Visible = CustomVisibleCondition;
@@ -228,8 +194,8 @@ namespace Automata.Logistics
             }
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlTextbox, IMyProgrammableBlock>(IdPrefix + "QuotaEdit");
-                c.Title = StrEntry;
-                c.Tooltip = StrEntryTip;
+                c.Title = MyStrings.Logistics_Entry;
+                c.Tooltip = MyStrings.Logistics_EntryTooltip;
                 c.SupportsMultipleBlocks = false;
                 c.Visible = CustomVisibleCondition;
                 c.Getter = b => { var l = GetBlock(b); return l != null ? l.Terminal_EditText : new StringBuilder(); };
@@ -237,13 +203,13 @@ namespace Automata.Logistics
                 editBox = c;
                 Add(c);
             }
-            Button("QuotaEditAndAdd", StrQuotaEditAndAdd, MyStrings.BLANK, l => l.Terminal_EditAndAdd());
-            Button("QuotaEdit2", StrQuotaEdit, MyStrings.BLANK, l => l.Terminal_EditQuota());
-            Button("QuotaRemove", StrQuotaRemove, MyStrings.BLANK, l => l.Terminal_RemoveQuota());
-            Button("QuotaAddManually", StrQuotaAddManually, MyStrings.BLANK, l => l.Terminal_AddManually());
-            Button("QuotaClear", StrQuotaClear, MyStrings.BLANK, l => { l.Terminal_ClearQuotas(); return true; });
+            Button("QuotaEditAndAdd", MyStrings.Logistics_EditAndAdd, MyStrings.BLANK, l => l.Terminal_EditAndAdd());
+            Button("QuotaEdit2", MyStrings.Keen_Edit, MyStrings.BLANK, l => l.Terminal_EditQuota());
+            Button("QuotaRemove", MyStrings.Keen_Remove, MyStrings.BLANK, l => l.Terminal_RemoveQuota());
+            Button("QuotaAddManually", MyStrings.Logistics_AddManually, MyStrings.BLANK, l => l.Terminal_AddManually());
+            Button("QuotaClear", MyStrings.Logistics_ClearAll, MyStrings.BLANK, l => { l.Terminal_ClearQuotas(); return true; });
             Separator();
-            Button("RetryHeld", StrRetryHeld, MyStrings.BLANK,
+            Button("RetryHeld", MyStrings.Logistics_RetryHeldJobs, MyStrings.BLANK,
                    l => { l.Terminal_RetryHeld(); return false; });
             NicknameControl.Add<IMyProgrammableBlock, LogisticsComputerBlock>(IdPrefix + "Nick", GetBlock, l => l.Nickname, (l, v) => l.Terminal_Nickname = v);
             LcdTagControl.Add(IdPrefix + "LcdTag", GetBlock, l => l.Terminal_LcdTag, (l, v) => l.Terminal_LcdTag = v, "[LogisticComputer]");
@@ -252,14 +218,14 @@ namespace Automata.Logistics
 
         static readonly Dictionary<ItemCategory, MyStringId> CategoryNames = new Dictionary<ItemCategory, MyStringId>
         {
-            { ItemCategory.Component, StrCategoryComponent },
-            { ItemCategory.Tool, StrCategoryTool },
-            { ItemCategory.PlayerWeapon, StrCategoryPlayerWeapon },
-            { ItemCategory.PlayerAmmo, StrCategoryPlayerAmmo },
-            { ItemCategory.BlockAmmo, StrCategoryBlockAmmo },
-            { ItemCategory.Ingot, StrCategoryIngot },
-            { ItemCategory.Ore, StrCategoryOre },
-            { ItemCategory.Other, StrCategoryOther },
+            { ItemCategory.Component, MyStrings.Logistics_Component },
+            { ItemCategory.Tool, MyStrings.Logistics_Tool },
+            { ItemCategory.PlayerWeapon, MyStrings.Logistics_PlayerWeapon },
+            { ItemCategory.PlayerAmmo, MyStrings.Logistics_PlayerWeaponAmmo },
+            { ItemCategory.BlockAmmo, MyStrings.Logistics_BlockAmmo },
+            { ItemCategory.Ingot, MyStrings.Logistics_Ingot },
+            { ItemCategory.Ore, MyStrings.Logistics_Ore },
+            { ItemCategory.Other, MyStrings.Logistics_Other },
         };
 
         static void ItemListContent(IMyTerminalBlock b, List<MyTerminalControlListBoxItem> items, List<MyTerminalControlListBoxItem> selected)

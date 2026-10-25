@@ -6,6 +6,7 @@ using VRage.Utils;
 using VRageMath;
 
 using Automata.Util.Logging;
+using Automata.Util.Strings;
 
 namespace Automata.Util
 {
@@ -18,11 +19,6 @@ namespace Automata.Util
     /// </summary>
     public sealed class DroneWatch
     {
-        private static readonly MyStringId StrNotHeard = MyStringId.GetOrCompute("Drone {0} has not been heard of for {1} min!");
-        private static readonly MyStringId StrLastSeen = MyStringId.GetOrCompute("{0} Last known position {1}");
-        private static readonly MyStringId StrLostInLane = MyStringId.GetOrCompute("{0}: lost in lane {1}");
-        private static readonly MyStringId StrHeardAgain = MyStringId.GetOrCompute("Drone {0} heard again");
-
         public const int SILENT_TICKS = 10 * 60 * 60;
         private const int FORGET_TICKS = 30 * 60 * 60;
         private const int CHECK_EVERY = 5 * 60;
@@ -42,7 +38,7 @@ namespace Automata.Util
             if (!drones.TryGetValue(drone, out e)) { e = new Entry { JobId = jobId, Last = now }; drones[drone] = e; }
             else
             {
-                if (e.Warned && addEvent != null) addEvent(Loc.F(StrHeardAgain, Nicknames.Of(drone)));
+                if (e.Warned && addEvent != null) addEvent(Loc.F(MyStrings.Common_DroneHeardAgain, Nicknames.Of(drone)));
                 e.JobId = jobId;
                 e.Last = now;
                 e.Warned = false;
@@ -75,11 +71,11 @@ namespace Automata.Util
                 // Last seen flying a lane: said so (and the lane is suspended)
                 var lanes = Pathfinding.PathfindingManager.Instance != null ? Pathfinding.PathfindingManager.Instance.Lanes : null;
                 string lane = lanes != null ? lanes.Lost(kv.Key, now) : null;
-                string text = lane != null ? Loc.F(StrLostInLane, Nicknames.Of(kv.Key), lane) : Loc.F(StrNotHeard, Nicknames.Of(kv.Key), SILENT_TICKS / 3600);
+                string text = lane != null ? Loc.F(MyStrings.Common_LostInLane, Nicknames.Of(kv.Key), lane) : Loc.F(MyStrings.Common_DroneHasNotBeenHeard, Nicknames.Of(kv.Key), SILENT_TICKS / 3600);
                 if (e.HasPos)
                 {
                     string name = (Nicknames.Of(kv.Key) + " last seen").Replace(':', ' ');
-                    text = Loc.F(StrLastSeen, text, string.Format(System.Globalization.CultureInfo.InvariantCulture, "GPS:{0}:{1:F1}:{2:F1}:{3:F1}:", name, e.Pos.X, e.Pos.Y, e.Pos.Z));
+                    text = Loc.F(MyStrings.Common_LastKnownPosition, text, string.Format(System.Globalization.CultureInfo.InvariantCulture, "GPS:{0}:{1:F1}:{2:F1}:{3:F1}:", name, e.Pos.X, e.Pos.Y, e.Pos.Z));
                 }
                 string via = "broadcast off";
                 bool sent = broadcast && block != null && BroadcastControllerSender.Send(block, Nicknames.Of(blockId) + ": " + text, out via);

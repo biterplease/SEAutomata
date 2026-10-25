@@ -2,6 +2,7 @@ using Sandbox.ModAPI;
 using VRage.Utils;
 
 using Automata.Util;
+using Automata.Util.Strings;
 
 namespace Automata.Drone
 {
@@ -12,11 +13,6 @@ namespace Automata.Drone
     // is back. Docked / parked drones are left to pre-flight, which checks own power before letting go.
     public partial class DroneControllerBlock
     {
-        private static readonly MyStringId StrNoPowerToFly = MyStringId.GetOrCompute("No power to fly: {0}. Stopped; checked again every {1} s");
-        private static readonly MyStringId StrDroneNoPowerToFly = MyStringId.GetOrCompute("No power to fly ({0}): stalled for {1} min, stopped at GPS:{2}:{3:F0}:{4:F0}:{5:F0}:");
-        private static readonly MyStringId StrPowerBack = MyStringId.GetOrCompute("Power back: flying again");
-        private static readonly MyStringId StrNoWorkingThruster = MyStringId.GetOrCompute("no thruster working (off, unpowered or unfuelled)");
-
         private const int GROUNDED_RECHECK_TICKS = 30 * 60;   // grounded: power checked again this often
         private string groundedReason;                         // non-null: grounded (in State.Error) for want of power
         private int groundedNextCheck;
@@ -39,7 +35,7 @@ namespace Automata.Drone
                 groundedReason = null;
                 groundedAlerted = false;
                 errorReason = null;
-                Report(StrPowerBack);
+                Report(MyStrings.Drone_PowerBackFlyingAgain);
                 if (currentState == State.Error) SetState(IsParkedNow() ? State.Docked : State.Standby);
                 UpdateAlert();
                 return;
@@ -47,12 +43,12 @@ namespace Automata.Drone
             groundedNextCheck = now + GROUNDED_RECHECK_TICKS;
             bool already = Grounded;
             groundedReason = why;
-            errorReason = Loc.F(StrNoPowerToFly, why, GROUNDED_RECHECK_TICKS / 60);
+            errorReason = Loc.F(MyStrings.Drone_NoPowerToFlyStopped, why, GROUNDED_RECHECK_TICKS / 60);
             if (already && !groundedAlerted && now - groundedSince >= GROUNDED_ALERT_TICKS)
             {
                 groundedAlerted = true;
                 var at = block.GetPosition();
-                Broadcast(Loc.F(StrDroneNoPowerToFly, why, GROUNDED_ALERT_TICKS / 3600, at.X, at.Y, at.Z));
+                Broadcast(Loc.F(MyStrings.Drone_NoPowerToFlyStalled, why, GROUNDED_ALERT_TICKS / 3600, at.X, at.Y, at.Z));
             }
             if (already && currentState == State.Error) return;   // still stopped: nothing new to say
             if (!already)
@@ -85,7 +81,7 @@ namespace Automata.Drone
                     if (t != null && !t.Closed && t.IsWorking) return null;
                 }
             }
-            return Loc.T(StrNoWorkingThruster);
+            return Loc.T(MyStrings.Drone_NoThrusterWorkingOffUnpowered);
         }
     }
 }

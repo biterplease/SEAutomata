@@ -6,6 +6,7 @@ using VRageMath;
 
 using Automata.Util;
 using Automata.Util.Logging;
+using Automata.Util.Strings;
 
 namespace Automata.Drone
 {
@@ -262,7 +263,7 @@ namespace Automata.Drone
                 if (!WillClear(blocker) && SwitchToSiblingConnector(Nicknames.Of(blocker.block) + " stuck in the way")) return;
                 if (Log.DebugEnabled) Log.Debug("Drone {0}: shared site: drone {1} stays in the way of the dock: planning the way in again", _entityId, blocker._entityId);
                 lastReplanFrame = MyAPIGateway.Session.GameplayFrameCounter;
-                if (!Replan()) RouteStopped(Loc.T(StrNoRouteAheadStopped));
+                if (!Replan()) RouteStopped(Loc.T(MyStrings.Drone_NoRouteAheadStopped));
                 return;
             }
             if (taskIndex >= currentJob.Tasks.Count || currentJob.Tasks[taskIndex].Type != Orchestrator.TaskType.NavigateToolTo

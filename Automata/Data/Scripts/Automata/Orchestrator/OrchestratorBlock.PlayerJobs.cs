@@ -12,6 +12,7 @@ using Automata.Util;
 using Automata.Util.Logging;
 using Automata.VirtualNetwork;
 using VRage.Utils;
+using Automata.Util.Strings;
 
 namespace Automata.Orchestrator
 {
@@ -31,17 +32,6 @@ namespace Automata.Orchestrator
     /// </summary>
     public partial class OrchestratorBlock
     {
-        #region UI strings
-        private static readonly MyStringId StrOreScout = MyStringId.GetOrCompute("ore scout");
-        private static readonly MyStringId StrOreDetectorDrone = MyStringId.GetOrCompute("drone with an ore detector");
-        private static readonly MyStringId StrCombatDrone = MyStringId.GetOrCompute("combat drone");
-        private static readonly MyStringId StrOreHauler = MyStringId.GetOrCompute("ore hauler");
-        private static readonly MyStringId StrMiningDrone = MyStringId.GetOrCompute("mining drone");
-        private static readonly MyStringId StrJobOrderedByAPlayer = MyStringId.GetOrCompute("{1}: ordered by a player\n  {2}");
-        private static readonly MyStringId StrJobCancelledNotConfirmedIn = MyStringId.GetOrCompute("{1}: cancelled, not confirmed in {2} s");
-        private static readonly MyStringId StrNotConfirmedInTime = MyStringId.GetOrCompute("not confirmed in time");
-        private static readonly MyStringId StrAutomataDesignatorOrderOrchestrator = MyStringId.GetOrCompute("Automata: {0} designator order {1} (orchestrator '{2}')");
-        #endregion
 
         private sealed class PlayerJob
         {
@@ -93,13 +83,13 @@ namespace Automata.Orchestrator
         // Who may take a designator job, for the log / feedback ("no {0} bid")
         private static string DesignatorTakerName(JobType type)
         {
-            return type == JobType.DesignatorScoutPoint ? Loc.T(StrOreDetectorDrone) : ProfileName(RequiredProfile(type));
+            return type == JobType.DesignatorScoutPoint ? Loc.T(MyStrings.Orchestrator_DroneWithAnOreDetector) : ProfileName(RequiredProfile(type));
         }
 
         private static string ProfileName(Drone.BehaviourProfile p)
         {
-            return p == Drone.BehaviourProfile.IsOreScout ? Loc.T(StrOreScout) : p == Drone.BehaviourProfile.IsCombatDrone ? Loc.T(StrCombatDrone)
-                 : p == Drone.BehaviourProfile.IsOreHauler ? Loc.T(StrOreHauler) : p == Drone.BehaviourProfile.IsMiningDrone ? Loc.T(StrMiningDrone) : p.ToString();
+            return p == Drone.BehaviourProfile.IsOreScout ? Loc.T(MyStrings.Orchestrator_OreScoutLower) : p == Drone.BehaviourProfile.IsCombatDrone ? Loc.T(MyStrings.Orchestrator_CombatDroneLower)
+                 : p == Drone.BehaviourProfile.IsOreHauler ? Loc.T(MyStrings.Orchestrator_OreHaulerLower) : p == Drone.BehaviourProfile.IsMiningDrone ? Loc.T(MyStrings.Orchestrator_MiningDroneLower) : p.ToString();
         }
 
         private static Config.ServerConfig.ScoutPointerConfig PointerConfig()
@@ -190,8 +180,8 @@ namespace Automata.Orchestrator
                     order.Cancelled++;
                     if (!playerOrdersTouched.Contains(order)) playerOrdersTouched.Add(order);
                 }
-                AddEvent(Loc.F(StrJobCancelledNotConfirmedIn, jobId, pj.Announcement.Type, PointerConfig().ConfirmTimeoutSeconds));
-                EndPlayerJob(jobId, Loc.T(StrNotConfirmedInTime));
+                AddEvent(Loc.F(MyStrings.Orchestrator_CancelledNotConfirmedInS, jobId, pj.Announcement.Type, PointerConfig().ConfirmTimeoutSeconds));
+                EndPlayerJob(jobId, Loc.T(MyStrings.Orchestrator_NotConfirmedInTime));
             }
             playerJobsEnded.Clear();
             for (int i = 0; i < playerOrdersTouched.Count; i++)
@@ -200,7 +190,7 @@ namespace Automata.Orchestrator
                 if (order.Jobs <= 0)
                 {
                     ScoutPointer.Feedback(order.Identity, DesignatorSignal.Error);
-                    SendOrderUpdate(order, 0, DesignatorOrderState.Cancelled, Loc.F(StrOrderCancelled, order.Name));
+                    SendOrderUpdate(order, 0, DesignatorOrderState.Cancelled, Loc.F(MyStrings.Orchestrator_CancelledNoDroneTookIt, order.Name));
                 }
                 else CheckOrder(order);
             }
@@ -287,7 +277,7 @@ namespace Automata.Orchestrator
             try
             {
                 var cfg = PointerConfig();
-                var gps = MyAPIGateway.Session.GPS.Create(order.Name, Loc.F(StrAutomataDesignatorOrderOrchestrator,
+                var gps = MyAPIGateway.Session.GPS.Create(order.Name, Loc.F(MyStrings.Orchestrator_AutomataDesignatorOrderOrchestrator,
                                                           order.Kind, order.OrderId, block != null ? block.CustomName : entityId.ToString()),
                                                           order.Position, true, true);
                 gps.GPSColor = order.Confirmed ? cfg.ConfirmedGpsColor : cfg.PendingGpsColor;

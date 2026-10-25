@@ -17,6 +17,7 @@ using Automata.Util;
 using Automata.Util.Logging;
 using Automata.VirtualNetwork;
 using Digi.NetworkLib;
+using Automata.Util.Strings;
 
 namespace Automata.Pointer
 {
@@ -53,18 +54,6 @@ namespace Automata.Pointer
     /// </summary>
     public static class ScoutPointer
     {
-        #region UI strings
-        private static readonly MyStringId StrEngageTarget = MyStringId.GetOrCompute("engage {0}");
-        private static readonly MyStringId StrEscortTarget = MyStringId.GetOrCompute("escort {0}");
-        private static readonly MyStringId StrSpotCheck = MyStringId.GetOrCompute("spot check");
-        private static readonly MyStringId StrSpotCheckN = MyStringId.GetOrCompute("spot check {0}/{1}");
-        private static readonly MyStringId StrSpotCheckMarker = MyStringId.GetOrCompute("Spot check");
-        private static readonly MyStringId StrAreaSweepSector = MyStringId.GetOrCompute("area sweep sector {0}/{1}");
-        private static readonly MyStringId StrAreaSweep = MyStringId.GetOrCompute("Area sweep");
-        private static readonly MyStringId StrEngageAtAPoint = MyStringId.GetOrCompute("engage at a point");
-        private static readonly MyStringId StrADesignatedPoint = MyStringId.GetOrCompute("a designated point");
-        private static readonly MyStringId StrScoutLaser = MyStringId.GetOrCompute("scout laser");
-        #endregion
 
         // Hand item subtypes (MyObjectBuilder_AutomaticRifle): the held entity's DefinitionId
         public const string COMBAT_HAND_ITEM = "AutomataHostileTargetDesignator";
@@ -493,7 +482,7 @@ namespace Automata.Pointer
             if (mode == PointerMode.Tag) return "tag";
             if (mode == PointerMode.Green) return "recall";
             if (kind == PointerKind.Combat) return mode == PointerMode.Red ? "engage" : "escort";
-            return mode == PointerMode.Red ? Loc.T(StrSpotCheck) : "area sweep";
+            return mode == PointerMode.Red ? Loc.T(MyStrings.Common_SpotCheck) : "area sweep";
         }
 
         /// <summary>The hit entity's relation to the player (grids: by majority owner; characters: their identity).</summary>
@@ -838,8 +827,8 @@ namespace Automata.Pointer
                 var spots = SpreadSpots(hit, p.HitNormal.ToVector3D(), Math.Max(1, tagged.Count));
                 for (int s = 0; s < spots.Count; s++)
                     sink.Submit(Orchestrator.JobType.DesignatorScoutPoint, ScoutPlanner.SpotCheck(spots[s], p.HitNormal.ToVector3D(), at), hit,
-                                         spots.Count > 1 ? Loc.F(StrSpotCheckN, s + 1, spots.Count) : Loc.T(StrSpotCheck), identity, p.Kind,
-                                         Loc.T(StrSpotCheckMarker), ref order, s < tagged.Count ? tagged[s] : 0);
+                                         spots.Count > 1 ? Loc.F(MyStrings.Common_SpotCheckArg0SlashArg1, s + 1, spots.Count) : Loc.T(MyStrings.Common_SpotCheck), identity, p.Kind,
+                                         Loc.T(MyStrings.Common_SpotCheck2), ref order, s < tagged.Count ? tagged[s] : 0);
                 Feedback(identity, DesignatorSignal.Requested);
                 if (tagged.Count > 0) ForgetTags(identity, p.Kind, "order given");
                 return;
@@ -862,8 +851,8 @@ namespace Automata.Pointer
             string how;
             var sectors = ScoutPlanner.AreaSweep(hit, at, Math.Max(1, tagged.Count), out how, SmallestDetectorRange(tagged));
             for (int s = 0; s < sectors.Count; s++)
-                sink.Submit(Orchestrator.JobType.DesignatorScoutArea, sectors[s], hit, Loc.F(StrAreaSweepSector, s + 1, sectors.Count),
-                                     identity, p.Kind, Loc.T(StrAreaSweep), ref order, s < tagged.Count ? tagged[s] : 0);
+                sink.Submit(Orchestrator.JobType.DesignatorScoutArea, sectors[s], hit, Loc.F(MyStrings.Common_AreaSweepSector, s + 1, sectors.Count),
+                                     identity, p.Kind, Loc.T(MyStrings.Common_AreaSweep), ref order, s < tagged.Count ? tagged[s] : 0);
             if (Log.DebugEnabled) Log.Debug("Pointer: [server] area sweep at {0} for player {1}: {2}", hit, identity, how);
             Feedback(identity, DesignatorSignal.Requested);
             if (tagged.Count > 0) ForgetTags(identity, p.Kind, "order given");
@@ -871,7 +860,6 @@ namespace Automata.Pointer
 
         #region Camera designator (target designator block toolbar actions)
         private static readonly List<IMyCubeGrid> cameraGroup = new List<IMyCubeGrid>();
-        private static readonly MyStringId StrTagsCleared = MyStringId.GetOrCompute("tags cleared ({0} drones)");
 
         /// <summary>
         /// Server: a "Designator:" action of a target designator block, pressed by a player with terminal access: its camera
@@ -896,7 +884,7 @@ namespace Automata.Pointer
             if (p.Order == DesignatorOrder.Clear)   // no camera needed
             {
                 int n = ClearTagsFor(((IMyCubeBlock)tb).OwnerId);
-                designator.AddLog(Loc.F(StrTagsCleared, n));
+                designator.AddLog(Loc.F(MyStrings.Common_TagsClearedDrones, n));
                 Feedback(identity, DesignatorSignal.Recall);
                 return;
             }
@@ -1044,7 +1032,7 @@ namespace Automata.Pointer
                 uint pointOrder = 0;
                 for (int i = 0; i < n; i++)
                     sink.Submit(Orchestrator.JobType.DesignatorEngage, new List<Orchestrator.Task> { Orchestrator.Task.Engage(0, spot) }, spot,
-                                         Loc.T(StrEngageAtAPoint), identity, p.Kind, Loc.T(StrADesignatedPoint), ref pointOrder, i < tagged.Count ? tagged[i] : 0);
+                                         Loc.T(MyStrings.Common_EngageAtAPoint), identity, p.Kind, Loc.T(MyStrings.Common_ADesignatedPoint), ref pointOrder, i < tagged.Count ? tagged[i] : 0);
                 return true;
             }
             long owner = 0;
@@ -1066,13 +1054,13 @@ namespace Automata.Pointer
                 Vector3D hit = p.HitPosition.ToVector3D();
                 for (int i = 0; i < n; i++)
                     sink.Submit(Orchestrator.JobType.DesignatorEngage, new List<Orchestrator.Task> { Orchestrator.Task.Engage(target.EntityId, hit) },
-                                         hit, Loc.F(StrEngageTarget, name), identity, p.Kind, name, ref order, i < tagged.Count ? tagged[i] : 0);
+                                         hit, Loc.F(MyStrings.Common_EngageArg0, name), identity, p.Kind, name, ref order, i < tagged.Count ? tagged[i] : 0);
                 return true;
             }
             if (!friendly || npc || (grid != null && grid.IsStatic)) { Feedback(identity, DesignatorSignal.Error); return false; }
             for (int i = 0; i < n; i++)
                 sink.Submit(Orchestrator.JobType.DesignatorEscort, new List<Orchestrator.Task> { Orchestrator.Task.Escort(target.EntityId, at) },
-                                     at, Loc.F(StrEscortTarget, name), identity, p.Kind, name, ref order, i < tagged.Count ? tagged[i] : 0);
+                                     at, Loc.F(MyStrings.Common_EscortArg0, name), identity, p.Kind, name, ref order, i < tagged.Count ? tagged[i] : 0);
             return true;
         }
 
@@ -1117,7 +1105,7 @@ namespace Automata.Pointer
             {
                 DronesOn(grid);
                 for (int i = 0; i < groupDrones.Count; i++)
-                    if (Drone.AnchorDirectory.IsAllowed(((IMyCubeBlock)groupDrones[i].Entity).OwnerId, identity) && groupDrones[i].Recall(Loc.T(StrScoutLaser))) n++;
+                    if (Drone.AnchorDirectory.IsAllowed(((IMyCubeBlock)groupDrones[i].Entity).OwnerId, identity) && groupDrones[i].Recall(Loc.T(MyStrings.Common_ScoutLaser))) n++;
                 groupDrones.Clear();
             }
             if (n == 0)
@@ -1127,7 +1115,7 @@ namespace Automata.Pointer
                     var o = OrchestratorBlock.All[i];
                     int drones, cancelled;
                     if (!o.IsRunning || !Drone.AnchorDirectory.IsAllowed(o.OwnerId, identity)) continue;
-                    if (o.RecallOrderAt(hit, RECALL_MARKER_RADIUS, Loc.T(StrScoutLaser), out drones, out cancelled)) n = drones + cancelled;
+                    if (o.RecallOrderAt(hit, RECALL_MARKER_RADIUS, Loc.T(MyStrings.Common_ScoutLaser), out drones, out cancelled)) n = drones + cancelled;
                 }
             }
             Feedback(identity, n > 0 ? DesignatorSignal.Recall : DesignatorSignal.Error);

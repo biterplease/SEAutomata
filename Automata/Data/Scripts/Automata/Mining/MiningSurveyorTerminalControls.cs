@@ -23,39 +23,6 @@ namespace Automata.Mining
     /// </summary>
     public static class MiningSurveyorTerminalControls
     {
-        #region UI strings
-        private static readonly MyStringId StrKg = MyStringId.GetOrCompute("{0} kg");
-        private static readonly MyStringId StrBroadcastSends = MyStringId.GetOrCompute("nothing yet.");
-        private static readonly MyStringId StrCheckboxShowGps = MyStringId.GetOrCompute("Show deposits as GPS");
-        private static readonly MyStringId StrCheckboxShowGpsTip = MyStringId.GetOrCompute("Temporary GPS markers for the known deposits (nearest first), for the block's owner only.");
-        private static readonly MyStringId StrShowDeposits = MyStringId.GetOrCompute("Show known deposits");
-        private static readonly MyStringId StrShowDepositsTip = MyStringId.GetOrCompute("Puts the known deposits (nearest first) on your GPS list as temporary markers, once. The game drops them after a few minutes; pressing again replaces them.");
-        private static readonly MyStringId StrCheckboxKeepConstant = MyStringId.GetOrCompute("Keep orders constant");
-        private static readonly MyStringId StrCheckboxKeepConstantTip = MyStringId.GetOrCompute("Orders are not counted down: mining jobs keep going out while deposits of the ore are known.");
-        private static readonly MyStringId StrOrderAdd = MyStringId.GetOrCompute("Add / update");
-        private static readonly MyStringId StrOrderAddTip = MyStringId.GetOrCompute("The order goes into the list (replacing the same ore's order).");
-        private static readonly MyStringId StrOrderEdit = MyStringId.GetOrCompute("Edit");
-        private static readonly MyStringId StrOrderEdit2Tip = MyStringId.GetOrCompute("The order replaces the one selected in the list.");
-        private static readonly MyStringId StrOrderRemove = MyStringId.GetOrCompute("Remove");
-        private static readonly MyStringId StrOrderRemoveTip = MyStringId.GetOrCompute("Removes the order selected in the list.");
-        private static readonly MyStringId StrOrderClear = MyStringId.GetOrCompute("Clear all");
-        private static readonly MyStringId StrOrderClearTip = MyStringId.GetOrCompute("Empties the order list.");
-        private static readonly MyStringId StrRetryJobs = MyStringId.GetOrCompute("Retry jobs");
-        private static readonly MyStringId StrRetryJobsTip = MyStringId.GetOrCompute("Mining jobs no drone has taken are announced again now, holds after failed auctions lifted.");
-        private static readonly MyStringId StrDeleteDeposits = MyStringId.GetOrCompute("Delete known deposits");
-        private static readonly MyStringId StrDeleteDepositsTip = MyStringId.GetOrCompute("Forgets every known deposit (and those found depleted). Jobs no drone has taken for them are dropped. New scans and drone surveys find deposits again.");
-        private static readonly MyStringId StrKnownOresOreDeposits = MyStringId.GetOrCompute("Known ores (ore:deposits)");
-        private static readonly MyStringId StrOrdersOreKg = MyStringId.GetOrCompute("Orders (ore:kg)");
-        private static readonly MyStringId StrEnableThisMiningSurveyorOre = MyStringId.GetOrCompute("Enable this Mining Surveyor: ore scans, survey data from drones, mining jobs.");
-        private static readonly MyStringId StrJobSize = MyStringId.GetOrCompute("Job size");
-        private static readonly MyStringId StrJobSizeTip = MyStringId.GetOrCompute("kg of ore one mining job asks for. A drone fills its cargo; what it brings is counted off the order.");
-        private static readonly MyStringId StrKnownOres = MyStringId.GetOrCompute("Known ores");
-        private static readonly MyStringId StrKnownOresTip = MyStringId.GetOrCompute("Ores of the deposits this surveyor knows, without an order yet. Select one to order it below.");
-        private static readonly MyStringId StrOrders = MyStringId.GetOrCompute("Orders");
-        private static readonly MyStringId StrOrdersTip = MyStringId.GetOrCompute("Ore to mine, kg. Each mining job is counted off its order; at 0 no more jobs go out (unless kept constant).");
-        private static readonly MyStringId StrOrder = MyStringId.GetOrCompute("Order");
-        private static readonly MyStringId StrOrderTip = MyStringId.GetOrCompute("ore:kg, e.g. Ore/Iron:100000 or Iron:50000 (whole kg above 0)");
-        #endregion
 
         const string IdPrefix = AutomataSession.MOD_NAME + "_MiningSurveyor_";
         static bool Done = false;
@@ -91,11 +58,11 @@ namespace Automata.Mining
 
         static void CreateActions()
         {
-            AddAction(IdPrefix + "_Action_ShowKnownOreDeposits_ON", Loc.Compose(MyStrings.Toggle, MyStrings.Show, MyStrings.KnownOreDeposits, MyStrings.On), ICON_ON, b => { if (!b.Terminal_ShowGps) { b.Terminal_ShowGps = true; } }, (b, sb) => sb.Append(Loc.Compose(MyStrings.Show, MyStrings.On, sep: ":")));
-            AddAction(IdPrefix + "_Action_ShowKnownOreDeposits_OFF", Loc.Compose(MyStrings.Toggle, MyStrings.Show, MyStrings.KnownOreDeposits, MyStrings.Off), ICON_OFF, b => { if (b.Terminal_ShowGps) { b.Terminal_ShowGps = false; } }, (b, sb) => sb.Append(Loc.Compose(MyStrings.Show, MyStrings.Off, sep: ":")));
-            AddAction(IdPrefix + "_Action_ShowKnownOreDeposits_ON_OFF", Loc.Compose(MyStrings.Toggle, MyStrings.Show, MyStrings.KnownOreDeposits, MyStrings.On_Off), ICON_TOGGLE, b => { b.Terminal_ShowGps = !b.Terminal_ShowGps; }, (b, sb) => sb.Append(b.Terminal_IsEnabled ? Loc.Compose(MyStrings.Show, MyStrings.On, sep: ":") : Loc.Compose(MyStrings.Show, MyStrings.Off, sep: ":")));
+            AddAction(IdPrefix + "_Action_ShowKnownOreDeposits_ON", Loc.T(MyStrings.Mining_ToggleShowKnownOreDepositsOn), ICON_ON, b => { if (!b.Terminal_ShowGps) { b.Terminal_ShowGps = true; } }, (b, sb) => sb.Append(Loc.T(MyStrings.Mining_ShowOn)));
+            AddAction(IdPrefix + "_Action_ShowKnownOreDeposits_OFF", Loc.T(MyStrings.Mining_ToggleShowKnownOreDepositsOff), ICON_OFF, b => { if (b.Terminal_ShowGps) { b.Terminal_ShowGps = false; } }, (b, sb) => sb.Append(Loc.T(MyStrings.Mining_ShowOff)));
+            AddAction(IdPrefix + "_Action_ShowKnownOreDeposits_ON_OFF", Loc.T(MyStrings.Mining_ToggleShowKnownOreDepositsOnOff), ICON_TOGGLE, b => { b.Terminal_ShowGps = !b.Terminal_ShowGps; }, (b, sb) => sb.Append(b.Terminal_IsEnabled ? Loc.T(MyStrings.Mining_ShowOn) : Loc.T(MyStrings.Mining_ShowOff)));
             
-            AddAction(IdPrefix + "_Action_DeleteDeposits", Loc.T(StrDeleteDeposits), ICON_RESET, b => { b.Terminal_DeleteDeposits(); }, null);
+            AddAction(IdPrefix + "_Action_DeleteDeposits", Loc.T(MyStrings.Mining_DeleteKnownDeposits), ICON_RESET, b => { b.Terminal_DeleteDeposits(); }, null);
         }
         static MiningSurveyorBlock GetBlock(IMyTerminalBlock b)
         {
@@ -148,6 +115,27 @@ namespace Automata.Mining
             Add(c);
         }
 
+        /// <summary>
+        /// On/Off Toggle
+        /// </summary>
+        static void OnOffSwitch(string id, MyStringId title, MyStringId tooltip, Func<MiningSurveyorBlock, bool> get, Action<MiningSurveyorBlock, bool> set)
+        {
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlOnOffSwitch, IMyProgrammableBlock>(id);
+                c.Title = title;
+                c.Tooltip = tooltip;
+                c.SupportsMultipleBlocks = true;
+
+                c.Visible = Visible;
+                c.OnText = MySpaceTexts.SwitchText_On;
+                c.OffText = MySpaceTexts.SwitchText_Off;
+
+                c.Getter = b => { var l = GetBlock(b); return l != null && get(l); };
+                c.Setter =(b, v) => { var l = GetBlock(b); if (l != null) set(l,v); };
+                Add(c);
+            }
+        }
+
         static void Button(string id, MyStringId title, MyStringId tooltip, Func<MiningSurveyorBlock, bool> act)
         {
             var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlButton, IMyProgrammableBlock>(IdPrefix + id);
@@ -165,7 +153,7 @@ namespace Automata.Mining
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlOnOffSwitch, IMyProgrammableBlock>(IdPrefix + "OnOffEnabled");
                 c.Title = MySpaceTexts.BlockPropertyTitle_EnableAI;
-                c.Tooltip = StrEnableThisMiningSurveyorOre;
+                c.Tooltip = MyStrings.Mining_EnableThisMiningSurveyorOre;
                 c.SupportsMultipleBlocks = true;
                 c.Visible = Visible;
                 c.OnText = MySpaceTexts.SwitchText_On;
@@ -174,33 +162,32 @@ namespace Automata.Mining
                 c.Setter = (b, v) => { var l = GetBlock(b); if (l != null) l.Terminal_IsEnabled = v; };
                 Add(c);
             }
-            Button("RetryJobs", StrRetryJobs, StrRetryJobsTip, l => l.Terminal_RetryJobs());
-            Button("DeleteDeposits", StrDeleteDeposits, StrDeleteDepositsTip, l => l.Terminal_DeleteDeposits());
-            Checkbox("CheckboxShowGps", StrCheckboxShowGps,
-                     StrCheckboxShowGpsTip,
+            Button("RetryJobs", MyStrings.Mining_RetryJobs, MyStrings.Mining_MiningJobsNoDroneHasTooltip, l => l.Terminal_RetryJobs());
+            Button("DeleteDeposits", MyStrings.Mining_DeleteKnownDeposits, MyStrings.Mining_DeleteKnownDepositsTooltip, l => l.Terminal_DeleteDeposits());
+            OnOffSwitch("CheckboxShowGps", MyStrings.Mining_ShowDepositsAsGPS,
+                     MyStrings.Mining_ShowDepositsAsGPSTooltip,
                      l => l.Terminal_ShowGps, (l, v) => l.Terminal_ShowGps = v);
-                Button("ShowDeposits", StrShowDeposits, StrShowDepositsTip, l => l.Terminal_ShowDeposits());
-            Checkbox("CheckboxKeepConstant", StrCheckboxKeepConstant,
-                     StrCheckboxKeepConstantTip,
+            Checkbox("CheckboxKeepConstant", MyStrings.Mining_KeepOrdersConstant,
+                     MyStrings.Mining_KeepOrdersConstantTooltip,
                      l => l.Terminal_KeepOrdersConstant, (l, v) => l.Terminal_KeepOrdersConstant = v);
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSlider, IMyProgrammableBlock>(IdPrefix + "SliderJobSize");
-                c.Title = StrJobSize;
-                c.Tooltip = StrJobSizeTip;
+                c.Title = MyStrings.Mining_JobSize;
+                c.Tooltip = MyStrings.Mining_JobSizeTooltip;
                 c.SupportsMultipleBlocks = true;
                 c.Visible = Visible;
                 c.SetLimits(MiningSurveyorBlock.JOB_SIZE_MIN, MiningSurveyorBlock.JOB_SIZE_MAX);
                 c.Getter = b => { var l = GetBlock(b); return l != null ? l.Terminal_JobSizeKg : MiningSurveyorBlock.JOB_SIZE_MIN; };
                 c.Setter = (b, v) => { var l = GetBlock(b); if (l != null) l.Terminal_JobSizeKg = v; };
-                c.Writer = (b, sb) => { var l = GetBlock(b); if (l != null) sb.AppendLoc(StrKg, l.Terminal_JobSizeKg.ToString("N0", CultureInfo.InvariantCulture)); };
+                c.Writer = (b, sb) => { var l = GetBlock(b); if (l != null) sb.AppendLoc(MyStrings.Mining_Arg0Kg, l.Terminal_JobSizeKg.ToString("N0", CultureInfo.InvariantCulture)); };
                 Add(c);
             }
             Separator();
-            Label(IdPrefix + "LabelOres", StrKnownOresOreDeposits);
+            Label(IdPrefix + "LabelOres", MyStrings.Mining_KnownOresOreDeposits);
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlListbox, IMyProgrammableBlock>(IdPrefix + "OreList");
-                c.Title = StrKnownOres;
-                c.Tooltip = StrKnownOresTip;
+                c.Title = MyStrings.Mining_KnownOres;
+                c.Tooltip = MyStrings.Mining_KnownOresTooltip;
                 c.SupportsMultipleBlocks = false;
                 c.Visible = Visible;
                 c.Multiselect = false;
@@ -216,11 +203,11 @@ namespace Automata.Mining
                 oreList = c;
                 Add(c);
             }
-            Label(IdPrefix + "LabelOrders", StrOrdersOreKg);
+            Label(IdPrefix + "LabelOrders", MyStrings.Mining_OrdersOreKg);
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlListbox, IMyProgrammableBlock>(IdPrefix + "OrderList");
-                c.Title = StrOrders;
-                c.Tooltip = StrOrdersTip;
+                c.Title = MyStrings.Mining_Orders;
+                c.Tooltip = MyStrings.Mining_OrdersTooltip;
                 c.SupportsMultipleBlocks = false;
                 c.Visible = Visible;
                 c.Multiselect = false;
@@ -238,8 +225,8 @@ namespace Automata.Mining
             }
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlTextbox, IMyProgrammableBlock>(IdPrefix + "OrderEdit");
-                c.Title = StrOrder;
-                c.Tooltip = StrOrderTip;
+                c.Title = MyStrings.Mining_Order;
+                c.Tooltip = MyStrings.Mining_OrderTooltip;
                 c.SupportsMultipleBlocks = false;
                 c.Visible = Visible;
                 c.Getter = b => { var l = GetBlock(b); return l != null ? l.Terminal_EditText : new System.Text.StringBuilder(); };
@@ -247,10 +234,10 @@ namespace Automata.Mining
                 editBox = c;
                 Add(c);
             }
-            Button("OrderAdd", StrOrderAdd, StrOrderAddTip, l => l.Terminal_AddOrder());
-            Button("OrderEdit2", StrOrderEdit, StrOrderEdit2Tip, l => l.Terminal_EditOrder());
-            Button("OrderRemove", StrOrderRemove, StrOrderRemoveTip, l => l.Terminal_RemoveOrder());
-            Button("OrderClear", StrOrderClear, StrOrderClearTip, l => { l.Terminal_ClearOrders(); return true; });
+            Button("OrderAdd", MyStrings.Mining_AddUpdate, MyStrings.Mining_AddUpdateTooltip, l => l.Terminal_AddOrder());
+            Button("OrderEdit2", MyStrings.Keen_Edit, MyStrings.Mining_TheOrderReplacesTheOneTooltip, l => l.Terminal_EditOrder());
+            Button("OrderRemove", MyStrings.Keen_Remove, MyStrings.Mining_RemoveTooltip, l => l.Terminal_RemoveOrder());
+            Button("OrderClear", MyStrings.Mining_ClearAll, MyStrings.Mining_ClearAllTooltip, l => { l.Terminal_ClearOrders(); return true; });
             NicknameControl.Add<IMyProgrammableBlock, MiningSurveyorBlock>(IdPrefix + "Nick", GetBlock, l => l.Nickname, (l, v) => l.Terminal_Nickname = v);
             LcdTagControl.Add(IdPrefix + "LcdTag", GetBlock, l => l.Terminal_LcdTag, (l, v) => l.Terminal_LcdTag = v, "[MiningSurveyor]");
             LcdControls.Add(IdPrefix, GetBlock, l => l.Terminal_LcdStyle, l => l.Terminal_LcdEdited(), true);

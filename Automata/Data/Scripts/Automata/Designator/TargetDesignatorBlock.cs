@@ -14,6 +14,7 @@ using Automata.Pointer;
 using Automata.Util;
 using Automata.Util.Logging;
 using Automata.VirtualNetwork;
+using Automata.Util.Strings;
 
 namespace Automata.Designator
 {
@@ -35,25 +36,6 @@ namespace Automata.Designator
     [MyEntityComponentDescriptor(typeof(MyObjectBuilder_MyProgrammableBlock), false, "AutomataLargeTargetDesignator", "AutomataSmallTargetDesignator")]
     public class TargetDesignatorBlock : SettingsBlockLogic, INicknamed
     {
-        #region UI strings
-        private static readonly MyStringId StrNoCamera = MyStringId.GetOrCompute("(none)");
-        private static readonly MyStringId StrNoCameraSelected = MyStringId.GetOrCompute("no designator camera selected");
-        private static readonly MyStringId StrCameraGone = MyStringId.GetOrCompute("the designator camera is gone");
-        private static readonly MyStringId StrCameraOff = MyStringId.GetOrCompute("the designator camera '{0}' isn't working");
-        private static readonly MyStringId StrCameraDetached = MyStringId.GetOrCompute("the designator camera '{0}' isn't on this construct (rotor / hinge / piston)");
-        private static readonly MyStringId StrCameraForeign = MyStringId.GetOrCompute("the designator camera '{0}' isn't yours or your faction's");
-        private static readonly MyStringId StrRefused = MyStringId.GetOrCompute("Designator: {0}");
-        private static readonly MyStringId StrNoOrchestrator = MyStringId.GetOrCompute("{0}: no orchestrator answered (in reach of an antenna?)");
-        private static readonly MyStringId StrNoNetwork = MyStringId.GetOrCompute("{0}: the network isn't up");
-        private static readonly MyStringId StrTitle = MyStringId.GetOrCompute("Designator {0}");
-        private static readonly MyStringId StrTags = MyStringId.GetOrCompute("TAGS");
-        private static readonly MyStringId StrIndustrial = MyStringId.GetOrCompute("Industrial: {0}");
-        private static readonly MyStringId StrCombat = MyStringId.GetOrCompute("Combat: {0}");
-        private static readonly MyStringId StrLastTagged = MyStringId.GetOrCompute("Last tagged:");
-        private static readonly MyStringId StrCameraLine = MyStringId.GetOrCompute("Camera: {0}");
-        private static readonly MyStringId StrInfoCamera = MyStringId.GetOrCompute("Designator camera: {0}");
-        private static readonly MyStringId StrInfoOrders = MyStringId.GetOrCompute("Orders waiting for an answer: {0}");
-        #endregion
 
         #region Timing
         private const double ORDER_ANSWER_SECONDS = 5;      // no answer from an orchestrator by then: none in reach
@@ -202,7 +184,7 @@ namespace Automata.Designator
         /// <summary>Dropdown content: (none), then the cameras that may designate (see the class notes); the key is the camera's entity id.</summary>
         public void Terminal_CameraItems(List<MyTerminalControlComboBoxItem> items)
         {
-            items.Add(new MyTerminalControlComboBoxItem { Key = 0L, Value = StrNoCamera });
+            items.Add(new MyTerminalControlComboBoxItem { Key = 0L, Value = MyStrings.Keen_None });
             if (block == null) return;
             group.Clear();
             MyAPIGateway.GridGroups.GetGroup(block.CubeGrid, GridLinkTypeEnum.Mechanical, group);
@@ -245,8 +227,8 @@ namespace Automata.Designator
             if (!ready) return;
             IMyEntity e;
             var cam = settings.CameraId != 0 && MyAPIGateway.Entities.TryGetEntityById(settings.CameraId, out e) ? e as IMyCameraBlock : null;
-            target.AppendLoc(StrInfoCamera, cam != null && !cam.Closed ? cam.CustomName : Loc.T(StrNoCamera)).Append('\n');
-            if (pending.Count > 0) target.AppendLoc(StrInfoOrders, pending.Count).Append('\n');
+            target.AppendLoc(MyStrings.Designator_DesignatorCamera, cam != null && !cam.Closed ? cam.CustomName : Loc.T(MyStrings.Keen_None)).Append('\n');
+            if (pending.Count > 0) target.AppendLoc(MyStrings.Designator_OrdersWaitingForAnAnswer, pending.Count).Append('\n');
         }
         #endregion
 
@@ -256,24 +238,24 @@ namespace Automata.Designator
         {
             why = null;
             long id = settings.CameraId;
-            if (id == 0) { why = Loc.T(StrNoCameraSelected); return null; }
+            if (id == 0) { why = Loc.T(MyStrings.Designator_NoDesignatorCameraSelected); return null; }
             IMyEntity e;
             var cam = MyAPIGateway.Entities.TryGetEntityById(id, out e) ? e as IMyCameraBlock : null;
-            if (cam == null || cam.Closed) { why = Loc.T(StrCameraGone); return null; }
-            if (!cam.IsWorking) { why = Loc.F(StrCameraOff, cam.CustomName); return null; }
-            if (!Drone.AnchorDirectory.IsAllowed(block.OwnerId, cam.OwnerId)) { why = Loc.F(StrCameraForeign, cam.CustomName); return null; }
+            if (cam == null || cam.Closed) { why = Loc.T(MyStrings.Designator_TheDesignatorCameraIsGone); return null; }
+            if (!cam.IsWorking) { why = Loc.F(MyStrings.Designator_TheDesignatorCameraIsntWorking, cam.CustomName); return null; }
+            if (!Drone.AnchorDirectory.IsAllowed(block.OwnerId, cam.OwnerId)) { why = Loc.F(MyStrings.Designator_TheDesignatorCameraIsntYours, cam.CustomName); return null; }
             group.Clear();
             MyAPIGateway.GridGroups.GetGroup(block.CubeGrid, GridLinkTypeEnum.Mechanical, group);
             bool attached = group.Contains(cam.CubeGrid);
             group.Clear();
-            if (!attached) { why = Loc.F(StrCameraDetached, cam.CustomName); return null; }
+            if (!attached) { why = Loc.F(MyStrings.Designator_TheDesignatorCameraIsnt, cam.CustomName); return null; }
             return cam;
         }
 
         /// <summary>A refused camera order, in the designator's log.</summary>
         public void ReportDesignator(string why)
         {
-            log.Add(Loc.F(StrRefused, why));
+            log.Add(Loc.F(MyStrings.Designator_Designator, why));
         }
 
         /// <summary>
@@ -309,7 +291,7 @@ namespace Automata.Designator
             if (messaging == null) messaging = AutomataSession.GetMessageQueue();
             if (messaging == null || !GridAntennaReg.Ensure(messaging, ref antennaReg, block))
             {
-                log.Add(Loc.F(StrNoNetwork, ja.What));
+                log.Add(Loc.F(MyStrings.Designator_TheNetworkIsntUp, ja.What));
                 return false;
             }
             ja.EntityType = AutomataEntityType.TargetDesignatorBlock;
@@ -328,7 +310,7 @@ namespace Automata.Designator
             if (error != ErrorCode.None)
             {
                 if (Log.DebugEnabled) Log.Debug("Designator {0}: order {1} job {2} not sent: {3}", entityId, ja.OrderId, ja.JobId, error);
-                log.Add(Loc.F(StrNoNetwork, ja.What));
+                log.Add(Loc.F(MyStrings.Designator_TheNetworkIsntUp, ja.What));
                 return false;
             }
             PendingOrder p;
@@ -369,7 +351,7 @@ namespace Automata.Designator
                 double age = (now - kv.Value.Sent).TotalSeconds;
                 if (!kv.Value.Answered && age >= ORDER_ANSWER_SECONDS)
                 {
-                    log.Add(Loc.F(StrNoOrchestrator, kv.Value.What));
+                    log.Add(Loc.F(MyStrings.Designator_NoOrchestratorAnsweredInReach, kv.Value.What));
                     ScoutPointer.Feedback(kv.Value.Identity, DesignatorSignal.Error);
                     pendingGone.Add(kv.Key);
                 }
@@ -391,14 +373,14 @@ namespace Automata.Designator
                 int industrial, combat;
                 long last;
                 ScoutPointer.TagSummary(block.OwnerId, out industrial, out combat, out last);
-                header.Add(Loc.F(StrTitle, Nicknames.Of(Entity)));
-                header.Add(Loc.T(StrTags));
-                header.Add(BlockLcd.Columns(Loc.F(StrIndustrial, industrial), Loc.F(StrCombat, combat), 24));
-                header.Add(Loc.T(StrLastTagged));
+                header.Add(Loc.F(MyStrings.Designator_DesignatorArg0, Nicknames.Of(Entity)));
+                header.Add(Loc.T(MyStrings.Designator_Tags));
+                header.Add(BlockLcd.Columns(Loc.F(MyStrings.Designator_Industrial, industrial), Loc.F(MyStrings.Designator_Combat, combat), 24));
+                header.Add(Loc.T(MyStrings.Designator_LastTagged));
                 header.Add(last != 0 ? Nicknames.Of(last) : "-");
                 string why;
                 var cam = DesignatorCamera(out why);
-                header.Add(Loc.F(StrCameraLine, cam != null ? cam.CustomName : why));
+                header.Add(Loc.F(MyStrings.Designator_Camera, cam != null ? cam.CustomName : why));
             }
             lcd.Publish(Terminal_LcdStyle, header, log);
         }

@@ -8,6 +8,7 @@ using VRage.ModAPI;
 
 using Automata.Config;
 using Automata.Util;
+using Automata.Util.Strings;
 
 namespace Automata.Util.Logging
 {
@@ -153,9 +154,6 @@ namespace Automata.Util.Logging
     /// </summary>
     internal class LoggingEngine
     {
-        #region UI strings
-        private static readonly MyStringId StrErrorHud = MyStringId.GetOrCompute("{0} error - open %AppData%/SpaceEngineers/Storage/{1} for details");
-        #endregion
 
         private string _modName;
         private int _workshopId;
@@ -252,7 +250,7 @@ namespace Automata.Util.Logging
             {
                 MyLog.Default.WriteLineAndConsole(_modName + " error: " + msg);
 
-                string text = Loc.F(StrErrorHud, _modName, _logFilename);
+                string text = Loc.F(MyStrings.Common_ErrorOpenAppDataSpaceEngineersStorage, _modName, _logFilename);
 
                 // Always show errors on HUD regardless of config
                 ShowOnHud(text);

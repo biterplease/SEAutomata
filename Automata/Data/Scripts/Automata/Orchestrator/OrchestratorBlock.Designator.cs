@@ -13,6 +13,7 @@ using Automata.Pointer;
 using Automata.Util;
 using Automata.Util.Logging;
 using Automata.VirtualNetwork;
+using Automata.Util.Strings;
 
 namespace Automata.Orchestrator
 {
@@ -27,12 +28,6 @@ namespace Automata.Orchestrator
     /// </summary>
     public partial class OrchestratorBlock
     {
-        private static readonly MyStringId StrDesigAt = MyStringId.GetOrCompute("{0} at {1}");
-        private static readonly MyStringId StrDesigEscorting = MyStringId.GetOrCompute("{0} escorting {1}");
-        private static readonly MyStringId StrDesigEscortingMulti = MyStringId.GetOrCompute("Escorting {0}");
-        private static readonly MyStringId StrOrderCancelled = MyStringId.GetOrCompute("{0}: cancelled, no drone took it");
-        private static readonly MyStringId StrOrderReceived = MyStringId.GetOrCompute("{0}: taken by orchestrator '{1}'");
-
         private readonly List<Message<JobAnnouncement>> designatorInbox = new List<Message<JobAnnouncement>>();
         private readonly Dictionary<KeyValuePair<long, uint>, int> designatorSeen = new Dictionary<KeyValuePair<long, uint>, int>();
         private readonly List<Message<DesignatorOrderUpdate>> updateOutbox = new List<Message<DesignatorOrderUpdate>>();
@@ -86,7 +81,7 @@ namespace Automata.Orchestrator
                 order = new PlayerOrder { OrderId = orderId, Identity = ja.Identity, Kind = ja.Kind, Position = ja.PositionData.ToVector3D(), Name = ja.Marker, OriginBlock = origin };
                 playerOrders[orderId] = order;
                 ShowGps(order);
-                if (origin != 0) SendOrderUpdate(order, 0, DesignatorOrderState.Received, Loc.F(StrOrderReceived, ja.What, Nicknames.Of(Entity)));
+                if (origin != 0) SendOrderUpdate(order, 0, DesignatorOrderState.Received, Loc.F(MyStrings.Orchestrator_TakenByOrchestrator, ja.What, Nicknames.Of(Entity)));
             }
             uint jobId = IdGenerator.GenerateId(ref playerJobCounter, entityId);
             // (the received payload is shared with the other readers: the job is a copy of its own)
@@ -104,7 +99,7 @@ namespace Automata.Orchestrator
             var key = new KeyValuePair<long, uint>(entityId, jobId);
             knownJobs[key] = int.MaxValue;
             jobQueue.Add(new QueuedJob { Announcement = job, Key = key, SenderOwner = senderOwner, Received = now });
-            AddEvent(Loc.F(StrJobOrderedByAPlayer, jobId, ja.Type, ja.What));
+            AddEvent(Loc.F(MyStrings.Orchestrator_OrderedByAPlayer, jobId, ja.Type, ja.What));
             if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: player job {1} ({2}, order {3}, player {4}, from {5}): {6} task(s), {7}{8}", entityId, jobId, ja.Type, order.OrderId, ja.Identity, origin != 0 ? "designator " + origin : "a hand-held designator", job.Tasks.Count, ja.What, ja.RequiredDrone != 0 ? ", tagged drone " + ja.RequiredDrone : "");
             return jobId;
         }
@@ -171,10 +166,10 @@ namespace Automata.Orchestrator
             bool escort = order.Type == JobType.DesignatorEscort;
             string where = escort ? order.Name : GpsText(order.Position);
             var sb = new System.Text.StringBuilder(label).Append(": ");
-            if (drones.Count == 1) sb.Append(escort ? Loc.F(StrDesigEscorting, drones[0], where) : Loc.F(StrDesigAt, drones[0], where));
+            if (drones.Count == 1) sb.Append(escort ? Loc.F(MyStrings.Orchestrator_Arg0EscortingArg1, drones[0], where) : Loc.F(MyStrings.Orchestrator_At, drones[0], where));
             else
             {
-                sb.Append(escort ? Loc.F(StrDesigEscortingMulti, where) : where);
+                sb.Append(escort ? Loc.F(MyStrings.Orchestrator_EscortingArg0, where) : where);
                 for (int i = 0; i < drones.Count; i++) sb.Append("\n  ").Append(drones[i]);
             }
             return sb.ToString();

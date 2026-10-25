@@ -7,6 +7,7 @@ using VRageMath;
 using Automata.Pathfinding;
 using Automata.Util;
 using Automata.Util.Logging;
+using Automata.Util.Strings;
 
 namespace Automata.Drone
 {
@@ -22,9 +23,6 @@ namespace Automata.Drone
     /// </summary>
     public partial class DroneControllerBlock
     {
-        private static readonly MyStringId StrNoRouteRepositioning = MyStringId.GetOrCompute("No route: repositioning {0:F0} m and planning again ({1}/{2})");
-        private static readonly MyStringId StrNoRouteAfterRepositions = MyStringId.GetOrCompute("no route after {0} repositions");
-
         private const int RECOVER_MAX = 3;
         private const double RECOVER_EXCLUDE_MIN = 10;   // m: no spot this close to a place already tried from (or the hull radius x 1.5)
         private static readonly double[] RECOVER_DISTANCES = { 15, 30 };   // m (at least 2 / 4 hull radii)
@@ -87,7 +85,7 @@ namespace Automata.Drone
             if (!recoverPlanning || pm == null || SweepWaypointActive()) return false;   // a sweep waypoint nobody can reach is skipped, not a drone that is stuck
             if (recoverAttempts >= RECOVER_MAX)
             {
-                routeErrorPending = Loc.F(StrNoRouteAfterRepositions, RECOVER_MAX);
+                routeErrorPending = Loc.F(MyStrings.Drone_NoRouteAfterRepositions, RECOVER_MAX);
                 routeErrorByDrone = IsOtherDrone(pm.LastBlocker);
                 return false;
             }
@@ -123,11 +121,11 @@ namespace Automata.Drone
                 recoverDeadline = Sandbox.ModAPI.MyAPIGateway.Session.GameplayFrameCounter + RECOVER_FLY_MIN_TICKS
                                   + (int)(Vector3D.Distance(start, s) * RECOVER_FLY_TICKS_PER_M);
                 recoverCandidates.Clear();
-                Report(StrNoRouteRepositioning, Vector3D.Distance(start, s), recoverAttempts, RECOVER_MAX);
+                Report(MyStrings.Drone_NoRouteRepositioningM, Vector3D.Distance(start, s), recoverAttempts, RECOVER_MAX);
                 return true;
             }
             recoverCandidates.Clear();
-            routeErrorPending = Loc.F(StrNoRouteAfterRepositions, recoverAttempts);   // nowhere left to go
+            routeErrorPending = Loc.F(MyStrings.Drone_NoRouteAfterRepositions, recoverAttempts);   // nowhere left to go
             routeErrorByDrone = IsOtherDrone(pm.LastBlocker);
             return false;
         }
@@ -192,7 +190,7 @@ namespace Automata.Drone
             recoverReplanPending = false;
             if (Log.DebugEnabled) Log.Debug("Drone {0}: {1} ({2}/{3}): planning again", Entity.EntityId, late ? string.Format("not at the reposition spot in time ({0:F1} m short)", left) : "at the reposition spot", recoverAttempts, RECOVER_MAX);
             lastReplanFrame = Sandbox.ModAPI.MyAPIGateway.Session.GameplayFrameCounter;
-            if (!Replan()) RouteStopped(Loc.T(StrNoRouteAheadStopped));
+            if (!Replan()) RouteStopped(Loc.T(MyStrings.Drone_NoRouteAheadStopped));
         }
 
         private int RouteRetryTicks { get { return routeErrorByDrone ? ROUTE_ERROR_DRONE_RETRY_TICKS : ROUTE_ERROR_RETRY_TICKS; } }
@@ -207,7 +205,7 @@ namespace Automata.Drone
             recoverAttempts = 0;
             recoverVisited.Clear();
             errorReason = why;
-            Report(StrERRORStopped, why);
+            Report(MyStrings.Drone_ErrorStopped, why);
             StopJob(why);
             ClearFlightOrder();
             ClearAllThrustOverrides();

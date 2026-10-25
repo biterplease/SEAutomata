@@ -5,9 +5,9 @@ using VRage.Utils;
 namespace Automata.Util
 {
     /// <summary>
-    /// Localized text lookups. Every UI string is a MyStringId declared in the "UI strings" region at the top of the
-    /// file that uses it; its key is the English text (Data/Localization/MyTexts.resx), so a missing translation
-    /// still shows English.
+    /// Localized text lookups. Every UI string is a MyStringId defined in Util/Strings/*.cs (MyStrings: one file per block,
+    /// ids like "Drone_EnableAI", Keen's way); its English text is generated into Data/Localization/MyTexts.resx by
+    /// tools/generate_mytexts_resx.py. Whole phrases are one string each: texts are not composed from words.
     /// </summary>
     public static class Loc
     {
@@ -69,19 +69,6 @@ namespace Automata.Util
         public static StringBuilder AppendLoc(this StringBuilder sb, MyStringId id, params object[] args)
         {
             return sb.AppendFormat(MyTexts.GetString(id), args);
-        }
-
-        public static string Compose(MyStringId a, MyStringId b, string sep = " ")
-        {
-            return string.Format("{0}"+sep+"{1}", MyTexts.GetString(a), MyTexts.GetString(b));
-        }
-        public static string Compose(MyStringId a, MyStringId b, MyStringId c, string sep = " ")
-        {
-            return string.Format("{0}"+sep+"{1}"+sep+"{2}", MyTexts.GetString(a), MyTexts.GetString(b), MyTexts.GetString(c));
-        }
-        public static string Compose(MyStringId a, MyStringId b, MyStringId c, MyStringId d, string sep = " ")
-        {
-            return string.Format("{0}"+sep+"{1}"+sep+"{2}"+sep+"{3}", MyTexts.GetString(a), MyTexts.GetString(b), MyTexts.GetString(c), MyTexts.GetString(d));
         }
     }
 }

@@ -7,6 +7,7 @@ using VRage.Utils;
 using VRageMath;
 
 using Automata.Util.Logging;
+using Automata.Util.Strings;
 
 namespace Automata.Drone
 {
@@ -24,11 +25,6 @@ namespace Automata.Drone
     /// </summary>
     public partial class DroneControllerBlock
     {
-        #region UI strings
-        private static readonly MyStringId StrClearingCargoAt = MyStringId.GetOrCompute("Clearing its cargo at {0}");
-        private static readonly MyStringId StrCargoLeftAboard = MyStringId.GetOrCompute("Cargo: no room at {0}, {1:F2} m3 left aboard");
-        private static readonly MyStringId StrCargoNoPort = MyStringId.GetOrCompute("Cargo aboard ({0:F2} m3), no connector known to clear it");
-        #endregion
 
         #region Timing
         private const int CLEAR_RETRY_TICKS = 60 * 60;       // a clear / housekeeping trip at most this often (a full drone is the exception:
@@ -196,7 +192,7 @@ namespace Automata.Drone
             if (Log.DebugEnabled) Log.Debug("Drone {0}: cargo cleared at {1}: {2:F3} -> {3:F3} m3", Entity.EntityId, at.CustomName, before, after);
             if (after > CLEAR_MIN_VOLUME)
             {
-                Report(StrCargoLeftAboard, at.CustomName, after);
+                Report(MyStrings.Drone_CargoNoRoomAtM3, at.CustomName, after);
                 clearNoRoomPort = at.EntityId;
                 clearNoRoomFrame = MyAPIGateway.Session.GameplayFrameCounter;
                 return false;
@@ -354,7 +350,7 @@ namespace Automata.Drone
             var port = ClearPort();
             if (port == null)
             {
-                Report(StrCargoNoPort, volume);
+                Report(MyStrings.Drone_CargoAboardM3NoConnector, volume);
                 return false;
             }
             if (docked != null && docked.EntityId == port.EntityId) return false;   // here already: no room
@@ -363,7 +359,7 @@ namespace Automata.Drone
             job.Tasks.Add(DockTaskFor(port));
             job.Tasks.Add(ClearCargoTask());
             job.Tasks.Add(Orchestrator.Task.ReturnHome());
-            Report(StrClearingCargoAt, port.CustomName);
+            Report(MyStrings.Drone_ClearingItsCargoAt, port.CustomName);
             StartJob(job, JobSource.Housekeeping);
             return true;
         }

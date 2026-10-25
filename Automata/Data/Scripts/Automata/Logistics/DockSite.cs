@@ -8,6 +8,7 @@ using VRageMath;
 
 using Automata.Util;
 using VRage.Utils;
+using Automata.Util.Strings;
 
 namespace Automata.Logistics
 {
@@ -54,10 +55,6 @@ namespace Automata.Logistics
     /// </summary>
     public static class DockFit
     {
-        #region UI strings
-        private static readonly MyStringId StrPortSSmallNoGravity = MyStringId.GetOrCompute("{0} port(s) ({1} small), no gravity");
-        private static readonly MyStringId StrPortSSmallFacingUp = MyStringId.GetOrCompute("{0} port(s) ({4} small): {1} facing up, {2} down, {3} sideways");
-        #endregion
 
         public const float GRAVITY_MIN = 0.1f;          // m/s²: below this, "no natural gravity"
         public const int MAX_PORTS = 16;
@@ -153,8 +150,8 @@ namespace Automata.Logistics
                 var f = (Base6Directions.Direction)site.Ports[i].Facing;
                 if (f == Base6Directions.Direction.Up) up++; else if (f == Base6Directions.Direction.Down) down++; else side++;
             }
-            if (!site.InGravity) return Loc.F(StrPortSSmallNoGravity, site.Ports.Count, small);
-            return Loc.F(StrPortSSmallFacingUp, site.Ports.Count, up, down, side, small);
+            if (!site.InGravity) return Loc.F(MyStrings.Logistics_PortSmallNoGravity, site.Ports.Count, small);
+            return Loc.F(MyStrings.Logistics_PortSmallFacingUpDown, site.Ports.Count, up, down, side, small);
         }
     }
 }

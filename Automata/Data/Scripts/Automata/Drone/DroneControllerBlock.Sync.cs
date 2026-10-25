@@ -12,6 +12,7 @@ using Automata.Util;
 using Automata.Util.Logging;
 using Digi.NetworkLib;
 using VRage.Utils;
+using Automata.Util.Strings;
 
 namespace Automata.Drone
 {
@@ -108,14 +109,6 @@ namespace Automata.Drone
     /// </summary>
     public partial class DroneControllerBlock
     {
-        #region UI strings
-        private static readonly MyStringId StrAIIsDisabled = MyStringId.GetOrCompute("AI is disabled");
-        private static readonly MyStringId StrDebugOrdersNeedManagedBy = MyStringId.GetOrCompute("Debug orders need 'Managed by player' mode");
-        private static readonly MyStringId StrNavM = MyStringId.GetOrCompute("Nav: {0:F0} m");
-        private static readonly MyStringId StrNavWaypointQueueFull = MyStringId.GetOrCompute("Nav: waypoint queue full");
-        private static readonly MyStringId StrHomeDockTheDroneTo = MyStringId.GetOrCompute("Home: dock the drone to a connector first");
-        private static readonly MyStringId StrOrdersCleared = MyStringId.GetOrCompute("Orders cleared");
-        #endregion
 
         #region Timing
         private const int ANCHOR_LIST_REFRESH_TICKS = 5 * 60;   // clients re-request a shown list at most every 5 s
@@ -406,12 +399,12 @@ namespace Automata.Drone
         {
             if (!settings.IsEnabled && IsMovementAction(p.Action))
             {
-                Report(StrAIIsDisabled);
+                Report(MyStrings.Drone_AIIsDisabled);
                 return;
             }
             if (settings.OperationMode != OperationMode.ManagedByPlayer && IsDebugAction(p.Action))
             {
-                Report(StrDebugOrdersNeedManagedBy);
+                Report(MyStrings.Drone_DebugOrdersNeedManaged);
                 return;
             }
             if (IsMovementAction(p.Action)) owesReturn = false;   // the player moves it now: no return after the last job
@@ -423,11 +416,11 @@ namespace Automata.Drone
                     var wps = new List<Vector3D>();
                     if (p.HasVectorB) wps.Add(p.VectorB.ToVector3D());
                     wps.Add(p.VectorA.ToVector3D());
-                    if (FlyPlayerRoute(wps)) Report(StrNavM, Vector3D.Distance(flightState.Position, p.VectorA.ToVector3D()));
+                    if (FlyPlayerRoute(wps)) Report(MyStrings.Drone_NavM, Vector3D.Distance(flightState.Position, p.VectorA.ToVector3D()));
                     break;
                 }
                 case DroneAction.QueueWaypoint:
-                    if (queuedLegs.Count >= MAX_QUEUED_LEGS) { Report(StrNavWaypointQueueFull); break; }
+                    if (queuedLegs.Count >= MAX_QUEUED_LEGS) { Report(MyStrings.Drone_NavWaypointQueueFull); break; }
                     ExecuteQueueWaypoint(p.VectorA.ToVector3D());
                     break;
                 case DroneAction.Orient:
@@ -458,7 +451,7 @@ namespace Automata.Drone
                     if (RecordDockPoseFromConnection(identity))
                         SyncSetting(DroneSettingKey.HomeConnector);
                     else
-                        Report(StrHomeDockTheDroneTo);
+                        Report(MyStrings.Drone_HomeDockTheDrone);
                     break;
                 case DroneAction.RequestAnchorList:
                     SendAnchorList(senderSteamId, identity);
@@ -480,7 +473,7 @@ namespace Automata.Drone
                     constructionPausedUntil = int.MinValue / 2;   // a new Stop restarts the countdown
                     PauseConstruction(CONSTRUCTION_STOP_PAUSE_TICKS);
                     stopResumeFrame = constructionPausedUntil;
-                    Report(StrOrdersCleared);
+                    Report(MyStrings.Drone_OrdersCleared);
                     break;
             }
         }

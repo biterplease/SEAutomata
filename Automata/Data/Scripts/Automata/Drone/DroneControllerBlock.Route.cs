@@ -9,6 +9,7 @@ using Automata.Pathfinding;
 using Automata.Util;
 using Automata.Util.Logging;
 using VRage.Utils;
+using Automata.Util.Strings;
 
 namespace Automata.Drone
 {
@@ -19,12 +20,6 @@ namespace Automata.Drone
     /// </summary>
     public partial class DroneControllerBlock
     {
-        #region UI strings
-        private static readonly MyStringId StrNavNoRouteToWaypoint = MyStringId.GetOrCompute("Nav: no route to waypoint {0}");
-        private static readonly MyStringId StrRouteBlockedMAheadStopped = MyStringId.GetOrCompute("Route blocked {0:F0} m ahead: stopped");
-        private static readonly MyStringId StrCrashedInLane = MyStringId.GetOrCompute("Crashed in lane {0}");
-        private static readonly MyStringId StrNoRouteAheadStopped = MyStringId.GetOrCompute("No route ahead: stopped");
-        #endregion
 
         private enum RouteOwner : byte { None, FlyRoute, Docking, Player }
 
@@ -104,9 +99,9 @@ namespace Automata.Drone
             bool noCamera = pf.RequireCamerasForPathfinding(), noSensor = pf.RequireSensorsForPathfinding();
             for (int i = 0; i < cameraBlocks.Count && noCamera; i++) if (PathfindingManager.InstrumentOn(cameraBlocks[i], asleep)) noCamera = false;
             for (int i = 0; i < sensors.Count && noSensor; i++) if (PathfindingManager.InstrumentOn(sensors[i], asleep)) noSensor = false;
-            if (noCamera && noSensor) return Loc.T(StrWarnNoSensorOrCamera);
-            if (noCamera) return Loc.T(StrWarnNoCamera);
-            if (noSensor) return Loc.T(StrWarnNoSensor);
+            if (noCamera && noSensor) return Loc.T(MyStrings.Drone_WarnNoSensorOrCamera);
+            if (noCamera) return Loc.T(MyStrings.Drone_WarnNoCameraDetected);
+            if (noSensor) return Loc.T(MyStrings.Drone_WarnNoSensorDetected);
             return null;
         }
 
@@ -824,7 +819,7 @@ namespace Automata.Drone
                 int before = pts.Count;
                 if (!PlanPath(from, waypoints[w], pts, false, true, sf, su, true))
                 {
-                    Report(StrNavNoRouteToWaypoint, w + 1);
+                    Report(MyStrings.Drone_NavNoRouteToWaypoint, w + 1);
                     return false;
                 }
                 for (int i = before; i < pts.Count; i++)
@@ -1024,7 +1019,7 @@ namespace Automata.Drone
             bool ok = pf.AllowRepathing() && ++routeReplans <= pf.MaxRepositionAttempts();
             if (Log.DebugEnabled) Log.Debug("Drone {0}: leg start ({1:F0} m, {2}): {3} {4:F1} m ahead, {5}", Entity.EntityId, len, scene ? "scene" : "rays", hitEntity != null ? (hitEntity.DisplayName ?? hitEntity.GetType().Name) : "obstacle", Vector3D.Distance(from, hit), ok ? "new route" : "giving up");
             if (ok && Replan()) return;
-            RouteStopped(Loc.F(StrRouteBlockedMAheadStopped, Vector3D.Distance(from, hit)));
+            RouteStopped(Loc.F(MyStrings.Drone_RouteBlockedMAheadStopped, Vector3D.Distance(from, hit)));
         }
 
         /// <summary>
@@ -1098,7 +1093,7 @@ namespace Automata.Drone
                     string lane = pm.Lanes.Crashed(Entity.EntityId);
                     if (lane != null)
                     {
-                        string text = Loc.F(StrCrashedInLane, lane);
+                        string text = Loc.F(MyStrings.Drone_CrashedInLane, lane);
                         if (Log.DebugEnabled) Log.Debug("Drone {0}: {1} ({2:F0} -> {3:F0} m/s)", Entity.EntityId, text, prev, speed);
                         Broadcast(text);
                     }
@@ -1146,7 +1141,7 @@ namespace Automata.Drone
                     routeJitForce = false;
                     if (Log.DebugEnabled) Log.Debug("Drone {0}: the route ahead is in view now, planning it", Entity.EntityId);
                     if (Replan()) return;
-                    RouteStopped(Loc.T(StrNoRouteAheadStopped));
+                    RouteStopped(Loc.T(MyStrings.Drone_NoRouteAheadStopped));
                     return;
                 }
             }
@@ -1174,7 +1169,7 @@ namespace Automata.Drone
             bool ok = pf.AllowRepathing() && ++routeReplans <= pf.MaxRepositionAttempts();
             if (Log.DebugEnabled) Log.Debug("Drone {0}: obstacle {1:F1} m ahead, {2}", Entity.EntityId, Vector3D.Distance(from, hit), ok ? "new route" : "giving up");
             if (ok && Replan()) return;
-            RouteStopped(Loc.F(StrRouteBlockedMAheadStopped, Vector3D.Distance(from, hit)));
+            RouteStopped(Loc.F(MyStrings.Drone_RouteBlockedMAheadStopped, Vector3D.Distance(from, hit)));
         }
 
         // No way on: stop; the task fails (Unreachable), outside jobs the drone waits

@@ -10,6 +10,7 @@ using BlendTypeEnum = VRageRender.MyBillboard.BlendTypeEnum;
 
 using Automata.Util;
 using Automata.Util.Logging;
+using Automata.Util.Strings;
 
 namespace Automata.Orchestrator
 {
@@ -21,11 +22,6 @@ namespace Automata.Orchestrator
     /// </summary>
     public partial class OrchestratorBlock
     {
-        #region UI strings
-        private static readonly MyStringId StrLaneDeleted = MyStringId.GetOrCompute("Lane L{0} deleted");
-        private static readonly MyStringId StrLaneResumed = MyStringId.GetOrCompute("Lane L{0} resumed (checked again before use)");
-        private static readonly MyStringId StrLanesCleared = MyStringId.GetOrCompute("{0} lane pair(s) cleared");
-        #endregion
 
         private const int LANE_LIST_EVERY = 30;   // UpdateBeforeSimulation10 calls (5 s)
         private const float LANE_DASH = 5f, LANE_GAP = 5f, LANE_CRAWL = 3f, LANE_THICKNESS = 0.35f;
@@ -78,13 +74,13 @@ namespace Automata.Orchestrator
             switch (parts[1])
             {
                 case "delete":
-                    if (lanes.Delete(Entity.EntityId, number)) AddLaneEvent(Loc.F(StrLaneDeleted, number));
+                    if (lanes.Delete(Entity.EntityId, number)) AddLaneEvent(Loc.F(MyStrings.Orchestrator_LaneLDeleted, number));
                     break;
                 case "resume":
-                    if (lanes.Resume(Entity.EntityId, number)) AddLaneEvent(Loc.F(StrLaneResumed, number));
+                    if (lanes.Resume(Entity.EntityId, number)) AddLaneEvent(Loc.F(MyStrings.Orchestrator_LaneLResumedCheckedAgain, number));
                     break;
                 case "clear":
-                    AddLaneEvent(Loc.F(StrLanesCleared, lanes.ClearAll(Entity.EntityId)));
+                    AddLaneEvent(Loc.F(MyStrings.Orchestrator_LanePairCleared, lanes.ClearAll(Entity.EntityId)));
                     break;
                 case "draw":
                 {

@@ -32,7 +32,7 @@ wired** (`AllowAStar` only logs a warning); the legacy planners (`AStarPathfinde
   `Entry.Version`, matrix); an accepted answer is reused for 3 s (routes of several stretches). Async callers: FlyRoute from the
   task runner / replans in a job, StartDocking (GoHome, DockAtConnector, docking replans; `DockPrep` keeps the corridor while
   waiting). Synchronous: player routes, parking, the GoCharge connector loop, RealShapeGrid queries, the memory stage.
-  `PathWarmUp` offers areas (static grids with Automata blocks, 50 m round their projectors, construction areas) to
+  `PathWarmUp` offers areas (static grids with Automata blocks, 50 m round their projectors, construction fields) to
   `PathSearchQueue.WarmUp`, which only builds the scene ahead (entries, block trees).
 - Failed-route cache (`PathfindingManager`, main thread): a plan that found no route is answered at once when asked again
   (owner, `QuerySignature`, coarse attitude, start within 2 m, goal within 1 m) for 120 s, 10 s when a moving grid / door / a
