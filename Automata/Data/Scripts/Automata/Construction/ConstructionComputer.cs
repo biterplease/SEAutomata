@@ -14,14 +14,12 @@ using Automata.Util;
 using Automata.Util.Logging;
 using Automata.Inventory;
 using Automata.VirtualNetwork;
+using Automata.Util.Strings;
 
 namespace Automata.Construction
 {
     public partial class ConstructionComputer
     {
-        #region UI strings
-        private static readonly MyStringId StrNoAntennaInit = MyStringId.GetOrCompute("Failed to initialize construction computer; no antenna found");
-        #endregion
 
         /// Queue of discovered, but yet unporsed Jobs.
         /// </summary>
@@ -179,7 +177,7 @@ namespace Automata.Construction
             else
             {
                 currentState = State.Error;
-                errorMessage = Loc.T(StrNoAntennaInit);
+                errorMessage = Loc.T(MyStrings.Construction_FailedToInitializeConstructionComputer);
             }
         }
 

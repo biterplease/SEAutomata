@@ -11,6 +11,7 @@ using Automata.Config;
 using Automata.Util.Logging;
 using VRage.Utils;
 using Automata.Util;
+using Automata.Util.Strings;
 
 namespace Automata.Pathfinding
 {
@@ -139,10 +140,6 @@ namespace Automata.Pathfinding
     /// </summary>
     public sealed partial class PathfindingManager
     {
-        #region UI strings
-        private static readonly MyStringId StrSomething = MyStringId.GetOrCompute("something");
-        private static readonly MyStringId StrAtOf = MyStringId.GetOrCompute("{0} at {1} of {2}");
-        #endregion
 
         /// <summary>Kept for the legacy A* / direct planners (IPathfinder), which are not wired.</summary>
         public enum Method : byte { None, Direct, AStar }
@@ -277,8 +274,8 @@ namespace Automata.Pathfinding
         /// <summary>"subtype at cell of grid name" for the logs.</summary>
         public static string Describe(IMySlimBlock b)
         {
-            if (b == null) return Loc.T(StrSomething);
-            return Loc.F(StrAtOf, b.BlockDefinition.Id.SubtypeName, b.Min, b.CubeGrid != null ? b.CubeGrid.DisplayName : "?");
+            if (b == null) return Loc.T(MyStrings.Common_Something);
+            return Loc.F(MyStrings.Common_AtOf, b.BlockDefinition.Id.SubtypeName, b.Min, b.CubeGrid != null ? b.CubeGrid.DisplayName : "?");
         }
 
         /// <summary>The block the last SegmentBlocked / HullSpaceFree hit (null: none / an asteroid). For the logs.</summary>

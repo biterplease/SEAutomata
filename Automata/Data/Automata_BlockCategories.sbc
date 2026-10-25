@@ -13,6 +13,8 @@
 			<string>MyProgrammableBlock/AutomataLargeLogisticsComputer</string>
 			<string>MyProgrammableBlock/AutomataLargeConstructionComputer</string>
 			<string>MyProgrammableBlock/AutomataLargeMiningSurveyor</string>
+			<string>MyProgrammableBlock/AutomataLargeTargetDesignator</string>
+			<string>MyProgrammableBlock/AutomataSmallTargetDesignator</string>
 			<string>RemoteControl/AutomataLargeDroneController</string>
          <string>RemoteControl/AutomataSmallDroneController</string>
 		 </ItemIds>
@@ -31,6 +33,7 @@
             <string>MyProgrammableBlock/AutomataLargeLogisticsComputer</string>
             <string>MyProgrammableBlock/AutomataLargeConstructionComputer</string>
             <string>MyProgrammableBlock/AutomataLargeMiningSurveyor</string>
+            <string>MyProgrammableBlock/AutomataLargeTargetDesignator</string>
          </ItemIds>
       </Category>
 	   
@@ -44,6 +47,7 @@
          <Name>Section1_Position1_SmallBlocks</Name>
          <ItemIds>
             <string>RemoteControl/AutomataSmallDroneController</string>
+            <string>MyProgrammableBlock/AutomataSmallTargetDesignator</string>
          </ItemIds>
       </Category>
       

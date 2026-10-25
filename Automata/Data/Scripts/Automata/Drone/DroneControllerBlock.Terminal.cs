@@ -12,6 +12,7 @@ using VRageMath;
 using Automata.Network;
 using Automata.VirtualNetwork;
 using Automata.Util;
+using Automata.Util.Strings;
 
 namespace Automata.Drone
 {
@@ -21,39 +22,6 @@ namespace Automata.Drone
     /// </summary>
     public partial class DroneControllerBlock
     {
-        #region UI strings
-        private static readonly MyStringId StrSettingsCopied = MyStringId.GetOrCompute("Drone settings copied from {0}");
-        private static readonly MyStringId StrSettingsOfPastedOnto = MyStringId.GetOrCompute("Settings of {0} pasted onto {1}{2}");
-        private static readonly MyStringId StrTheDrone = MyStringId.GetOrCompute("the drone");
-        private static readonly MyStringId StrOperationModeKeptSwitchThe = MyStringId.GetOrCompute(" (operation mode kept: switch the AI off to change it)");
-        private static readonly MyStringId StrAIOff = MyStringId.GetOrCompute("AI off");
-        private static readonly MyStringId StrAIDisabled = MyStringId.GetOrCompute("AI disabled");
-        private static readonly MyStringId StrHomeBeacon = MyStringId.GetOrCompute("Home beacon: {0}");
-        private static readonly MyStringId StrSetLower = MyStringId.GetOrCompute("set");
-        private static readonly MyStringId StrHomeBeaconCleared = MyStringId.GetOrCompute("Home beacon cleared");
-        private static readonly MyStringId StrDock = MyStringId.GetOrCompute("Dock");
-        private static readonly MyStringId StrWeld = MyStringId.GetOrCompute("Weld");
-        private static readonly MyStringId StrGrind = MyStringId.GetOrCompute("Grind");
-        private static readonly MyStringId StrDrill = MyStringId.GetOrCompute("Drill");
-        private static readonly MyStringId StrScoutOre = MyStringId.GetOrCompute("Scout ore");
-        private static readonly MyStringId StrWheels = MyStringId.GetOrCompute("Wheels");
-        private static readonly MyStringId StrFlyInAtmosphere = MyStringId.GetOrCompute("Fly in atmosphere");
-        private static readonly MyStringId StrFlyInSpace = MyStringId.GetOrCompute("Fly in space");
-        private static readonly MyStringId StrCombatAIDefensiveFlightOffensive = MyStringId.GetOrCompute("Combat (AI Defensive, Flight, Offensive)");
-        private static readonly MyStringId StrSensors = MyStringId.GetOrCompute("Sensors");
-        private static readonly MyStringId StrCameras = MyStringId.GetOrCompute("Cameras");
-        private static readonly MyStringId StrCargoNone = MyStringId.GetOrCompute("Cargo: none");
-        private static readonly MyStringId StrCargo10M = MyStringId.GetOrCompute("Cargo: < 10 m³");
-        private static readonly MyStringId StrCargo10100M = MyStringId.GetOrCompute("Cargo: 10-100 m³");
-        private static readonly MyStringId StrCargo1001000M = MyStringId.GetOrCompute("Cargo: 100-1000 m³");
-        private static readonly MyStringId StrCargo1000MOrMore = MyStringId.GetOrCompute("Cargo: 1000 m³ or more");
-        private static readonly MyStringId StrLiftNone = MyStringId.GetOrCompute("Lift: none");
-        private static readonly MyStringId StrLift1T = MyStringId.GetOrCompute("Lift: < 1 t");
-        private static readonly MyStringId StrLift110T = MyStringId.GetOrCompute("Lift: 1-10 t");
-        private static readonly MyStringId StrLift10100T = MyStringId.GetOrCompute("Lift: 10-100 t");
-        private static readonly MyStringId StrLift100TOrMore = MyStringId.GetOrCompute("Lift: 100 t or more");
-        private static readonly MyStringId StrNoneListItem = MyStringId.GetOrCompute("(none)");
-        #endregion
 
         #region Copy / paste settings (terminal, per player)
         // What "Copy settings" took: one setting packet per key, as the network sends them. Local to this player's game.
@@ -97,7 +65,7 @@ namespace Automata.Drone
             list.Sort((a, b) => (a.Key == DroneSettingKey.OperationModeValue ? 0 : 1).CompareTo(b.Key == DroneSettingKey.OperationModeValue ? 0 : 1));
             settingsClipboard = list;
             settingsClipboardFrom = block is IMyTerminalBlock ? ((IMyTerminalBlock)block).CustomName : Entity.EntityId.ToString();
-            MyAPIGateway.Utilities.ShowNotification(Loc.F(StrSettingsCopied, settingsClipboardFrom), 2000);
+            MyAPIGateway.Utilities.ShowNotification(Loc.F(MyStrings.Drone_DroneSettingsCopiedFrom, settingsClipboardFrom), 2000);
             RefreshTerminal();   // "Paste settings" becomes available
         }
 
@@ -114,8 +82,8 @@ namespace Automata.Drone
                 ApplySettingPacket(p);
                 SyncSetting(p.Key);
             }
-            MyAPIGateway.Utilities.ShowNotification(Loc.F(StrSettingsOfPastedOnto, settingsClipboardFrom,
-                block is IMyTerminalBlock ? ((IMyTerminalBlock)block).CustomName : Loc.T(StrTheDrone), modeSkipped ? Loc.T(StrOperationModeKeptSwitchThe) : ""), 3000);
+            MyAPIGateway.Utilities.ShowNotification(Loc.F(MyStrings.Drone_SettingsOfPastedOnto, settingsClipboardFrom,
+                block is IMyTerminalBlock ? ((IMyTerminalBlock)block).CustomName : Loc.T(MyStrings.Drone_TheDrone), modeSkipped ? Loc.T(MyStrings.Drone_OperationModeKeptSwitch) : ""), 3000);
             RefreshTerminal();
         }
         #endregion
@@ -125,8 +93,8 @@ namespace Automata.Drone
         // overrides are cleared) hold the drone where it is, hovering if it was flying.
         private void DisableAI()
         {
-            EndCombat(Loc.T(StrAIOff));
-            StopJob(Loc.T(StrAIOff));
+            EndCombat(Loc.T(MyStrings.Drone_AIOff));
+            StopJob(Loc.T(MyStrings.Drone_AIOff));
             Shutdown();
             preflightStage = 0;
             // Hand the drone back flyable: blocks the dock routine put to sleep (thrusters, tools...) come back on
@@ -136,7 +104,7 @@ namespace Automata.Drone
             isParked = IsParkedNow();
             RestoreConnectors();
             SetState(isParked ? State.Docked : State.Standby);
-            Report(StrAIDisabled);
+            Report(MyStrings.Drone_AIDisabled);
         }
 
         // Server: side effects of the current mode (called when the AI goes on; the mode can't change while on)
@@ -183,7 +151,7 @@ namespace Automata.Drone
 
         public void Terminal_HomeBeaconListContent(List<MyTerminalControlListBoxItem> items, List<MyTerminalControlListBoxItem> selected)
         {
-            var none = new MyTerminalControlListBoxItem(StrNoneListItem, MyStringId.NullOrEmpty, 0L);
+            var none = new MyTerminalControlListBoxItem(MyStrings.Keen_None, MyStringId.NullOrEmpty, 0L);
             items.Add(none);
             if (settings == null || AutomataSession.Instance == null) return;
             RequestAnchorListIfStale();
@@ -217,9 +185,9 @@ namespace Automata.Drone
             if (id != 0)
             {
                 var beacon = AnchorDirectory.Resolve(block, id) as IMyTerminalBlock;
-                Report(StrHomeBeacon, beacon != null ? beacon.CustomName : Loc.T(StrSetLower));
+                Report(MyStrings.Drone_HomeBeacon, beacon != null ? beacon.CustomName : Loc.T(MyStrings.Drone_Set));
             }
-            else Report(StrHomeBeaconCleared);
+            else Report(MyStrings.Drone_HomeBeaconCleared);
             SaveSettings();
             SyncSetting(DroneSettingKey.HomeBeacon);
             RefreshTerminal();
@@ -608,27 +576,27 @@ namespace Automata.Drone
         {
             switch (c)
             {
-                case Capabilities.CanDock:              return Loc.T(StrDock);
-                case Capabilities.CanWeld:              return Loc.T(StrWeld);
-                case Capabilities.CanGrind:             return Loc.T(StrGrind);
-                case Capabilities.CanDrill:             return Loc.T(StrDrill);
-                case Capabilities.CanScoutOre:          return Loc.T(StrScoutOre);
-                case Capabilities.HasWheels:            return Loc.T(StrWheels);
-                case Capabilities.CanFlyAtmosphere:     return Loc.T(StrFlyInAtmosphere);
-                case Capabilities.CanFlySpace:          return Loc.T(StrFlyInSpace);
-                case Capabilities.HasDefenseSystems:    return Loc.T(StrCombatAIDefensiveFlightOffensive);
-                case Capabilities.HasSensors:           return Loc.T(StrSensors);
-                case Capabilities.HasCameras:           return Loc.T(StrCameras);
-                case Capabilities.CargoVolumeNil:       return Loc.T(StrCargoNone);
-                case Capabilities.CargoVolumeLt10m3:    return Loc.T(StrCargo10M);
-                case Capabilities.CargoVolumeLt100m3:   return Loc.T(StrCargo10100M);
-                case Capabilities.CargoVolumeLt1000m3:  return Loc.T(StrCargo1001000M);
-                case Capabilities.CargoVolumeLt10000m3: return Loc.T(StrCargo1000MOrMore);
-                case Capabilities.LiftNil:              return Loc.T(StrLiftNone);
-                case Capabilities.LiftLt1t:             return Loc.T(StrLift1T);
-                case Capabilities.LiftLt10t:            return Loc.T(StrLift110T);
-                case Capabilities.LiftLt100t:           return Loc.T(StrLift10100T);
-                case Capabilities.LiftLt1000t:          return Loc.T(StrLift100TOrMore);
+                case Capabilities.CanDock:              return Loc.T(MyStrings.Drone_Dock);
+                case Capabilities.CanWeld:              return Loc.T(MyStrings.Drone_Weld);
+                case Capabilities.CanGrind:             return Loc.T(MyStrings.Drone_Grind);
+                case Capabilities.CanDrill:             return Loc.T(MyStrings.Drone_Drill);
+                case Capabilities.CanScoutOre:          return Loc.T(MyStrings.Drone_ScoutOre);
+                case Capabilities.HasWheels:            return Loc.T(MyStrings.Drone_Wheels);
+                case Capabilities.CanFlyAtmosphere:     return Loc.T(MyStrings.Drone_FlyInAtmosphere);
+                case Capabilities.CanFlySpace:          return Loc.T(MyStrings.Drone_FlyInSpace);
+                case Capabilities.HasDefenseSystems:    return Loc.T(MyStrings.Drone_CombatAIDefensiveFlightOffensive);
+                case Capabilities.HasSensors:           return Loc.T(MyStrings.Drone_Sensors);
+                case Capabilities.HasCameras:           return Loc.T(MyStrings.Drone_Cameras);
+                case Capabilities.CargoVolumeNil:       return Loc.T(MyStrings.Drone_CargoNone);
+                case Capabilities.CargoVolumeLt10m3:    return Loc.T(MyStrings.Drone_Cargo10M);
+                case Capabilities.CargoVolumeLt100m3:   return Loc.T(MyStrings.Drone_Cargo10100M);
+                case Capabilities.CargoVolumeLt1000m3:  return Loc.T(MyStrings.Drone_Cargo1001000M);
+                case Capabilities.CargoVolumeLt10000m3: return Loc.T(MyStrings.Drone_Cargo1000MOrMore);
+                case Capabilities.LiftNil:              return Loc.T(MyStrings.Drone_LiftNone);
+                case Capabilities.LiftLt1t:             return Loc.T(MyStrings.Drone_Lift1T);
+                case Capabilities.LiftLt10t:            return Loc.T(MyStrings.Drone_Lift110T);
+                case Capabilities.LiftLt100t:           return Loc.T(MyStrings.Drone_Lift10100T);
+                case Capabilities.LiftLt1000t:          return Loc.T(MyStrings.Drone_Lift100TOrMore);
                 default:                                return c.ToString();
             }
         }

@@ -17,6 +17,7 @@ using Automata.Orchestrator;
 using Automata.Util;
 using Automata.Util.Logging;
 using Automata.VirtualNetwork;
+using Automata.Util.Strings;
 
 namespace Automata.Mining
 {
@@ -33,54 +34,6 @@ namespace Automata.Mining
     [MyEntityComponentDescriptor(typeof(MyObjectBuilder_MyProgrammableBlock), false, "AutomataLargeMiningSurveyor")]
     public class MiningSurveyorBlock : SettingsBlockLogic, INicknamed
     {
-        #region UI strings
-        private static readonly MyStringId StrError = MyStringId.GetOrCompute("Error: {0}");
-        private static readonly MyStringId StrSourceDrone = MyStringId.GetOrCompute("drone {0}");
-        private static readonly MyStringId StrHeaderTitle = MyStringId.GetOrCompute("MC {0}");
-        private static readonly MyStringId StrHeaderDeposits = MyStringId.GetOrCompute("Known deposits");
-        private static readonly MyStringId StrHeaderRequests = MyStringId.GetOrCompute("Active requests (kg)");
-        private static readonly MyStringId StrHeaderPage = MyStringId.GetOrCompute("(page {0}/{1})");
-        private static readonly MyStringId StrLogSurveyDrone = MyStringId.GetOrCompute("Survey: Drone {0} found {1}");
-        private static readonly MyStringId StrLogSurveyOwn = MyStringId.GetOrCompute("Survey: own scan found {0}");
-        private static readonly MyStringId StrLogDelivered = MyStringId.GetOrCompute("Delivered: Drone {0}, Ore: {1}, {2:F0} kg");
-        private static readonly MyStringId StrLogDroneOutcome = MyStringId.GetOrCompute("Mining: Drone {0} {1}, Ore: {2}");
-        private static readonly MyStringId StrOnHoldReason = MyStringId.GetOrCompute("on hold ({0})");
-        private static readonly MyStringId StrGpsDescription = MyStringId.GetOrCompute("Ore deposit known to mining surveyor {0}");
-        private static readonly MyStringId StrDepositCount = MyStringId.GetOrCompute("{0} x{1}");
-        private static readonly MyStringId StrOrderConstant = MyStringId.GetOrCompute("{0} (constant)");
-        private static readonly MyStringId StrInfoStatus = MyStringId.GetOrCompute("Mining: {0}");
-        private static readonly MyStringId StrKnownDeposits = MyStringId.GetOrCompute("Known deposits:");
-        private static readonly MyStringId StrNone = MyStringId.GetOrCompute("none");
-        private static readonly MyStringId StrConstant = MyStringId.GetOrCompute("constant");
-        private static readonly MyStringId StrKgLeft = MyStringId.GetOrCompute("{0:N0} kg left");
-        private static readonly MyStringId StrInfoDelivered = MyStringId.GetOrCompute("Delivered: {0:N0} kg, failed auctions: {1}");
-        private static readonly MyStringId StrKnownDepositsTitle = MyStringId.GetOrCompute("Known deposits");
-        private static readonly MyStringId StrActiveRequests = MyStringId.GetOrCompute("Active requests");
-        private static readonly MyStringId StrStarting = MyStringId.GetOrCompute("Starting");
-        private static readonly MyStringId StrDepositsShownAsGps = MyStringId.GetOrCompute("{0} known deposit(s) shown as GPS");
-        private static readonly MyStringId StrDeletedDeposits = MyStringId.GetOrCompute("Deleted {0} known deposit(s)");
-        private static readonly MyStringId StrRetryJobSAnnouncedAgain = MyStringId.GetOrCompute("Retry: {0} job(s) announced again");
-        private static readonly MyStringId StrWaitingForTheMod = MyStringId.GetOrCompute("Waiting for the mod");
-        private static readonly MyStringId StrLoading = MyStringId.GetOrCompute("Loading");
-        private static readonly MyStringId StrOffTerminal = MyStringId.GetOrCompute("Off (terminal)");
-        private static readonly MyStringId StrNotWorkingPowerDamage = MyStringId.GetOrCompute("Not working (power / damage)");
-        private static readonly MyStringId StrNoAntennaFunctionalOnBroadcasting = MyStringId.GetOrCompute("No antenna (functional, on, broadcasting): deposits only");
-        private static readonly MyStringId StrNoOreOrders = MyStringId.GetOrCompute("No ore orders");
-        private static readonly MyStringId StrNothingToMineOrdersDone = MyStringId.GetOrCompute("Nothing to mine (orders done, or no known deposit)");
-        private static readonly MyStringId StrJobSPublishedOnHold = MyStringId.GetOrCompute("{0} job(s) published, {1} on hold, {2} out");
-        private static readonly MyStringId StrOwnScan = MyStringId.GetOrCompute("own scan");
-        private static readonly MyStringId StrAtMDepleted = MyStringId.GetOrCompute("{0} at {1:F0} m: depleted ({2})");
-        private static readonly MyStringId StrOrderRemoved = MyStringId.GetOrCompute("order removed");
-        private static readonly MyStringId StrJobKgAtMBore = MyStringId.GetOrCompute("Job: {1:N0} kg {2} at {3:F0} m (bore {4:F0} m)");
-        private static readonly MyStringId StrAnnounced = MyStringId.GetOrCompute("announced");
-        private static readonly MyStringId StrNoOrchestratorInRange = MyStringId.GetOrCompute("no orchestrator in range");
-        private static readonly MyStringId StrAssigned = MyStringId.GetOrCompute("assigned");
-        private static readonly MyStringId StrJobDroneOnItsWay = MyStringId.GetOrCompute("Job awarded: {0}, Drone {1}");
-        private static readonly MyStringId StrJobOnHoldS = MyStringId.GetOrCompute("Job on hold {1} s\n  {2}");
-        private static readonly MyStringId StrJobDroneKgDelivered = MyStringId.GetOrCompute("Job {0}: drone {1} {2}, {3:N0} kg delivered");
-        private static readonly MyStringId StrText = MyStringId.GetOrCompute(" - {0}: {1}\n");
-        private static readonly MyStringId StrOrderProgress = MyStringId.GetOrCompute("{0} {1:N0}/{2:N0} kg");
-        #endregion
 
         #region Timing
         private const int STEP_EVERY = 10;                       // UpdateBeforeSimulation10 calls per step (100 ticks)
@@ -89,6 +42,7 @@ namespace Automata.Mining
         private const int ASSIGNED_TTL_TICKS = 30 * 60 * 60;     // awarded, then no sign of the drone (award / keepalive every 60 s) this long: counted back
         private const double DEPLETED_MEMORY_SECONDS = 3600;     // a depleted deposit isn't brought back by older scans
         private const int GPS_REFRESH_TICKS = 600;
+        private const int GPS_ON_TICKS = 180 * 60;               // "Show deposits as GPS" turns itself off after this long
         private const int KNOWN_ORES_TICKS = 600;                // the terminal's ore list sent to players at most this often
         #endregion
         private const double BORE_SEARCH_METERS = 400;
@@ -104,7 +58,7 @@ namespace Automata.Mining
         private bool ready;
         private int stepCounter;
         private int lastSearch = int.MinValue / 2, lastOwnScan = int.MinValue / 2, lastGps = int.MinValue / 2, lastKnownOres = int.MinValue / 2;
-        private string status = Loc.T(StrStarting);
+        private string status = Loc.T(MyStrings.Mining_Starting);
         private readonly StringBuilder info = new StringBuilder();
         private readonly List<IMyCubeGrid> gridBuffer = new List<IMyCubeGrid>();
 
@@ -143,9 +97,11 @@ namespace Automata.Mining
 
         private readonly OreScanner scanner = new OreScanner();
         private readonly List<OreHit> scanHits = new List<OreHit>();
-        private readonly List<int> gpsHashes = new List<int>(), requestedHashes = new List<int>();
+        private readonly List<int> gpsHashes = new List<int>();
         private long gpsIdentity;
         private bool gpsDirty = true;
+        private bool gpsCleaned;                                 // this block's markers left from before a reload were removed
+        private int gpsOffAt;                                    // frame the "Show deposits as GPS" switch turns itself off (0: it is off)
         private readonly BlockLog log = new BlockLog();
 
         private readonly List<Message<MiningSurveyDataBroadcast>> surveyInbox = new List<Message<MiningSurveyDataBroadcast>>();
@@ -224,7 +180,7 @@ namespace Automata.Mining
             catch (Exception ex)
             {
                 Log.Error("MS {0}: update error: {1}", entityId, ex);
-                status = Loc.F(StrError, ex.Message);
+                status = Loc.F(MyStrings.Mining_Error, ex.Message);
             }
         }
 
@@ -234,7 +190,7 @@ namespace Automata.Mining
             {
                 if (block != null) block.AppendingCustomInfo -= AppendInfo;
                 All.Remove(this);
-                if (IsServer) { RemoveGps(); RemoveGps(requestedHashes); }
+                if (IsServer) RemoveGps();
                 if (messaging != null) { messaging.ReaderClosed(entityId); }
                 if (Log.DebugEnabled) Log.Debug("MS {0}: closed ({1} deposit(s), {2} job(s))", entityId, deposits.Count, jobs.Count);
             }
@@ -245,9 +201,9 @@ namespace Automata.Mining
             base.Close();
         }
 
-        protected override string SettingsXml()
+        protected override byte[] SettingsBinary()
         {
-            return MyAPIGateway.Utilities.SerializeToXML(settings);
+            return MyAPIGateway.Utilities.SerializeToBinary(settings);
         }
 
         protected override string SaveText()
@@ -267,9 +223,9 @@ namespace Automata.Mining
             return true;
         }
 
-        protected override bool LoadSettingsXml(string xml)
+        protected override bool LoadSettingsBinary(byte[] data)
         {
-            var loaded = MyAPIGateway.Utilities.SerializeFromXML<MiningSurveyorSettings>(xml);
+            var loaded = MyAPIGateway.Utilities.SerializeFromBinary<MiningSurveyorSettings>(data);
             if (loaded == null) return false;
             settings = loaded;
             Normalize();
@@ -282,28 +238,10 @@ namespace Automata.Mining
             ordersDirty = true;
             gpsDirty = true;
             CheckRetryRequest();
-            CheckShowDepositsRequest();
             CheckDeleteDepositsRequest();
         }
 
         #region Retry jobs (terminal button)
-        private int lastShowRequest;
-        private bool showSeen;
-
-        private void CheckShowDepositsRequest()
-        {
-            if (showSeen && settings.ShowDepositsRequest != lastShowRequest && IsServer) ShowDepositsOnce();
-            lastShowRequest = settings.ShowDepositsRequest;
-            showSeen = true;
-        }
-
-        public bool Terminal_ShowDeposits()
-        {
-            settings.ShowDepositsRequest++;
-            SettingsEdited();
-            return true;
-        }
-
         private int lastDeleteRequest;
         private bool deleteSeen;
 
@@ -331,7 +269,7 @@ namespace Automata.Mining
             lastKnownOres = int.MinValue / 2;
             gpsDirty = true;
             ordersDirty = true;
-            AddEvent(Loc.F(StrDeletedDeposits, n));
+            AddEvent(Loc.F(MyStrings.Mining_DeletedKnownDeposit, n));
             if (Log.DebugEnabled) Log.Debug("MS {0}: known deposits deleted on request: {1} deposit(s)", entityId, n);
         }
 
@@ -365,7 +303,7 @@ namespace Automata.Mining
                 n++;
             }
             ordersDirty = true;
-            AddEvent(Loc.F(StrRetryJobSAnnouncedAgain, n));
+            AddEvent(Loc.F(MyStrings.Mining_RetryJobAnnouncedAgain, n));
             if (Log.DebugEnabled) Log.Debug("MS {0}: retry requested: {1} unassigned job(s) announced again", entityId, n);
         }
         #endregion
@@ -383,19 +321,19 @@ namespace Automata.Mining
         {
             int now = MyAPIGateway.Session.GameplayFrameCounter;
             if (!retrySeen) CheckRetryRequest();   // loaded: the saved request counts as seen
-            if (!showSeen) CheckShowDepositsRequest();
+            if (IsServer) CheckGpsTimer(now);
             if (!deleteSeen) CheckDeleteDepositsRequest();
             if (messaging == null) messaging = AutomataSession.GetMessageQueue();
-            if (messaging == null) { status = Loc.T(StrWaitingForTheMod); return; }
+            if (messaging == null) { status = Loc.T(MyStrings.Mining_WaitingForTheMod); return; }
             if (pendingState != null)
             {
-                if (!BlockSave.CanRestore) { status = Loc.T(StrLoading); return; }
+                if (!BlockSave.CanRestore) { status = Loc.T(MyStrings.Mining_Loading); return; }
                 RestoreState(pendingState);
                 pendingState = null;
             }
             if (!settings.Enabled || !block.IsWorking)
             {
-                status = !settings.Enabled ? Loc.T(StrOffTerminal) : Loc.T(StrNotWorkingPowerDamage);
+                status = !settings.Enabled ? Loc.T(MyStrings.Mining_OffTerminal) : Loc.T(MyStrings.Mining_NotWorkingPowerDamage);
                 if (gpsHashes.Count > 0) RemoveGps();
                 return;
             }
@@ -439,10 +377,10 @@ namespace Automata.Mining
                 if (jobs[i].Assigned != 0) continue;
                 if (jobs[i].HeldUntil != 0) held++; else open++;
             }
-            status = !online ? Loc.T(StrNoAntennaFunctionalOnBroadcasting)
-                   : orders.Count == 0 ? Loc.T(StrNoOreOrders)
-                   : jobs.Count == 0 ? Loc.T(StrNothingToMineOrdersDone)
-                   : Loc.F(StrJobSPublishedOnHold, open, held, jobs.Count - open - held);
+            status = !online ? Loc.T(MyStrings.Mining_NoAntennaFunctionalOnBroadcastingDeposits)
+                   : orders.Count == 0 ? Loc.T(MyStrings.Mining_NoOreOrders)
+                   : jobs.Count == 0 ? Loc.T(MyStrings.Mining_NothingToMineOrdersDone)
+                   : Loc.F(MyStrings.Mining_JobPublishedOnHoldOut, open, held, jobs.Count - open - held);
         }
 
         private void FindBlocks()
@@ -476,10 +414,10 @@ namespace Automata.Mining
         {
             if (Log.DebugEnabled) Log.Debug("MS {0}: own scan done: {1} cell(s) read, {2} hit(s)", entityId, scanner.CellsRead, scanHits.Count);
             CountDeposits(depositsBefore);
-            ApplySweep(scanner.Center, scanner.Radius, DateTime.UtcNow, scanHits, Loc.T(StrOwnScan));
+            ApplySweep(scanner.Center, scanner.Radius, DateTime.UtcNow, scanHits, Loc.T(MyStrings.Mining_OwnScan));
             scanHits.Clear();
             string found = NewOres(depositsBefore);
-            if (found != null) AddEvent(Loc.F(StrLogSurveyOwn, found));
+            if (found != null) AddEvent(Loc.F(MyStrings.Mining_SurveyOwnScanFound, found));
         }
 
         private readonly List<OreHit> sweepHits = new List<OreHit>();
@@ -542,10 +480,10 @@ namespace Automata.Mining
                             if (hit == null || string.IsNullOrEmpty(hit.Ore)) continue;
                             sweepHits.Add(new OreHit { Ore = MyStringHash.GetOrCompute(hit.Ore), Position = hit.Position.ToVector3D(), Voxels = hit.Voxels, VoxelId = hit.VoxelId });
                         }
-                    ApplySweep(sweep.Center.ToVector3D(), sweep.Radius, sent.AddSeconds(-Math.Max(0, sweep.AgeSeconds)), sweepHits, Loc.F(StrSourceDrone, Nicknames.Of(m.SenderId)));
+                    ApplySweep(sweep.Center.ToVector3D(), sweep.Radius, sent.AddSeconds(-Math.Max(0, sweep.AgeSeconds)), sweepHits, Loc.F(MyStrings.Mining_DroneArg0Lower, Nicknames.Of(m.SenderId)));
                 }
                 string found = NewOres(depositsBefore);
-                if (found != null) AddEvent(Loc.F(StrLogSurveyDrone, Nicknames.Of(m.SenderId), found));
+                if (found != null) AddEvent(Loc.F(MyStrings.Mining_SurveyDroneFound, Nicknames.Of(m.SenderId), found));
                 if (Log.DebugEnabled) Log.Debug("MS {0}: survey from drone {1}: {2} scan(s), deposits {3} -> {4}", entityId, m.SenderId, m.Payload.Sweeps.Count, before, deposits.Count);
             }
             surveyInbox.Clear();
@@ -573,7 +511,7 @@ namespace Automata.Mining
                 d.Seen = scanned;
                 depleted.Add(d);
                 changed = true;
-                AddEvent(Loc.F(StrAtMDepleted, ShortOre(d.Ore), Vector3D.Distance(d.Position, block.GetPosition()), source));
+                AddEvent(Loc.F(MyStrings.Mining_AtMDepleted, ShortOre(d.Ore), Vector3D.Distance(d.Position, block.GetPosition()), source));
                 if (Log.DebugEnabled) Log.Debug("MS {0}: deposit {1} at {2} depleted ({3})", entityId, d.Ore, d.Position, source);
             }
             for (int h = 0; h < hits.Count; h++)
@@ -670,7 +608,7 @@ namespace Automata.Mining
             for (int j = jobs.Count - 1; j >= 0; j--)
                 if (jobs[j].Assigned == 0 && !seen.Contains(jobs[j].Ore))
                 {
-                    if (jobs[j].Announced || jobs[j].Pending) Withdraw(jobs[j], Loc.T(StrOrderRemoved));   // an auction may already run for it
+                    if (jobs[j].Announced || jobs[j].Pending) Withdraw(jobs[j], Loc.T(MyStrings.Mining_OrderRemoved));   // an auction may already run for it
                     jobs.RemoveAt(j);
                 }
         }
@@ -784,7 +722,7 @@ namespace Automata.Mining
                 BlockCount = 1,
                 RequesterEntityId = entityId,
             };
-            AddEvent(Loc.F(StrJobKgAtMBore, jobId, kg, ShortOre(deposit.Ore),
+            AddEvent(Loc.F(MyStrings.Mining_JobKgAtMBore, jobId, kg, ShortOre(deposit.Ore),
                                    Vector3D.Distance(deposit.Position, block.GetPosition()), Vector3D.Distance(surface, deposit.Position)));
             if (Log.DebugEnabled) Log.Debug("MS {0}: job {1}: {2:F0} kg {3} at {4}, bore from {5} ({6:F0} m)", entityId, jobId, kg, deposit.Ore, deposit.Position, surface, Vector3D.Distance(surface, deposit.Position));
             return new MiningJob { JobId = jobId, Ore = deposit.Ore, Deposit = deposit.Position, Kg = kg, Message = AnnouncementMessage(ja) };
@@ -817,8 +755,8 @@ namespace Automata.Mining
                 }
                 if (job.Pending)
                 {
-                    if (job.Message.Delivered) { job.Pending = false; job.Announced = true; job.LastResult = Loc.T(StrAnnounced); }
-                    else if (now - job.LastAnnounced >= messaging.LifetimeTicks) { job.Pending = false; job.Announced = false; job.LastResult = Loc.T(StrNoOrchestratorInRange); }
+                    if (job.Message.Delivered) { job.Pending = false; job.Announced = true; job.LastResult = Loc.T(MyStrings.Mining_Announced); }
+                    else if (now - job.LastAnnounced >= messaging.LifetimeTicks) { job.Pending = false; job.Announced = false; job.LastResult = Loc.T(MyStrings.Mining_NoOrchestratorInRange); }
                     else continue;   // still in the network
                 }
                 if (now - job.LastAnnounced < (job.Announced ? RESPONSE_TIMEOUT_TICKS : RETRY_TICKS)) continue;
@@ -851,10 +789,10 @@ namespace Automata.Mining
                 job.Assigned = now;
                 job.HeldUntil = 0;
                 job.DronesOut = award.TaskAssignments != null ? award.TaskAssignments.Count : 0;
-                job.LastResult = Loc.T(StrAssigned);
+                job.LastResult = Loc.T(MyStrings.Mining_Assigned);
                 long drone = 0;
                 if (award.TaskAssignments != null) foreach (var k in award.TaskAssignments.Keys) { drone = k; break; }
-                AddEvent(Loc.F(StrJobDroneOnItsWay, ShortOre(job.Ore), Nicknames.Of(drone)));
+                AddEvent(Loc.F(MyStrings.Mining_JobAwardedDrone, ShortOre(job.Ore), Nicknames.Of(drone)));
             }
             awardInbox.Clear();
         }
@@ -869,9 +807,9 @@ namespace Automata.Mining
                 var job = FindJob(f.JobId);
                 if (job == null || job.Assigned != 0 || (job.HeldUntil != 0 && job.HeldUntil > now)) continue;
                 job.HeldUntil = now + Math.Max(10, f.HoldSeconds) * 60;
-                job.LastResult = Loc.F(StrOnHoldReason, f.Reason);
+                job.LastResult = Loc.F(MyStrings.Mining_OnHold, f.Reason);
                 failedCount++;
-                AddEvent(Loc.F(StrJobOnHoldS, job.JobId, f.HoldSeconds, f.Reason));
+                AddEvent(Loc.F(MyStrings.Mining_JobOnHoldS, job.JobId, f.HoldSeconds, f.Reason));
             }
             failureInbox.Clear();
         }
@@ -895,8 +833,8 @@ namespace Automata.Mining
                     if (r.OreKg > 0) deliveredCount += (int)r.OreKg;
                     OrderProgress op;
                     if (r.OreKg > 0 && progress.TryGetValue(job.Ore, out op)) op.DeliveredKg += r.OreKg;   // the header's requests
-                    AddEvent(r.OreKg > 0 ? Loc.F(StrLogDelivered, Nicknames.Of(r.DroneEntityId), ShortOre(job.Ore), r.OreKg)
-                                         : Loc.F(StrLogDroneOutcome, Nicknames.Of(r.DroneEntityId), r.Outcome, ShortOre(job.Ore))
+                    AddEvent(r.OreKg > 0 ? Loc.F(MyStrings.Mining_DeliveredDroneOreKg, Nicknames.Of(r.DroneEntityId), ShortOre(job.Ore), r.OreKg)
+                                         : Loc.F(MyStrings.Mining_MiningDroneOre, Nicknames.Of(r.DroneEntityId), r.Outcome, ShortOre(job.Ore))
                                            + (string.IsNullOrEmpty(r.Reason) ? "" : "\n  " + r.Reason));
                     if (job.DronesOut > 0) continue;   // more miners on it: settled with the last report
                     Settle(job, job.DeliveredKg, "drones done, last " + r.Outcome + (string.IsNullOrEmpty(r.Reason) ? "" : " (" + r.Reason + ")"));
@@ -959,8 +897,18 @@ namespace Automata.Mining
             SettingsEdited();   // saved and sent to the players
         }
 
+        // GPS markers are added silently: created hidden, then shown (the game plays its GPS sound only for a marker that is on
+        // the HUD when it is added; showing it afterwards makes no sound). Showing it also drops the game's expiry of temporary
+        // markers, so this block removes its own: when they no longer match, when the switch goes off, and any left over from before a reload (tagged with this block's id in their description).
+        // The markers are diffed against the deposits each refresh: only new ones are added, gone ones removed.
         private void UpdateGps(int now)
         {
+            if (!gpsCleaned && block.OwnerId != 0)
+            {
+                gpsCleaned = true;
+                gpsIdentity = block.OwnerId;
+                RemoveStaleGps();
+            }
             if (!settings.ShowGps || block.OwnerId == 0)
             {
                 if (gpsHashes.Count > 0) RemoveGps();
@@ -969,51 +917,93 @@ namespace Automata.Mining
             if (!gpsDirty && now - lastGps < GPS_REFRESH_TICKS && gpsIdentity == block.OwnerId) return;
             lastGps = now;
             gpsDirty = false;
-            RemoveGps();
-            gpsIdentity = block.OwnerId;   // the owner only: deposits are never shown to anyone else
-            AddDepositGps(gpsHashes);
+            if (gpsIdentity != block.OwnerId)
+            {
+                RemoveGps();
+                gpsIdentity = block.OwnerId;   // the owner only: deposits are never shown to anyone else
+            }
+            var wanted = WantedGps();
+            for (int i = gpsHashes.Count - 1; i >= 0; i--)
+            {
+                int h = gpsHashes[i];
+                if (wanted.ContainsKey(h)) continue;
+                MyAPIGateway.Session.GPS.RemoveGps(gpsIdentity, h);
+                gpsHashes.RemoveAt(i);
+            }
+            int added = 0;
+            foreach (var kv in wanted)
+            {
+                if (gpsHashes.Contains(kv.Key)) continue;
+                AddGpsSilent(kv.Value);
+                added++;
+                gpsHashes.Add(kv.Key);
+            }
+            if (added > 0 && Log.DebugEnabled) Log.Debug("MS {0}: GPS: {1} marker(s) added, {2} shown", entityId, added, gpsHashes.Count);
         }
 
-        /// <summary>The "Show known deposits" button: the known deposits as temporary GPS markers once (the game drops them after a few
-        /// minutes), the previous ones of the button replaced. Owner only, like the checkbox.</summary>
-        private void ShowDepositsOnce()
+        // The switch turns itself off GPS_ON_TICKS after it was turned on (server): a changed setting reaches the players
+        private void CheckGpsTimer(int now)
         {
-            RemoveGps(requestedHashes);
-            if (block.OwnerId == 0) return;
-            gpsIdentity = block.OwnerId;
-            int n = AddDepositGps(requestedHashes);
-            AddEvent(Loc.F(StrDepositsShownAsGps, n));
-            if (Log.DebugEnabled) Log.Debug("MS {0}: show known deposits requested: {1} marker(s) of {2} deposit(s)", entityId, n, deposits.Count);
+            if (!settings.ShowGps) { gpsOffAt = 0; return; }
+            if (gpsOffAt == 0) { gpsOffAt = now + GPS_ON_TICKS; return; }
+            if (now < gpsOffAt) return;
+            gpsOffAt = 0;
+            settings.ShowGps = false;
+            SettingsEdited();
+            AddEvent(Loc.T(MyStrings.Mining_DepositGPSMarkersSwitchedOff));
+            if (Log.DebugEnabled) Log.Debug("MS {0}: show deposits as GPS switched off (time)", entityId);
         }
 
-        // Temporary GPS markers (nearest deposits first, up to MaxGpsMarkers) for the owner; their hashes into 'hashes'
-        private int AddDepositGps(List<int> hashes)
+        // Markers for the nearest deposits (up to MaxGpsMarkers), by the hash the game gives them (name + position)
+        private Dictionary<int, IMyGps> WantedGps()
         {
             Vector3D here = block.GetPosition();
             var shown = new List<Deposit>(deposits);
             shown.Sort((a, b) => Vector3D.DistanceSquared(a.Position, here).CompareTo(Vector3D.DistanceSquared(b.Position, here)));
             int max = Math.Min(shown.Count, MiningConfig.MaxGpsMarkers);
+            var wanted = new Dictionary<int, IMyGps>();
+            string description = Loc.F(MyStrings.Mining_OreDepositKnownToMining, block.CustomName) + GpsTag;
             for (int i = 0; i < max; i++)
             {
                 var d = shown[i];
-                var gps = MyAPIGateway.Session.GPS.Create(ShortOre(d.Ore) + " (" + block.CustomName + ")",
-                                                          Loc.F(StrGpsDescription, block.CustomName), d.Position, true, true);
+                var gps = MyAPIGateway.Session.GPS.Create(ShortOre(d.Ore) + " (" + block.CustomName + ")", description, d.Position, false, false);
                 gps.GPSColor = Color.Gold;
-                MyAPIGateway.Session.GPS.AddGps(gpsIdentity, gps);
-                hashes.Add(gps.Hash);
+                wanted[gps.Hash] = gps;
             }
-            return max;
+            return wanted;
         }
+
+        private void AddGpsSilent(IMyGps gps)
+        {
+            MyAPIGateway.Session.GPS.AddGps(gpsIdentity, gps);                   // hidden: no sound
+            MyAPIGateway.Session.GPS.SetShowOnHud(gpsIdentity, gps.Hash, true);   // shown: no sound either
+        }
+
+        // This block's markers in the owner's GPS list (description ends with its tag) that it no longer tracks: left from
+        // before a reload (they are saved now that they don't expire)
+        private void RemoveStaleGps()
+        {
+            var list = MyAPIGateway.Session.GPS.GetGpsList(gpsIdentity);
+            if (list == null) return;
+            string tag = GpsTag;
+            int removed = 0;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var g = list[i];
+                if (g == null || g.Description == null || !g.Description.EndsWith(tag, StringComparison.Ordinal)) continue;
+                if (gpsHashes.Contains(g.Hash)) continue;
+                MyAPIGateway.Session.GPS.RemoveGps(gpsIdentity, g.Hash);
+                removed++;
+            }
+            if (removed > 0 && Log.DebugEnabled) Log.Debug("MS {0}: GPS: {1} marker(s) left from before removed", entityId, removed);
+        }
+
+        private string GpsTag { get { return " [MS " + entityId + "]"; } }
 
         private void RemoveGps()
         {
-            RemoveGps(gpsHashes);
-        }
-
-        private void RemoveGps(List<int> hashes)
-        {
-            for (int i = 0; i < hashes.Count; i++) MyAPIGateway.Session.GPS.RemoveGps(gpsIdentity, hashes[i]);
-            hashes.Clear();
+            for (int i = 0; i < gpsHashes.Count; i++) MyAPIGateway.Session.GPS.RemoveGps(gpsIdentity, gpsHashes[i]);
+            gpsHashes.Clear();
         }
         #endregion
 
@@ -1097,9 +1087,9 @@ namespace Automata.Mining
         {
             if (!ready) return;
             info.Clear();
-            if (IsServer) info.AppendLoc(StrInfoStatus, status).Append('\n');
-            info.AppendLoc(StrKnownDeposits).Append(' ');
-            if (settings.KnownOres.Count == 0) info.AppendLoc(StrNone);
+            if (IsServer) info.AppendLoc(MyStrings.Mining_MiningColonArg0, status).Append('\n');
+            info.AppendLoc(MyStrings.Mining_KnownDepositsColon).Append(' ');
+            if (settings.KnownOres.Count == 0) info.AppendLoc(MyStrings.Keen_None);
             for (int i = 0; i < settings.KnownOres.Count; i++) info.Append(i > 0 ? ", " : "").Append(settings.KnownOres[i].StartsWith("Ore/", StringComparison.Ordinal) ? settings.KnownOres[i].Substring(4) : settings.KnownOres[i]);
             info.Append('\n');
             if (IsServer)
@@ -1108,9 +1098,9 @@ namespace Automata.Mining
                 {
                     OrderProgress p;
                     progress.TryGetValue(orders[i].Ore, out p);
-                    info.AppendLoc(StrText, orders[i], settings.KeepOrdersConstant ? Loc.T(StrConstant) : p != null ? Loc.F(StrKgLeft, p.RemainingKg) : "-");
+                    info.AppendLoc(MyStrings.Mining_DashArg0ColonArg1Newline, orders[i], settings.KeepOrdersConstant ? Loc.T(MyStrings.Mining_ConstantLower) : p != null ? Loc.F(MyStrings.Mining_KgLeft, p.RemainingKg) : "-");
                 }
-                info.AppendLoc(StrInfoDelivered, deliveredCount, failedCount).Append('\n');
+                info.AppendLoc(MyStrings.Mining_DeliveredKgFailedAuctions, deliveredCount, failedCount).Append('\n');
                 BuildHeader();
                 info.Append('\n');
                 for (int i = 0; i < header.Count; i++) info.Append(header[i]).Append('\n');
@@ -1267,15 +1257,15 @@ namespace Automata.Mining
                 if (!settings.KeepOrdersConstant && p != null && p.RemainingKg < 1 && !HasJobFor(orders[i].Ore)) continue;   // done: not active
                 string ore = ShortOre(orders[i].Ore);
                 double delivered = p != null ? p.DeliveredKg : 0;
-                lcdRequests.Add(ore + "=" + delivered.ToString("F0") + "/" + (settings.KeepOrdersConstant ? Loc.T(StrConstant) : orders[i].Kg.ToString()));
+                lcdRequests.Add(ore + "=" + delivered.ToString("F0") + "/" + (settings.KeepOrdersConstant ? Loc.T(MyStrings.Mining_ConstantLower) : orders[i].Kg.ToString()));
             }
             int first;
             int pages = BlockLcd.Paginate(settings.Lcd, Math.Max(lcdDeposits.Count, lcdRequests.Count), HEADER_ROWS, out first);
             header.Clear();
-            header.Add(Loc.F(StrHeaderTitle, Nicknames.Of(Entity)));
-            string title = Loc.T(StrHeaderRequests);
-            if (pages > 1) title += " " + Loc.F(StrHeaderPage, first / HEADER_ROWS + 1, pages);
-            header.Add(BlockLcd.Columns(Loc.T(StrHeaderDeposits), title, HEADER_COLUMN));
+            header.Add(Loc.F(MyStrings.Mining_MC, Nicknames.Of(Entity)));
+            string title = Loc.T(MyStrings.Mining_ActiveRequestsKg);
+            if (pages > 1) title += " " + Loc.F(MyStrings.Mining_Page, first / HEADER_ROWS + 1, pages);
+            header.Add(BlockLcd.Columns(Loc.T(MyStrings.Mining_KnownDeposits), title, HEADER_COLUMN));
             for (int r = 0; r < HEADER_ROWS; r++)
             {
                 int k = first + r;

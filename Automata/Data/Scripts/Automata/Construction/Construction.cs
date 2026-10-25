@@ -4,6 +4,7 @@ using System.Collections.Generic;
 
 using VRage.ModAPI;
 using VRage.Utils;
+using Automata.Util.Strings;
 
 namespace Automata.Construction
 {
@@ -108,12 +109,12 @@ namespace Automata.Construction
 
         private static readonly MyStringId[] NAMES =
         {
-            MyStringId.GetOrCompute("Repair, projected, unbuilt"),
-            MyStringId.GetOrCompute("Repair, unbuilt, projected"),
-            MyStringId.GetOrCompute("Projected, repair, unbuilt"),
-            MyStringId.GetOrCompute("Projected, unbuilt, repair"),
-            MyStringId.GetOrCompute("Unbuilt, repair, projected"),
-            MyStringId.GetOrCompute("Unbuilt, projected, repair"),
+            MyStrings.Construction_RepairProjectedUnbuilt,
+            MyStrings.Construction_RepairUnbuiltProjected,
+            MyStrings.Construction_ProjectedRepairUnbuilt,
+            MyStrings.Construction_ProjectedUnbuiltRepair,
+            MyStrings.Construction_UnbuiltRepairProjected,
+            MyStrings.Construction_UnbuiltProjectedRepair,
         };
 
         /// <summary>The terminal dropdown's items (Key = WorkPriority).</summary>

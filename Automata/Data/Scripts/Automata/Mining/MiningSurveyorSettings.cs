@@ -13,7 +13,7 @@ namespace Automata.Mining
         [ProtoMember(2)] public List<string> Orders = new List<string>();
         /// <summary>Orders are not counted down: jobs go out while deposits of the ore are known.</summary>
         [ProtoMember(3, IsRequired = true)] public bool KeepOrdersConstant;
-        /// <summary>Known deposits shown to the owner as temporary GPS markers.</summary>
+        /// <summary>Known deposits shown to the owner as GPS markers; the server turns it off again after 3 minutes.</summary>
         [ProtoMember(4, IsRequired = true)] public bool ShowGps;
         /// <summary>kg of ore one MineOre job asks for (one drone trip fills its cargo; the rest goes to the next job).</summary>
         [ProtoMember(5, IsRequired = true)] public int JobSizeKg = 10000;
@@ -27,8 +27,7 @@ namespace Automata.Mining
         // (ProtoMember 8 was UseBroadcastController: only the orchestrator writes to chat)
         /// <summary>"Retry jobs" (terminal): bumped by the button, the server acts on a change.</summary>
         [ProtoMember(10)] public int RetryRequest;
-        /// <summary>"Show known deposits" (terminal): bumped by the button, the server acts on a change.</summary>
-        [ProtoMember(11)] public int ShowDepositsRequest;
+        // (ProtoMember 11 was ShowDepositsRequest: the "Show known deposits" button is gone)
         /// <summary>"Delete known deposits" (terminal): bumped by the button, the server acts on a change.</summary>
         [ProtoMember(14)] public int DeleteDepositsRequest;
         /// <summary>The name its logs (and other blocks' logs) show; empty: the block's name.</summary>

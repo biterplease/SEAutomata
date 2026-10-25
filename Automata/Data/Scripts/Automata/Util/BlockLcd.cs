@@ -10,6 +10,7 @@ using VRage.Game.ModAPI;
 using VRage.ModAPI;
 using VRage.Utils;
 using VRageMath;
+using Automata.Util.Strings;
 
 namespace Automata.Util
 {
@@ -170,14 +171,6 @@ namespace Automata.Util
     public static class LcdControls
     {
         #region UI strings
-        private static readonly MyStringId StrText = MyStringId.GetOrCompute("Text color");
-        private static readonly MyStringId StrTextTip = MyStringId.GetOrCompute("LCD text color.");
-        private static readonly MyStringId StrBack = MyStringId.GetOrCompute("Background color");
-        private static readonly MyStringId StrBackTip = MyStringId.GetOrCompute("LCD background color.");
-        private static readonly MyStringId StrFont = MyStringId.GetOrCompute("Font size");
-        private static readonly MyStringId StrFontTip = MyStringId.GetOrCompute("LCD font size. Only as many log lines as fit are shown.");
-        private static readonly MyStringId StrHeader = MyStringId.GetOrCompute("Show header");
-        private static readonly MyStringId StrHeaderTip = MyStringId.GetOrCompute("The summary lines above the log.");
         private const string PG_UP = "Header PgUp";
         private const string PG_DN = "Header PgDn";
         #endregion
@@ -189,8 +182,8 @@ namespace Automata.Util
             Func<IMyTerminalBlock, bool> visible = b => logic(b) != null;
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlColor, IMyProgrammableBlock>(prefix + "LcdForeground");
-                c.Title = StrText;
-                c.Tooltip = StrTextTip;
+                c.Title = MyStrings.Common_TextColor;
+                c.Tooltip = MyStrings.Common_TextColorTooltip;
                 c.SupportsMultipleBlocks = true;
                 c.Visible = visible;
                 c.Getter = b => { var l = logic(b); return l != null ? new Color(style(l).Foreground) : Color.Lime; };
@@ -199,8 +192,8 @@ namespace Automata.Util
             }
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlColor, IMyProgrammableBlock>(prefix + "LcdBackground");
-                c.Title = StrBack;
-                c.Tooltip = StrBackTip;
+                c.Title = MyStrings.Common_BackgroundColor;
+                c.Tooltip = MyStrings.Common_BackgroundColorTooltip;
                 c.SupportsMultipleBlocks = true;
                 c.Visible = visible;
                 c.Getter = b => { var l = logic(b); return l != null ? new Color(style(l).Background) : new Color(32, 32, 32); };
@@ -209,8 +202,8 @@ namespace Automata.Util
             }
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSlider, IMyProgrammableBlock>(prefix + "LcdFontSize");
-                c.Title = StrFont;
-                c.Tooltip = StrFontTip;
+                c.Title = MyStrings.Common_FontSize;
+                c.Tooltip = MyStrings.Common_FontSizeTooltip;
                 c.SupportsMultipleBlocks = true;
                 c.Visible = visible;
                 c.SetLimits(0.1f, 2f);
@@ -221,8 +214,8 @@ namespace Automata.Util
             }
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlCheckbox, IMyProgrammableBlock>(prefix + "LcdShowHeader");
-                c.Title = StrHeader;
-                c.Tooltip = StrHeaderTip;
+                c.Title = MyStrings.Common_ShowHeader;
+                c.Tooltip = MyStrings.Common_ShowHeaderTooltip;
                 c.SupportsMultipleBlocks = true;
                 c.Visible = visible;
                 c.Getter = b => { var l = logic(b); return l != null && style(l).ShowHeader; };

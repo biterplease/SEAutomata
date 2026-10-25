@@ -37,7 +37,7 @@ namespace Digi.NetworkLib
 namespace Automata.Network
 {
     /// <summary>
-    /// All settings of a logistics / construction computer (XML), client -> server (access checked, applied,
+    /// All settings of a block (protobuf bytes), client -> server (access checked, applied,
     /// relayed to the other clients) or server -> clients.
     /// </summary>
     [ProtoContract]
@@ -46,7 +46,8 @@ namespace Automata.Network
         public BlockSettingsPacket() { }
 
         [ProtoMember(1)] public long EntityId;
-        [ProtoMember(2)] public string Xml;
+        // ProtoMember 2 was the settings as XML text: never reuse
+        [ProtoMember(3)] public byte[] Data;
 
         public override void Received(ref PacketInfo packetInfo, ulong senderSteamId)
         {

@@ -41,10 +41,7 @@ namespace Automata.Orchestrator
         [ProtoMember(19)] public bool LaneDrawPending;
         [ProtoMember(20)] public string LaneDrawNameAB = "";
         [ProtoMember(21)] public string LaneDrawNameBA = "";
-        /// <summary>The camera the "Designator:" toolbar actions point with (on this orchestrator's mechanical group); 0: none.</summary>
-        [ProtoMember(22)] public long DesignatorCameraId;
-        /// <summary>LCDs whose name contains this (AutomataLog app) show the designator orders (orchestrator's LCD style).</summary>
-        [ProtoMember(23)] public string DesignatorLcdTag = "[Designator]";
+        // ProtoMember 22 (DesignatorCameraId) and 23 (DesignatorLcdTag) moved to the target designator block: never reuse them.
     }
 
     /// <summary>Where the parking protocol puts drones: its area first, or the orchestrator's grid. Values are saved.</summary>

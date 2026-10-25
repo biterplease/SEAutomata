@@ -22,6 +22,7 @@ using Sandbox.ModAPI.Interfaces.Terminal;
 using VRage.Game;
 using VRage.Utils;
 using VRage.Game.ObjectBuilders.ComponentSystem;
+using Automata.Util.Strings;
 using BlendTypeEnum = VRageRender.MyBillboard.BlendTypeEnum;
 
 namespace Automata.Drone
@@ -34,92 +35,6 @@ namespace Automata.Drone
         "AutomataLargeDroneController")]
     public partial class DroneControllerBlock : MyGameLogicComponent, IDebugDrawable, INicknamed
     {
-        #region UI strings
-        private static readonly MyStringId StrDamagedNoThrust = MyStringId.GetOrCompute("Damaged: no {0} thrust");
-        private static readonly MyStringId StrStuckThrust = MyStringId.GetOrCompute("Stuck: {0} thrust has no effect");
-        private static readonly MyStringId StrSmallConnectorOnly = MyStringId.GetOrCompute("Small connector '{0}': only Combat drones, Ore scouts and Ore haulers can use small connectors (fit a standard one)");
-        private static readonly MyStringId StrGyroscope = MyStringId.GetOrCompute("gyroscope");
-        private static readonly MyStringId StrThrusters = MyStringId.GetOrCompute("thrusters");
-        private static readonly MyStringId StrConnector = MyStringId.GetOrCompute("connector");
-        private static readonly MyStringId StrMaxLoadTonnes = MyStringId.GetOrCompute("{0}% ({1} t)");
-        private static readonly MyStringId StrMaxLoadKg = MyStringId.GetOrCompute("{0}% ({1} kg)");
-        private static readonly MyStringId StrNavAnchorLostOrderCancelled = MyStringId.GetOrCompute("Nav: anchor lost, order cancelled");
-        private static readonly MyStringId StrNavArrived = MyStringId.GetOrCompute("Nav: arrived");
-        private static readonly MyStringId StrNavAnchorNoLongerAvailable = MyStringId.GetOrCompute("Nav: anchor no longer available, order cancelled");
-        private static readonly MyStringId StrDroneAlreadyInitialized = MyStringId.GetOrCompute("drone {0}: already initialized");
-        private static readonly MyStringId StrERROREntityIsNotA = MyStringId.GetOrCompute("ERROR: entity is not a ship controller");
-        private static readonly MyStringId StrNotAShipController = MyStringId.GetOrCompute("Not a ship controller");
-        private static readonly MyStringId StrERRORFailedCapabilityCheck = MyStringId.GetOrCompute("ERROR: failed capability check ({0})");
-        private static readonly MyStringId StrInitializedInMode = MyStringId.GetOrCompute("Initialized in mode: {0}");
-        private static readonly MyStringId StrSystemOverloadFound = MyStringId.GetOrCompute("System Overload: {0} found on grid");
-        private static readonly MyStringId StrPartOfAStaticGrid = MyStringId.GetOrCompute("Part of a static grid (station), not a drone");
-        private static readonly MyStringId StrOreScoutProfileMissingOre = MyStringId.GetOrCompute("Ore scout profile: missing ore detector");
-        private static readonly MyStringId StrCombatDroneProfileMissing = MyStringId.GetOrCompute("Combat drone profile: missing");
-        private static readonly MyStringId StrMissing = MyStringId.GetOrCompute("Missing:");
-        private static readonly MyStringId StrERRORStopped = MyStringId.GetOrCompute("ERROR: {0}: stopped");
-        private static readonly MyStringId StrSystemsRestored = MyStringId.GetOrCompute("Systems restored");
-        private static readonly MyStringId StrWarningThrustersLostLeft = MyStringId.GetOrCompute("Warning: thrusters lost ({0} left)");
-        private static readonly MyStringId StrNoHomeConnectorAndNo = MyStringId.GetOrCompute("No home connector and no landing gear: it rests docked at the nearest free connector");
-        private static readonly MyStringId StrWarning = MyStringId.GetOrCompute("Warning: {0}");
-        private static readonly MyStringId StrMiningNeedsManagedByOrchestrator = MyStringId.GetOrCompute("Mining needs 'Managed by orchestrator' (stand-alone drones don't mine)");
-        private static readonly MyStringId StrMiningDroneProfileWithoutA = MyStringId.GetOrCompute("Mining drone profile without a drill");
-        private static readonly MyStringId StrMiningNeedsAnOreDetector = MyStringId.GetOrCompute("Mining needs an ore detector on the drone");
-        private static readonly MyStringId StrMiningNeedsACargoContainer = MyStringId.GetOrCompute("Mining needs a cargo container (the drill's own inventory doesn't count)");
-        private static readonly MyStringId StrNavDistanceDetail = MyStringId.GetOrCompute("Nav: {0:F0} m{1}");
-        private static readonly MyStringId StrApproachLine = MyStringId.GetOrCompute(", approach line");
-        private static readonly MyStringId StrError = MyStringId.GetOrCompute("Error");
-        private static readonly MyStringId StrSTOPOrderActiveResumeIn = MyStringId.GetOrCompute("STOP order active. Resume in {0:00}:{1:00}");
-        private static readonly MyStringId StrMaxLoadExceeded = MyStringId.GetOrCompute("Max load exceeded");
-        private static readonly MyStringId StrBatteryLow = MyStringId.GetOrCompute("Battery low");
-        private static readonly MyStringId StrHydrogenLow = MyStringId.GetOrCompute("Hydrogen low");
-        private static readonly MyStringId StrWarnNoCamera = MyStringId.GetOrCompute("WARN: no camera detected");
-        private static readonly MyStringId StrWarnNoSensor = MyStringId.GetOrCompute("WARN: no sensor detected");
-        private static readonly MyStringId StrWarnNoSensorOrCamera = MyStringId.GetOrCompute("WARN: no sensor or camera detected");
-        private static readonly MyStringId StrMaxSpeedIs0 = MyStringId.GetOrCompute("Max speed is 0");
-        private static readonly MyStringId StrApproachSpeedIs0 = MyStringId.GetOrCompute("Approach speed is 0");
-        private static readonly MyStringId StrSafeSpeedIs0 = MyStringId.GetOrCompute("Safe speed is 0");
-        private static readonly MyStringId StrApproachSpeedMaxSpeed = MyStringId.GetOrCompute("Approach speed > max speed");
-        private static readonly MyStringId StrSafeSpeedApproachSpeed = MyStringId.GetOrCompute("Safe speed > approach speed");
-        private static readonly MyStringId StrWarningMountAlignmentTiltsThe = MyStringId.GetOrCompute("Warning: mount alignment tilts the drone {0:F0}°");
-        private static readonly MyStringId StrMaxSpeed = MyStringId.GetOrCompute("Max speed");
-        private static readonly MyStringId StrApproachSpeed = MyStringId.GetOrCompute("Approach speed");
-        private static readonly MyStringId StrSafeSpeed = MyStringId.GetOrCompute("Safe speed");
-        private static readonly MyStringId StrTimedOutHeldAtIts = MyStringId.GetOrCompute("{0}: timed out held at its {1} ({2:F1} m/s). Raise '{1}' or the timeout");
-        private static readonly MyStringId StrAIEnabled = MyStringId.GetOrCompute("AI enabled ({0})");
-        private static readonly MyStringId StrDroneHome = MyStringId.GetOrCompute("Drone Home");
-        private static readonly MyStringId StrOrientation = MyStringId.GetOrCompute("Orientation");
-        private static readonly MyStringId StrNavInvalidTargetGPS = MyStringId.GetOrCompute("Nav: invalid target GPS");
-        private static readonly MyStringId StrNavWaypointQueuedInThe = MyStringId.GetOrCompute("Nav: waypoint queued ({0} in the route)");
-        private static readonly MyStringId StrWelder = MyStringId.GetOrCompute("Welder");
-        private static readonly MyStringId StrGrinder = MyStringId.GetOrCompute("Grinder");
-        private static readonly MyStringId StrMountInvalidTargetGPS = MyStringId.GetOrCompute("Mount: invalid target GPS");
-        private static readonly MyStringId StrMountSelectAMountFirst = MyStringId.GetOrCompute("Mount: select a mount first");
-        private static readonly MyStringId StrMountWelderName = MyStringId.GetOrCompute("welder");
-        private static readonly MyStringId StrMountGrinderName = MyStringId.GetOrCompute("grinder");
-        private static readonly MyStringId StrMountDrillName = MyStringId.GetOrCompute("drill");
-        private static readonly MyStringId StrMountNotAvailableOrNo = MyStringId.GetOrCompute("Mount: {0} not available, or no route");
-        private static readonly MyStringId StrMountM = MyStringId.GetOrCompute("Mount: {0} -> {1:F0} m");
-        private static readonly MyStringId StrHomeSet = MyStringId.GetOrCompute("Home set: {0}");
-        private static readonly MyStringId StrHomeSetNoDroneConnector = MyStringId.GetOrCompute("Home set: {0} (no drone connector can dock)");
-        private static readonly MyStringId StrScanWaitS = MyStringId.GetOrCompute("Scan: wait {0}s");
-        private static readonly MyStringId StrScanConnectorsBeaconsInRange = MyStringId.GetOrCompute("Scan: {0} connectors/beacons in range");
-        private static readonly MyStringId StrAddEnterAConnectorName = MyStringId.GetOrCompute("Add: enter a connector name");
-        private static readonly MyStringId StrAddWaitS = MyStringId.GetOrCompute("Add: wait {0}s");
-        private static readonly MyStringId StrAddConnectorNotFound = MyStringId.GetOrCompute("Add: connector \"{0}\" not found");
-        private static readonly MyStringId StrAddedMatchingConnector = MyStringId.GetOrCompute("Added {0} matching connector");
-        private static readonly MyStringId StrAddedMatchingConnectors = MyStringId.GetOrCompute("Added {0} matching connectors");
-        private static readonly MyStringId StrAnchorKm = MyStringId.GetOrCompute("{0} ({1:F1} km)");
-        private static readonly MyStringId StrAnchorM = MyStringId.GetOrCompute("{0} ({1:F0} m)");
-        private static readonly MyStringId StrRelOffsetMustBeRight = MyStringId.GetOrCompute("Rel: offset must be \"right, up, forward\"");
-        private static readonly MyStringId StrRelSelectAnAnchor = MyStringId.GetOrCompute("Rel: select an anchor");
-        private static readonly MyStringId StrRelAnchorNotAvailable = MyStringId.GetOrCompute("Rel: anchor not available");
-        private static readonly MyStringId StrRelNoRoute = MyStringId.GetOrCompute("Rel: no route");
-        private static readonly MyStringId StrRelOrder = MyStringId.GetOrCompute("Rel: {0} + ({1:F0}, {2:F0}, {3:F0})");
-        private static readonly MyStringId StrListHome = MyStringId.GetOrCompute("Home: {0}");
-        private static readonly MyStringId StrListBeacon = MyStringId.GetOrCompute("Beacon: {0}");
-        private static readonly MyStringId StrNonePark = MyStringId.GetOrCompute("None (park)");
-        private static readonly MyStringId StrManagedByOrchestratorWithLanding = MyStringId.GetOrCompute("Managed by orchestrator, with landing gear: parks on its gears (staging area / friendly grid)");
-        #endregion
 
         private struct FlightState
         {
@@ -425,7 +340,7 @@ namespace Automata.Drone
                 }
                 if (activeFlightOrder != null && !RefreshAnchoredOrder(activeFlightOrder))
                 {
-                    Report(StrNavAnchorLostOrderCancelled);
+                    Report(MyStrings.Drone_NavAnchorLostOrderCancelled);
                     ClearFlightOrder();
                 }
                 if (preflightStage != 0)
@@ -502,7 +417,7 @@ namespace Automata.Drone
                     if (o.Arrived && !arrivalReported && nextLeg == null && queuedLegs.Count == 0 && dockingHomeId == 0)
                     {
                         arrivalReported = true;
-                        Report(StrNavArrived);
+                        Report(MyStrings.Drone_NavArrived);
                         SetState(State.Standby);
                     }
                     UpdateLegChaining(o);
@@ -619,11 +534,12 @@ namespace Automata.Drone
                     UpdateConstruction100();
                     UpdateOrchestratorJobs();
                     ClearWhenIdle();
+                    ReturnWhenIdle();
                     // Ownership / range can change mid-flight: re-validate the anchor at a low rate
                     if (anchorBlock != null && activeFlightOrder != null && activeFlightOrder.AnchorEntityId != 0
                         && AnchorDirectory.Resolve(block, activeFlightOrder.AnchorEntityId) == null)
                     {
-                        Report(StrNavAnchorNoLongerAvailable);
+                        Report(MyStrings.Drone_NavAnchorNoLongerAvailable);
                         ClearFlightOrder();
                     }
                 }
@@ -861,7 +777,7 @@ namespace Automata.Drone
                 if (Log.DebugEnabled) Log.Debug("initializing drone {0}", entity.EntityId);
             }
             if (initialized){
-                Report(StrDroneAlreadyInitialized, _entityId);
+                Report(MyStrings.Drone_DroneAlreadyInitialized, _entityId);
                 return;
             }
             _entityId = entity.EntityId;
@@ -884,8 +800,8 @@ namespace Automata.Drone
             shipController = entity as IMyShipController;
             if (shipController == null)
             {
-                if (currentState != State.Error) Report(StrERROREntityIsNotA);
-                errorReason = Loc.T(StrNotAShipController);
+                if (currentState != State.Error) Report(MyStrings.Drone_ErrorEntity);
+                errorReason = Loc.T(MyStrings.Drone_NotAShipController);
                 SetState(State.Error);
                 UpdateAlert();
                 return;
@@ -893,7 +809,7 @@ namespace Automata.Drone
 
             if (!CheckCapabilities())
             {
-                if (currentState != State.Error) Report(StrERRORFailedCapabilityCheck, errorReason);
+                if (currentState != State.Error) Report(MyStrings.Drone_ErrorFailedCapabilityCheck, errorReason);
                 if (errorReason != initLoggedReason)
                 {
                     initLoggedReason = errorReason;
@@ -912,7 +828,7 @@ namespace Automata.Drone
             initialized = true;
             if (IsServer) RegisterDrone(this);
             isParked = IsParkedNow();
-            Report(StrInitializedInMode, settings.OperationMode);
+            Report(MyStrings.Drone_InitializedInMode, settings.OperationMode);
             SetState(isParked ? State.Docked : State.Standby);
         }
         #endregion
@@ -1112,7 +1028,7 @@ namespace Automata.Drone
                 else if (n < thrusterBaseline[d] && initialized && !isParked)
                     damageNote = string.Format("{0} {1}/{2}", (Base6Directions.Direction)d, n, thrusterBaseline[d]);
             }
-            if (crippled != null) crippled = Loc.F(StrDamagedNoThrust, crippled);
+            if (crippled != null) crippled = Loc.F(MyStrings.Drone_DamagedNoThrust, crippled);
             SetCombatBlocks(foundDefensive, foundOffensive, foundFlight);
             string combatMissing = CombatMissingBlocks();
             // (checked at home only, like the combat blocks: a detector lost out there must not strand the drone)
@@ -1138,20 +1054,20 @@ namespace Automata.Drone
             {
                 capabilities = Capabilities.None;   // nothing to offer; don't keep what a removed block gave
                 sb.Clear();
-                if (overloadSource != null) sb.Append(Loc.F(StrSystemOverloadFound, overloadSource));
-                else if (onStatic) sb.Append(Loc.T(StrPartOfAStaticGrid));
+                if (overloadSource != null) sb.Append(Loc.F(MyStrings.Drone_SystemOverloadFoundOnGrid, overloadSource));
+                else if (onStatic) sb.Append(Loc.T(MyStrings.Drone_PartOfAStaticGrid));
                 else if (crippled != null) sb.Append(crippled);
-                else if (combatMissing == "") sb.Append(Loc.T(StrOreScoutProfileMissingOre));
-                else if (combatMissing != null) sb.Append(Loc.T(StrCombatDroneProfileMissing)).Append(combatMissing);
+                else if (combatMissing == "") sb.Append(Loc.T(MyStrings.Drone_OreScoutProfileMissingOre));
+                else if (combatMissing != null) sb.Append(Loc.T(MyStrings.Drone_CombatDroneProfileMissing)).Append(combatMissing);
                 else if (smallConnector != null && connectors.Count == 0)
-                    sb.AppendLoc(StrSmallConnectorOnly, smallConnector);
+                    sb.AppendLoc(MyStrings.Drone_SmallConnectorOnlyCombatDrones, smallConnector);
                 else
                 {
-                    sb.Append(Loc.T(StrMissing));
-                    if (gyroscopes.Count == 0) sb.Append(' ').Append(Loc.T(StrGyroscope));
+                    sb.Append(Loc.T(MyStrings.Drone_Missing));
+                    if (gyroscopes.Count == 0) sb.Append(' ').Append(Loc.T(MyStrings.Drone_Gyroscope));
                     if (!HasAnyDirectionalComponent(hydrogenThrusters) && !HasAnyDirectionalComponent(ionThrusters)
-                        && !HasAnyDirectionalComponent(atmoThrusters)) sb.Append(' ').Append(Loc.T(StrThrusters));
-                    if (connectors.Count == 0) sb.Append(' ').Append(Loc.T(StrConnector));
+                        && !HasAnyDirectionalComponent(atmoThrusters)) sb.Append(' ').Append(Loc.T(MyStrings.Drone_Thrusters));
+                    if (connectors.Count == 0) sb.Append(' ').Append(Loc.T(MyStrings.Drone_Connector));
                 }
                 errorReason = sb.ToString();
             }
@@ -1160,7 +1076,7 @@ namespace Automata.Drone
                 {
                     // Lost what it needs mid-operation (damage, blocks removed): work and flight stop, the game's own
                     // dampeners hold what they can
-                    Report(StrERRORStopped, errorReason);
+                    Report(MyStrings.Drone_ErrorStopped, errorReason);
                     StopJob(errorReason);
                     ClearFlightOrder();
                 }
@@ -1171,12 +1087,12 @@ namespace Automata.Drone
             }
             if (initialized && IsServer && currentState == State.Error && !routeError && !Grounded)
             {
-                Report(StrSystemsRestored);
+                Report(MyStrings.Drone_SystemsRestored);
                 SetState(IsParkedNow() ? State.Docked : State.Standby);
             }
             if (damageNote != null)
             {
-                if (damageNote != lastDamageNote) Report(StrWarningThrustersLostLeft, damageNote);
+                if (damageNote != lastDamageNote) Report(MyStrings.Drone_WarningThrustersLostLeft, damageNote);
                 lastDamageNote = damageNote;
                 damageNote = null;
             }
@@ -1215,22 +1131,22 @@ namespace Automata.Drone
             CalibrateRotationCapabilities();
             // Managed, no home connector: it parks on landing gears (TODO/12), so it needs some
             string parkNote = settings.OperationMode == OperationMode.ManagedByOrchestrator && settings.HomeConnectorId == 0 && landingGears.Count == 0
-                ? Loc.T(StrNoHomeConnectorAndNo) : null;
-            if (parkNote != null && parkNote != lastParkNote && IsServer) Report(StrWarning, parkNote);
+                ? Loc.T(MyStrings.Drone_NoHomeConnector) : null;
+            if (parkNote != null && parkNote != lastParkNote && IsServer) Report(MyStrings.Drone_Warning, parkNote);
             lastParkNote = parkNote;
             // Mining happens only through a mining surveyor's jobs (orchestrator); a miner left stand-alone just waits
             bool miner = drills.Count > 0 || settings.BehaviourProfile == BehaviourProfile.IsMiningDrone;
             string mineNote = !miner ? null
-                : settings.OperationMode != OperationMode.ManagedByOrchestrator ? Loc.T(StrMiningNeedsManagedByOrchestrator)
-                : drills.Count == 0 ? Loc.T(StrMiningDroneProfileWithoutA)
-                : oreDetector == null ? Loc.T(StrMiningNeedsAnOreDetector)
-                : cargoContainers.Count == 0 ? Loc.T(StrMiningNeedsACargoContainer)
+                : settings.OperationMode != OperationMode.ManagedByOrchestrator ? Loc.T(MyStrings.Drone_MiningNeedsManagedByOrchestrator)
+                : drills.Count == 0 ? Loc.T(MyStrings.Drone_MiningDroneProfileWithout)
+                : oreDetector == null ? Loc.T(MyStrings.Drone_MiningNeedsAnOreDetector)
+                : cargoContainers.Count == 0 ? Loc.T(MyStrings.Drone_MiningNeedsACargoContainer)
                 : null;
-            if (mineNote != null && mineNote != lastMineNote && IsServer) Report(StrWarning, mineNote);
+            if (mineNote != null && mineNote != lastMineNote && IsServer) Report(MyStrings.Drone_Warning, mineNote);
             lastMineNote = mineNote;
             // Combat drones: AI block settings that hold the drone back in a fight (LCD alert + terminal)
             string aiNote = CombatAiSettingsNote();
-            if (aiNote != null && aiNote != combatAiNote && IsServer) Report(StrWarning, aiNote);
+            if (aiNote != null && aiNote != combatAiNote && IsServer) Report(MyStrings.Drone_Warning, aiNote);
             combatAiNote = aiNote;
             if (initialized && IsServer && parkPhase == ParkPhase.None && isParked) RegisterParkedSpot();
             if (localHullBox.Max.X >= localHullBox.Min.X)
@@ -1616,7 +1532,7 @@ namespace Automata.Drone
         public FlightOrder OrderGoTo(Vector3D target, Vector3D? approachFrom = null)
         {
             var o = CreateGoTo(target, approachFrom);
-            Report(StrNavDistanceDetail, Vector3D.Distance(flightState.Position, target), approachFrom.HasValue ? Loc.T(StrApproachLine) : "");
+            Report(MyStrings.Drone_NavColonArg0MArg1, Vector3D.Distance(flightState.Position, target), approachFrom.HasValue ? Loc.T(MyStrings.Drone_ApproachLine) : "");
             return o;
         }
 
@@ -1654,22 +1570,22 @@ namespace Automata.Drone
             string text = null;
             string speed = SpeedSettingsProblem();
             int stop;
-            if (currentState == State.Error) { level = DisplayAlertLevel.Error; text = errorReason ?? Loc.T(StrError); }
+            if (currentState == State.Error) { level = DisplayAlertLevel.Error; text = errorReason ?? Loc.T(MyStrings.Keen_Error); }
             else if (speed != null) { level = DisplayAlertLevel.Error; text = speed; }
-            else if (!settings.IsEnabled) { level = DisplayAlertLevel.Warning; text = Loc.T(StrAIDisabled); }
+            else if (!settings.IsEnabled) { level = DisplayAlertLevel.Warning; text = Loc.T(MyStrings.Drone_AIDisabled); }
             else if ((stop = StopRemainingSeconds()) > 0)
             {
                 level = DisplayAlertLevel.Warning;
-                text = Loc.F(StrSTOPOrderActiveResumeIn, stop / 60, stop % 60);
+                text = Loc.F(MyStrings.Drone_StopOrderActiveResumeIn, stop / 60, stop % 60);
             }
             else if (thrustObstructedDir >= 0 && activeFlightOrder != null)
             {
                 level = DisplayAlertLevel.Warning;
-                text = Loc.F(StrStuckThrust, (Base6Directions.Direction)thrustObstructedDir);
+                text = Loc.F(MyStrings.Drone_StuckThrustHasNoEffect, (Base6Directions.Direction)thrustObstructedDir);
             }
-            else if (loadLevel == 2) { level = DisplayAlertLevel.Warning; text = Loc.T(StrMaxLoadExceeded); }
-            else if (needsBatteryRecharge) { level = DisplayAlertLevel.Warning; text = Loc.T(StrBatteryLow); }
-            else if (needsHydrogenRefuel) { level = DisplayAlertLevel.Warning; text = Loc.T(StrHydrogenLow); }
+            else if (loadLevel == 2) { level = DisplayAlertLevel.Warning; text = Loc.T(MyStrings.Drone_MaxLoadExceeded); }
+            else if (needsBatteryRecharge) { level = DisplayAlertLevel.Warning; text = Loc.T(MyStrings.Drone_BatteryLow); }
+            else if (needsHydrogenRefuel) { level = DisplayAlertLevel.Warning; text = Loc.T(MyStrings.Drone_HydrogenLow); }
             else if (lastConstructionProblem != null) { level = DisplayAlertLevel.Warning; text = lastConstructionProblem; }
             else if (combatAiNote != null) { level = DisplayAlertLevel.Warning; text = combatAiNote; }
             else if ((text = MissingInstrumentsWarning()) != null) level = DisplayAlertLevel.Warning;
@@ -1679,11 +1595,11 @@ namespace Automata.Drone
         /// <summary>Speed settings that make no sense together, or null.</summary>
         private string SpeedSettingsProblem()
         {
-            if (settings.MaxSpeed <= 0) return Loc.T(StrMaxSpeedIs0);
-            if (settings.ApproachSpeed <= 0) return Loc.T(StrApproachSpeedIs0);
-            if (settings.SafeSpeed <= 0) return Loc.T(StrSafeSpeedIs0);
-            if (settings.ApproachSpeed > settings.MaxSpeed) return Loc.T(StrApproachSpeedMaxSpeed);
-            if (settings.SafeSpeed > settings.ApproachSpeed) return Loc.T(StrSafeSpeedApproachSpeed);
+            if (settings.MaxSpeed <= 0) return Loc.T(MyStrings.Drone_MaxSpeedIs0);
+            if (settings.ApproachSpeed <= 0) return Loc.T(MyStrings.Drone_ApproachSpeedIs0);
+            if (settings.SafeSpeed <= 0) return Loc.T(MyStrings.Drone_SafeSpeedIs0);
+            if (settings.ApproachSpeed > settings.MaxSpeed) return Loc.T(MyStrings.Drone_ApproachSpeedMaxSpeed);
+            if (settings.SafeSpeed > settings.ApproachSpeed) return Loc.T(MyStrings.Drone_SafeSpeedApproachSpeed);
             return null;
         }
         private double FinalSpeedFor(FlightOrder o)
@@ -1827,7 +1743,7 @@ namespace Automata.Drone
             {
                 double tilt = MathHelperD.ToDegrees(Math.Acos(MathHelperD.Clamp(Vector3D.Dot(frame.Up, gUp), -1, 1)));
                 if (tilt > 30)
-                    Report(StrWarningMountAlignmentTiltsThe, tilt);
+                    Report(MyStrings.Drone_WarningMountAlignmentTilts, tilt);
             }
             return order;
         }
@@ -2646,16 +2562,16 @@ namespace Automata.Drone
             speedBoundShare += ((bound ? 1.0 : 0.0) - speedBoundShare) * SPEED_WATCH_ALPHA;
             if (!bound) return;
             speedCapValue = cap;
-            if (cap >= MaxSpeed - 1e-3) speedCapName = Loc.T(StrMaxSpeed);
-            else if (!finalLeg || cap >= ApproachSpeed - 1e-3) speedCapName = Loc.T(StrApproachSpeed);
-            else speedCapName = Math.Abs(finalSpeed - SafeSpeed) < 1e-3 ? Loc.T(StrSafeSpeed) : Loc.T(StrApproachSpeed);
+            if (cap >= MaxSpeed - 1e-3) speedCapName = Loc.T(MyStrings.Drone_MaxSpeed);
+            else if (!finalLeg || cap >= ApproachSpeed - 1e-3) speedCapName = Loc.T(MyStrings.Drone_ApproachSpeed);
+            else speedCapName = Math.Abs(finalSpeed - SafeSpeed) < 1e-3 ? Loc.T(MyStrings.Drone_SafeSpeed) : Loc.T(MyStrings.Drone_ApproachSpeed);
         }
 
         /// <summary>A timeout of 'what' while mostly held at a speed setting: said on the terminal / LCD and broadcast.</summary>
         private void NoteSpeedTimeout(string what)
         {
             if (speedBoundShare < 0.5 || speedCapName == null) return;
-            string text = Loc.F(StrTimedOutHeldAtIts, what, speedCapName, speedCapValue);
+            string text = Loc.F(MyStrings.Drone_TimedOutHeld, what, speedCapName, speedCapValue);
             Report(text);
         }
         #endregion
@@ -2997,7 +2913,7 @@ namespace Automata.Drone
                         {
                             CheckCapabilities();
                             ApplyOperationMode();
-                            Report(StrAIEnabled, settings.OperationMode);
+                            Report(MyStrings.Drone_AIEnabled, settings.OperationMode);
                         }
                         else DisableAI();
                     }
@@ -3027,7 +2943,7 @@ namespace Automata.Drone
             get
             {
                 if (settings == null) return new StringBuilder("");
-                return new StringBuilder(ConvertVectorToGPS(Loc.T(StrDroneHome), settings.HomePosition));
+                return new StringBuilder(ConvertVectorToGPS(Loc.T(MyStrings.Drone_DroneHome), settings.HomePosition));
             }
             set
             {
@@ -3113,8 +3029,8 @@ namespace Automata.Drone
             if (settings == null) return;
             float pct = gravity ? settings.MaxLoadGravity : settings.MaxLoadSpace;
             double mass = (gravity ? MaxMassGravity() : MaxMassSpace()) * pct / 100.0;
-            if (mass >= 10000) sb.AppendLoc(StrMaxLoadTonnes, pct.ToString("F0"), (mass / 1000).ToString("F1"));
-            else sb.AppendLoc(StrMaxLoadKg, pct.ToString("F0"), mass.ToString("F0"));
+            if (mass >= 10000) sb.AppendLoc(MyStrings.Drone_T, pct.ToString("F0"), (mass / 1000).ToString("F1"));
+            else sb.AppendLoc(MyStrings.Drone_Kg, pct.ToString("F0"), mass.ToString("F0"));
         }
 
         // LCD output
@@ -3250,7 +3166,7 @@ namespace Automata.Drone
             get
             {
                 if (settings == null) return new StringBuilder("");
-                return new StringBuilder(ConvertVectorToGPS(Loc.T(StrOrientation), orientationTarget));
+                return new StringBuilder(ConvertVectorToGPS(Loc.T(MyStrings.Drone_Orientation), orientationTarget));
             }
             set
             {
@@ -3291,7 +3207,7 @@ namespace Automata.Drone
 
         public void Terminal_Debug_NavigateToTarget()
         {
-            if (!navDebugTarget.HasValue) { Feedback(StrNavInvalidTargetGPS); return; }
+            if (!navDebugTarget.HasValue) { Feedback(MyStrings.Drone_NavInvalidTargetGPS); return; }
             var p = new DroneActionPacket { Action = DroneAction.NavigateTo, VectorA = Vector3DData.FromVector3D(navDebugTarget.Value), HasVectorA = true };
             if (navDebugTargetApproachFrom.HasValue)
             {
@@ -3303,7 +3219,7 @@ namespace Automata.Drone
 
         public void Terminal_Debug_QueueWaypoint()
         {
-            if (!navDebugTarget.HasValue) { Feedback(StrNavInvalidTargetGPS); return; }
+            if (!navDebugTarget.HasValue) { Feedback(MyStrings.Drone_NavInvalidTargetGPS); return; }
             RequestAction(new DroneActionPacket { Action = DroneAction.QueueWaypoint, VectorA = Vector3DData.FromVector3D(navDebugTarget.Value), HasVectorA = true });
         }
 
@@ -3313,15 +3229,15 @@ namespace Automata.Drone
             var wps = new List<Vector3D>();
             if (activeFlightOrder != null && routeOwner == RouteOwner.Player) RemainingPlayerWaypoints(wps);
             wps.Add(target);
-            if (FlyPlayerRoute(wps)) Report(StrNavWaypointQueuedInThe, wps.Count);
+            if (FlyPlayerRoute(wps)) Report(MyStrings.Drone_NavWaypointQueued, wps.Count);
         }
 
         #region Terminal - place mount (debug)
         public void Terminal_Debug_MountListContent(List<MyTerminalControlListBoxItem> items, List<MyTerminalControlListBoxItem> selected)
         {
-            AddMountItem(items, selected, welder, MOUNT_WELDER, Loc.T(StrWelder));
-            AddMountItem(items, selected, grinder, MOUNT_GRINDER, Loc.T(StrGrinder));
-            AddMountItem(items, selected, drill, MOUNT_DRILL, Loc.T(StrDrill));
+            AddMountItem(items, selected, welder, MOUNT_WELDER, Loc.T(MyStrings.Drone_Welder));
+            AddMountItem(items, selected, grinder, MOUNT_GRINDER, Loc.T(MyStrings.Drone_Grinder));
+            AddMountItem(items, selected, drill, MOUNT_DRILL, Loc.T(MyStrings.Drone_Drill));
             // Connectors: use "Go home" (docking)
         }
         private void AddMountItem(List<MyTerminalControlListBoxItem> items, List<MyTerminalControlListBoxItem> selected,
@@ -3344,8 +3260,8 @@ namespace Automata.Drone
         }
         public void Terminal_Debug_PlaceMount()
         {
-            if (!debugMountTarget.HasValue) { Feedback(StrMountInvalidTargetGPS); return; }
-            if (debugMountSelection == MOUNT_NONE) { Feedback(StrMountSelectAMountFirst); return; }
+            if (!debugMountTarget.HasValue) { Feedback(MyStrings.Drone_MountInvalidTargetGPS); return; }
+            if (debugMountSelection == MOUNT_NONE) { Feedback(MyStrings.Drone_MountSelectAMountFirst); return; }
             RequestAction(new DroneActionPacket { Action = DroneAction.PlaceMount, Code = debugMountSelection,
                 VectorA = Vector3DData.FromVector3D(debugMountTarget.Value), HasVectorA = true });
         }
@@ -3356,15 +3272,15 @@ namespace Automata.Drone
             string name;
             switch (code)
             {
-                case MOUNT_WELDER:  name = Loc.T(StrMountWelderName);  order = RouteWorkAt(ref welderMount, target);  break;
-                case MOUNT_GRINDER: name = Loc.T(StrMountGrinderName); order = RouteWorkAt(ref grinderMount, target); break;
-                case MOUNT_DRILL:   name = Loc.T(StrMountDrillName);   order = RouteWorkAt(ref drillMount, target);   break;
+                case MOUNT_WELDER:  name = Loc.T(MyStrings.Drone_WelderLower);  order = RouteWorkAt(ref welderMount, target);  break;
+                case MOUNT_GRINDER: name = Loc.T(MyStrings.Drone_GrinderLower); order = RouteWorkAt(ref grinderMount, target); break;
+                case MOUNT_DRILL:   name = Loc.T(MyStrings.Drone_DrillLower);   order = RouteWorkAt(ref drillMount, target);   break;
                 default:
-                    Report(StrMountSelectAMountFirst);
+                    Report(MyStrings.Drone_MountSelectAMountFirst);
                     return;
             }
-            if (order == null) { Report(StrMountNotAvailableOrNo, name); return; }
-            Report(StrMountM, name, Vector3D.Distance(flightState.Position, order.Target.ToVector3D()));
+            if (order == null) { Report(MyStrings.Drone_MountNotAvailable, name); return; }
+            Report(MyStrings.Drone_MountM, name, Vector3D.Distance(flightState.Position, order.Target.ToVector3D()));
         }
         #endregion
 
@@ -3386,8 +3302,8 @@ namespace Automata.Drone
 
         public void Terminal_HomeConnectorListContent(List<MyTerminalControlListBoxItem> items, List<MyTerminalControlListBoxItem> selected)
         {
-            var none = new MyTerminalControlListBoxItem(StrNonePark,
-                StrManagedByOrchestratorWithLanding, 0L);
+            var none = new MyTerminalControlListBoxItem(MyStrings.Drone_NonePark,
+                MyStrings.Drone_ManagedByOrchestratorWithLanding, 0L);
             items.Add(none);
             if (settings == null || AutomataSession.Instance == null) return;
             RequestAnchorListIfStale();
@@ -3424,8 +3340,8 @@ namespace Automata.Drone
             var home = GetHomeConnector();
             if (home != null && initialized)
             {
-                if (EnsureDockPose(home, true)) Report(StrHomeSet, home.CustomName);
-                else Report(StrHomeSetNoDroneConnector, home.CustomName);
+                if (EnsureDockPose(home, true)) Report(MyStrings.Drone_HomeSet, home.CustomName);
+                else Report(MyStrings.Drone_HomeSetNoDroneConnector, home.CustomName);
             }
             SaveSettings();
             SyncSetting(DroneSettingKey.HomeConnector);   // clients: selection + observation-area controls
@@ -3443,10 +3359,10 @@ namespace Automata.Drone
             int wait;
             if (!AutomataSession.Instance.Anchors.TryManualScan(block, out wait))
             {
-                Report(StrScanWaitS, wait);
+                Report(MyStrings.Drone_ScanWaitS, wait);
                 return;
             }
-            Report(StrScanConnectorsBeaconsInRange, AutomataSession.Instance.Anchors.Get(block).Count);
+            Report(MyStrings.Drone_ScanConnectorsBeaconsInRange, AutomataSession.Instance.Anchors.Get(block).Count);
             SendAnchorList(steamId, identity);
         }
 
@@ -3460,7 +3376,7 @@ namespace Automata.Drone
 
         public void Terminal_AddConnectorByName()
         {
-            if (string.IsNullOrWhiteSpace(connectorNameQuery)) { Feedback(StrAddEnterAConnectorName); return; }
+            if (string.IsNullOrWhiteSpace(connectorNameQuery)) { Feedback(MyStrings.Drone_AddEnterAConnectorName); return; }
             RequestAction(new DroneActionPacket { Action = DroneAction.AddConnectorByName, Text = connectorNameQuery.Trim() });
         }
 
@@ -3469,9 +3385,9 @@ namespace Automata.Drone
             if (AutomataSession.Instance == null || block == null || string.IsNullOrWhiteSpace(name)) return;
             int wait;
             int added = AutomataSession.Instance.Anchors.TryAddByName(block, name, identity, out wait);
-            if (added < 0) { Report(StrAddWaitS, wait); return; }
-            if (added == 0) { Report(StrAddConnectorNotFound, name); return; }
-            Report(added == 1 ? StrAddedMatchingConnector : StrAddedMatchingConnectors, added);
+            if (added < 0) { Report(MyStrings.Drone_AddWaitS, wait); return; }
+            if (added == 0) { Report(MyStrings.Drone_AddConnectorNotFound, name); return; }
+            Report(added == 1 ? MyStrings.Drone_AddedMatchingConnector : MyStrings.Drone_AddedMatchingConnectors, added);
             SendAnchorList(steamId, identity);
         }
 
@@ -3492,8 +3408,8 @@ namespace Automata.Drone
         private static string FormatAnchor(AnchorEntry e)
         {
             return e.Distance >= 1000
-                ? Loc.F(StrAnchorKm, e.Name, e.Distance / 1000.0)
-                : Loc.F(StrAnchorM, e.Name, e.Distance);
+                ? Loc.F(MyStrings.Drone_Km, e.Name, e.Distance / 1000.0)
+                : Loc.F(MyStrings.Drone_M, e.Name, e.Distance);
         }
 
         public bool Terminal_ObservationAreaDraw
@@ -3727,7 +3643,7 @@ namespace Automata.Drone
             var home = GetHomeConnector();
             if (home != null && AnchorDirectory.ViewerAllowed(home.OwnerId))
             {
-                var item = new MyTerminalControlListBoxItem(MyStringId.GetOrCompute(Loc.F(StrListHome, home.CustomName)), MyStringId.NullOrEmpty, home.EntityId);
+                var item = new MyTerminalControlListBoxItem(MyStringId.GetOrCompute(Loc.F(MyStrings.Drone_HomeColonArg0, home.CustomName)), MyStringId.NullOrEmpty, home.EntityId);
                 items.Add(item);
                 if (debugAnchorId == home.EntityId) selected.Add(item);
             }
@@ -3735,7 +3651,7 @@ namespace Automata.Drone
             for (int i = 0; i < entries.Count; i++)
             {
                 if (entries[i].Kind != AnchorKind.Beacon || !AnchorDirectory.ViewerAllowed(entries[i].OwnerId)) continue;
-                var item = new MyTerminalControlListBoxItem(MyStringId.GetOrCompute(Loc.F(StrListBeacon, FormatAnchor(entries[i]))), MyStringId.NullOrEmpty, entries[i].EntityId);
+                var item = new MyTerminalControlListBoxItem(MyStringId.GetOrCompute(Loc.F(MyStrings.Drone_Beacon, FormatAnchor(entries[i]))), MyStringId.NullOrEmpty, entries[i].EntityId);
                 items.Add(item);
                 if (entries[i].EntityId == debugAnchorId) selected.Add(item);
             }
@@ -3757,8 +3673,8 @@ namespace Automata.Drone
         }
         public void Terminal_Debug_NavigateRelative()
         {
-            if (!debugRelativeOffset.HasValue) { Feedback(StrRelOffsetMustBeRight); return; }
-            if (debugAnchorId == 0) { Feedback(StrRelSelectAnAnchor); return; }
+            if (!debugRelativeOffset.HasValue) { Feedback(MyStrings.Drone_RelOffsetMustBeRight); return; }
+            if (debugAnchorId == 0) { Feedback(MyStrings.Drone_RelSelectAnAnchor); return; }
             RequestAction(new DroneActionPacket { Action = DroneAction.NavigateRelative, Id = debugAnchorId,
                 VectorA = Vector3DData.FromVector3D(debugRelativeOffset.Value), HasVectorA = true });
         }
@@ -3766,7 +3682,7 @@ namespace Automata.Drone
         private void ExecuteNavigateRelative(long anchorId, Vector3D offset, long identity)
         {
             IMyTerminalBlock anchor = AnchorDirectory.Resolve(block, anchorId);
-            if (anchor == null || !AnchorDirectory.IsAllowed(identity, anchor.OwnerId)) { Report(StrRelAnchorNotAvailable); return; }
+            if (anchor == null || !AnchorDirectory.IsAllowed(identity, anchor.OwnerId)) { Report(MyStrings.Drone_RelAnchorNotAvailable); return; }
             // Through the pathfinder, anchored to the block (moving grids)
             CaptureFlightState();
             MatrixD am = anchor.WorldMatrix;
@@ -3780,10 +3696,10 @@ namespace Automata.Drone
             if (FlyRoute(anchor, ref am, target, target, DroneRadius(), Vector3D.Zero, ref frame, false) != Orchestrator.TaskFailure.None)
             {
                 ClearFlightOrder();
-                Report(StrRelNoRoute);
+                Report(MyStrings.Drone_RelNoRoute);
                 return;
             }
-            Report(StrRelOrder, anchor.CustomName, offset.X, offset.Y, offset.Z);
+            Report(MyStrings.Drone_Rel, anchor.CustomName, offset.X, offset.Y, offset.Z);
         }
         #endregion
 

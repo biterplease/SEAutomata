@@ -14,70 +14,13 @@ using VRageMath;
 using Automata.Util;
 using Automata.Util.Logging;
 using VRage.Utils;
+using Automata.Util.Strings;
 
 namespace Automata.Drone
 {
     // Docking, sleep/wake, pre-flight, power and load monitoring, and player-facing reporting (terminal + LCD).
     public partial class DroneControllerBlock
     {
-        #region UI strings
-        private static readonly MyStringId StrOccupiedBy = MyStringId.GetOrCompute("occupied by {0}");
-        private static readonly MyStringId StrAnotherGrid = MyStringId.GetOrCompute("another grid");
-        private static readonly MyStringId StrHeadingAlternative = MyStringId.GetOrCompute(" || heading +{0}°: {1}");
-        private static readonly MyStringId StrDroneConnectorOff = MyStringId.GetOrCompute("drone connector {0} off / unpowered");
-        private static readonly MyStringId StrOwnersNotFriendly = MyStringId.GetOrCompute("owners not friendly ({0})");
-        private static readonly MyStringId StrInUseByDrone = MyStringId.GetOrCompute("in use by drone {0}");
-        private static readonly MyStringId StrState = MyStringId.GetOrCompute("State: {0}");
-        private static readonly MyStringId StrInit = MyStringId.GetOrCompute("Init");
-        private static readonly MyStringId StrNavigating = MyStringId.GetOrCompute("Navigating");
-        private static readonly MyStringId StrLoading = MyStringId.GetOrCompute("Loading");
-        private static readonly MyStringId StrReturning = MyStringId.GetOrCompute("Returning");
-        private static readonly MyStringId StrAligning = MyStringId.GetOrCompute("Aligning");
-        private static readonly MyStringId StrRefueling = MyStringId.GetOrCompute("Refueling");
-        private static readonly MyStringId StrRecharging = MyStringId.GetOrCompute("Recharging");
-        private static readonly MyStringId StrWarningDockingTiltsTheDrone = MyStringId.GetOrCompute("Warning: docking tilts the drone {0:F0}°");
-        private static readonly MyStringId StrHomeSetDockingPoseRecorded = MyStringId.GetOrCompute("Home set: {0} (docking pose recorded)");
-        private static readonly MyStringId StrHomeNoHomeConnectorSet = MyStringId.GetOrCompute("Home: no home connector set / in range");
-        private static readonly MyStringId StrHomeIsNotWorking = MyStringId.GetOrCompute("Home: {0} is not working");
-        private static readonly MyStringId StrHomeAlreadyDocked = MyStringId.GetOrCompute("Home: already docked");
-        private static readonly MyStringId StrHomeIsOccupied = MyStringId.GetOrCompute("Home: {0} is occupied");
-        private static readonly MyStringId StrHomeNoUsableDroneConnector = MyStringId.GetOrCompute("Home: no usable drone connector");
-        private static readonly MyStringId StrGoingHomeM = MyStringId.GetOrCompute("Going home: {0} ({1:F0} m)");
-        private static readonly MyStringId StrDockIsNotWorking = MyStringId.GetOrCompute("Dock: {0} is not working");
-        private static readonly MyStringId StrDockIsOccupied = MyStringId.GetOrCompute("Dock: {0} is occupied");
-        private static readonly MyStringId StrDockNoUsableDroneConnector = MyStringId.GetOrCompute("Dock: no usable drone connector");
-        private static readonly MyStringId StrDockingAtM = MyStringId.GetOrCompute("Docking at {0} ({1:F0} m)");
-        private static readonly MyStringId StrDockNeedsPGravityAlign = MyStringId.GetOrCompute("Dock: {0} needs {1} (P-Gravity align limits): not docking");
-        private static readonly MyStringId StrDockNoWayInCorrectedPose = MyStringId.GetOrCompute("Dock: no way in to {0}: the straight approach is blocked by {1}, and no corridor ({2})");
-        private static readonly MyStringId StrDockNoRouteTo = MyStringId.GetOrCompute("Dock: no route to {0}");
-        private static readonly MyStringId StrDockOrderRefused = MyStringId.GetOrCompute("Dock: order refused");
-        private static readonly MyStringId StrDockingAbortedDroneConnectorMissing = MyStringId.GetOrCompute("Docking aborted: drone connector missing");
-        private static readonly MyStringId StrDocking = MyStringId.GetOrCompute("Docking");
-        private static readonly MyStringId StrDockingFailedConnectorDidNot = MyStringId.GetOrCompute("Docking failed: connector did not lock ({0})");
-        private static readonly MyStringId StrDockNoWayInStraightBlocked = MyStringId.GetOrCompute("Dock: no way in to {0} with the corrected pose");
-        private static readonly MyStringId StrTargetConnectorGone = MyStringId.GetOrCompute("target connector gone");
-        private static readonly MyStringId StrTargetConnectorOffUnpowered = MyStringId.GetOrCompute("target connector off / unpowered");
-        private static readonly MyStringId StrGapMAlongAcrossAxes = MyStringId.GetOrCompute("gap {0:F2} m (along {1:F2}, across {2:F2}), axes {3:F0}° off, status {4} / {5}, {6} / {7}");
-        private static readonly MyStringId StrDockedAt = MyStringId.GetOrCompute("Docked at {0}");
-        private static readonly MyStringId StrHome = MyStringId.GetOrCompute("home");
-        private static readonly MyStringId StrRechargingBatteries = MyStringId.GetOrCompute("Recharging batteries ({0}%)");
-        private static readonly MyStringId StrRefuelingHydrogen = MyStringId.GetOrCompute("Refueling hydrogen ({0}%)");
-        private static readonly MyStringId StrPreFlightThrustersOn = MyStringId.GetOrCompute("Pre-flight: {0} thruster(s) that were off switched on");
-        private static readonly MyStringId StrPreFlightNoWorkingGyroscope = MyStringId.GetOrCompute("Pre-flight: no working gyroscope ({0} damaged, {1} without power): it can't turn");
-        private static readonly MyStringId StrPreFlightNoSensorOn = MyStringId.GetOrCompute("Pre-flight: no sensor on ({0} fitted): obstacles only seen ahead of {1} working camera(s)");
-        private static readonly MyStringId StrNoBatteryOrPowerProducer = MyStringId.GetOrCompute("no battery or power producer of its own");
-        private static readonly MyStringId StrBatteriesStuckOnRecharge = MyStringId.GetOrCompute("batteries stuck on Recharge");
-        private static readonly MyStringId StrBatteriesEmpty = MyStringId.GetOrCompute("batteries empty");
-        private static readonly MyStringId StrBatteriesSwitchedOff = MyStringId.GetOrCompute("batteries switched off");
-        private static readonly MyStringId StrPreFlightStayingDocked = MyStringId.GetOrCompute("Pre-flight: {0}: staying docked");
-        private static readonly MyStringId StrPreFlightKgLoad = MyStringId.GetOrCompute("Pre-flight: {0:N0} kg, load {1:F0}%");
-        private static readonly MyStringId StrBatteryLowRecharging = MyStringId.GetOrCompute("Battery low ({0}% < {1:F0}%), recharging");
-        private static readonly MyStringId StrBatteryRecharged = MyStringId.GetOrCompute("Battery recharged ({0}%)");
-        private static readonly MyStringId StrHydrogenLowRefueling = MyStringId.GetOrCompute("Hydrogen low ({0}% < {1:F0}%), refueling");
-        private static readonly MyStringId StrHydrogenRefueled = MyStringId.GetOrCompute("Hydrogen refueled ({0}%)");
-        private static readonly MyStringId StrMaxLoadExceededOffloading = MyStringId.GetOrCompute("Max load exceeded ({0:F0}% > {1:F0}%), offloading");
-        private static readonly MyStringId StrMaxLoadReachedOf = MyStringId.GetOrCompute("Max load reached ({0:F0}% of {1:F0}%)");
-        #endregion
 
         private const double DOCK_APPROACH_DISTANCE = 10.0;   // m: straight final approach along the home connector's axis (at least)
         // Long drones: their own length + 2.5 m, so they turn clear of the connector's grid
@@ -163,9 +106,9 @@ namespace Automata.Drone
         private string ConnectorBusy(IMyShipConnector target)
         {
             var other = ConnectorClaimant(target.EntityId);
-            if (other != null) return Loc.F(StrInUseByDrone, other.Entity.EntityId);
+            if (other != null) return Loc.F(MyStrings.Drone_InUseByDrone, other.Entity.EntityId);
             if (target.IsConnected && target.OtherConnector != null && FindConnectorMount(target.OtherConnector.EntityId) < 0)
-                return Loc.F(StrOccupiedBy, target.OtherConnector.CubeGrid != null ? target.OtherConnector.CubeGrid.DisplayName : Loc.T(StrAnotherGrid));
+                return Loc.F(MyStrings.Drone_OccupiedBy, target.OtherConnector.CubeGrid != null ? target.OtherConnector.CubeGrid.DisplayName : Loc.T(MyStrings.Drone_AnotherGrid));
             return null;
         }
         private FlightOrder dockingOrder;    // the final (connector) order; legs before it go around the observation area
@@ -219,7 +162,7 @@ namespace Automata.Drone
         {
             if (state == currentState) return;
             currentState = state;
-            Report(StrState, StateLabel(state));
+            Report(MyStrings.Drone_State, StateLabel(state));
             display.SetHeader(StateLabel(state), batteryPercent, h2Percent);
         }
 
@@ -227,13 +170,13 @@ namespace Automata.Drone
         {
             switch (s)
             {
-                case State.Initializing:       return Loc.T(StrInit);
-                case State.NavigatingToTarget: return Loc.T(StrNavigating);
-                case State.LoadingInventory:   return Loc.T(StrLoading);
-                case State.ReturningToBase:    return Loc.T(StrReturning);
-                case State.AligningToHome:     return Loc.T(StrAligning);
-                case State.RefuelingHydrogen:  return Loc.T(StrRefueling);
-                case State.RechargingBattery:  return Loc.T(StrRecharging);
+                case State.Initializing:       return Loc.T(MyStrings.Drone_Init);
+                case State.NavigatingToTarget: return Loc.T(MyStrings.Drone_Navigating);
+                case State.LoadingInventory:   return Loc.T(MyStrings.Drone_Loading);
+                case State.ReturningToBase:    return Loc.T(MyStrings.Drone_Returning);
+                case State.AligningToHome:     return Loc.T(MyStrings.Drone_Aligning);
+                case State.RefuelingHydrogen:  return Loc.T(MyStrings.Drone_Refueling);
+                case State.RechargingBattery:  return Loc.T(MyStrings.Drone_Recharging);
                 default:                       return s.ToString();
             }
         }
@@ -346,7 +289,7 @@ namespace Automata.Drone
             settings.HomeDockRecorded = false;
             SaveSettings();
             if (flightState.InGravity && MathHelperD.ToDegrees(tilt) > 30)
-                Report(StrWarningDockingTiltsTheDrone, MathHelperD.ToDegrees(tilt));
+                Report(MyStrings.Drone_WarningDockingTiltsTheDrone, MathHelperD.ToDegrees(tilt));
             return true;
         }
 
@@ -457,7 +400,7 @@ namespace Automata.Drone
                 settings.HomeDockRecorded = true;
                 homeConnector = null;
                 SaveSettings();
-                Report(StrHomeSetDockingPoseRecorded, other.CustomName);
+                Report(MyStrings.Drone_HomeSetDockingPoseRecorded, other.CustomName);
                 return true;
             }
             return false;
@@ -472,21 +415,26 @@ namespace Automata.Drone
             if (!initialized || settings == null) return false;
             CaptureFlightState();
             var home = GetHomeConnector();
-            if (home == null) { Report(StrHomeNoHomeConnectorSet); return false; }
-            if (!home.IsWorking) { Report(StrHomeIsNotWorking, home.CustomName); return false; }
+            if (home == null)
+            {
+                if (settings.HomeConnectorId == 0) Report(MyStrings.Drone_HomeNoHomeConnectorSet);
+                else Report(MyStrings.Drone_HomeTheHomeConnectorCant, AnchorDirectory.WhyNot(block, settings.HomeConnectorId));
+                return false;
+            }
+            if (!home.IsWorking) { Report(MyStrings.Drone_HomeIsNotWorking, home.CustomName); return false; }
             if (home.IsConnected)
             {
                 var other = home.OtherConnector;
                 bool ours = other != null && FindConnectorMount(other.EntityId) >= 0;
-                Report(ours ? StrHomeAlreadyDocked : StrHomeIsOccupied, home.CustomName);
+                Report(ours ? MyStrings.Drone_HomeAlreadyDocked : MyStrings.Drone_HomeIsOccupied, home.CustomName);
                 return false;
             }
-            if (!EnsureDockPose(home, false)) { Report(StrHomeNoUsableDroneConnector); return false; }
+            if (!EnsureDockPose(home, false)) { Report(MyStrings.Drone_HomeNoUsableDroneConnector); return false; }
             ResetRoute();
             int mi = FindConnectorMount(settings.HomeDockConnectorId);
             if (!StartDocking(home, mi, settings.HomeDockOffset, settings.HomeDockForward, settings.HomeDockUp, true)) return false;
             if (preflightStage == 0) SetState(State.ReturningToBase);
-            Report(StrGoingHomeM, home.CustomName, Vector3D.Distance(flightState.Position, home.GetPosition()));
+            Report(MyStrings.Drone_GoingHomeM, home.CustomName, Vector3D.Distance(flightState.Position, home.GetPosition()));
             return true;
         }
 
@@ -498,21 +446,21 @@ namespace Automata.Drone
         {
             if (!initialized || settings == null || target == null) return false;
             CaptureFlightState();
-            if (!target.IsWorking) { Report(StrDockIsNotWorking, target.CustomName); return false; }
+            if (!target.IsWorking) { Report(MyStrings.Drone_DockIsNotWorking, target.CustomName); return false; }
             if (target.IsConnected)
             {
                 var other = target.OtherConnector;
                 if (other != null && FindConnectorMount(other.EntityId) >= 0) return true;   // already there
-                Report(StrDockIsOccupied, target.CustomName);
+                Report(MyStrings.Drone_DockIsOccupied, target.CustomName);
                 return false;
             }
             Vector3DData offset, forward, up;
             int mi;
             double tilt;
-            if (!ComputeDockPose(target, out offset, out forward, out up, out mi, out tilt)) { Report(StrDockNoUsableDroneConnector); return false; }
+            if (!ComputeDockPose(target, out offset, out forward, out up, out mi, out tilt)) { Report(MyStrings.Drone_DockNoUsableDroneConnector); return false; }
             ResetRoute();
             if (!StartDocking(target, mi, offset, forward, up, async)) return false;
-            Report(StrDockingAtM, target.CustomName, Vector3D.Distance(flightState.Position, target.GetPosition()));
+            Report(MyStrings.Drone_DockingAtM, target.CustomName, Vector3D.Distance(flightState.Position, target.GetPosition()));
             return true;
         }
 
@@ -621,7 +569,7 @@ namespace Automata.Drone
             string tiltNeed;
             if (!WithinGravityLimits(ref dockFrame, out tiltNeed))
             {
-                Report(StrDockNeedsPGravityAlign, target.CustomName, tiltNeed);
+                Report(MyStrings.Drone_DockNeedsPGravityAlign, target.CustomName, tiltNeed);
                 return null;
             }
             Vector3D connectorLocal = dockOffset.ToVector3D() + WorldToAnchorDir(ref hm, Vector3D.TransformNormal(mount.LocalPoint, dockFrame));
@@ -660,7 +608,7 @@ namespace Automata.Drone
                         dockOffset = Vector3DData.FromVector3D(connectorLocal - WorldToAnchorDir(ref hm, Vector3D.TransformNormal(mount.LocalPoint, frameK)));
                     }
                 }
-                else corridorHow = corridorHow == null ? howK : corridorHow + Loc.F(StrHeadingAlternative, k * 90, howK);
+                else corridorHow = corridorHow == null ? howK : corridorHow + Loc.F(MyStrings.Drone_Heading, k * 90, howK);
             }
             // The corridor's way out (read now: the departure's corridor, worked out after, overwrites corridorExitDir)
             Vector3D exitDir = corridorExitDir;
@@ -681,7 +629,7 @@ namespace Automata.Drone
                 if (!ApproachLineClear(p0World + hullFromConnector, AnchorToWorldPoint(ref hm, approachLocal) + hullFromConnector, ref dockFrame, out lineBlocker))
                 {
                     corridorIgnore = null;
-                    Report(StrDockNoWayInCorrectedPose, target.CustomName, lineBlocker, corridorHow);
+                    Report(MyStrings.Drone_DockNoWay, target.CustomName, lineBlocker, corridorHow);
                     return null;
                 }
                 if (Log.DebugEnabled) Log.Debug("Drone {0}: no dock corridor at {1} ({2}): approach point {3:F1} m out", Entity.EntityId, target.CustomName, corridorHow, Vector3D.Distance(approachLocal, connectorLocal));
@@ -750,7 +698,7 @@ namespace Automata.Drone
             finally { dockAreaSet = false; }
             if (!planned)
             {
-                Report(StrDockNoRouteTo, target.CustomName);
+                Report(MyStrings.Drone_DockNoRouteTo, target.CustomName);
                 return false;
             }
             if (staged)
@@ -763,7 +711,7 @@ namespace Automata.Drone
             dockLegs.Clear();
             if (BuildHullLegs(target, ref hm, dockRoutePoints, backOuts, hullAtApproach, dockFrame.Forward, dockFrame.Up, dockLegs) == null)
             {
-                Report(StrDockOrderRefused);
+                Report(MyStrings.Drone_DockOrderRefused);
                 return false;
             }
             if (Log.DebugEnabled) Log.Debug("Drone {0}: docking route, {1} waypoints", Entity.EntityId, dockRoutePoints.Count);
@@ -954,7 +902,7 @@ namespace Automata.Drone
 
             int mi = FindConnectorMount(dockingConnectorId);
             var c = mi >= 0 ? connectorMounts[mi].Block as IMyShipConnector : null;
-            if (c == null || c.Closed) { Report(StrDockingAbortedDroneConnectorMissing); dockingHomeId = 0; return; }
+            if (c == null || c.Closed) { Report(MyStrings.Drone_DockingAbortedDroneConnectorMissing); dockingHomeId = 0; return; }
 
             bool final = o == dockingOrder;   // not the legs around the observation area
             if (++dockDiagCalls >= DOCK_DIAG_CALLS)
@@ -995,8 +943,8 @@ namespace Automata.Drone
                 int limit = (int)((dockCorridor ? CORRIDOR_SLIDE : DockApproachDistance) / SafeSpeed * 60) + DOCK_TIMEOUT_TICKS;
                 if (dockingWaitTicks >= limit)
                 {
-                    NoteSpeedTimeout(Loc.T(StrDocking));
-                    Report(StrDockingFailedConnectorDidNot, DockFailDetail(c));
+                    NoteSpeedTimeout(Loc.T(MyStrings.Drone_Docking));
+                    Report(MyStrings.Drone_DockingFailedConnectorDid, DockFailDetail(c));
                     ClearFlightOrder();
                     SetState(State.Standby);
                 }
@@ -1127,7 +1075,7 @@ namespace Automata.Drone
             ResetRoute();
             if (!StartDocking(target, mi, offset, forward, up, true))
             {
-                Report(StrDockNoWayInStraightBlocked, target.CustomName);
+                Report(MyStrings.Drone_DockNoWayInToWithTheCorrected, target.CustomName);
                 ClearFlightOrder();
                 SetState(State.Standby);
                 return true;
@@ -1212,17 +1160,17 @@ namespace Automata.Drone
         {
             IMyEntity e;
             var target = MyAPIGateway.Entities.TryGetEntityById(dockingHomeId, out e) ? e as IMyShipConnector : null;
-            if (target == null || target.Closed) return Loc.T(StrTargetConnectorGone);
-            if (!c.Enabled || !c.IsWorking) return Loc.F(StrDroneConnectorOff, c.CustomName);
-            if (!target.Enabled || !target.IsWorking) return Loc.T(StrTargetConnectorOffUnpowered);
+            if (target == null || target.Closed) return Loc.T(MyStrings.Drone_TargetConnectorGone);
+            if (!c.Enabled || !c.IsWorking) return Loc.F(MyStrings.Drone_DroneConnectorOffUnpowered, c.CustomName);
+            if (!target.Enabled || !target.IsWorking) return Loc.T(MyStrings.Drone_TargetConnectorOffUnpowered);
             var rel = target.GetUserRelationToOwner(c.OwnerId);
             if (rel == MyRelationsBetweenPlayerAndBlock.Enemies || rel == MyRelationsBetweenPlayerAndBlock.Neutral)
-                return Loc.F(StrOwnersNotFriendly, rel);
+                return Loc.F(MyStrings.Drone_OwnersNotFriendly, rel);
             Vector3D pd, ad, pt, at;
             ConnectorGeometry(c, out pd, out ad);
             ConnectorGeometry(target, out pt, out at);
             double angle = MathHelperD.ToDegrees(Math.Acos(MathHelperD.Clamp(-Vector3D.Dot(ad, at), -1, 1)));
-            return Loc.F(StrGapMAlongAcrossAxes,
+            return Loc.F(MyStrings.Drone_GapMAlongAcrossAxes,
                 Vector3D.Distance(pd, pt), Vector3D.Dot(pd - pt, at), ((pd - pt) - at * Vector3D.Dot(pd - pt, at)).Length(), angle,
                 c.Status, target.Status, c.BlockDefinition.SubtypeId, target.BlockDefinition.SubtypeId);
         }
@@ -1238,9 +1186,9 @@ namespace Automata.Drone
             if (settings.AlwaysRefuelWhenDocked || needsBatteryRecharge || needsHydrogenRefuel) StartRefuel();
             isParked = true;
             SetState(State.Docked);
-            Report(StrDockedAt, c.OtherConnector != null ? c.OtherConnector.CustomName : Loc.T(StrHome));
-            if (needsBatteryRecharge) Report(StrRechargingBatteries, batteryPercent);
-            if (needsHydrogenRefuel) Report(StrRefuelingHydrogen, h2Percent);
+            Report(MyStrings.Drone_DockedAt, c.OtherConnector != null ? c.OtherConnector.CustomName : Loc.T(MyStrings.Drone_Home));
+            if (needsBatteryRecharge) Report(MyStrings.Drone_RechargingBatteries, batteryPercent);
+            if (needsHydrogenRefuel) Report(MyStrings.Drone_RefuelingHydrogen, h2Percent);
             SaveSettings();
         }
 
@@ -1281,13 +1229,13 @@ namespace Automata.Drone
                     if (t.IsFunctional && !t.Enabled) { t.Enabled = true; thrustersOn++; }
                     if (t.IsWorking) thrustersWorking++;
                 }
-            if (thrustersOn > 0) Report(StrPreFlightThrustersOn, thrustersOn);
+            if (thrustersOn > 0) Report(MyStrings.Drone_PreFlightThrusterThatWere, thrustersOn);
             if (Log.DebugEnabled) Log.Debug("Drone {0}: pre-flight systems: gyros {1}/{2} working ({3} switched back on, {4} damaged, {5} without power), thrusters {6}/{7} working", Entity.EntityId, working, gyroscopes.Count, switchedOn, damaged, unpowered, thrustersWorking, thrustersTotal);
-            if (working == 0) Report(StrPreFlightNoWorkingGyroscope, damaged, unpowered);
+            if (working == 0) Report(MyStrings.Drone_PreFlightNoWorkingGyroscope, damaged, unpowered);
             // Obstacles are only seen through working sensors (all around) / cameras (their facing): flying without
             // is flying into what nothing saw
             if (AutomataSession.GetConfig().Pathfinding.RequireSensorsForPathfinding() && CountOn(sensors) == 0)
-                Report(StrPreFlightNoSensorOn, sensors.Count, CountOn(cameraBlocks));
+                Report(MyStrings.Drone_PreFlightNoSensor, sensors.Count, CountOn(cameraBlocks));
         }
 
         private bool IsParkedNow()
@@ -1373,10 +1321,10 @@ namespace Automata.Drone
                 foreach (var p in grid.GetFatBlocks<IMyPowerProducer>())
                     if (!(p is IMyBatteryBlock) && !(p is IMySolarPanel) && p.Enabled && p.IsWorking) { _gridCache.Clear(); return null; }
             _gridCache.Clear();
-            if (fitted == 0) return Loc.T(StrNoBatteryOrPowerProducer);
-            if (onRecharge > 0) return Loc.T(StrBatteriesStuckOnRecharge);
-            if (empty > 0) return Loc.T(StrBatteriesEmpty);
-            return Loc.T(StrBatteriesSwitchedOff);
+            if (fitted == 0) return Loc.T(MyStrings.Drone_NoBatteryOrPowerProducer);
+            if (onRecharge > 0) return Loc.T(MyStrings.Drone_BatteriesStuckOnRecharge);
+            if (empty > 0) return Loc.T(MyStrings.Drone_BatteriesEmpty);
+            return Loc.T(MyStrings.Drone_BatteriesSwitchedOff);
         }
 
         private void WakeSystems()
@@ -1435,7 +1383,7 @@ namespace Automata.Drone
                 string noPower = OwnPowerProblem();
                 if (noPower != null)
                 {
-                    Report(StrPreFlightStayingDocked, noPower);
+                    Report(MyStrings.Drone_PreFlightStayingDocked, noPower);
                     if (currentJob != null) StopJob(noPower);
                     ClearFlightOrder();
                     return;   // next update: order gone -> back to sleep, docked
@@ -1463,7 +1411,7 @@ namespace Automata.Drone
             ResetIntegralTerms();
             ResetThrustGains();
             double pct = LoadPercent();
-            Report(StrPreFlightKgLoad, physicalMass, pct);
+            Report(MyStrings.Drone_PreFlightKgLoad, physicalMass, pct);
             CheckFlightSystems();
             CheckLoad();
             SetState(activeFlightOrder == null ? State.Standby
@@ -1508,12 +1456,12 @@ namespace Automata.Drone
                 if (!needsBatteryRecharge && batteryPercent < settings.BatteryRefuelThreshold)
                 {
                     needsBatteryRecharge = true;
-                    Report(StrBatteryLowRecharging, batteryPercent, settings.BatteryRefuelThreshold);
+                    Report(MyStrings.Drone_BatteryLowRecharging, batteryPercent, settings.BatteryRefuelThreshold);
                 }
                 else if (needsBatteryRecharge && batteryPercent >= Math.Max(settings.BatteryOperationalThreshold, settings.BatteryRefuelThreshold + 5))
                 {
                     needsBatteryRecharge = false;
-                    Report(StrBatteryRecharged, batteryPercent);
+                    Report(MyStrings.Drone_BatteryRecharged, batteryPercent);
                 }
             }
             if (settings.MonitorHydrogenLevels && h2Percent >= 0)
@@ -1521,12 +1469,12 @@ namespace Automata.Drone
                 if (!needsHydrogenRefuel && h2Percent < settings.HydrogenRefuelThreshold)
                 {
                     needsHydrogenRefuel = true;
-                    Report(StrHydrogenLowRefueling, h2Percent, settings.HydrogenRefuelThreshold);
+                    Report(MyStrings.Drone_HydrogenLowRefueling, h2Percent, settings.HydrogenRefuelThreshold);
                 }
                 else if (needsHydrogenRefuel && h2Percent >= Math.Max(settings.HydrogenOperationalThreshold, settings.HydrogenRefuelThreshold + 5))
                 {
                     needsHydrogenRefuel = false;
-                    Report(StrHydrogenRefueled, h2Percent);
+                    Report(MyStrings.Drone_HydrogenRefueled, h2Percent);
                 }
             }
 
@@ -1592,12 +1540,12 @@ namespace Automata.Drone
             {
                 if (level == 2)
                 {
-                    Report(StrMaxLoadExceededOffloading, pct, limit);
+                    Report(MyStrings.Drone_MaxLoadExceededOffloading, pct, limit);
                     // Construction batches are planned to the limit: only abort one that is still collecting (grinding)
                     if (cPhase == ConstructionPhase.Running && !boring) AbortJobToHome();   // boring: RunMine ends the bore and delivers
                     else if (!IsGoingToRest && (HasHomeConnector || ParkMode) && cPhase == ConstructionPhase.Idle && !CombatHoldsControl) GoRest();
                 }
-                else Report(StrMaxLoadReachedOf, pct, limit);
+                else Report(MyStrings.Drone_MaxLoadReachedOf, pct, limit);
             }
             loadLevel = level;
         }

@@ -15,6 +15,7 @@ using Automata.Inventory;
 using Automata.Logistics;
 using Automata.Util;
 using Automata.Util.Logging;
+using Automata.Util.Strings;
 
 namespace Automata.Drone
 {
@@ -29,19 +30,6 @@ namespace Automata.Drone
     /// </summary>
     public partial class DroneControllerBlock
     {
-        #region UI strings
-        private static readonly MyStringId StrConstructionNoLoadCapacity = MyStringId.GetOrCompute("Construction: no load capacity (max load setting)");
-        private static readonly MyStringId StrConstructionMissing = MyStringId.GetOrCompute("Construction: missing {0}");
-        private static readonly MyStringId StrConstructionOnHoldHomeConnector = MyStringId.GetOrCompute("Construction on hold: home connector unavailable (damaged, owner / faction, out of range)");
-        private static readonly MyStringId StrConstructionPausedLowPower = MyStringId.GetOrCompute("Construction paused: low power");
-        private static readonly MyStringId StrResumingJobAtTask = MyStringId.GetOrCompute("Resuming job {0} ({3}) at task {1}/{2}");
-        private static readonly MyStringId StrConstructionBlocksToWorkOn = MyStringId.GetOrCompute("Construction: {0} blocks to work on");
-        private static readonly MyStringId StrConstructionBlocksOutOfReach = MyStringId.GetOrCompute("Construction: {0} blocks out of reach for now");
-        private static readonly MyStringId StrConstructionNothingToDoIn = MyStringId.GetOrCompute("Construction: nothing to do in the area");
-        private static readonly MyStringId StrConstructionMovingBaseSelectIts = MyStringId.GetOrCompute("Construction: moving base, select its beacon (Home is relative to beacon)");
-        private static readonly MyStringId StrConstructionHomeIsMovingTick = MyStringId.GetOrCompute("Construction: home is moving: tick 'Home connector is not station' and select its beacon");
-        private static readonly MyStringId StrComponents = MyStringId.GetOrCompute("components");
-        #endregion
 
         private enum ConstructionPhase : byte
         {
@@ -184,7 +172,7 @@ namespace Automata.Drone
             if (wanted && home != homeUsable)
             {
                 homeUsable = home;
-                if (!home) Report(StrConstructionOnHoldHomeConnector);
+                if (!home) Report(MyStrings.Drone_ConstructionOnHoldHomeConnector);
             }
             bool active = wanted && home;
             if (!active)
@@ -196,7 +184,7 @@ namespace Automata.Drone
             {
                 if (cPhase != ConstructionPhase.Idle)
                 {
-                    Report(StrConstructionPausedLowPower);
+                    Report(MyStrings.Drone_ConstructionPausedLowPower);
                     StopJob();   // MonitorPower sends the drone home
                 }
                 return;
@@ -347,7 +335,7 @@ namespace Automata.Drone
             {
                 while (index > 0 && s.Job.Tasks[index].Type != Orchestrator.TaskType.DockAt) index--;
             }
-            Report(StrResumingJobAtTask, s.Job.JobId, index + 1, s.Job.Tasks.Count, Orchestrator.JobTypeExtensions.Label(s.Job.JobType, s.Job.WeldCategory));
+            Report(MyStrings.Drone_ResumingJobAtTask, s.Job.JobId, index + 1, s.Job.Tasks.Count, Orchestrator.JobTypeExtensions.Label(s.Job.JobType, s.Job.WeldCategory));
             StartJob(s.Job, (JobSource)s.Source, index);
             jobAnnouncerId = s.Announcer;
             jobAuctionId = s.AuctionId;
@@ -406,9 +394,9 @@ namespace Automata.Drone
             if (count != lastReportedJobCount)
             {
                 lastReportedJobCount = count;
-                if (count > 0) Report(StrConstructionBlocksToWorkOn, count);
-                else if (parked > 0) Report(StrConstructionBlocksOutOfReach, parked);
-                else Report(StrConstructionNothingToDoIn);
+                if (count > 0) Report(MyStrings.Drone_ConstructionBlocksToWorkOn, count);
+                else if (parked > 0) Report(MyStrings.Drone_ConstructionBlocksOutOfReach, parked);
+                else Report(MyStrings.Drone_ConstructionNothingToDo);
             }
             return count;
         }
@@ -469,8 +457,8 @@ namespace Automata.Drone
             beacon = settings.HomeBeaconId != 0 ? AnchorDirectory.Resolve(block, settings.HomeBeaconId) : null;
             if (beacon != null) return true;
             ReportProblem(settings.HomeNotStatic
-                ? Loc.T(StrConstructionMovingBaseSelectIts)
-                : Loc.T(StrConstructionHomeIsMovingTick));
+                ? Loc.T(MyStrings.Drone_ConstructionMovingBaseSelect)
+                : Loc.T(MyStrings.Drone_ConstructionHomeIsMovingTick));
             return false;
         }
 
@@ -504,7 +492,7 @@ namespace Automata.Drone
                                                    beacon, (float)g, missing);
             if (job == null)
             {
-                ReportProblem(maxMass <= 0 ? Loc.T(StrConstructionNoLoadCapacity) : Loc.F(StrConstructionMissing, DescribeTop(missing, 3)));
+                ReportProblem(maxMass <= 0 ? Loc.T(MyStrings.Drone_ConstructionNoLoadCapacityMax) : Loc.F(MyStrings.Drone_ConstructionMissing, DescribeTop(missing, 3)));
                 return;
             }
             scannedTargets.Clear();   // rescan after this trip: neighbours become buildable as blocks are finished
@@ -797,7 +785,7 @@ namespace Automata.Drone
             }
             if (kvBuffer.Count > max) sb.Append(", ...");
             kvBuffer.Clear();
-            return sb.Length > 0 ? sb.ToString() : Loc.T(StrComponents);
+            return sb.Length > 0 ? sb.ToString() : Loc.T(MyStrings.Drone_Components);
         }
         #endregion
     }

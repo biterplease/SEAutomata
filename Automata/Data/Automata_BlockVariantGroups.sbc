@@ -12,6 +12,8 @@
                 <Block Type="MyObjectBuilder_MyProgrammableBlock" Subtype="AutomataLargeConstructionComputer" />
                 <Block Type="MyObjectBuilder_MyProgrammableBlock" Subtype="AutomataLargeLogisticsComputer" />
                 <Block Type="MyObjectBuilder_MyProgrammableBlock" Subtype="AutomataLargeMiningSurveyor" />
+                <Block Type="MyObjectBuilder_MyProgrammableBlock" Subtype="AutomataLargeTargetDesignator" />
+                <Block Type="MyObjectBuilder_MyProgrammableBlock" Subtype="AutomataSmallTargetDesignator" />
                 <Block Type="MyObjectBuilder_RemoteControl" Subtype="AutomataLargeDroneController" />
                 <Block Type="MyObjectBuilder_RemoteControl" Subtype="AutomataSmallDroneController" />
             </Blocks>

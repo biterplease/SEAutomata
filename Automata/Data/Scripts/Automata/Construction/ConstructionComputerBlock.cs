@@ -17,6 +17,7 @@ using Automata.Util;
 using Automata.Util.Logging;
 using Automata.VirtualNetwork;
 using VRage.Utils;
+using Automata.Util.Strings;
 
 namespace Automata.Construction
 {
@@ -36,50 +37,6 @@ namespace Automata.Construction
     [MyEntityComponentDescriptor(typeof(MyObjectBuilder_MyProgrammableBlock), false, "AutomataLargeConstructionComputer")]
     public class ConstructionComputerBlock : SettingsBlockLogic, IDebugDrawable, INicknamed
     {
-        #region UI strings
-        private static readonly MyStringId StrStarting = MyStringId.GetOrCompute("Starting");
-        private static readonly MyStringId StrError = MyStringId.GetOrCompute("Error: {0}");
-        private static readonly MyStringId StrRetryEvent = MyStringId.GetOrCompute("Retry: {0} job(s) announced again");
-        private static readonly MyStringId StrWaitingForMod = MyStringId.GetOrCompute("Waiting for the mod");
-        private static readonly MyStringId StrLoading = MyStringId.GetOrCompute("Loading");
-        private static readonly MyStringId StrOffTerminal = MyStringId.GetOrCompute("Off (terminal)");
-        private static readonly MyStringId StrNotWorking = MyStringId.GetOrCompute("Not working (power / damage)");
-        private static readonly MyStringId StrNoAntenna = MyStringId.GetOrCompute("No antenna (functional, on, broadcasting)");
-        private static readonly MyStringId StrBlocksFoundNoJob = MyStringId.GetOrCompute("Blocks found, no job yet");
-        private static readonly MyStringId StrNothingToDo = MyStringId.GetOrCompute("Nothing to do in the area");
-        private static readonly MyStringId StrJobsSummary = MyStringId.GetOrCompute("{0} job(s) published, {1} on hold, {2} assigned");
-        private static readonly MyStringId StrJobDone = MyStringId.GetOrCompute("Done: {1}:\n{0}");
-        private static readonly MyStringId StrHeaderTitle = MyStringId.GetOrCompute("CC {0}");
-        private static readonly MyStringId StrHeaderJobs = MyStringId.GetOrCompute("Active jobs: {0}, Total tasks: {1}");
-        private static readonly MyStringId StrHeaderPriority = MyStringId.GetOrCompute("Weld priority: {0}");
-        private static readonly MyStringId StrHeaderQueuedWeld = MyStringId.GetOrCompute("Queued Weld blocks:");
-        private static readonly MyStringId StrHeaderQueuedGrind = MyStringId.GetOrCompute("Queued Grind: {0}");
-        private static readonly MyStringId StrHeaderCategory = MyStringId.GetOrCompute(" {0}. {1}{2}");
-        private static readonly MyStringId StrCatRepair = MyStringId.GetOrCompute("Repair:");
-        private static readonly MyStringId StrCatProjected = MyStringId.GetOrCompute("Projected:");
-        private static readonly MyStringId StrCatUnbuilt = MyStringId.GetOrCompute("Unbuilt:");
-        private static readonly MyStringId StrLogJob = MyStringId.GetOrCompute("{0}:\n{1}");
-        private static readonly MyStringId StrLogJobDrone = MyStringId.GetOrCompute("{0} Drone: {2}\n{1}");
-        private static readonly MyStringId StrNotOwnerFaction = MyStringId.GetOrCompute("not owner/faction");
-        private static readonly MyStringId StrWorkingDrone = MyStringId.GetOrCompute("a working drone");
-        private static readonly MyStringId StrJobCreated = MyStringId.GetOrCompute("Job {0}: {1} {2} block(s)");
-        private static readonly MyStringId StrAnnounced = MyStringId.GetOrCompute("announced");
-        private static readonly MyStringId StrNoOrchestratorInRange = MyStringId.GetOrCompute("no orchestrator in range");
-        private static readonly MyStringId StrJobOnHold = MyStringId.GetOrCompute("On hold {1} s: {0}\n  {2}");
-        private static readonly MyStringId StrJobAssigned = MyStringId.GetOrCompute("Job {0}: assigned ({1} drone(s))");
-        private static readonly MyStringId StrJobDroneOutcome = MyStringId.GetOrCompute("{0}: Drone {1} {2}");
-        private static readonly MyStringId StrJobDroneOutcomeReason = MyStringId.GetOrCompute("{0}: Drone {1} {2}\n  {3}");
-        private static readonly MyStringId StrJobExpired = MyStringId.GetOrCompute("Expired: {0}");
-        private static readonly MyStringId StrInfoStatus = MyStringId.GetOrCompute("Construction: {0}");
-        private static readonly MyStringId StrInfoArea = MyStringId.GetOrCompute("Area: {0} x {1} x {2} blocks ({3:F0} x {4:F0} x {5:F0} m), scan every {6} s");
-        private static readonly MyStringId StrInfoLastScan = MyStringId.GetOrCompute("Last scan: {0} block(s) ({1} weld, {2} grind)");
-        private static readonly MyStringId StrInfoJobs = MyStringId.GetOrCompute("Jobs: {0} cached, done {1}, failed {2}, expired {3}");
-        private static readonly MyStringId StrInfoJobLine = MyStringId.GetOrCompute(" - {1}: {2} block(s), {3}");
-        private static readonly MyStringId StrAssigned = MyStringId.GetOrCompute("assigned");
-        private static readonly MyStringId StrOnHoldSeconds = MyStringId.GetOrCompute("on hold {0}s");
-        private static readonly MyStringId StrPending = MyStringId.GetOrCompute("pending");
-        private static readonly MyStringId StrWarnNoAntenna = MyStringId.GetOrCompute("Warning: no broadcasting antenna on the grid (only blocks on this grid hear it)");
-        #endregion
 
         #region Timing
         private const int RETRY_TICKS = 20 * 60;                // an announcement that reached nobody: tried again
@@ -102,7 +59,7 @@ namespace Automata.Construction
         private int lastFullScan = int.MinValue / 2;
         private bool forceFullScan;
         private readonly ScanCache scanCache = new ScanCache();
-        private string status = Loc.T(StrStarting);
+        private string status = Loc.T(MyStrings.Construction_Starting);
         private readonly StringBuilder info = new StringBuilder();
 
         private sealed class OpenJob
@@ -257,7 +214,7 @@ namespace Automata.Construction
             catch (Exception ex)
             {
                 Log.Error("CC {0}: update error: {1}", entityId, ex);
-                status = Loc.F(StrError, ex.Message);
+                status = Loc.F(MyStrings.Construction_Error, ex.Message);
             }
         }
 
@@ -282,9 +239,9 @@ namespace Automata.Construction
             base.Close();
         }
 
-        protected override string SettingsXml()
+        protected override byte[] SettingsBinary()
         {
-            return MyAPIGateway.Utilities.SerializeToXML(settings);
+            return MyAPIGateway.Utilities.SerializeToBinary(settings);
         }
 
         protected override string SaveText()
@@ -305,9 +262,9 @@ namespace Automata.Construction
             return true;
         }
 
-        protected override bool LoadSettingsXml(string xml)
+        protected override bool LoadSettingsBinary(byte[] data)
         {
-            var loaded = MyAPIGateway.Utilities.SerializeFromXML<ConstructionComputerBlockSettings>(xml);
+            var loaded = MyAPIGateway.Utilities.SerializeFromBinary<ConstructionComputerBlockSettings>(data);
             if (loaded == null) return false;
             settings = loaded;
             Clamp();
@@ -370,7 +327,7 @@ namespace Automata.Construction
             forceFullScan = true;
             blockCooldown.Clear();   // blocks held back after aborts come back too
             unreachableStrikes.Clear();
-            AddEvent(Loc.F(StrRetryEvent, n));
+            AddEvent(Loc.F(MyStrings.Construction_RetryJobAnnouncedAgain, n));
             if (Log.DebugEnabled) Log.Debug("CC {0}: retry requested: {1} unassigned job(s) announced again, area rescanned", entityId, n);
         }
         #endregion
@@ -407,16 +364,16 @@ namespace Automata.Construction
             int now = MyAPIGateway.Session.GameplayFrameCounter;
             if (!retrySeen) CheckRetryRequest();   // loaded: the saved request counts as seen
             if (messaging == null) messaging = AutomataSession.GetMessageQueue();
-            if (messaging == null) { status = Loc.T(StrWaitingForMod); return; }
+            if (messaging == null) { status = Loc.T(MyStrings.Construction_WaitingForTheMod); return; }
             if (pendingState != null)
             {
-                if (!BlockSave.CanRestore) { status = Loc.T(StrLoading); return; }
+                if (!BlockSave.CanRestore) { status = Loc.T(MyStrings.Construction_Loading); return; }
                 RestoreState(pendingState);
                 pendingState = null;
             }
             if (!settings.Enabled || !block.IsWorking)
             {
-                status = Loc.T(!settings.Enabled ? StrOffTerminal : StrNotWorking);
+                status = Loc.T(!settings.Enabled ? MyStrings.Construction_OffTerminal : MyStrings.Construction_NotWorkingPowerDamage);
                 return;
             }
             if (now - lastAntennaSearch >= 600)
@@ -424,7 +381,7 @@ namespace Automata.Construction
                 lastAntennaSearch = now;
                 FindAntenna();
             }
-            if (!EnsureAntenna()) { status = Loc.T(StrNoAntenna); return; }
+            if (!EnsureAntenna()) { status = Loc.T(MyStrings.Construction_NoAntennaFunctionalOnBroadcasting); return; }
             ReadAwards(now);
             ReadFailures(now);
             ReadJobReports(now);
@@ -453,8 +410,8 @@ namespace Automata.Construction
                 if (jobs[i].Assigned != 0) continue;
                 if (jobs[i].HeldUntil != 0) held++; else open++;
             }
-            status = jobs.Count == 0 ? Loc.T(lastFound > 0 ? StrBlocksFoundNoJob : StrNothingToDo)
-                                     : Loc.F(StrJobsSummary, open, held, jobs.Count - open - held);
+            status = jobs.Count == 0 ? Loc.T(lastFound > 0 ? MyStrings.Construction_BlocksFoundNoJobYet : MyStrings.Construction_NothingToDo)
+                                     : Loc.F(MyStrings.Construction_JobPublishedOnHoldAssigned, open, held, jobs.Count - open - held);
         }
 
         private void FindAntenna()
@@ -556,7 +513,7 @@ namespace Automata.Construction
                                             && !StillAhead(job, k, live));
                 if (job.Blocks.Count > 0) continue;
                 doneCount++;
-                AddEvent(Loc.F(StrJobDone, job.Summary ?? job.Blocks.Count.ToString(), LabelOf(job)));
+                AddEvent(Loc.F(MyStrings.Construction_Done, job.Summary ?? job.Blocks.Count.ToString(), LabelOf(job)));
                 if (Log.DebugEnabled) Log.Debug("CC {0}: job {1} ({2}) done: none of its blocks needs work any more", entityId, job.JobId, LabelOf(job));
                 jobs.RemoveAt(j);
             }
@@ -690,9 +647,9 @@ namespace Automata.Construction
             {
                 bool allowed = false;
                 for (int i = 0; i < owners.Count && !allowed; i++) allowed = AnchorDirectory.IsAllowed(block.OwnerId, owners[i]);
-                if (!allowed) return Loc.T(StrNotOwnerFaction);
+                if (!allowed) return Loc.T(MyStrings.Construction_NotOwnerFaction);
             }
-            return DroneControllerBlock.IsActiveDroneGroup(grid) ? Loc.T(StrWorkingDrone) : null;
+            return DroneControllerBlock.IsActiveDroneGroup(grid) ? Loc.T(MyStrings.Construction_AWorkingDrone) : null;
         }
 
         private static KeyValuePair<long, Vector3I> Key(ConstructionTarget t)
@@ -784,13 +741,13 @@ namespace Automata.Construction
                 }
                 if (job.Pending)
                 {
-                    if (job.Message.Delivered) { job.Pending = false; job.Announced = true; job.LastResult = Loc.T(StrAnnounced); }
-                    else if (now - job.LastAnnounced >= messaging.LifetimeTicks) { job.Pending = false; job.Announced = false; job.LastResult = Loc.T(StrNoOrchestratorInRange); }
+                    if (job.Message.Delivered) { job.Pending = false; job.Announced = true; job.LastResult = Loc.T(MyStrings.Construction_Announced); }
+                    else if (now - job.LastAnnounced >= messaging.LifetimeTicks) { job.Pending = false; job.Announced = false; job.LastResult = Loc.T(MyStrings.Construction_NoOrchestratorInRange); }
                     else continue;   // still in the network
                     if (job.Announced && !job.Logged)
                     {
                         job.Logged = true;   // no drone yet: an announcement
-                        AddEvent(Loc.F(StrLogJob, LabelOf(job), job.Summary));
+                        AddEvent(Loc.F(MyStrings.Construction_Arg0ColonNewlineArg1, LabelOf(job), job.Summary));
                     }
                 }
                 if (now - job.LastAnnounced < (job.Announced ? RESPONSE_TIMEOUT_TICKS : RETRY_TICKS)) continue;
@@ -821,7 +778,7 @@ namespace Automata.Construction
                     if (job.HeldUntil != 0 && job.HeldUntil > now) continue;   // the same failure read again
                     job.HeldUntil = now + Math.Max(10, f.HoldSeconds) * 60;
                     failedCount++;
-                    AddEvent(Loc.F(StrJobOnHold, LabelOf(job) + ":\n" + job.Summary, f.HoldSeconds, f.Reason));
+                    AddEvent(Loc.F(MyStrings.Construction_OnHoldS, LabelOf(job) + ":\n" + job.Summary, f.HoldSeconds, f.Reason));
                     if (Log.DebugEnabled) Log.Debug("CC {0}: job {1} on hold for {2} s: orchestrator {3}: {4}", entityId, job.JobId, f.HoldSeconds, f.OrchestratorEntityId, f.Reason);
                 }
             }
@@ -849,7 +806,7 @@ namespace Automata.Construction
                     var names = new StringBuilder();
                     if (award.TaskAssignments != null)
                         foreach (var d in award.TaskAssignments.Keys) { if (names.Length > 0) names.Append(", "); names.Append(Nicknames.Of(d)); }
-                    AddEvent(Loc.F(StrLogJobDrone, LabelOf(job), job.Summary, names));
+                    AddEvent(Loc.F(MyStrings.Construction_Drone, LabelOf(job), job.Summary, names));
                     if (Log.DebugEnabled) Log.Debug("CC {0}: job {1} assigned by orchestrator {2} to {3} drone(s)", entityId, job.JobId, awardInbox[i].SenderId, drones);
                 }
             }
@@ -895,8 +852,8 @@ namespace Automata.Construction
                                 }
                         }
                         bool close = job.DronesOut <= 0;
-                        AddEvent(string.IsNullOrEmpty(r.Reason) ? Loc.F(StrJobDroneOutcome, LabelOf(job), Nicknames.Of(r.DroneEntityId), r.Outcome)
-                                                                 : Loc.F(StrJobDroneOutcomeReason, LabelOf(job), Nicknames.Of(r.DroneEntityId), r.Outcome, r.Reason));
+                        AddEvent(string.IsNullOrEmpty(r.Reason) ? Loc.F(MyStrings.Construction_Arg0ColonDroneArg1Arg2, LabelOf(job), Nicknames.Of(r.DroneEntityId), r.Outcome)
+                                                                 : Loc.F(MyStrings.Construction_Arg0ColonDroneArg1Arg2Newline, LabelOf(job), Nicknames.Of(r.DroneEntityId), r.Outcome, r.Reason));
                         if (Log.DebugEnabled) Log.Debug("CC {0}: job {1}: drone {2} {3} ({4}), {5}/{6} block(s); {7}", entityId, job.JobId, r.DroneEntityId, r.Outcome, r.Reason, r.BlocksDone, r.BlocksTotal, close ? "closed, blocks back to the pool" : job.DronesOut + " drone(s) still out");
                         if (!close) continue;
                         if (job.Unreachable.Count > 0) HoldUnreachable(job, now);
@@ -978,7 +935,7 @@ namespace Automata.Construction
                 if (job.Assigned == 0 || now - job.Assigned <= ASSIGNED_TTL_TICKS) continue;
                 expiredCount++;
                 if (Log.DebugEnabled) Log.Debug("CC {0}: job {1} ({2}) no drone keepalive for {3} s: {4} block(s) back to the pool", entityId, job.JobId, LabelOf(job), ASSIGNED_TTL_TICKS / 60, job.Blocks.Count);
-                AddEvent(Loc.F(StrJobExpired, LabelOf(job) + ":\n" + job.Summary));
+                AddEvent(Loc.F(MyStrings.Construction_Expired, LabelOf(job) + ":\n" + job.Summary));
                 jobs.RemoveAt(j);
                 changed = true;
             }
@@ -1029,19 +986,19 @@ namespace Automata.Construction
         {
             if (!ready) return;
             info.Clear();
-            info.AppendLoc(StrInfoStatus, status).Append('\n');
-            info.AppendLoc(StrInfoArea, settings.FieldSizeX, settings.FieldSizeY,
+            info.AppendLoc(MyStrings.Construction_Construction, status).Append('\n');
+            info.AppendLoc(MyStrings.Construction_FieldXXBlocksX, settings.FieldSizeX, settings.FieldSizeY,
                               settings.FieldSizeZ, settings.FieldSizeX * AREA_UNIT, settings.FieldSizeY * AREA_UNIT, settings.FieldSizeZ * AREA_UNIT,
                               settings.ScanIntervalSeconds).Append('\n');
-            info.AppendLoc(StrInfoLastScan, lastFound, lastWeld, lastGrind).Append('\n');
-            info.AppendLoc(StrInfoJobs, jobs.Count, doneCount, failedCount, expiredCount).Append('\n');
+            info.AppendLoc(MyStrings.Construction_LastScanBlockWeldGrind, lastFound, lastWeld, lastGrind).Append('\n');
+            info.AppendLoc(MyStrings.Construction_JobsCachedDoneFailedExpired, jobs.Count, doneCount, failedCount, expiredCount).Append('\n');
             int nowFrame = MyAPIGateway.Session.GameplayFrameCounter;
             for (int j = 0; j < jobs.Count && j < 10; j++)
-                info.AppendLoc(StrInfoJobLine, jobs[j].JobId, LabelOf(jobs[j]), jobs[j].Blocks.Count,
-                                  jobs[j].Assigned != 0 ? Loc.T(StrAssigned)
-                                  : jobs[j].HeldUntil > nowFrame ? Loc.F(StrOnHoldSeconds, (jobs[j].HeldUntil - nowFrame) / 60)
-                                  : jobs[j].LastResult ?? Loc.T(StrPending)).Append('\n');
-            if (antenna == null) info.AppendLoc(StrWarnNoAntenna).Append('\n');
+                info.AppendLoc(MyStrings.Construction_DashArg1ColonArg2Block, jobs[j].JobId, LabelOf(jobs[j]), jobs[j].Blocks.Count,
+                                  jobs[j].Assigned != 0 ? Loc.T(MyStrings.Construction_Assigned)
+                                  : jobs[j].HeldUntil > nowFrame ? Loc.F(MyStrings.Construction_OnHoldArg0S, (jobs[j].HeldUntil - nowFrame) / 60)
+                                  : jobs[j].LastResult ?? Loc.T(MyStrings.Construction_Pending)).Append('\n');
+            if (antenna == null) info.AppendLoc(MyStrings.Construction_WarningNoBroadcastingAntenna).Append('\n');
             BuildHeader();
             info.Append('\n');
             for (int i = 0; i < header.Count; i++) info.Append(header[i]).Append('\n');
@@ -1299,15 +1256,15 @@ namespace Automata.Construction
                 tasks += ja != null && ja.Tasks != null ? ja.Tasks.Count : jobs[j].Blocks.Count * 3;
             }
             header.Clear();
-            header.Add(Loc.F(StrHeaderTitle, Nicknames.Of(Entity)));
-            header.Add(Loc.F(StrHeaderJobs, active, tasks));
-            header.Add(Loc.F(StrHeaderPriority, PriorityCode(settings.WorkPriority)));
-            header.Add(BlockLcd.Columns(Loc.T(StrHeaderQueuedWeld), Loc.F(StrHeaderQueuedGrind, lastGrind), 32));
+            header.Add(Loc.F(MyStrings.Construction_CC, Nicknames.Of(Entity)));
+            header.Add(Loc.F(MyStrings.Construction_ActiveJobsTotalTasks, active, tasks));
+            header.Add(Loc.F(MyStrings.Construction_WeldPriorityColonArg0, PriorityCode(settings.WorkPriority)));
+            header.Add(BlockLcd.Columns(Loc.T(MyStrings.Construction_QueuedWeldBlocks), Loc.F(MyStrings.Construction_QueuedGrind, lastGrind), 32));
             for (int r = 0; r < 3; r++)
             {
                 var c = WorkPriorities.At(settings.WorkPriority, r);
-                string label = Loc.T(c == WorkCategory.Repair ? StrCatRepair : c == WorkCategory.Projected ? StrCatProjected : StrCatUnbuilt);
-                header.Add(Loc.F(StrHeaderCategory, r + 1, label.PadRight(11), lastCategory[(int)c]));
+                string label = Loc.T(c == WorkCategory.Repair ? MyStrings.Construction_Repair : c == WorkCategory.Projected ? MyStrings.Construction_Projected : MyStrings.Construction_Unbuilt);
+                header.Add(Loc.F(MyStrings.Construction_Arg0DotArg1Arg2, r + 1, label.PadRight(11), lastCategory[(int)c]));
             }
         }
 

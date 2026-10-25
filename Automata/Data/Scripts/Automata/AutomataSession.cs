@@ -21,6 +21,7 @@ using Automata.Drone;
 using Automata.Construction;
 using Automata.Util;
 using Sandbox.Game.Entities;
+using Automata.Util.Strings;
 
 namespace Automata
 {
@@ -91,9 +92,6 @@ namespace Automata
     [MySessionComponentDescriptor(MyUpdateOrder.BeforeSimulation)]
     public partial class AutomataSession : MySessionComponentBase
     {
-        #region UI strings
-        private static readonly MyStringId StrUpdateError = MyStringId.GetOrCompute("Update error: {0}");
-        #endregion
 
         public const string MOD_VERSION = "v0.0.1";
         public const string MOD_NAME = "Automata";
@@ -393,7 +391,7 @@ namespace Automata
             }
             catch (Exception ex)
             {
-                MyAPIGateway.Utilities.ShowMessage(MOD_NAME, Loc.F(StrUpdateError, ex.Message));
+                MyAPIGateway.Utilities.ShowMessage(MOD_NAME, Loc.F(MyStrings.Common_UpdateError, ex.Message));
                 MyLog.Default.WriteLine($"Automata: UpdateBeforeSimulation exception: {ex}");
             }
         }

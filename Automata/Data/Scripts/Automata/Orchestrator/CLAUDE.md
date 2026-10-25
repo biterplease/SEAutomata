@@ -122,25 +122,14 @@ Designator recall (green): the aimed drone's grid first (as before); none of the
 ## Drone keepalives (2026-10-11)
 Subscribes to JOB_KEEPALIVE (directed to it, `OrchestratorEntityId == entityId`); keepalives for every job it awarded feed `droneWatch` (`Util.DroneWatch`, also in CC / MS / LC) and the active gauge. 60 s unheard: "Drone NAME has not been heard of for 60s!" (event, log, broadcast controller when on). Final reports end the watch.
 
-## Camera designator (2026-10-15, `OrchestratorBlock.Designator.cs`)
-Toolbar actions "Designator: TAG / SPOT / AREA / ENGAGE / ESCORT / RECALL / CLEAR" (PB actions, orchestrators only): the client
-sends `DesignatorCameraPacket` (orchestrator id, `DesignatorOrder`); the server (`ScoutPointer.CameraReceived`, terminal
-access checked) raycasts from the **Designator camera** (listbox, `settings.DesignatorCameraId`, proto 22: cameras of
-the orchestrator's mechanical group, friendly; working at use time) along its forward, `CAMERA_RANGE` 15 km, hits on
-the camera's own mechanical group skipped, and runs the hand-held order path (`ScoutPointer.Order`) with no shooter
-(no self-escort). TAG picks the hostile memory for a combat drone, else the industrial one. Taken by this orchestrator
-when it runs, else the nearest running one covering the camera. Refusals go to its event log.
-"Designator: CLEAR" (`DesignatorOrder.Clear`, no camera needed): `ScoutPointer.ClearTagsFor(owner)` forgets every tag
-memory of players allowed with the orchestrator's owner (what its designator LCDs count); event-log line with the count.
-Tag memories also expire `TAG_MEMORY_MINUTES` (10) after the last tag (no longer extended by orders).
-**Designator LCD tag** (`settings.DesignatorLcdTag`, proto 23, default "[Designator]"): a second LCD feed of the block
-(`BlockLcd(1)`; `LcdFeeder` channel 1: feed id = entity id ^ salt, so both feeds of one block stay apart), the
-orchestrator's LCD style. Header: "Designator <nick>", TAGS, Industrial / Combat counts (`ScoutPointer.TagSummary`:
-tag memories of players allowed with the owner), last tagged drone. Log (`designatorLog`): one entry per confirmed order
-(`CheckOrder` -> `LogDesignatorOrder`, the winning drones from `PlayerJob.Drone`): one drone `SPOT  : <drone> at GPS:x:y:z`
-/ `ESCORT: <drone> escorting <target>`; several: `SPOT  : GPS:x:y:z` (`ESCORT: Escorting <target>`) and one indented line
-per drone. Targets that are Automata drones show their nickname (`ScoutPointer.TargetName`).
-Hand-held designators: `HANDHELD_RANGE` 5 km (client ray; server refuses hits farther than 5.1 km from the player).
+## Designator orders (2026-10-22; the camera designator moved to the Target Designator block, see `Designator/CLAUDE.md`)
+The orchestrator no longer has a camera, toolbar actions, designator LCD feed or settings (ProtoMembers 22 / 23 of `OrchestratorBlockSettings` are reserved, never reuse). `OrchestratorBlock.Designator.cs` is only the ingest:
+- `ReadDesignatorOrders(now)` (running orchestrator only, `primary == null`, after `ReadAnnouncements`): reads `Channel.DESIGNATOR_JOB_ANNOUNCEMENT` (`JobAnnouncement` + order fields `OrderId`, `Identity`, `Kind`, `Marker`, `What`, `RequiredDrone`, `OriginBlockId`); dedupes (`designatorSeen`), requires `OriginBlockId == msg.SenderId`, `Tasks != null`, `OrderId != 0`, sender owner allowed.
+- `AcceptDesignatorJob(ja, origin, senderOwner)`: makes the player job (the orchestrator is the announcer of record, key `(entityId, jobId)` with its own jobId; the designator's order id is kept as `PlayerOrder.OrderId`, `OriginBlock` also in `PlayerJobState` proto 11). Hand-held designators call it directly with origin 0 (no updates).
+- `DesignatorOrderUpdate {OrderId, JobId, State Received / Confirmed / Cancelled, Text, OrchestratorEntityId}` goes back on `DESIGNATOR_ORDER_UPDATE`, directed to the origin block (`updateOutbox`, retried every 30 s): `Received` on accept, `Confirmed` from `CheckOrder` (text = `DesignatorOrderLine(order)`, the old LCD line: `SPOT  : <drone> at GPS:x:y:z` / `ESCORT: <drone> escorting <target>`, several drones: header + one indented line each), `Cancelled` from `ExpirePlayerJobs` when no job remains.
+- No-bid rule: `Auction.NoBidGridId = PlayerJobOriginGrid(key)` (the designator's grid); drones on that construct don't bid (`WhyNotJob`: "ordered by a target designator on this drone's own construct").
+- Orchestrators still do: TAG picks, CLEAR, tag memories (`ScoutPointer`), `RecallOrderAt`, `HANDHELD_RANGE` 5 km (client ray; server refuses hits farther than 5.1 km from the player).
+Tag memories expire `TAG_MEMORY_MINUTES` (10) after the last tag.
 Blueprints: industrial = HandDrill cost (any assembler / survival kit); hostile = HandDrill3 chain cost, full Assembler only.
 
 ## Alerts, targeted awards (2026-10-21)

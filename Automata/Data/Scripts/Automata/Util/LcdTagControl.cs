@@ -13,7 +13,7 @@ namespace Automata.Util
     {
         public static void Add<T>(string id, Func<IMyTerminalBlock, T> logic, Func<T, string> get, Action<T, string> set, string defaultTag) where T : class
         {
-            Add(id, logic, get, set, defaultTag, MyStrings.LCDScreenTag, Loc.Id(MyStrings.LCDScreenTagTip, defaultTag));
+            Add(id, logic, get, set, defaultTag, MyStrings.Common_LCDTag, Loc.Id(MyStrings.Common_LCDTagTooltip, defaultTag));
         }
 
         /// <summary>Same, with its own title and tooltip (a block's second LCD tag).</summary>
@@ -48,7 +48,7 @@ namespace Automata.Util
         public static void Add<T>(string id, Func<IMyTerminalBlock, T> logic, Func<T, bool> get, Action<T, bool> set) where T : class
         {
             var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlCheckbox, IMyProgrammableBlock>(id);
-            c.Title = MyStrings.UseBroadcastController;
+            c.Title = MyStrings.Common_UseBroadcastController;
             c.Tooltip = MyStrings.BLANK;
             c.SupportsMultipleBlocks = true;
             c.Visible = b => logic(b) != null;

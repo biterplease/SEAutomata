@@ -529,7 +529,10 @@ namespace Automata.Pathfinding
                 using (BinaryReader r = MyAPIGateway.Utilities.ReadBinaryFileInWorldStorage(FILE_NAME, typeof(RouteMemory)))
                 {
                     int version = r.ReadInt32();
-                    if (version != FILE_VERSION) { Log.Warning("Pathfinding memory: file version {0}, expected {1}: not loaded", version, FILE_VERSION); return; }
+                    if (version != FILE_VERSION) {
+                        Log.Warning("Pathfinding memory: file version {0}, expected {1}: not loaded", version, FILE_VERSION);
+                        return;
+                    }
                     nextId = r.ReadInt32();
                     int nc = r.ReadInt32();
                     for (int i = 0; i < nc; i++)

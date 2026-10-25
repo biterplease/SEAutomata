@@ -8,6 +8,7 @@ using VRage.Utils;
 using VRageMath;
 
 using Automata.Util;
+using Automata.Util.Strings;
 
 namespace Automata
 {
@@ -19,12 +20,6 @@ namespace Automata
     /// </summary>
     public class AutomataSessionCommandHandler
     {
-        #region UI strings
-        private static readonly MyStringId StrHelp = MyStringId.GetOrCompute("Automata {0} - Commands: {1}");
-        private static readonly MyStringId StrDebugDrawUsage = MyStringId.GetOrCompute("Usage: /automata debugdraw [dronenav] [droneobs] [ccobs] [park] [off] (none: all)");
-        private static readonly MyStringId StrDebugDrawOn = MyStringId.GetOrCompute("Debug draw on within {0} m: {1} drone route(s), {2} drone area(s), {3} construction area(s), {4} parking area(s).");
-        private static readonly MyStringId StrDebugDrawOff = MyStringId.GetOrCompute("Debug draw off within {0} m: {1} drone route(s), {2} drone area(s), {3} construction area(s), {4} parking area(s).");
-        #endregion
 
         public AutomataSessionCommandHandler() { }
 
@@ -92,7 +87,7 @@ namespace Automata
                     case DD_PARK: kinds |= DrawKinds.Park; break;
                     case DD_OFF: on = false; break;
                     default:
-                        MyAPIGateway.Utilities.ShowMessage(AutomataSession.MOD_NAME, Loc.T(StrDebugDrawUsage));
+                        MyAPIGateway.Utilities.ShowMessage(AutomataSession.MOD_NAME, Loc.T(MyStrings.Common_UsageAutomataDebugdrawDronenavDroneobs));
                         return;
                 }
             }
@@ -154,13 +149,13 @@ namespace Automata
             }
             entityBuffer.Clear();
             MyAPIGateway.Utilities.ShowMessage(AutomataSession.MOD_NAME,
-                Loc.F(on ? StrDebugDrawOn : StrDebugDrawOff, (int)DEBUGDRAW_RANGE_METERS, nav, obs, cc, park));
+                Loc.F(on ? MyStrings.Common_DebugDrawOnWithinM : MyStrings.Common_DebugDrawOffWithinM, (int)DEBUGDRAW_RANGE_METERS, nav, obs, cc, park));
         }
         #endregion
 
        private string GetHelpText()
         {
-            return Loc.F(StrHelp, AutomataSession.MOD_VERSION, DEBUGDRAW);
+            return Loc.F(MyStrings.Common_AutomataCommands, AutomataSession.MOD_VERSION, DEBUGDRAW);
         }
     }
 }

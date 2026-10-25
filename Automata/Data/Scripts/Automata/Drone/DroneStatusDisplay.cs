@@ -8,6 +8,7 @@ using VRage.Game.ModAPI;
 using VRageMath;
 using VRage.Utils;
 using Automata.Util;
+using Automata.Util.Strings;
 
 namespace Automata.Drone
 {
@@ -27,11 +28,6 @@ namespace Automata.Drone
     /// </summary>
     public class DroneStatusDisplay
     {
-        #region UI strings
-        private static readonly MyStringId StrHeaderLevels = MyStringId.GetOrCompute("Pow:{0}%  H2:{1}%");
-        private static readonly MyStringId StrHeaderDrone = MyStringId.GetOrCompute("Drone {0}");
-        private static readonly MyStringId StrHeaderThrustTable = MyStringId.GetOrCompute("Thrust table:");
-        #endregion
 
         private const int HEADER_LEFT = 26;              // columns of the header's left part (name, levels, state)
 
@@ -167,8 +163,8 @@ namespace Automata.Drone
                 //                            UP/DN: 234.5kN, 234.5kN
                 packet.Header = new List<string>(4)
                 {
-                    Left(Loc.F(StrHeaderDrone, headerName)) + Loc.T(StrHeaderThrustTable),
-                    Left(Loc.F(StrHeaderLevels, Pct(headerPower), Pct(headerH2))) + "FW/BK: " + thrustFB,
+                    Left(Loc.F(MyStrings.Drone_DroneArg0, headerName)) + Loc.T(MyStrings.Drone_ThrustTable),
+                    Left(Loc.F(MyStrings.Drone_PowH2, Pct(headerPower), Pct(headerH2))) + "FW/BK: " + thrustFB,
                     Left(headerState) + "L /R : " + thrustLR,
                     Left("") + "UP/DN: " + thrustUD,
                 };

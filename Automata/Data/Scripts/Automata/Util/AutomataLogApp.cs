@@ -6,6 +6,7 @@ using Sandbox.Game.GameSystems.TextSurfaceScripts;
 using VRage.Game.GUI.TextPanel;
 using VRage.Utils;
 using VRageMath;
+using Automata.Util.Strings;
 
 namespace Automata.Util
 {
@@ -18,16 +19,6 @@ namespace Automata.Util
     [MyTextSurfaceScript(LcdFeedServer.APP, "AutomataLog")]
     public class AutomataLogApp : MyTSSCommon
     {
-        #region UI strings
-        private static readonly MyStringId StrTitle = MyStringId.GetOrCompute("Automata Log");
-        private static readonly MyStringId StrWaiting = MyStringId.GetOrCompute("Waiting for the server...");
-        private static readonly MyStringId StrNotApp = MyStringId.GetOrCompute("Set this LCD's content to the AutomataLog app.");
-        private static readonly MyStringId StrBusy = MyStringId.GetOrCompute("This block has too many LCDs in view.");
-        private static readonly MyStringId StrNoBlock = MyStringId.GetOrCompute("No Automata block on this construct has its LCD tag in this LCD's name (same owner or faction). Name the LCD with the tag.");
-        private static readonly MyStringId StrNotPanel   = MyStringId.GetOrCompute("Use this app on an LCD or a block with screens.");
-        private static readonly MyStringId StrNotRunning = MyStringId.GetOrCompute("This block is off or not ready.");
-
-        #endregion
 
         private const int ASK_EVERY_RUNS = 3;   // one request per ~5 s (a run every 100 ticks)
         private const int REDRAW_EVERY_RUNS = 6; // drawn again even when nothing changed (~10 s), in case the screen lost its sprites
@@ -155,14 +146,14 @@ namespace Automata.Util
                 frame.Add(new MySprite(SpriteType.TEXTURE, "SquareSimple", texture * 0.5f, texture, bg, null, TextAlignment.CENTER, 0f));
                 if (feed == null)
                 {
-                    AddLine(frame, Loc.T(StrTitle), ref pos, unit.Y, fg, scale, cols);
+                    AddLine(frame, Loc.T(MyStrings.Common_AutomataLog), ref pos, unit.Y, fg, scale, cols);
                     AddLine(frame, new string('-', cols), ref pos, unit.Y, fg, scale, cols);
-                    string text = reason == LcdAttachPacket.NOT_A_PANEL ? Loc.T(StrNotPanel)
-                                : reason == LcdAttachPacket.NOT_THE_APP ? Loc.T(StrNotApp)
-                                : reason == LcdAttachPacket.NO_BLOCK ? Loc.T(StrNoBlock)
-                                : reason == LcdAttachPacket.BUSY ? Loc.T(StrBusy)
-                                : reason == LcdAttachPacket.NOT_RUNNING ? Loc.T(StrNotRunning)
-                                : Loc.T(StrWaiting);
+                    string text = reason == LcdAttachPacket.NOT_A_PANEL ? Loc.T(MyStrings.Common_UseThisApp)
+                                : reason == LcdAttachPacket.NOT_THE_APP ? Loc.T(MyStrings.Common_SetThisLCDsContent)
+                                : reason == LcdAttachPacket.NO_BLOCK ? Loc.T(MyStrings.Common_NoAutomataBlock)
+                                : reason == LcdAttachPacket.BUSY ? Loc.T(MyStrings.Common_ThisBlockHasTooMany)
+                                : reason == LcdAttachPacket.NOT_RUNNING ? Loc.T(MyStrings.Common_ThisBlockIsOff)
+                                : Loc.T(MyStrings.Common_WaitingForTheServer);
                     foreach (var line in Wrap(text, cols)) AddLine(frame, line, ref pos, unit.Y, fg, scale, cols);
                     return;
                 }

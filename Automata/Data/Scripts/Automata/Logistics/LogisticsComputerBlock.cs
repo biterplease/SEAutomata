@@ -17,6 +17,7 @@ using Automata.Inventory;
 using Automata.Util;
 using Automata.Util.Logging;
 using Automata.VirtualNetwork;
+using Automata.Util.Strings;
 
 namespace Automata.Logistics
 {
@@ -37,66 +38,6 @@ namespace Automata.Logistics
     [MyEntityComponentDescriptor(typeof(MyObjectBuilder_MyProgrammableBlock), false, "AutomataLargeLogisticsComputer")]
     public partial class LogisticsComputerBlock : SettingsBlockLogic, INicknamed
     {
-        #region UI strings
-        private static readonly MyStringId StrHeaderTitle = MyStringId.GetOrCompute("LC {0}");
-        private static readonly MyStringId StrHeaderNetworks = MyStringId.GetOrCompute("Conveyor Networks: {0}");
-        private static readonly MyStringId StrHeaderItems = MyStringId.GetOrCompute("Available items");
-        private static readonly MyStringId StrHeaderPage = MyStringId.GetOrCompute("(page {0}/{1})");
-        private static readonly MyStringId StrLogBid = MyStringId.GetOrCompute("Bid: {0}, port: {1}");
-        private static readonly MyStringId StrLogPickup = MyStringId.GetOrCompute("Pickup: {0}, Drone: {1}, port: {2}");
-        private static readonly MyStringId StrLogIncoming = MyStringId.GetOrCompute("Incoming: {0}, Drone: {1}, port: {2}");
-        private static readonly MyStringId StrLogPayload = MyStringId.GetOrCompute("Payload:");
-        private static readonly MyStringId StrKindConstruction = MyStringId.GetOrCompute("Construction");
-        private static readonly MyStringId StrKindRequest = MyStringId.GetOrCompute("Request");
-        private static readonly MyStringId StrKindPush = MyStringId.GetOrCompute("Push");
-        private static readonly MyStringId StrKindPull = MyStringId.GetOrCompute("Pull");
-        private static readonly MyStringId StrKindSupply = MyStringId.GetOrCompute("Supply");
-        private static readonly MyStringId StrKindSurplus = MyStringId.GetOrCompute("Surplus");
-        private static readonly MyStringId StrError = MyStringId.GetOrCompute("Error: {0}");
-        private static readonly MyStringId StrNetworkName = MyStringId.GetOrCompute("Network {0}");
-        private static readonly MyStringId StrDroneOutcome = MyStringId.GetOrCompute("drone {0}");
-        private static readonly MyStringId StrOnHoldReason = MyStringId.GetOrCompute("on hold ({0})");
-        private static readonly MyStringId StrInfoStatus = MyStringId.GetOrCompute("Logistics: {0}");
-        private static readonly MyStringId StrInfoModes = MyStringId.GetOrCompute("Modes:");
-        private static readonly MyStringId StrModeProvideLogistics = MyStringId.GetOrCompute("provide (logistics)");
-        private static readonly MyStringId StrModeProvideConstruction = MyStringId.GetOrCompute("provide (construction)");
-        private static readonly MyStringId StrModeRequest = MyStringId.GetOrCompute("request");
-        private static readonly MyStringId StrModePush = MyStringId.GetOrCompute("push");
-        private static readonly MyStringId StrInfoNetworks = MyStringId.GetOrCompute("Conveyor networks: {0}");
-        private static readonly MyStringId StrInfoMin = MyStringId.GetOrCompute("Min {0}: {1} (has {2})");
-        private static readonly MyStringId StrInfoMax = MyStringId.GetOrCompute("Max {0}: {1} (has {2})");
-        private static readonly MyStringId StrJobRequest = MyStringId.GetOrCompute("Request");
-        private static readonly MyStringId StrJobPush = MyStringId.GetOrCompute("Push");
-        private static readonly MyStringId StrInfoPromised = MyStringId.GetOrCompute("Promised in bids: {0}");
-        private static readonly MyStringId StrInfoLastBid = MyStringId.GetOrCompute("Last bid: {0}");
-        private static readonly MyStringId StrInfoSmallConnectors = MyStringId.GetOrCompute("Small connector(s) '{0}': only combat drones, ore scouts and ore haulers dock there");
-        private static readonly MyStringId StrInfoWarning = MyStringId.GetOrCompute("Warning: {0}");
-        private static readonly MyStringId StrInfoJob = MyStringId.GetOrCompute("{0} job {1}: {2} ({3})");
-        private static readonly MyStringId StrPending = MyStringId.GetOrCompute("pending");
-        private static readonly MyStringId StrStarting = MyStringId.GetOrCompute("Starting");
-        private static readonly MyStringId StrWaitingForTheMod = MyStringId.GetOrCompute("Waiting for the mod");
-        private static readonly MyStringId StrLoading = MyStringId.GetOrCompute("Loading");
-        private static readonly MyStringId StrOffTerminal = MyStringId.GetOrCompute("Off (terminal)");
-        private static readonly MyStringId StrNotWorkingPowerDamage = MyStringId.GetOrCompute("Not working (power / damage)");
-        private static readonly MyStringId StrNoAntennaFunctionalOnBroadcasting = MyStringId.GetOrCompute("No antenna (functional, on, broadcasting)");
-        private static readonly MyStringId StrNoConveyorNetworkWithA = MyStringId.GetOrCompute("No conveyor network with a working standard connector");
-        private static readonly MyStringId StrActive = MyStringId.GetOrCompute("Active");
-        private static readonly MyStringId StrUnknownItemOrNotWhole = MyStringId.GetOrCompute("'{0}': unknown item or not whole numbers >= 0: ignored");
-        private static readonly MyStringId StrMinMaxWouldLoopRequested = MyStringId.GetOrCompute("{0}: Min {1} > Max {2} would loop (requested, then pushed away): ignored");
-        private static readonly MyStringId StrMinSetButRequestMode = MyStringId.GetOrCompute("Min set, but Request mode is off: nothing is requested");
-        private static readonly MyStringId StrMaxSetButPushMode = MyStringId.GetOrCompute("Max set, but Push mode is off: nothing is pushed");
-        private static readonly MyStringId StrNoFreeConnector = MyStringId.GetOrCompute("no free connector");
-        private static readonly MyStringId StrAnnounced = MyStringId.GetOrCompute("announced");
-        private static readonly MyStringId StrNoOrchestratorInRange = MyStringId.GetOrCompute("no orchestrator in range");
-        private static readonly MyStringId StrSent = MyStringId.GetOrCompute("sent");
-        private static readonly MyStringId StrAssigned = MyStringId.GetOrCompute("assigned");
-        private static readonly MyStringId StrNothing = MyStringId.GetOrCompute("nothing");
-        private static readonly MyStringId StrNone = MyStringId.GetOrCompute("none");
-        private static readonly MyStringId StrContainersPortSAssemblerS = MyStringId.GetOrCompute("{0}: {1} containers, {2} port(s), {3} assembler(s), {4} refinery(ies), {5} O2/H2 generator(s), {6} O2 / {7} H2 tank(s), {8:F1} / {9:F1} m3{10}");
-        private static readonly MyStringId StrMain = MyStringId.GetOrCompute(" (main)");
-        private static readonly MyStringId StrRestored = MyStringId.GetOrCompute("restored");
-        private static readonly MyStringId StrRetryRequested = MyStringId.GetOrCompute("retry requested");
-        #endregion
 
         #region Timing
         private const int RESCAN_TICKS = 600;            // components / networks again (block changes mark it dirty)
@@ -173,7 +114,7 @@ namespace Automata.Logistics
         private readonly List<Message<Auction>> auctionInbox = new List<Message<Auction>>();
         private readonly List<Message<AuctionWinnerAnnouncement>> awardInbox = new List<Message<AuctionWinnerAnnouncement>>();
         private readonly List<KVPair> kv = new List<KVPair>();
-        private string status = Loc.T(StrStarting);
+        private string status = Loc.T(MyStrings.Logistics_Starting);
         private string lastBid;
         private readonly List<Message<JobAnnouncementFailed>> failureInbox = new List<Message<JobAnnouncementFailed>>();
         private LogisticsComputerState pendingState;
@@ -214,7 +155,7 @@ namespace Automata.Logistics
             catch (Exception ex)
             {
                 Log.Error("LC {0}: update error: {1}", entityId, ex);
-                status = Loc.F(StrError, ex.Message);
+                status = Loc.F(MyStrings.Logistics_Error, ex.Message);
             }
         }
 
@@ -239,9 +180,9 @@ namespace Automata.Logistics
             base.Close();
         }
 
-        protected override string SettingsXml()
+        protected override byte[] SettingsBinary()
         {
-            return MyAPIGateway.Utilities.SerializeToXML(settings);
+            return MyAPIGateway.Utilities.SerializeToBinary(settings);
         }
 
         protected override string SaveText()
@@ -263,9 +204,9 @@ namespace Automata.Logistics
             return true;
         }
 
-        protected override bool LoadSettingsXml(string xml)
+        protected override bool LoadSettingsBinary(byte[] data)
         {
-            var loaded = MyAPIGateway.Utilities.SerializeFromXML<LogisticsComputerSettings>(xml);
+            var loaded = MyAPIGateway.Utilities.SerializeFromBinary<LogisticsComputerSettings>(data);
             if (loaded == null) return false;
             if (loaded.Quotas == null) loaded.Quotas = new List<string>();
             settings = loaded;
@@ -292,16 +233,16 @@ namespace Automata.Logistics
             if (block.CubeGrid == null || block.CubeGrid.Physics == null) return;
             int now = MyAPIGateway.Session.GameplayFrameCounter;
             if (messaging == null) messaging = AutomataSession.GetMessageQueue();
-            if (messaging == null) { status = Loc.T(StrWaitingForTheMod); return; }
+            if (messaging == null) { status = Loc.T(MyStrings.Logistics_WaitingForTheMod); return; }
             if (pendingState != null)
             {
-                if (!BlockSave.CanRestore) { status = Loc.T(StrLoading); return; }
+                if (!BlockSave.CanRestore) { status = Loc.T(MyStrings.Logistics_Loading); return; }
                 RestoreState(pendingState);
                 pendingState = null;
             }
             if (!settings.Enabled || !block.IsWorking)
             {
-                status = !settings.Enabled ? Loc.T(StrOffTerminal) : Loc.T(StrNotWorkingPowerDamage);
+                status = !settings.Enabled ? Loc.T(MyStrings.Logistics_OffTerminal) : Loc.T(MyStrings.Logistics_NotWorkingPowerDamage);
                 return;
             }
             if (quotasDirty) ParseQuotas();
@@ -313,7 +254,7 @@ namespace Automata.Logistics
                 dirtyWhy = null;
                 lastInventory = int.MinValue / 2;
             }
-            if (!EnsureAntenna()) { status = Loc.T(StrNoAntennaFunctionalOnBroadcasting); return; }
+            if (!EnsureAntenna()) { status = Loc.T(MyStrings.Logistics_NoAntennaFunctionalOnBroadcasting); return; }
             if (now - lastInventory >= INVENTORY_TICKS)
             {
                 lastInventory = now;
@@ -327,8 +268,8 @@ namespace Automata.Logistics
                 if (primary != before)
                     if (Log.DebugEnabled) Log.Debug("LC {0}: main network: {1}", entityId, primary != null ? DescribeNetwork(networks.IndexOf(primary)) : "none (no free standard connector)");
             }
-            if (primary == null) { status = Loc.T(StrNoConveyorNetworkWithA); return; }
-            status = Loc.T(StrActive);
+            if (primary == null) { status = Loc.T(MyStrings.Logistics_NoConveyorNetwork); return; }
+            status = Loc.T(MyStrings.Logistics_Active);
             ExpireCommitments(now);
             if (quotaKeys.Count > 0 && now - lastQuotaCheck >= QUOTA_CHECK_TICKS)
             {
@@ -436,7 +377,7 @@ namespace Automata.Logistics
                 {
                     var network = new ConveyorNetwork();
                     network.ConveyorNetworkId = IdGenerator.GenerateId(ref networkCounter, entityId);
-                    network.Nickname = Loc.F(StrNetworkName, networks.Count + 1);
+                    network.Nickname = Loc.F(MyStrings.Logistics_Network, networks.Count + 1);
                     networks.Add(network);
                     networkKeys.Add(long.MaxValue);
                     reps.Add(inv);
@@ -514,21 +455,21 @@ namespace Automata.Logistics
                 QuotaEntry e;
                 if (!QuotaEntry.TryParse(settings.Quotas[i], out e))
                 {
-                    quotaWarnings.Add(Loc.F(StrUnknownItemOrNotWhole, settings.Quotas[i]));
+                    quotaWarnings.Add(Loc.F(MyStrings.Logistics_UnknownItemOrNotWhole, settings.Quotas[i]));
                     continue;
                 }
                 quotaKeys.Add(e.Key);
                 // Min above Max: it would be requested and pushed away in a loop
                 if (e.Min > 0 && e.Max > 0 && e.Min > e.Max)
                 {
-                    quotaWarnings.Add(Loc.F(StrMinMaxWouldLoopRequested, e.Key.String, e.Min, e.Max));
+                    quotaWarnings.Add(Loc.F(MyStrings.Logistics_MinMaxWouldLoopRequested, e.Key.String, e.Min, e.Max));
                     continue;
                 }
                 if (e.Min > 0) minimums[e.Key] = e.Min;
                 if (e.Max > 0) maximums[e.Key] = e.Max;
             }
-            if (minimums.Count > 0 && !Has(OperationMode.Request)) quotaWarnings.Add(Loc.T(StrMinSetButRequestMode));
-            if (maximums.Count > 0 && !Has(OperationMode.Push)) quotaWarnings.Add(Loc.T(StrMaxSetButPushMode));
+            if (minimums.Count > 0 && !Has(OperationMode.Request)) quotaWarnings.Add(Loc.T(MyStrings.Logistics_MinSetButRequestMode));
+            if (maximums.Count > 0 && !Has(OperationMode.Push)) quotaWarnings.Add(Loc.T(MyStrings.Logistics_MaxSetButPushMode));
             if (Log.DebugEnabled) Log.Debug("LC {0}: Min/Max: {1} min, {2} max, {3} warning(s)", entityId, minimums.Count, maximums.Count, quotaWarnings.Count);
             for (int i = 0; i < quotaWarnings.Count; i++) if (Log.DebugEnabled) Log.Debug("LC {0}: Min/Max warning: {1}", entityId, quotaWarnings[i]);
         }
@@ -629,14 +570,14 @@ namespace Automata.Logistics
             }
             if (job.Sent != null)
             {
-                if (job.Sent.Delivered) { job.Announced = true; job.Sent = null; job.LastResult = Loc.T(StrAnnounced); }
-                else if (now - job.LastAnnounced >= messaging.LifetimeTicks) { job.Announced = false; job.Sent = null; job.LastResult = Loc.T(StrNoOrchestratorInRange); }
+                if (job.Sent.Delivered) { job.Announced = true; job.Sent = null; job.LastResult = Loc.T(MyStrings.Logistics_Announced); }
+                else if (now - job.LastAnnounced >= messaging.LifetimeTicks) { job.Announced = false; job.Sent = null; job.LastResult = Loc.T(MyStrings.Logistics_NoOrchestratorInRange); }
                 else return;   // still in the network
             }
             if (now - job.LastAnnounced < (job.Announced ? RESPONSE_TIMEOUT_TICKS : RETRY_TICKS)) return;
             job.LastAnnounced = now;
             var dock = FreeDock(primary);
-            if (dock == null) { job.LastResult = Loc.T(StrNoFreeConnector); if (Log.DebugEnabled) Log.Debug("LC {0}: job {1}: no free connector to announce", entityId, job.JobId); return; }
+            if (dock == null) { job.LastResult = Loc.T(MyStrings.Logistics_NoFreeConnector); if (Log.DebugEnabled) Log.Debug("LC {0}: job {1}: no free connector to announce", entityId, job.JobId); return; }
             Vector3D at = dock.PositionData.ToVector3D();
             Message<JobAnnouncement> msg = job.Cached;
             if (msg != null && job.CachedDock == dock.EntityId && job.CachedAt == at && msg.Payload.IsStaticGrid == block.CubeGrid.IsStatic)
@@ -983,10 +924,10 @@ namespace Automata.Logistics
                 Channel = Channel.ORCHESTRATOR_AUCTION_BIDS,
             };
             var error = messaging.BroadcastMessage(antennaReg, msg, false, MessageQueue.IAIBlockType.LogisticsComputer);
-            lastBid = string.Format("{0}: {1} ({2})", a.JobType, DescribeItems(items), error == ErrorCode.None ? Loc.T(StrSent) : error.ToString());
+            lastBid = string.Format("{0}: {1} ({2})", a.JobType, DescribeItems(items), error == ErrorCode.None ? Loc.T(MyStrings.Logistics_Sent) : error.ToString());
             var entry = new StringBuilder();
-            entry.AppendLoc(StrLogBid, BidKind(a), ConnectorName(dock.EntityId));
-            Nicknames.AppendPayload(entry, Loc.T(StrLogPayload), items);
+            entry.AppendLoc(MyStrings.Logistics_BidPort, BidKind(a), ConnectorName(dock.EntityId));
+            Nicknames.AppendPayload(entry, Loc.T(MyStrings.Logistics_Payload), items);
             log.Add(entry.ToString());
             if (Log.DebugEnabled) Log.Debug("LC {0}: bid on auction {1} ({2}) from {3}, port {4} ({8}): {5} {6} ({7})", entityId, a.AuctionId, a.JobType, network.Nickname, dock.EntityId, fulfillment, DescribeItems(items), error, DockFit.Describe(msg.Payload.DockSite));
         }
@@ -1010,7 +951,7 @@ namespace Automata.Logistics
                         own.Assigned = now;
                         own.HeldUntil = 0;
                         own.DronesOut = award.TaskAssignments != null ? award.TaskAssignments.Count : 0;
-                        own.LastResult = Loc.T(StrAssigned);
+                        own.LastResult = Loc.T(MyStrings.Logistics_Assigned);
                         if (Log.DebugEnabled) Log.Debug("LC {0}: job {1} ({2}) awarded by orchestrator {3}", entityId, own.JobId, own.Type, awardInbox[i].SenderId);
                     }
                 }
@@ -1080,7 +1021,7 @@ namespace Automata.Logistics
                         job.Finished = true;
                         lastQuotaCheck = int.MinValue / 2;   // closed / re-opened at once
                     }
-                    job.LastResult = Loc.F(StrDroneOutcome, r.Outcome);
+                    job.LastResult = Loc.F(MyStrings.Logistics_DroneArg0Lower, r.Outcome);
                     if (Log.DebugEnabled) Log.Debug("LC {0}: job {1} ({2}): drone {3} {4} ({5}); {6}", entityId, job.JobId, job.Type, r.DroneEntityId, r.Outcome, r.Reason, job.Finished ? "closing" : job.DronesOut + " drone(s) still out");
                 }
                 reportInbox.Clear();
@@ -1126,7 +1067,7 @@ namespace Automata.Logistics
                 var job = requestJob != null && requestJob.JobId == f.JobId ? requestJob : pushJob != null && pushJob.JobId == f.JobId ? pushJob : null;
                 if (job == null || job.Assigned != 0 || (job.HeldUntil != 0 && job.HeldUntil > now)) continue;
                 job.HeldUntil = now + Math.Max(10, f.HoldSeconds) * 60;
-                job.LastResult = Loc.F(StrOnHoldReason, f.Reason);
+                job.LastResult = Loc.F(MyStrings.Logistics_OnHold, f.Reason);
                 if (Log.DebugEnabled) Log.Debug("LC {0}: job {1} ({2}) on hold for {3} s: orchestrator {4}: {5}", entityId, job.JobId, job.Type, f.HoldSeconds, f.OrchestratorEntityId, f.Reason);
             }
             failureInbox.Clear();
@@ -1162,7 +1103,7 @@ namespace Automata.Logistics
         #region Info
         private static string DescribeItems(DiscreteInventory items)
         {
-            if (items == null || items.IsEmpty()) return Loc.T(StrNothing);
+            if (items == null || items.IsEmpty()) return Loc.T(MyStrings.Logistics_Nothing);
             var sb = new StringBuilder();
             foreach (var item in items.GetAllItems())
             {
@@ -1174,13 +1115,13 @@ namespace Automata.Logistics
 
         private string DescribeNetwork(int i)
         {
-            if (i < 0 || i >= networks.Count) return Loc.T(StrNone);
+            if (i < 0 || i >= networks.Count) return Loc.T(MyStrings.Keen_None);
             var n = networks[i];
             int ports = 0;
             for (int c = 0; c < n.connectors.Count; c++) if (n.connectors[c] != null && n.connectors[c].IsWorking) ports++;
-            return Loc.F(StrContainersPortSAssemblerS, n.Nickname,
+            return Loc.F(MyStrings.Logistics_ContainersPortAssemblerRefineryIes, n.Nickname,
                                  n.cargoContainers.Count, ports, n.assemblers.Count, n.refineries.Count, n.gasGenerators.Count, n.GasTankCount(true), n.GasTankCount(false),
-                                 (double)n.CurrentVolume, (double)n.MaxVolume, n == primary ? Loc.T(StrMain) : "");
+                                 (double)n.CurrentVolume, (double)n.MaxVolume, n == primary ? Loc.T(MyStrings.Logistics_Main) : "");
         }
 
         /// <summary>Terminal info panel.</summary>
@@ -1188,27 +1129,27 @@ namespace Automata.Logistics
         {
             if (!ready) return;
             info.Clear();
-            info.AppendLoc(StrInfoStatus, status).Append('\n');
-            info.AppendLoc(StrInfoModes);
-            if (Has(OperationMode.ProvideForLogistics)) info.Append(' ').AppendLoc(StrModeProvideLogistics);
-            if (Has(OperationMode.ProvideForConstruction)) info.Append(' ').AppendLoc(StrModeProvideConstruction);
-            if (Has(OperationMode.Request)) info.Append(' ').AppendLoc(StrModeRequest);
-            if (Has(OperationMode.Push)) info.Append(' ').AppendLoc(StrModePush);
+            info.AppendLoc(MyStrings.Logistics_Logistics, status).Append('\n');
+            info.AppendLoc(MyStrings.Logistics_Modes);
+            if (Has(OperationMode.ProvideForLogistics)) info.Append(' ').AppendLoc(MyStrings.Logistics_ProvideLogistics);
+            if (Has(OperationMode.ProvideForConstruction)) info.Append(' ').AppendLoc(MyStrings.Logistics_ProvideConstruction);
+            if (Has(OperationMode.Request)) info.Append(' ').AppendLoc(MyStrings.Logistics_RequestLower);
+            if (Has(OperationMode.Push)) info.Append(' ').AppendLoc(MyStrings.Logistics_PushLower);
             info.Append('\n');
-            info.AppendLoc(StrInfoNetworks, networks.Count).Append('\n');
+            info.AppendLoc(MyStrings.Logistics_ConveyorNetworksColonArg0, networks.Count).Append('\n');
             for (int i = 0; i < networks.Count; i++) info.Append(" ").Append(DescribeNetwork(i)).Append('\n');
             var have = primary != null ? primary.GetHeldInventory() : null;
             foreach (var m in minimums)
-                info.AppendLoc(StrInfoMin, Nicknames.Item(m.Key), m.Value, have != null ? have.GetItemCount(m.Key) : 0).Append('\n');
+                info.AppendLoc(MyStrings.Logistics_MinHas, Nicknames.Item(m.Key), m.Value, have != null ? have.GetItemCount(m.Key) : 0).Append('\n');
             foreach (var m in maximums)
-                info.AppendLoc(StrInfoMax, Nicknames.Item(m.Key), m.Value, have != null ? have.GetItemCount(m.Key) : 0).Append('\n');
-            AppendJob(info, StrJobRequest, requestJob);
-            AppendJob(info, StrJobPush, pushJob);
-            if (commitments.Count > 0) info.AppendLoc(StrInfoPromised, commitments.Count).Append('\n');
-            if (lastBid != null) info.AppendLoc(StrInfoLastBid, lastBid).Append('\n');
+                info.AppendLoc(MyStrings.Logistics_MaxHas, Nicknames.Item(m.Key), m.Value, have != null ? have.GetItemCount(m.Key) : 0).Append('\n');
+            AppendJob(info, MyStrings.Logistics_Request, requestJob);
+            AppendJob(info, MyStrings.Logistics_Push, pushJob);
+            if (commitments.Count > 0) info.AppendLoc(MyStrings.Logistics_PromisedInBids, commitments.Count).Append('\n');
+            if (lastBid != null) info.AppendLoc(MyStrings.Logistics_LastBid, lastBid).Append('\n');
             if (reportedSmallConnectors != null)
-                info.AppendLoc(StrInfoSmallConnectors, reportedSmallConnectors).Append('\n');
-            for (int i = 0; i < quotaWarnings.Count; i++) info.AppendLoc(StrInfoWarning, quotaWarnings[i]).Append('\n');
+                info.AppendLoc(MyStrings.Logistics_SmallConnectorOnlyCombatDronesOre, reportedSmallConnectors).Append('\n');
+            for (int i = 0; i < quotaWarnings.Count; i++) info.AppendLoc(MyStrings.Logistics_Warning, quotaWarnings[i]).Append('\n');
             BuildHeader();
             info.Append('\n');
             for (int i = 0; i < header.Count; i++) info.Append(header[i]).Append('\n');
@@ -1220,7 +1161,7 @@ namespace Automata.Logistics
         private static void AppendJob(StringBuilder sb, MyStringId label, OpenJob job)
         {
             if (job == null) return;
-            sb.AppendLoc(StrInfoJob, Loc.T(label), job.JobId, DescribeItems(job.Items), job.LastResult ?? Loc.T(StrPending)).Append('\n');
+            sb.AppendLoc(MyStrings.Logistics_Arg0JobArg1ColonArg2, Loc.T(label), job.JobId, DescribeItems(job.Items), job.LastResult ?? Loc.T(MyStrings.Logistics_Pending)).Append('\n');
         }
         #endregion
 
@@ -1278,7 +1219,7 @@ namespace Automata.Logistics
                 DronesOut = js.DronesOut,
                 Finished = js.Finished,
                 LastAnnounced = int.MinValue / 2,
-                LastResult = Loc.T(StrRestored),
+                LastResult = Loc.T(MyStrings.Logistics_Restored),
             };
         }
 
@@ -1462,7 +1403,7 @@ namespace Automata.Logistics
                 job.HeldUntil = 0;
                 job.Announced = false;
                 job.LastAnnounced = int.MinValue / 2;
-                job.LastResult = Loc.T(StrRetryRequested);
+                job.LastResult = Loc.T(MyStrings.Logistics_RetryRequested);
                 n++;
             }
             lastQuotaCheck = int.MinValue / 2;
@@ -1501,8 +1442,8 @@ namespace Automata.Logistics
         private void BuildHeader()
         {
             header.Clear();
-            header.Add(Loc.F(StrHeaderTitle, Nicknames.Of(Entity)));
-            header.Add(Loc.F(StrHeaderNetworks, networks.Count));
+            header.Add(Loc.F(MyStrings.Logistics_LC, Nicknames.Of(Entity)));
+            header.Add(Loc.F(MyStrings.Logistics_ConveyorNetworks, networks.Count));
             var all = new DiscreteInventory();
             for (int i = 0; i < networks.Count; i++)
             {
@@ -1518,7 +1459,7 @@ namespace Automata.Logistics
             int page = first / (HEADER_ITEM_ROWS * 2);
             for (int r = 0; r < HEADER_ITEM_ROWS; r++)
             {
-                string label = r == 0 ? Loc.T(StrHeaderItems) : r == 1 ? Loc.F(StrHeaderPage, page + 1, pages) : "";
+                string label = r == 0 ? Loc.T(MyStrings.Logistics_AvailableItems) : r == 1 ? Loc.F(MyStrings.Logistics_Page, page + 1, pages) : "";
                 string left = ItemText(first + r), right = ItemText(first + HEADER_ITEM_ROWS + r);
                 header.Add(BlockLcd.Columns(BlockLcd.Columns(label, left, HEADER_LABEL_WIDTH), right, HEADER_LABEL_WIDTH + HEADER_ITEM_WIDTH));
             }
@@ -1560,8 +1501,8 @@ namespace Automata.Logistics
         {
             switch (a.JobType)
             {
-                case Orchestrator.JobType.DeliverMissingInventory: return Loc.T(StrKindRequest);
-                case Orchestrator.JobType.CollectInventorySurplus: return Loc.T(StrKindPush);
+                case Orchestrator.JobType.DeliverMissingInventory: return Loc.T(MyStrings.Logistics_Request);
+                case Orchestrator.JobType.CollectInventorySurplus: return Loc.T(MyStrings.Logistics_Push);
                 default: return a.JobType.ToString();
             }
         }
@@ -1584,14 +1525,14 @@ namespace Automata.Logistics
                     string kind;
                     switch (award.JobType)
                     {
-                        case Orchestrator.JobType.Weld: kind = Loc.T(StrKindConstruction); break;
-                        case Orchestrator.JobType.DeliverMissingInventory: kind = own ? Loc.T(StrKindPull) : Loc.T(StrKindSupply); break;
-                        case Orchestrator.JobType.CollectInventorySurplus: kind = own ? Loc.T(StrKindPush) : Loc.T(StrKindSurplus); break;
+                        case Orchestrator.JobType.Weld: kind = Loc.T(MyStrings.Logistics_Construction2); break;
+                        case Orchestrator.JobType.DeliverMissingInventory: kind = own ? Loc.T(MyStrings.Logistics_Pull) : Loc.T(MyStrings.Logistics_Supply); break;
+                        case Orchestrator.JobType.CollectInventorySurplus: kind = own ? Loc.T(MyStrings.Logistics_Push) : Loc.T(MyStrings.Logistics_Surplus); break;
                         default: kind = award.JobType.ToString(); break;
                     }
                     var entry = new StringBuilder();
-                    entry.AppendLoc(pickup ? StrLogPickup : StrLogIncoming, kind, Nicknames.Of(kvp.Key), ConnectorName(tasks[t].TargetEntityId));
-                    Nicknames.AppendPayload(entry, Loc.T(StrLogPayload), next.Inventory);
+                    entry.AppendLoc(pickup ? MyStrings.Logistics_PickupDronePort : MyStrings.Logistics_IncomingDronePort, kind, Nicknames.Of(kvp.Key), ConnectorName(tasks[t].TargetEntityId));
+                    Nicknames.AppendPayload(entry, Loc.T(MyStrings.Logistics_Payload), next.Inventory);
                     log.Add(entry.ToString());
                 }
             }

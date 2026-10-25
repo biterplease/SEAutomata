@@ -15,18 +15,18 @@ namespace Automata.Util
     /// <summary>
     /// Game logic of an Automata block with player settings. The block's save struct (<see cref="BlockSave"/>:
     /// settings + runtime state) lives in its mod storage. A terminal change is applied locally, saved, and its
-    /// settings sent whole (XML) to the server (terminal access checked there), which relays them to the other clients:
+    /// settings sent whole (protobuf) to the server (terminal access checked there), which relays them to the other clients:
     /// every machine holds the same settings, and the server's storage is what gets saved / streamed.
     /// </summary>
     public abstract class SettingsBlockLogic : MyGameLogicComponent
     {
         protected IMyTerminalBlock block;
 
-        /// <summary>Current settings as XML (network).</summary>
-        protected abstract string SettingsXml();
+        /// <summary>Current settings, protobuf (network).</summary>
+        protected abstract byte[] SettingsBinary();
 
-        /// <summary>Replace the settings with these (network, or storage of the older format); false when unreadable.</summary>
-        protected abstract bool LoadSettingsXml(string xml);
+        /// <summary>Replace the settings with these (network); false when unreadable.</summary>
+        protected abstract bool LoadSettingsBinary(byte[] data);
 
         /// <summary>The whole save struct (<see cref="BlockSave.ToText"/>): settings, and on the server the runtime state.</summary>
         protected abstract string SaveText();
@@ -39,7 +39,7 @@ namespace Automata.Util
 
         protected static bool IsServer { get { return MyAPIGateway.Multiplayer == null || MyAPIGateway.Multiplayer.IsServer; } }
 
-        /// <summary>Reads the save struct, or settings of the older format (false: none / unreadable, defaults kept).</summary>
+        /// <summary>Reads the save struct (false: none / unreadable, defaults kept).</summary>
         protected bool LoadFromStorage()
         {
             storageRead = true;
@@ -48,7 +48,6 @@ namespace Automata.Util
                 string text = BlockSave.ReadText(Entity);
                 if (string.IsNullOrEmpty(text)) return false;
                 if (LoadSaveText(text)) return true;
-                if (text.TrimStart().StartsWith("<", StringComparison.Ordinal)) return LoadSettingsXml(text);   // settings XML (older saves)
             }
             catch (Exception ex)
             {
@@ -75,7 +74,7 @@ namespace Automata.Util
             if (MyAPIGateway.Multiplayer == null || !MyAPIGateway.Multiplayer.MultiplayerActive) return;
             var net = AutomataSession.Instance != null ? AutomataSession.Instance.Net : null;
             if (net == null) return;
-            var packet = new BlockSettingsPacket { EntityId = Entity.EntityId, Xml = SettingsXml() };
+            var packet = new BlockSettingsPacket { EntityId = Entity.EntityId, Data = SettingsBinary() };
             if (IsServer) net.SendToEveryone(packet);
             else net.SendToServer(packet);
         }
@@ -96,7 +95,7 @@ namespace Automata.Util
             }
             try
             {
-                if (!LoadSettingsXml(p.Xml))
+                if (p.Data == null || !LoadSettingsBinary(p.Data))
                 {
                     if (Log.DebugEnabled) Log.Debug("Net: {0} {1}: settings from {2} not readable", GetType().Name, Entity.EntityId, senderSteamId);
                     return;

@@ -14,6 +14,7 @@ using Automata.Util;
 using Automata.Util.Logging;
 using Automata.VirtualNetwork;
 using VRage.Utils;
+using Automata.Util.Strings;
 
 namespace Automata.Drone
 {
@@ -55,61 +56,6 @@ namespace Automata.Drone
     /// </summary>
     public partial class DroneControllerBlock
     {
-        #region UI strings
-        private static readonly MyStringId StrAiDefensive = MyStringId.GetOrCompute("AI Defensive");
-        private static readonly MyStringId StrAiFlight = MyStringId.GetOrCompute("AI Flight");
-        private static readonly MyStringId StrAiOffensive = MyStringId.GetOrCompute("AI Offensive");
-        private static readonly MyStringId StrInterceptedBy = MyStringId.GetOrCompute("intercepted by {0}");
-        private static readonly MyStringId StrUnderFire = MyStringId.GetOrCompute("under fire");
-        private static readonly MyStringId StrEngageOrderAtPoint = MyStringId.GetOrCompute("engage order at a point");
-        private static readonly MyStringId StrEngageOrderOn = MyStringId.GetOrCompute("engage order on {0}");
-        private static readonly MyStringId StrEngageOrder = MyStringId.GetOrCompute("engage order");
-        private static readonly MyStringId StrEscortingChat = MyStringId.GetOrCompute("Escorting {0}.");
-        private static readonly MyStringId StrAIFlightSpeedLimitM = MyStringId.GetOrCompute("AI Flight speed limit {0:F0} m/s is below the drone's Max speed {1:F0} m/s");
-        private static readonly MyStringId StrModeChanged = MyStringId.GetOrCompute("mode changed");
-        private static readonly MyStringId StrDroneInError = MyStringId.GetOrCompute("drone in error");
-        private static readonly MyStringId StrEnemyDetected = MyStringId.GetOrCompute("enemy detected");
-        private static readonly MyStringId StrCombatEnemyDetectedNoHome = MyStringId.GetOrCompute("Combat: enemy detected, no home connector and can't park: staying");
-        private static readonly MyStringId StrCombatEnemyDetectedPowerHydrogen = MyStringId.GetOrCompute("Combat: enemy detected, power / hydrogen too low to launch");
-        private static readonly MyStringId StrCombatLaunchingM = MyStringId.GetOrCompute("Combat: {0}, launching ({1:F0} m)");
-        private static readonly MyStringId StrThreatLost = MyStringId.GetOrCompute("threat lost");
-        private static readonly MyStringId StrLowPower = MyStringId.GetOrCompute("low power");
-        private static readonly MyStringId StrNoRouteToTheTarget = MyStringId.GetOrCompute("no route to the target");
-        private static readonly MyStringId StrEngageFightingItOnThe = MyStringId.GetOrCompute("Engage: {0}, fighting it on the way");
-        private static readonly MyStringId StrAIFlightAIOffensiveNot = MyStringId.GetOrCompute("AI Flight / AI Offensive not working");
-        private static readonly MyStringId StrCombatAIFlightSpeedLimit = MyStringId.GetOrCompute("Combat: AI Flight speed limit {0:F0} -> {1:F0} m/s (the drone's Max speed)");
-        private static readonly MyStringId StrAIFlightRefusedToActivate = MyStringId.GetOrCompute("AI Flight refused to activate");
-        private static readonly MyStringId StrAIOffensiveRefusedToActivate = MyStringId.GetOrCompute("AI Offensive refused to activate");
-        private static readonly MyStringId StrCombatHandedOverToThe = MyStringId.GetOrCompute("Combat: handed over to the AI ({0:F0} m from the threat)");
-        private static readonly MyStringId StrAIBlockLost = MyStringId.GetOrCompute("AI block lost");
-        private static readonly MyStringId StrNoTargets = MyStringId.GetOrCompute("no targets");
-        private static readonly MyStringId StrFleeing = MyStringId.GetOrCompute("fleeing");
-        private static readonly MyStringId StrAIBehaviourSwitchedOff = MyStringId.GetOrCompute("AI behaviour switched off");
-        private static readonly MyStringId StrCombatReturningHome = MyStringId.GetOrCompute("Combat: {0}, returning home");
-        private static readonly MyStringId StrCombatBackHome = MyStringId.GetOrCompute("Combat: back home");
-        private static readonly MyStringId StrEnemyDetectedAgain = MyStringId.GetOrCompute("enemy detected again");
-        private static readonly MyStringId StrNewOrder = MyStringId.GetOrCompute("new order");
-        private static readonly MyStringId StrEngagingTargetAtGPS = MyStringId.GetOrCompute("Engaging target at GPS:{0}:{1:F0}:{2:F0}:{3:F0}:");
-        private static readonly MyStringId StrEscort = MyStringId.GetOrCompute("Escort: {0}");
-        private static readonly MyStringId StrTargetNotFoundYet = MyStringId.GetOrCompute("target not found yet");
-        private static readonly MyStringId StrInterrupted = MyStringId.GetOrCompute("interrupted");
-        private static readonly MyStringId StrDone = MyStringId.GetOrCompute("done");
-        private static readonly MyStringId StrGone = MyStringId.GetOrCompute("gone");
-        private static readonly MyStringId StrDisabled = MyStringId.GetOrCompute("disabled");
-        private static readonly MyStringId StrInterceptorDealtWithBackTo = MyStringId.GetOrCompute("interceptor dealt with, back to the target");
-        private static readonly MyStringId StrEscortFollowingAgain = MyStringId.GetOrCompute("Escort: {0}, following {1} again");
-        private static readonly MyStringId StrTargetStillOutThere = MyStringId.GetOrCompute("target still out there");
-        private static readonly MyStringId StrEscortedTargetGone = MyStringId.GetOrCompute("escorted target gone");
-        private static readonly MyStringId StrCombatDone = MyStringId.GetOrCompute("{0}: {1}, done");
-        private static readonly MyStringId StrEngage = MyStringId.GetOrCompute("Engage");
-        private static readonly MyStringId StrEscortLabel = MyStringId.GetOrCompute("Escort");
-        private static readonly MyStringId StrEngageTargetDone = MyStringId.GetOrCompute("Engage: target {0}, done");
-        private static readonly MyStringId StrTargetDestroyed = MyStringId.GetOrCompute("Target destroyed");
-        private static readonly MyStringId StrTarget = MyStringId.GetOrCompute("Target");
-        private static readonly MyStringId StrEscortTargetGoneDone = MyStringId.GetOrCompute("Escort: target gone, done");
-        private static readonly MyStringId StrEnemyNearTheEscort = MyStringId.GetOrCompute("enemy near the escort");
-        private static readonly MyStringId StrAINotActiveAfterLoad = MyStringId.GetOrCompute("AI not active after load");
-        #endregion
 
         private const string AI_BEHAVIOUR_PROPERTY = "ActivateBehavior";
         #region Timing
@@ -175,7 +121,7 @@ namespace Automata.Drone
             if (!IsCombatProfile) return null;
             string note = null;
             if (aiFlight != null && !aiFlight.Closed && aiFlight.SpeedLimit < MaxSpeed - 0.5f)
-                note = Loc.F(StrAIFlightSpeedLimitM, aiFlight.SpeedLimit, MaxSpeed);
+                note = Loc.F(MyStrings.Drone_AIFlightSpeedLimitM, aiFlight.SpeedLimit, MaxSpeed);
             return note;
         }
 
@@ -200,9 +146,9 @@ namespace Automata.Drone
             if (initialized && !isParked) return null;   // checked at home, like the ore scout's detector
             if (aiDefensive != null && aiOffensive != null && aiFlight != null) return null;
             string s = "";
-            if (aiDefensive == null) s += " " + Loc.T(StrAiDefensive);
-            if (aiFlight == null) s += " " + Loc.T(StrAiFlight);
-            if (aiOffensive == null) s += " " + Loc.T(StrAiOffensive);
+            if (aiDefensive == null) s += " " + Loc.T(MyStrings.Keen_AIDefensive);
+            if (aiFlight == null) s += " " + Loc.T(MyStrings.Keen_AIFlight);
+            if (aiOffensive == null) s += " " + Loc.T(MyStrings.Keen_AIOffensive);
             return s;
         }
 
@@ -288,14 +234,14 @@ namespace Automata.Drone
             }
             if (!IsCombatMode)
             {
-                if (combatPhase != CombatPhase.Idle) EndCombat(Loc.T(StrModeChanged));
+                if (combatPhase != CombatPhase.Idle) EndCombat(Loc.T(MyStrings.Drone_ModeChanged));
                 return;
             }
             if (savedSave != null) return;   // saved state not applied yet
             int now = MyAPIGateway.Session.GameplayFrameCounter;
             if (currentState == State.Error && combatPhase != CombatPhase.Handover)
             {
-                if (combatPhase != CombatPhase.Idle) EndCombat(Loc.T(StrDroneInError));
+                if (combatPhase != CombatPhase.Idle) EndCombat(Loc.T(MyStrings.Drone_DroneInError));
                 return;
             }
             switch (combatPhase)
@@ -325,7 +271,7 @@ namespace Automata.Drone
             if (e == null || now < combatRescrambleFrame) return;
             if (!CanScramble(e, now)) return;
             SeeThreat(e, now);
-            StartScramble(now, Loc.T(StrEnemyDetected));
+            StartScramble(now, Loc.T(MyStrings.Drone_EnemyDetected));
         }
 
         private bool CanScramble(IMyEntity e, int now)
@@ -336,7 +282,7 @@ namespace Automata.Drone
                 if (now - combatLowPowerLogFrame >= COMBAT_LOW_POWER_LOG_TICKS)
                 {
                     combatLowPowerLogFrame = now;
-                    Report(StrCombatEnemyDetectedNoHome);
+                    Report(MyStrings.Drone_CombatEnemyDetectedNoHome);
                 }
                 return false;
             }
@@ -345,7 +291,7 @@ namespace Automata.Drone
                 if (now - combatLowPowerLogFrame >= COMBAT_LOW_POWER_LOG_TICKS)
                 {
                     combatLowPowerLogFrame = now;
-                    Report(StrCombatEnemyDetectedPowerHydrogen);
+                    Report(MyStrings.Drone_CombatEnemyDetectedPowerHydrogen);
                 }
                 return false;
             }
@@ -363,7 +309,7 @@ namespace Automata.Drone
             combatNoTargetSince = -1;
             combatRouteFails = 0;
             LockOffensiveSearch(false);
-            Report(StrCombatLaunchingM, why, Vector3D.Distance(threatPosition, flightState.Position));
+            Report(MyStrings.Drone_CombatLaunchingM, why, Vector3D.Distance(threatPosition, flightState.Position));
             if (Vector3D.DistanceSquared(HullCentreWorld, threatPosition) <= HandoverDistanceSquared)
             {
                 CombatStartHandover(now);
@@ -416,9 +362,9 @@ namespace Automata.Drone
             var e = designatorCombat == DesignatorCombat.Engage ? DesignatedTarget() : DefensiveTarget() ?? OffensiveTarget();
             if (e != null) SeeThreat(e, now);
             else if (designatorCombat == DesignatorCombat.Engage && designatorTargetId == 0) threatSeenFrame = now;   // a point: never lost
-            else if (now - threatSeenFrame > COMBAT_THREAT_LOST_TICKS) { CombatStartRecover(now, Loc.T(StrThreatLost)); return; }
-            if (settings.CombatRetreatOnLowPower && CombatLowPower) { CombatStartRecover(now, Loc.T(StrLowPower)); return; }
-            if (combatRouteFails >= COMBAT_ROUTE_FAILS_MAX) { CombatStartRecover(now, Loc.T(StrNoRouteToTheTarget)); return; }
+            else if (now - threatSeenFrame > COMBAT_THREAT_LOST_TICKS) { CombatStartRecover(now, Loc.T(MyStrings.Drone_ThreatLost)); return; }
+            if (settings.CombatRetreatOnLowPower && CombatLowPower) { CombatStartRecover(now, Loc.T(MyStrings.Drone_LowPower)); return; }
+            if (combatRouteFails >= COMBAT_ROUTE_FAILS_MAX) { CombatStartRecover(now, Loc.T(MyStrings.Drone_NoRouteToTheTarget)); return; }
             if (preflightStage != 0) return;   // still undocking
             if (designatorCombat == DesignatorCombat.Engage && now >= combatRescrambleFrame)
             {
@@ -429,7 +375,7 @@ namespace Automata.Drone
                 {
                     engageDiverted = true;
                     if (interceptor != null) SeeThreat(interceptor, now);
-                    Report(StrEngageFightingItOnThe, interceptor != null ? Loc.F(StrInterceptedBy, interceptor.DisplayName) : Loc.T(StrUnderFire));
+                    Report(MyStrings.Drone_EngageFighting, interceptor != null ? Loc.F(MyStrings.Drone_InterceptedBy, interceptor.DisplayName) : Loc.T(MyStrings.Drone_UnderFire));
                     CombatStartHandover(now);
                     return;
                 }
@@ -475,7 +421,7 @@ namespace Automata.Drone
         {
             if (!AiBlockUsable(aiFlight) || !AiBlockUsable(aiOffensive))
             {
-                CombatStartRecover(now, Loc.T(StrAIFlightAIOffensiveNot));
+                CombatStartRecover(now, Loc.T(MyStrings.Drone_AIFlightAIOffensive));
                 return;
             }
             // Hands off: no order, no overrides, gyros free (the per-tick update then stays idle)
@@ -488,7 +434,7 @@ namespace Automata.Drone
             // The drone's Max speed holds in the fight too: an AI Flight limit above it is lowered to it
             if (aiFlight.SpeedLimit > MaxSpeed + 0.5f)
             {
-                Report(StrCombatAIFlightSpeedLimit, aiFlight.SpeedLimit, MaxSpeed);
+                Report(MyStrings.Drone_CombatAIFlightSpeedLimit, aiFlight.SpeedLimit, MaxSpeed);
                 aiFlight.SpeedLimit = MaxSpeed;
             }
             // Both: the Offensive behaviour errors without an active Flight block
@@ -496,7 +442,7 @@ namespace Automata.Drone
             bool offOn = flightOn && SetBehaviour(aiOffensive, true);
             if (!flightOn || !offOn)
             {
-                CombatStartRecover(now, !flightOn ? Loc.T(StrAIFlightRefusedToActivate) : Loc.T(StrAIOffensiveRefusedToActivate));
+                CombatStartRecover(now, !flightOn ? Loc.T(MyStrings.Drone_AIFlightRefusedToActivate) : Loc.T(MyStrings.Drone_AIOffensiveRefusedToActivate));
                 return;
             }
             aiOffensive.DoForceSearchEnemy();
@@ -505,12 +451,12 @@ namespace Automata.Drone
             combatDamaged = false;
             combatBehaviourCheckFrame = now;
             SetState(State.Combat);
-            Report(StrCombatHandedOverToThe, Vector3D.Distance(HullCentreWorld, threatPosition));
+            Report(MyStrings.Drone_CombatHandedOver, Vector3D.Distance(HullCentreWorld, threatPosition));
         }
 
         private void CombatHandover(int now)
         {
-            if (!AiBlockUsable(aiFlight) || !AiBlockUsable(aiOffensive)) { CombatStartRecover(now, Loc.T(StrAIBlockLost)); return; }
+            if (!AiBlockUsable(aiFlight) || !AiBlockUsable(aiOffensive)) { CombatStartRecover(now, Loc.T(MyStrings.Drone_AIBlockLost)); return; }
             var e = OffensiveTarget() ?? DefensiveTarget();
             if (e != null)
             {
@@ -523,7 +469,7 @@ namespace Automata.Drone
                 combatNoTargetSince = now;
                 if (Log.DebugEnabled) Log.Debug("Drone {0}: combat: no target, {1} s to return", Entity.EntityId, settings.CombatNoTargetSeconds);
             }
-            else if (now - combatNoTargetSince >= settings.CombatNoTargetSeconds * 60) { CombatStartRecover(now, Loc.T(StrNoTargets)); return; }
+            else if (now - combatNoTargetSince >= settings.CombatNoTargetSeconds * 60) { CombatStartRecover(now, Loc.T(MyStrings.Drone_NoTargets)); return; }
 
             if (settings.CombatRetreatOnFlee && aiDefensive != null && !aiDefensive.Closed)
             {
@@ -531,15 +477,15 @@ namespace Automata.Drone
                 // trigger is evaluated here from the drone's damage events
                 bool flee = aiDefensive.IsFleeing
                     || (combatDamaged && aiDefensive.FleeTrigger == VRage.Game.ModAPI.Ingame.FleeTrigger.WhenTakingDamage);
-                if (flee) { CombatStartRecover(now, Loc.T(StrFleeing)); return; }
+                if (flee) { CombatStartRecover(now, Loc.T(MyStrings.Drone_Fleeing)); return; }
             }
-            if (settings.CombatRetreatOnLowPower && CombatLowPower) { CombatStartRecover(now, Loc.T(StrLowPower)); return; }
+            if (settings.CombatRetreatOnLowPower && CombatLowPower) { CombatStartRecover(now, Loc.T(MyStrings.Drone_LowPower)); return; }
 
             if (now - combatBehaviourCheckFrame >= COMBAT_BEHAVIOUR_CHECK_TICKS)
             {
                 combatBehaviourCheckFrame = now;
                 // Switched off by the player, a timer or the AI system: the AI is no longer flying, take back
-                if (!GetBehaviour(aiFlight) || !GetBehaviour(aiOffensive)) { CombatStartRecover(now, Loc.T(StrAIBehaviourSwitchedOff)); return; }
+                if (!GetBehaviour(aiFlight) || !GetBehaviour(aiOffensive)) { CombatStartRecover(now, Loc.T(MyStrings.Drone_AIBehaviorSwitchedOff)); return; }
             }
         }
 
@@ -551,7 +497,7 @@ namespace Automata.Drone
             combatPhase = CombatPhase.Recover;
             combatRescrambleFrame = now + COMBAT_RESCRAMBLE_TICKS;
             combatHomeTryFrame = now;
-            Report(StrCombatReturningHome, why);
+            Report(MyStrings.Drone_CombatReturningHome, why);
             ClearFlightOrder();
             if (!IsAtRest()) GoRest();
         }
@@ -563,7 +509,7 @@ namespace Automata.Drone
                 combatPhase = CombatPhase.Idle;
                 LockOffensiveSearch(false);
                 capabilitiesDirty = true;   // a block lost out there is reported now
-                Report(StrCombatBackHome);
+                Report(MyStrings.Drone_CombatBackHome);
                 return;
             }
             // A new detection with enough power: back out, once a minute at most
@@ -572,7 +518,7 @@ namespace Automata.Drone
             {
                 combatRescrambleFrame = now + COMBAT_RESCRAMBLE_TICKS;
                 SeeThreat(e, now);
-                StartScramble(now, Loc.T(StrEnemyDetectedAgain));
+                StartScramble(now, Loc.T(MyStrings.Drone_EnemyDetectedAgain));
                 return;
             }
             if (!IsGoingToRest && activeFlightOrder == null && preflightStage == 0 && now - combatHomeTryFrame >= COMBAT_HOME_RETRY_TICKS)
@@ -654,7 +600,7 @@ namespace Automata.Drone
             {
                 if (!AiBlockUsable(aiDefensive) || !AiBlockUsable(aiFlight) || !AiBlockUsable(aiOffensive))
                     return Fail(Orchestrator.TaskFailure.MissingEquipment, TaskStatus.ToReturnHome);
-                EndCombat(Loc.T(StrNewOrder));
+                EndCombat(Loc.T(MyStrings.Drone_NewOrder));
                 CombatBehavioursOff();   // after a load the AI blocks keep their own switch
                 designatorCombat = task.Type == Orchestrator.TaskType.Engage ? DesignatorCombat.Engage : DesignatorCombat.Escort;
                 designatorTargetId = task.TargetEntityId;
@@ -674,15 +620,15 @@ namespace Automata.Drone
                     var grid = t as IMyCubeGrid;
                     engageTargetArmed = grid != null && GroupHas(grid, true);
                     engageCheckFrame = now;
-                    Broadcast(string.Format(CultureInfo.InvariantCulture, Loc.T(StrEngagingTargetAtGPS),
+                    Broadcast(string.Format(CultureInfo.InvariantCulture, Loc.T(MyStrings.Drone_EngagingTargetAtGPS),
                                             GpsName(t != null ? t.DisplayName : null), designatorTargetPosition.X, designatorTargetPosition.Y,
                                             designatorTargetPosition.Z));
-                    StartScramble(now, designatorTargetId == 0 ? Loc.T(StrEngageOrderAtPoint) : t != null ? Loc.F(StrEngageOrderOn, t.DisplayName) : Loc.T(StrEngageOrder));
+                    StartScramble(now, designatorTargetId == 0 ? Loc.T(MyStrings.Drone_EngageOrderAtAPoint) : t != null ? Loc.F(MyStrings.Drone_EngageOrderOn, t.DisplayName) : Loc.T(MyStrings.Drone_EngageOrder));
                 }
                 else
                 {
-                    Report(StrEscort, t != null ? t.DisplayName : Loc.T(StrTargetNotFoundYet));
-                    if (t != null) Broadcast(Loc.F(StrEscortingChat, t.DisplayName));
+                    Report(MyStrings.Drone_Escort, t != null ? t.DisplayName : Loc.T(MyStrings.Drone_TargetNotFoundYet));
+                    if (t != null) Broadcast(Loc.F(MyStrings.Drone_Escorting, t.DisplayName));
                     LockOffensiveSearch(true);   // its behaviour is off; no target picking while ours flies
                     EscortFollow(now);
                 }
@@ -691,12 +637,12 @@ namespace Automata.Drone
             if (designatorCombat == DesignatorCombat.None)
             {
                 // Ended from outside (error, AI off...): home
-                jobAbortReason = Loc.T(StrInterrupted);
+                jobAbortReason = Loc.T(MyStrings.Drone_Interrupted);
                 return TaskStatus.ToReturnHome;
             }
             if (!designatorDone) return TaskStatus.Running;
             string abort = designatorAbort;
-            EndCombat(abort ?? Loc.T(StrDone));
+            EndCombat(abort ?? Loc.T(MyStrings.Drone_DoneLower));
             if (abort != null) jobAbortReason = abort;
             return TaskStatus.Done;   // the job's ReturnHome follows
         }
@@ -706,22 +652,22 @@ namespace Automata.Drone
         {
             if (designatorDone) return;   // the task runner picks it up
             int now = MyAPIGateway.Session.GameplayFrameCounter;
-            if (currentState == State.Error && combatPhase != CombatPhase.Handover) { DesignatorCombatEnded(now, Loc.T(StrDroneInError)); return; }
+            if (currentState == State.Error && combatPhase != CombatPhase.Handover) { DesignatorCombatEnded(now, Loc.T(MyStrings.Drone_DroneInError)); return; }
             if (designatorCombat == DesignatorCombat.Engage && designatorTargetId != 0 && now - engageCheckFrame >= ENGAGE_CHECK_TICKS)
             {
                 engageCheckFrame = now;
                 var t = DesignatedTarget();
-                if (t == null || TargetDisabled(t)) { EngageTargetDown(t == null ? Loc.T(StrGone) : Loc.T(StrDisabled)); return; }
+                if (t == null || TargetDisabled(t)) { EngageTargetDown(t == null ? Loc.T(MyStrings.Drone_Gone) : Loc.T(MyStrings.Drone_DisabledLower)); return; }
             }
             switch (combatPhase)
             {
                 case CombatPhase.Idle:
                     if (designatorCombat == DesignatorCombat.Escort) EscortFollow(now);
-                    else DesignatorCombatEnded(now, Loc.T(StrNoTargets));   // engage between fights (not expected)
+                    else DesignatorCombatEnded(now, Loc.T(MyStrings.Drone_NoTargets));   // engage between fights (not expected)
                     break;
                 case CombatPhase.Scramble: CombatScramble(now); break;
                 case CombatPhase.Handover: CombatHandover(now); break;
-                default: DesignatorCombatEnded(now, Loc.T(StrNoTargets)); break;   // Recover is the operation mode's
+                default: DesignatorCombatEnded(now, Loc.T(MyStrings.Drone_NoTargets)); break;   // Recover is the operation mode's
             }
         }
 
@@ -733,7 +679,7 @@ namespace Automata.Drone
             LockOffensiveSearch(true);   // no target hunting that drags the drone back while ours flies
             combatPhase = CombatPhase.Idle;
             combatNoTargetSince = -1;
-            bool fightOver = why == Loc.T(StrNoTargets) || why == Loc.T(StrThreatLost);
+            bool fightOver = why == Loc.T(MyStrings.Drone_NoTargets) || why == Loc.T(MyStrings.Drone_ThreatLost);
             var target = DesignatedTarget();
             if (designatorCombat == DesignatorCombat.Engage && engageDiverted)
             {
@@ -745,7 +691,7 @@ namespace Automata.Drone
                     combatRescrambleFrame = now + ESCORT_RESCRAMBLE_TICKS;   // a few seconds of flight before the next diversion
                     if (point) { threatId = 0; threatPosition = designatorTargetPosition; threatSeenFrame = now; }
                     else SeeThreat(target, now);
-                    StartScramble(now, Loc.T(StrInterceptorDealtWithBackTo));
+                    StartScramble(now, Loc.T(MyStrings.Drone_InterceptorDealtWithBack));
                     return;
                 }
             }
@@ -754,26 +700,26 @@ namespace Automata.Drone
                 combatRescrambleFrame = now + ESCORT_RESCRAMBLE_TICKS;
                 escortRouteFrame = int.MinValue / 2;
                 ClearFlightOrder();
-                Report(StrEscortFollowingAgain, why, target.DisplayName);
+                Report(MyStrings.Drone_EscortFollowingAgain, why, target.DisplayName);
                 return;
             }
-            if (designatorCombat == DesignatorCombat.Engage && designatorTargetId != 0 && why == Loc.T(StrNoTargets) && target != null && engageAttempts < ENGAGE_ATTEMPTS_MAX
+            if (designatorCombat == DesignatorCombat.Engage && designatorTargetId != 0 && why == Loc.T(MyStrings.Drone_NoTargets) && target != null && engageAttempts < ENGAGE_ATTEMPTS_MAX
                 && Vector3D.DistanceSquared(HullCentreWorld, target.WorldAABB.Center) > HandoverDistanceSquared)
             {
                 engageAttempts++;
                 SeeThreat(target, now);
-                StartScramble(now, Loc.T(StrTargetStillOutThere));
+                StartScramble(now, Loc.T(MyStrings.Drone_TargetStillOutThere));
                 return;
             }
             if (designatorCombat == DesignatorCombat.Engage && designatorTargetId != 0 && fightOver && (target == null || TargetDisabled(target)))
             {
-                EngageTargetDown(target == null ? Loc.T(StrGone) : Loc.T(StrDisabled));
+                EngageTargetDown(target == null ? Loc.T(MyStrings.Drone_Gone) : Loc.T(MyStrings.Drone_DisabledLower));
                 return;
             }
             designatorDone = true;
-            designatorAbort = fightOver ? (designatorCombat == DesignatorCombat.Escort ? Loc.T(StrEscortedTargetGone) : null) : why;
+            designatorAbort = fightOver ? (designatorCombat == DesignatorCombat.Escort ? Loc.T(MyStrings.Drone_EscortedTargetGone) : null) : why;
             ClearFlightOrder();
-            Report(StrCombatDone, designatorCombat == DesignatorCombat.Engage ? Loc.T(StrEngage) : Loc.T(StrEscortLabel), designatorAbort ?? why);
+            Report(MyStrings.Drone_Arg0ColonArg1CommaDone, designatorCombat == DesignatorCombat.Engage ? Loc.T(MyStrings.Drone_Engage) : Loc.T(MyStrings.Drone_Escort2), designatorAbort ?? why);
         }
 
         // Engage: the designated target is destroyed or disabled: AI off, the job is done (completed), the drone says so
@@ -786,8 +732,8 @@ namespace Automata.Drone
             designatorDone = true;
             designatorAbort = null;
             ClearFlightOrder();
-            Report(StrEngageTargetDone, how);
-            Broadcast(Loc.T(StrTargetDestroyed));
+            Report(MyStrings.Drone_EngageTargetDone, how);
+            Broadcast(Loc.T(MyStrings.Drone_TargetDestroyed));
         }
 
         /// <summary>
@@ -890,7 +836,7 @@ namespace Automata.Drone
         // A GPS name for chat (no ':' allowed in it)
         private static string GpsName(string name)
         {
-            if (string.IsNullOrWhiteSpace(name)) return Loc.T(StrTarget);
+            if (string.IsNullOrWhiteSpace(name)) return Loc.T(MyStrings.Drone_Target);
             return name.Replace(':', ' ').Trim();
         }
 
@@ -904,9 +850,9 @@ namespace Automata.Drone
                 if (now - designatorSeenFrame > DESIGNATOR_TARGET_LOST_TICKS)
                 {
                     designatorDone = true;
-                    designatorAbort = Loc.T(StrEscortedTargetGone);
+                    designatorAbort = Loc.T(MyStrings.Drone_EscortedTargetGone);
                     ClearFlightOrder();
-                    Report(StrEscortTargetGoneDone);
+                    Report(MyStrings.Drone_EscortTargetGoneDone);
                 }
                 return;
             }
@@ -920,7 +866,7 @@ namespace Automata.Drone
                 if (Vector3D.DistanceSquared(flightState.Position, enemy.GetPosition()) <= maxRange * maxRange)
                 {
                     SeeThreat(enemy, now);
-                    StartScramble(now, Loc.T(StrEnemyNearTheEscort));
+                    StartScramble(now, Loc.T(MyStrings.Drone_EnemyNearTheEscort));
                     return;
                 }
             }
@@ -1067,7 +1013,7 @@ namespace Automata.Drone
             combatBehaviourCheckFrame = now;
             if (Log.DebugEnabled) Log.Debug("Drone {0}: combat: resumed in {1} (threat {2})", Entity.EntityId, combatPhase, threatId);
             if (combatPhase == CombatPhase.Handover && (!GetBehaviour(aiFlight) || !GetBehaviour(aiOffensive)))
-                CombatStartRecover(now, Loc.T(StrAINotActiveAfterLoad));
+                CombatStartRecover(now, Loc.T(MyStrings.Drone_AINotActiveAfterLoad));
             else if (combatPhase == CombatPhase.Handover)
                 SetState(State.Combat);
         }

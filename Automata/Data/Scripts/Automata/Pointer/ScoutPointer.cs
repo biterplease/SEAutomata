@@ -15,7 +15,9 @@ using VRageMath;
 using Automata.Orchestrator;
 using Automata.Util;
 using Automata.Util.Logging;
+using Automata.VirtualNetwork;
 using Digi.NetworkLib;
+using Automata.Util.Strings;
 
 namespace Automata.Pointer
 {
@@ -52,18 +54,6 @@ namespace Automata.Pointer
     /// </summary>
     public static class ScoutPointer
     {
-        #region UI strings
-        private static readonly MyStringId StrEngageTarget = MyStringId.GetOrCompute("engage {0}");
-        private static readonly MyStringId StrEscortTarget = MyStringId.GetOrCompute("escort {0}");
-        private static readonly MyStringId StrSpotCheck = MyStringId.GetOrCompute("spot check");
-        private static readonly MyStringId StrSpotCheckN = MyStringId.GetOrCompute("spot check {0}/{1}");
-        private static readonly MyStringId StrSpotCheckMarker = MyStringId.GetOrCompute("Spot check");
-        private static readonly MyStringId StrAreaSweepSector = MyStringId.GetOrCompute("area sweep sector {0}/{1}");
-        private static readonly MyStringId StrAreaSweep = MyStringId.GetOrCompute("Area sweep");
-        private static readonly MyStringId StrEngageAtAPoint = MyStringId.GetOrCompute("engage at a point");
-        private static readonly MyStringId StrADesignatedPoint = MyStringId.GetOrCompute("a designated point");
-        private static readonly MyStringId StrScoutLaser = MyStringId.GetOrCompute("scout laser");
-        #endregion
 
         // Hand item subtypes (MyObjectBuilder_AutomaticRifle): the held entity's DefinitionId
         public const string COMBAT_HAND_ITEM = "AutomataHostileTargetDesignator";
@@ -492,7 +482,7 @@ namespace Automata.Pointer
             if (mode == PointerMode.Tag) return "tag";
             if (mode == PointerMode.Green) return "recall";
             if (kind == PointerKind.Combat) return mode == PointerMode.Red ? "engage" : "escort";
-            return mode == PointerMode.Red ? Loc.T(StrSpotCheck) : "area sweep";
+            return mode == PointerMode.Red ? Loc.T(MyStrings.Common_SpotCheck) : "area sweep";
         }
 
         /// <summary>The hit entity's relation to the player (grids: by majority owner; characters: their identity).</summary>
@@ -678,10 +668,9 @@ namespace Automata.Pointer
         /// Tag mode: the drone hit joins the memory (ok sound, the status lights blink green 3x). Refused (error sound, a red
         /// blink; the memory stays as it was): not a drone, the wrong designator for it (hostile: combat drones, industrial:
         /// drones with an ore detector - area sweeps then use only the ore scouts among them), another player's / faction's,
-        /// already tagged, or MAX_TAGGED reached. No orchestrator needed (one in
-        /// range broadcasts it).
+        /// already tagged, or MAX_TAGGED reached. No orchestrator needed.
         /// </summary>
-        private static void TagAt(ScoutPointerPacket p, long identity, OrchestratorBlock orch)
+        private static void TagAt(ScoutPointerPacket p, long identity)
         {
             string why = "no hit";
             var drone = p.Hit ? TagTarget(p.HitEntityId, identity, p.Kind, out why) : null;
@@ -746,7 +735,8 @@ namespace Automata.Pointer
                 Feedback(identity, DesignatorSignal.Error);
                 return;
             }
-            Order(p, identity, at, player.Character, CoveringOrchestrator(at, identity));
+            var orch = CoveringOrchestrator(at, identity);
+            Order(p, identity, at, player.Character, orch != null ? new OrderSink { Orch = orch } : null);
         }
 
         // The nearest running orchestrator of the player's (or their faction's) whose network covers 'at' (null: none).
@@ -768,19 +758,53 @@ namespace Automata.Pointer
             return orch;
         }
 
-        // A designator pull (hand-held or camera): 'at' where it was fired from, 'shooter' the player holding it (null: a
-        // camera - no self-escort), 'orch' the orchestrator that takes the order (null: none in range)
-        private static void Order(ScoutPointerPacket p, long identity, Vector3D at, IMyCharacter shooter, OrchestratorBlock orch)
+        /// <summary>
+        /// Where a pointer order goes. Hand-held: 'Orch', the running orchestrator whose network covers the player (the order is put
+        /// straight into it). Camera: 'Designator', the target designator block (the order travels its grid's antennas as a
+        /// DESIGNATOR_JOB_ANNOUNCEMENT; the answer comes back to it); 'Self' is its construct (an ESCORT with no hit escorts it).
+        /// </summary>
+        private sealed class OrderSink
         {
-            if (p.Mode == PointerMode.Tag) { TagAt(p, identity, orch); return; }
-            if (orch == null)
+            public OrchestratorBlock Orch;
+            public Designator.TargetDesignatorBlock Designator;
+            public IMyCubeGrid Self;
+
+            public bool IsCamera { get { return Designator != null; } }
+
+            /// <summary>One job of an order (orderId 0: a new order, its id returned in it); the job id.</summary>
+            public uint Submit(Orchestrator.JobType type, List<Orchestrator.Task> tasks, Vector3D site, string what, long identity, PointerKind kind, string marker,
+                               ref uint orderId, long requiredDrone = 0)
+            {
+                float g = ScoutPlanner.Gravity(site);
+                if (orderId == 0) orderId = Designator != null ? Designator.NextId() : Orch.NewOrderId();
+                var ja = new JobAnnouncement
+                {
+                    JobId = Designator != null ? Designator.NextId() : 0,   // the orchestrator gives hand-held ones theirs
+                    Type = type, EntityType = Designator != null ? AutomataEntityType.TargetDesignatorBlock : AutomataEntityType.OrchestratorBlock,
+                    CreatedTime = DateTime.UtcNow, ComponentsInventory = new Inventory.DiscreteInventory(), PositionData = Vector3DData.FromVector3D(site),
+                    NaturalGravity = g, IsInSpace = g < JobAnnouncement.SPACE_GRAVITY, IsInAtmosphere = g >= JobAnnouncement.SPACE_GRAVITY,
+                    Tasks = tasks, OrderId = orderId, Identity = identity, Kind = kind, Marker = marker, What = what, RequiredDrone = requiredDrone,
+                };
+                if (Designator != null) { Designator.SendOrder(ja); return ja.JobId; }
+                return Orch.AcceptDesignatorJob(ja, 0, Orch.OwnerId);
+            }
+        }
+
+        // A designator pull (hand-held or camera): 'at' where it was fired from, 'shooter' the player holding it (null: a
+        // camera), 'sink' where the order goes (null: no orchestrator in range of a hand-held one)
+        private static void Order(ScoutPointerPacket p, long identity, Vector3D at, IMyCharacter shooter, OrderSink sink)
+        {
+            if (p.Mode == PointerMode.Tag) { TagAt(p, identity); return; }
+            if (sink == null)
             {
                 Feedback(identity, DesignatorSignal.Error);
                 if (Log.DebugEnabled) Log.Debug("Pointer: [server] player {0}: no orchestrator of theirs covers {1}", identity, at);
                 return;
             }
-            if (!p.Hit) { Feedback(identity, DesignatorSignal.Error); return; }
-            Vector3D hit = p.HitPosition.ToVector3D();
+            // (a camera ESCORT that hit nothing escorts the designator's own construct)
+            bool selfEscort = !p.Hit && sink.IsCamera && p.Mode == PointerMode.Blue && p.Kind == PointerKind.Combat;
+            if (!p.Hit && !selfEscort) { Feedback(identity, DesignatorSignal.Error); return; }
+            Vector3D hit = p.Hit ? p.HitPosition.ToVector3D() : at;
             double dist = Vector3D.Distance(at, hit);
             if (p.Mode == PointerMode.Green) { Recall(p.HitEntityId, hit, identity); return; }
             // Orders: the tagged drones (tag mode) take them, one job each; none tagged: one drone of the profile
@@ -788,7 +812,7 @@ namespace Automata.Pointer
             var tagged = LiveTags(memory);   // empty: one drone, any of the profile (as before tagging)
             if (p.Kind == PointerKind.Combat)
             {
-                if (CombatOrder(p, identity, dist, orch, shooter, tagged))
+                if (CombatOrder(p, identity, dist, sink, shooter, tagged))
                 {
                     Feedback(identity, DesignatorSignal.Requested);
                     if (tagged.Count > 0) ForgetTags(identity, p.Kind, "order given");
@@ -802,9 +826,9 @@ namespace Automata.Pointer
                 // tagged scouts: one spot each around the pointed one
                 var spots = SpreadSpots(hit, p.HitNormal.ToVector3D(), Math.Max(1, tagged.Count));
                 for (int s = 0; s < spots.Count; s++)
-                    orch.SubmitPlayerJob(Orchestrator.JobType.DesignatorScoutPoint, ScoutPlanner.SpotCheck(spots[s], p.HitNormal.ToVector3D(), at), hit,
-                                         spots.Count > 1 ? Loc.F(StrSpotCheckN, s + 1, spots.Count) : Loc.T(StrSpotCheck), identity, p.Kind,
-                                         Loc.T(StrSpotCheckMarker), ref order, s < tagged.Count ? tagged[s] : 0);
+                    sink.Submit(Orchestrator.JobType.DesignatorScoutPoint, ScoutPlanner.SpotCheck(spots[s], p.HitNormal.ToVector3D(), at), hit,
+                                         spots.Count > 1 ? Loc.F(MyStrings.Common_SpotCheckArg0SlashArg1, s + 1, spots.Count) : Loc.T(MyStrings.Common_SpotCheck), identity, p.Kind,
+                                         Loc.T(MyStrings.Common_SpotCheck2), ref order, s < tagged.Count ? tagged[s] : 0);
                 Feedback(identity, DesignatorSignal.Requested);
                 if (tagged.Count > 0) ForgetTags(identity, p.Kind, "order given");
                 return;
@@ -827,50 +851,49 @@ namespace Automata.Pointer
             string how;
             var sectors = ScoutPlanner.AreaSweep(hit, at, Math.Max(1, tagged.Count), out how, SmallestDetectorRange(tagged));
             for (int s = 0; s < sectors.Count; s++)
-                orch.SubmitPlayerJob(Orchestrator.JobType.DesignatorScoutArea, sectors[s], hit, Loc.F(StrAreaSweepSector, s + 1, sectors.Count),
-                                     identity, p.Kind, Loc.T(StrAreaSweep), ref order, s < tagged.Count ? tagged[s] : 0);
+                sink.Submit(Orchestrator.JobType.DesignatorScoutArea, sectors[s], hit, Loc.F(MyStrings.Common_AreaSweepSector, s + 1, sectors.Count),
+                                     identity, p.Kind, Loc.T(MyStrings.Common_AreaSweep), ref order, s < tagged.Count ? tagged[s] : 0);
             if (Log.DebugEnabled) Log.Debug("Pointer: [server] area sweep at {0} for player {1}: {2}", hit, identity, how);
             Feedback(identity, DesignatorSignal.Requested);
             if (tagged.Count > 0) ForgetTags(identity, p.Kind, "order given");
         }
 
-        #region Camera designator (orchestrator toolbar actions)
+        #region Camera designator (target designator block toolbar actions)
         private static readonly List<IMyCubeGrid> cameraGroup = new List<IMyCubeGrid>();
-        private static readonly MyStringId StrTagsCleared = MyStringId.GetOrCompute("tags cleared ({0} drones)");
 
         /// <summary>
-        /// Server: a "Designator:" action of an orchestrator, pressed by a player with terminal access: its designator
-        /// camera (mechanically connected to it, working, friendly) points the order - the camera's forward, CAMERA_RANGE,
-        /// hits on its own construct skipped - whether anyone looks through it or not. The order is the hand-held's
-        /// (industrial: spot, area; hostile: engage, escort; tag; recall), except escorting the player (no shooter). CLEAR
-        /// forgets the tags counted on its designator LCDs (ClearTagsFor), no camera needed.
-        /// Taken by this orchestrator when it runs its network, else by the nearest one of the player's covering the camera.
+        /// Server: a "Designator:" action of a target designator block, pressed by a player with terminal access: its camera
+        /// (mechanically connected to it, working, friendly) points the order - the camera's forward, CAMERA_RANGE, hits on
+        /// its own construct skipped - whether anyone looks through it or not. The order is the hand-held's (industrial: spot,
+        /// area; hostile: engage, escort; tag; recall), except that ESCORT with no hit (or one next to the camera) escorts the
+        /// designator's own construct. CLEAR forgets the tags counted on its LCDs (ClearTagsFor), no camera needed.
+        /// Orders travel the network to the running orchestrator (TargetDesignatorBlock.SendOrder).
         /// </summary>
         public static void CameraReceived(DesignatorCameraPacket p, ulong steamId)
         {
             long identity = MyAPIGateway.Players.TryGetIdentityId(steamId);
             IMyEntity e;
-            var tb = MyAPIGateway.Entities.TryGetEntityById(p.OrchestratorId, out e) ? e as IMyTerminalBlock : null;
-            var orchBlock = tb != null && tb.GameLogic != null ? tb.GameLogic.GetAs<OrchestratorBlock>() : null;
-            if (orchBlock == null || identity == 0 || !tb.HasPlayerAccess(identity))
+            var tb = MyAPIGateway.Entities.TryGetEntityById(p.DesignatorId, out e) ? e as IMyTerminalBlock : null;
+            var designator = tb != null && tb.GameLogic != null ? tb.GameLogic.GetAs<Designator.TargetDesignatorBlock>() : null;
+            if (designator == null || identity == 0 || !tb.HasPlayerAccess(identity))
             {
-                if (Log.DebugEnabled) Log.Debug("Pointer: [server] camera order {0} from {1}: refused (no orchestrator / no access)", p.Order, steamId);
+                if (Log.DebugEnabled) Log.Debug("Pointer: [server] camera order {0} from {1}: refused (no target designator / no access)", p.Order, steamId);
                 Feedback(identity, DesignatorSignal.Error);
                 return;
             }
             if (p.Order == DesignatorOrder.Clear)   // no camera needed
             {
                 int n = ClearTagsFor(((IMyCubeBlock)tb).OwnerId);
-                orchBlock.ReportDesignator(Loc.F(StrTagsCleared, n));
+                designator.AddLog(Loc.F(MyStrings.Common_TagsClearedDrones, n));
                 Feedback(identity, DesignatorSignal.Recall);
                 return;
             }
             string why;
-            var cam = orchBlock.DesignatorCamera(out why);
+            var cam = designator.DesignatorCamera(out why);
             if (cam == null)
             {
-                if (Log.DebugEnabled) Log.Debug("Pointer: [server] camera order {0} at orchestrator {1}: {2}", p.Order, p.OrchestratorId, why);
-                orchBlock.ReportDesignator(why);
+                if (Log.DebugEnabled) Log.Debug("Pointer: [server] camera order {0} at designator {1}: {2}", p.Order, p.DesignatorId, why);
+                designator.ReportDesignator(why);
                 Feedback(identity, DesignatorSignal.Error);
                 return;
             }
@@ -900,9 +923,8 @@ namespace Automata.Pointer
                 case DesignatorOrder.Escort: packet.Mode = PointerMode.Blue; packet.Kind = PointerKind.Combat; break;
                 default:                     packet.Mode = PointerMode.Green; packet.Kind = PointerKind.Industry; break;
             }
-            if (Log.DebugEnabled) Log.Debug("Pointer: [server] player {0}: camera '{1}' of orchestrator {2}: {3} ({4} {5}): {6}", identity, cam.CustomName, p.OrchestratorId, p.Order, packet.Kind, packet.Mode, packet.Hit ? string.Format("hit {0} at {1:F0} m ({2}), entity {3}", hitPos, Vector3D.Distance(from, hitPos), how, packet.HitEntityId) : "no hit within " + CAMERA_RANGE + " m");
-            var orch = orchBlock.IsRunning ? orchBlock : CoveringOrchestrator(from, identity);
-            Order(packet, identity, from, null, orch);
+            if (Log.DebugEnabled) Log.Debug("Pointer: [server] player {0}: camera '{1}' of designator {2}: {3} ({4} {5}): {6}", identity, cam.CustomName, p.DesignatorId, p.Order, packet.Kind, packet.Mode, packet.Hit ? string.Format("hit {0} at {1:F0} m ({2}), entity {3}", hitPos, Vector3D.Distance(from, hitPos), how, packet.HitEntityId) : "no hit within " + CAMERA_RANGE + " m");
+            Order(packet, identity, from, null, new OrderSink { Designator = designator, Self = designator.RootGrid() });
         }
 
         // Tag from a camera: the hostile memory for a combat drone, else the industrial one (TagTarget decides the rest)
@@ -976,12 +998,24 @@ namespace Automata.Pointer
         //    friendly grid that was hit (escorting the base they are on escorts them), else the player's character.
         //  - Tagged combat drones (this mode): one job per drone, each only for its drone; none tagged: one job, any combat
         //    drone (each further pull sends one more, as before).
-        private static bool CombatOrder(ScoutPointerPacket p, long identity, double dist, OrchestratorBlock orch, IMyCharacter shooter, List<long> tagged)
+        private static bool CombatOrder(ScoutPointerPacket p, long identity, double dist, OrderSink sink, IMyCharacter shooter, List<long> tagged)
         {
             int n = Math.Max(1, tagged.Count);
             IMyEntity e;
             var target = MyAPIGateway.Entities.TryGetEntityById(p.HitEntityId, out e) ? e : null;
-            if (p.Mode == PointerMode.Blue && dist <= SELF_ESCORT_RADIUS && shooter != null && !(target is IMyCharacter))
+            if (p.Mode == PointerMode.Blue && sink.IsCamera && sink.Self != null && (!p.Hit || dist <= SELF_ESCORT_RADIUS) && !(target is IMyCharacter))
+            {
+                // A camera: no hit, or one right next to it, escorts the designator's own construct - a mobile one
+                if (sink.Self.IsStatic || !IsFriendlyGrid(sink.Self, identity))
+                {
+                    if (Log.DebugEnabled) Log.Debug("Pointer: [server] player {0}: self escort refused: '{1}' is {2}", identity, sink.Self.DisplayName, sink.Self.IsStatic ? "static" : "not yours");
+                    Feedback(identity, DesignatorSignal.Error);
+                    return false;
+                }
+                target = sink.Self;
+                if (Log.DebugEnabled) Log.Debug("Pointer: [server] player {0}: escort request on the designator's own construct '{1}'", identity, sink.Self.DisplayName);
+            }
+            else if (p.Mode == PointerMode.Blue && dist <= SELF_ESCORT_RADIUS && shooter != null && !(target is IMyCharacter))
             {
                 var standing = target as IMyCubeGrid;
                 bool mobileBase = standing != null && !standing.IsStatic && IsFriendlyGrid(standing, identity);
@@ -997,8 +1031,8 @@ namespace Automata.Pointer
                 Vector3D spot = p.HitPosition.ToVector3D();
                 uint pointOrder = 0;
                 for (int i = 0; i < n; i++)
-                    orch.SubmitPlayerJob(Orchestrator.JobType.DesignatorEngage, new List<Orchestrator.Task> { Orchestrator.Task.Engage(0, spot) }, spot,
-                                         Loc.T(StrEngageAtAPoint), identity, p.Kind, Loc.T(StrADesignatedPoint), ref pointOrder, i < tagged.Count ? tagged[i] : 0);
+                    sink.Submit(Orchestrator.JobType.DesignatorEngage, new List<Orchestrator.Task> { Orchestrator.Task.Engage(0, spot) }, spot,
+                                         Loc.T(MyStrings.Common_EngageAtAPoint), identity, p.Kind, Loc.T(MyStrings.Common_ADesignatedPoint), ref pointOrder, i < tagged.Count ? tagged[i] : 0);
                 return true;
             }
             long owner = 0;
@@ -1019,14 +1053,14 @@ namespace Automata.Pointer
                 // The drone is dispatched where the designator hit (its GPS in the drone's broadcast); it tracks the entity
                 Vector3D hit = p.HitPosition.ToVector3D();
                 for (int i = 0; i < n; i++)
-                    orch.SubmitPlayerJob(Orchestrator.JobType.DesignatorEngage, new List<Orchestrator.Task> { Orchestrator.Task.Engage(target.EntityId, hit) },
-                                         hit, Loc.F(StrEngageTarget, name), identity, p.Kind, name, ref order, i < tagged.Count ? tagged[i] : 0);
+                    sink.Submit(Orchestrator.JobType.DesignatorEngage, new List<Orchestrator.Task> { Orchestrator.Task.Engage(target.EntityId, hit) },
+                                         hit, Loc.F(MyStrings.Common_EngageArg0, name), identity, p.Kind, name, ref order, i < tagged.Count ? tagged[i] : 0);
                 return true;
             }
             if (!friendly || npc || (grid != null && grid.IsStatic)) { Feedback(identity, DesignatorSignal.Error); return false; }
             for (int i = 0; i < n; i++)
-                orch.SubmitPlayerJob(Orchestrator.JobType.DesignatorEscort, new List<Orchestrator.Task> { Orchestrator.Task.Escort(target.EntityId, at) },
-                                     at, Loc.F(StrEscortTarget, name), identity, p.Kind, name, ref order, i < tagged.Count ? tagged[i] : 0);
+                sink.Submit(Orchestrator.JobType.DesignatorEscort, new List<Orchestrator.Task> { Orchestrator.Task.Escort(target.EntityId, at) },
+                                     at, Loc.F(MyStrings.Common_EscortArg0, name), identity, p.Kind, name, ref order, i < tagged.Count ? tagged[i] : 0);
             return true;
         }
 
@@ -1071,7 +1105,7 @@ namespace Automata.Pointer
             {
                 DronesOn(grid);
                 for (int i = 0; i < groupDrones.Count; i++)
-                    if (Drone.AnchorDirectory.IsAllowed(((IMyCubeBlock)groupDrones[i].Entity).OwnerId, identity) && groupDrones[i].Recall(Loc.T(StrScoutLaser))) n++;
+                    if (Drone.AnchorDirectory.IsAllowed(((IMyCubeBlock)groupDrones[i].Entity).OwnerId, identity) && groupDrones[i].Recall(Loc.T(MyStrings.Common_ScoutLaser))) n++;
                 groupDrones.Clear();
             }
             if (n == 0)
@@ -1081,7 +1115,7 @@ namespace Automata.Pointer
                     var o = OrchestratorBlock.All[i];
                     int drones, cancelled;
                     if (!o.IsRunning || !Drone.AnchorDirectory.IsAllowed(o.OwnerId, identity)) continue;
-                    if (o.RecallOrderAt(hit, RECALL_MARKER_RADIUS, Loc.T(StrScoutLaser), out drones, out cancelled)) n = drones + cancelled;
+                    if (o.RecallOrderAt(hit, RECALL_MARKER_RADIUS, Loc.T(MyStrings.Common_ScoutLaser), out drones, out cancelled)) n = drones + cancelled;
                 }
             }
             Feedback(identity, n > 0 ? DesignatorSignal.Recall : DesignatorSignal.Error);
@@ -1138,7 +1172,7 @@ namespace Automata.Pointer
     {
         public DesignatorCameraPacket() { }
 
-        [ProtoMember(1)] public long OrchestratorId;
+        [ProtoMember(1)] public long DesignatorId;
         [ProtoMember(2)] public DesignatorOrder Order;
 
         public override void Received(ref PacketInfo packetInfo, ulong senderSteamId)

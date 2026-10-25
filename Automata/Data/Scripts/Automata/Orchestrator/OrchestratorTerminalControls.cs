@@ -18,30 +18,6 @@ namespace Automata.Orchestrator
     /// </summary>
     public static class OrchestratorTerminalControls
     {
-        #region UI strings
-        private static readonly MyStringId StrBlocksMetres = MyStringId.GetOrCompute("{0} blocks ({1} m)");
-        private static readonly MyStringId StrDroneStagingArea = MyStringId.GetOrCompute("Use parking protocol");
-        private static readonly MyStringId StrDroneStagingAreaTip = MyStringId.GetOrCompute("Drones with landing gears park on grids instead of connector.");
-        private static readonly MyStringId StrStagingDraw = MyStringId.GetOrCompute("Show parking area");
-        private static readonly MyStringId StrStagingDrawTip = MyStringId.GetOrCompute("Draws the area for you. Switches off after a short time.");
-        private static readonly MyStringId StrParking = MyStringId.GetOrCompute("Parking");
-        private static readonly MyStringId StrParkingTip = MyStringId.GetOrCompute("Park on grid: anywhere this orchestrator's grid.\nParking area: in the area set below.\nVoxel: on rock near this orchestrator.");
-        private static readonly MyStringId StrParkOnGrid = MyStringId.GetOrCompute("Park on grid");
-        private static readonly MyStringId StrParkingArea = MyStringId.GetOrCompute("Parking area");
-        private static readonly MyStringId StrVoxel = MyStringId.GetOrCompute("Voxel");
-        private static readonly MyStringId StrLanes = MyStringId.GetOrCompute("Active lanes");
-        private static readonly MyStringId StrLanesTip = MyStringId.GetOrCompute("Flight lanes of this network's drones.");
-        private static readonly MyStringId StrLaneDelete = MyStringId.GetOrCompute("Delete lane");
-        private static readonly MyStringId StrLaneResume = MyStringId.GetOrCompute("Resume lane");
-        private static readonly MyStringId StrLaneVisualize = MyStringId.GetOrCompute("Show lane");
-        private static readonly MyStringId StrLaneVisualizeTip = MyStringId.GetOrCompute("Draws selected lane pair.");
-        private static readonly MyStringId StrLanesClear = MyStringId.GetOrCompute("Clear all lanes");
-        private static readonly MyStringId StrLanesClearArmed = MyStringId.GetOrCompute("Press again to clear all");
-        private static readonly MyStringId StrDesignatorCamera = MyStringId.GetOrCompute("Designator camera");
-        private static readonly MyStringId StrDesignatorLcdTag = MyStringId.GetOrCompute("Designator LCD tag");
-        private static readonly MyStringId StrDesignatorLcdTagTip = MyStringId.GetOrCompute("Place this tag on an LCD, select the AutomataLog app to see designator output.");
-        private static readonly MyStringId StrDesignatorCameraTip = MyStringId.GetOrCompute("Camera the \"Designator:\" toolbar actions aim with (15 km). On this grid, or via rotor / hinge / piston.");
-        #endregion
 
         public static ServerConfig.OrchestratorBlockConfig BlockConfig = ServerConfig.Instance.OrchestratorServerSettings;
         static bool Done = false;
@@ -59,48 +35,6 @@ namespace Automata.Orchestrator
                                            l => l.Terminal_UseBroadcastController, (l, v) => l.Terminal_UseBroadcastController = v);
             CreateStagingControls();
             CreateLaneControls();
-            CreateDesignatorControls();
-        }
-
-        static void CreateDesignatorControls()
-        {
-            var sep = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSeparator, IMyProgrammableBlock>("");
-            sep.Visible = Visible;
-            Add(sep);
-            {
-                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlListbox, IMyProgrammableBlock>(IdPrefix + "DesignatorCamera");
-                c.Title = StrDesignatorCamera;
-                c.Tooltip = StrDesignatorCameraTip;
-                c.Visible = Visible;
-                c.SupportsMultipleBlocks = false;
-                c.Multiselect = false;
-                c.VisibleRowsCount = 4;
-                c.ListContent = (b, items, selected) => { var l = GetBlock(b); if (l != null) l.Terminal_CameraList(items, selected); };
-                c.ItemSelected = (b, selected) => { var l = GetBlock(b); if (l != null) l.Terminal_SelectCamera(selected); };
-                Add(c);
-            }
-            LcdTagControl.Add(IdPrefix + "DesignatorLcdTag", GetBlock, l => l.Terminal_DesignatorLcdTag, (l, v) => l.Terminal_DesignatorLcdTag = v,
-                              "[Designator]", StrDesignatorLcdTag, StrDesignatorLcdTagTip);
-            DesignatorAction("Tag", "TAG", Pointer.DesignatorOrder.Tag, "Textures\\GUI\\Icons\\Actions\\Start.dds");
-            DesignatorAction("Spot", "SPOT", Pointer.DesignatorOrder.Spot, "Textures\\GUI\\Icons\\Actions\\Start.dds");
-            DesignatorAction("Area", "AREA", Pointer.DesignatorOrder.Area, "Textures\\GUI\\Icons\\Actions\\Start.dds");
-            DesignatorAction("Engage", "ENGAGE", Pointer.DesignatorOrder.Engage, "Textures\\GUI\\Icons\\Actions\\Start.dds");
-            DesignatorAction("Escort", "ESCORT", Pointer.DesignatorOrder.Escort, "Textures\\GUI\\Icons\\Actions\\Start.dds");
-            DesignatorAction("Recall", "RECALL", Pointer.DesignatorOrder.Recall, "Textures\\GUI\\Icons\\Actions\\Reverse.dds");
-            DesignatorAction("Clear", "CLEAR", Pointer.DesignatorOrder.Clear, "Textures\\GUI\\Icons\\Actions\\Decrease.dds");
-        }
-
-        // Toolbar only ("Designator: TAG" ...): pressed by a player, done by the server with the designator camera
-        static void DesignatorAction(string id, string name, Pointer.DesignatorOrder order, string icon)
-        {
-            var a = MyAPIGateway.TerminalControls.CreateAction<IMyProgrammableBlock>(IdPrefix + "Designator" + id);
-            a.Name = new System.Text.StringBuilder("Designator: " + name);
-            a.Icon = icon;
-            a.ValidForGroups = false;
-            a.Enabled = Visible;   // orchestrators only
-            a.Action = b => { var l = GetBlock(b); if (l != null) l.Terminal_Designate(order); };
-            a.Writer = (b, sb) => sb.Append(name);
-            MyAPIGateway.TerminalControls.AddAction<IMyProgrammableBlock>(a);
         }
 
         static IMyTerminalControlButton laneClearButton;
@@ -112,8 +46,8 @@ namespace Automata.Orchestrator
             Add(sep);
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlListbox, IMyProgrammableBlock>(IdPrefix + "LaneList");
-                c.Title = StrLanes;
-                c.Tooltip = StrLanesTip;
+                c.Title = MyStrings.Orchestrator_ActiveLanes;
+                c.Tooltip = MyStrings.Orchestrator_ActiveLanesTooltip;
                 c.SupportsMultipleBlocks = false;
                 c.Visible = Visible;
                 c.Multiselect = false;
@@ -142,12 +76,12 @@ namespace Automata.Orchestrator
                 };
                 Add(c);
             }
-            LaneButton("LaneVisualize", StrLaneVisualize, StrLaneVisualizeTip, l => l.Terminal_VisualizeLane());
-            LaneButton("LaneDelete", StrLaneDelete, MyStrings.BLANK, l => l.Terminal_DeleteLane());
-            LaneButton("LaneResume", StrLaneResume, MyStrings.BLANK, l => l.Terminal_ResumeLane());
+            LaneButton("LaneVisualize", MyStrings.Orchestrator_ShowLane, MyStrings.Orchestrator_ShowLaneTooltip, l => l.Terminal_VisualizeLane());
+            LaneButton("LaneDelete", MyStrings.Orchestrator_DeleteLane, MyStrings.BLANK, l => l.Terminal_DeleteLane());
+            LaneButton("LaneResume", MyStrings.Orchestrator_ResumeLane, MyStrings.BLANK, l => l.Terminal_ResumeLane());
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlButton, IMyProgrammableBlock>(IdPrefix + "LanesClear");
-                c.Title = StrLanesClear;
+                c.Title = MyStrings.Orchestrator_ClearAllLanes;
                 c.Tooltip = MyStrings.BLANK;
                 c.SupportsMultipleBlocks = false;
                 c.Visible = Visible;
@@ -157,7 +91,7 @@ namespace Automata.Orchestrator
                     if (l == null) return;
                     bool armed;
                     l.Terminal_ClearLanes(out armed);
-                    if (laneClearButton != null) laneClearButton.Title = armed ? StrLanesClearArmed : StrLanesClear;
+                    if (laneClearButton != null) laneClearButton.Title = armed ? MyStrings.Orchestrator_PressAgainToClearAll : MyStrings.Orchestrator_ClearAllLanes;
                     RefreshTerminal(b);
                 };
                 laneClearButton = c;
@@ -221,7 +155,7 @@ namespace Automata.Orchestrator
 
         static void Slider(string id, MyStringId title, MyStringId tooltip, float min, float max, Func<OrchestratorBlock, float> get, Action<OrchestratorBlock, float> set)
         {
-            BlockSlider(id, title, tooltip, min, max, get, set, (l, sb) => sb.AppendLoc(MyStrings.Metres, get(l).ToString("0")));
+            BlockSlider(id, title, tooltip, min, max, get, set, (l, sb) => sb.AppendLoc(MyStrings.Orchestrator_Metres, get(l).ToString("0")));
         }
 
         // Blocks of the orchestrator's grid, with the metres
@@ -230,7 +164,7 @@ namespace Automata.Orchestrator
             BlockSlider(id, title, tooltip, min, max, get, set, (l, sb) =>
             {
                 float v = get(l);
-                sb.AppendLoc(Math.Abs(v) == 1 ? MyStrings.BlockMetres : StrBlocksMetres, v.ToString("0"), (v * l.Terminal_GridSize).ToString("0.#"));
+                sb.AppendLoc(Math.Abs(v) == 1 ? MyStrings.Orchestrator_BlockMetres : MyStrings.Orchestrator_BlocksMetres, v.ToString("0"), (v * l.Terminal_GridSize).ToString("0.#"));
             });
         }
 
@@ -254,27 +188,27 @@ namespace Automata.Orchestrator
             var sep = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSeparator, IMyProgrammableBlock>("");
             sep.Visible = Visible;
             Add(sep);
-            Checkbox("DroneStagingArea", StrDroneStagingArea,
-                     StrDroneStagingAreaTip,
+            Checkbox("DroneStagingArea", MyStrings.Orchestrator_UseParkingProtocol,
+                     MyStrings.Orchestrator_UseParkingProtocolTooltip,
                      l => l.Terminal_StagingArea, (l, v) => l.Terminal_StagingArea = v, false);
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlCombobox, IMyProgrammableBlock>(IdPrefix + "ParkingMode");
-                c.Title = StrParking;
-                c.Tooltip = StrParkingTip;
+                c.Title = MyStrings.Orchestrator_Parking;
+                c.Tooltip = MyStrings.Orchestrator_ParkingTooltip;
                 c.Visible = ProtocolShown;
                 c.SupportsMultipleBlocks = true;
                 c.ComboBoxContent = list =>
                 {
-                    list.Add(new MyTerminalControlComboBoxItem { Key = (long)ParkingProtocolMode.ParkOnGrid, Value = StrParkOnGrid });
-                    list.Add(new MyTerminalControlComboBoxItem { Key = (long)ParkingProtocolMode.ParkingArea, Value = StrParkingArea });
-                    list.Add(new MyTerminalControlComboBoxItem { Key = (long)ParkingProtocolMode.Voxel, Value = StrVoxel });
+                    list.Add(new MyTerminalControlComboBoxItem { Key = (long)ParkingProtocolMode.ParkOnGrid, Value = MyStrings.Orchestrator_ParkOnGrid });
+                    list.Add(new MyTerminalControlComboBoxItem { Key = (long)ParkingProtocolMode.ParkingArea, Value = MyStrings.Orchestrator_ParkingArea });
+                    list.Add(new MyTerminalControlComboBoxItem { Key = (long)ParkingProtocolMode.Voxel, Value = MyStrings.Orchestrator_Voxel2 });
                 };
                 c.Getter = b => { var l = GetBlock(b); return l != null ? l.Terminal_ParkingMode : 0; };
                 c.Setter = (b, v) => { var l = GetBlock(b); if (l == null) return; l.Terminal_ParkingMode = v; RefreshTerminal(b); };
                 Add(c);
             }
-            MyStringId[] sizeTitles = { MyStrings.AreaWidth, MyStrings.AreaHeight, MyStrings.AreaDepth };
-            MyStringId[] offsetTitles = { MyStrings.OffsetRight, MyStrings.OffsetUp, MyStrings.OffsetForward };
+            MyStringId[] sizeTitles = { MyStrings.Orchestrator_AreaWidth, MyStrings.Orchestrator_AreaHeight, MyStrings.Orchestrator_AreaDepth };
+            MyStringId[] offsetTitles = { MyStrings.Orchestrator_AreaOffsetRight, MyStrings.Orchestrator_AreaOffsetUp, MyStrings.Orchestrator_AreaOffsetForward };
             for (int a = 0; a < 3; a++)
             {
                 int axis = a;
@@ -289,7 +223,7 @@ namespace Automata.Orchestrator
                             -OrchestratorBlock.STAGING_OFFSET_SLIDER_MAX, OrchestratorBlock.STAGING_OFFSET_SLIDER_MAX,
                             l => l.Terminal_GetStagingOffset(axis), (l, v) => l.Terminal_SetStagingOffset(axis, v));
             }
-            Checkbox("StagingDraw", StrStagingDraw, StrStagingDrawTip,
+            Checkbox("StagingDraw", MyStrings.Orchestrator_ShowParkingArea, MyStrings.Orchestrator_ShowParkingAreaTooltip,
                      l => l.Terminal_StagingDraw, (l, v) => l.Terminal_StagingDraw = v, true);
         }
     }

@@ -12,6 +12,7 @@ using Automata.Pathfinding;
 using Automata.Util;
 using Automata.Util.Logging;
 using Automata.VirtualNetwork;
+using Automata.Util.Strings;
 
 namespace Automata.Drone
 {
@@ -36,29 +37,6 @@ namespace Automata.Drone
     /// </summary>
     public partial class DroneControllerBlock
     {
-        #region UI strings
-        private static readonly MyStringId StrMineNoMoreOre = MyStringId.GetOrCompute("Mine: no more ore coming in");
-        private static readonly MyStringId StrMineNoOreFor = MyStringId.GetOrCompute("Mine: no {0} for {1} s");
-        private static readonly MyStringId StrMineStuckBackingUp = MyStringId.GetOrCompute("Mine: stuck {0:F0} m from the bore's end, backing up and trying again ({1}/{2})");
-        private static readonly MyStringId StrMineCantBackUp = MyStringId.GetOrCompute("Mine: can't back up either, taking what it has");
-        private static readonly MyStringId StrMineOnlyStone = MyStringId.GetOrCompute("Mine: no {0}, only stone / other ore");
-        private static readonly MyStringId StrMineNothingCollected = MyStringId.GetOrCompute("Mine: nothing collected");
-        private static readonly MyStringId StrMineNeedsAnOreDetector = MyStringId.GetOrCompute("Mine: needs an ore detector");
-        private static readonly MyStringId StrMineNoLeftAtThe = MyStringId.GetOrCompute("Mine: no {0} left at the site");
-        private static readonly MyStringId StrMineMaxLoadReached = MyStringId.GetOrCompute("Mine: max load reached");
-        private static readonly MyStringId StrMineAmountReached = MyStringId.GetOrCompute("Mine: ordered amount reached ({0:F0} kg of {1})");
-        private static readonly MyStringId StrMineCargoFull = MyStringId.GetOrCompute("Mine: cargo full");
-        private static readonly MyStringId StrMineBoreStuckMFrom = MyStringId.GetOrCompute("Mine: bore stuck {0:F0} m from its end{1}");
-        private static readonly MyStringId StrTakingWhatItHas = MyStringId.GetOrCompute(", taking what it has");
-        private static readonly MyStringId StrSurveyNeedsAWorkingOre = MyStringId.GetOrCompute("Survey: needs a working ore detector ({0})");
-        private static readonly MyStringId StrNone = MyStringId.GetOrCompute("none");
-        private static readonly MyStringId StrSwitchedOff = MyStringId.GetOrCompute("switched off");
-        private static readonly MyStringId StrNotWorking = MyStringId.GetOrCompute("not working");
-        private static readonly MyStringId StrSurveyOreHitSM = MyStringId.GetOrCompute("Survey: {0} ore hit(s) ({1:F0} m)");
-        private static readonly MyStringId StrRecalled = MyStringId.GetOrCompute("Recalled ({0})");
-        private static readonly MyStringId StrRecalledReason = MyStringId.GetOrCompute("recalled");
-        private static readonly MyStringId StrSurveyForOresNeedsA = MyStringId.GetOrCompute("Survey for ores: needs a working ore detector");
-        #endregion
 
         private const double MINE_SITE_RADIUS = 40;
         private const int MINE_SITE_MAX_CELLS = 64;
@@ -148,7 +126,7 @@ namespace Automata.Drone
                 if (!HasTool(Orchestrator.TaskType.Mine)) return Fail(Orchestrator.TaskFailure.MissingEquipment, TaskStatus.ToReturnHome);
                 if (oreDetector == null || oreDetector.Closed || !oreDetector.IsFunctional)
                 {
-                    Report(StrMineNeedsAnOreDetector);
+                    Report(MyStrings.Drone_MineNeedsAnOreDetector);
                     return Fail(Orchestrator.TaskFailure.MissingEquipment, TaskStatus.ToReturnHome);
                 }
                 boreDeposit = task.Position.ToVector3D();
@@ -168,7 +146,7 @@ namespace Automata.Drone
                 mineSiteFixed = false;
                 if (!LiveDeposit(siteHits, boreDeposit, boreOre, out live) && !(fixedSite && OreWithin(boreDeposit, MINE_NEAR_RADIUS)))
                 {
-                    Report(StrMineNoLeftAtThe, boreOre.String);
+                    Report(MyStrings.Drone_MineNoLeft, boreOre.String);
                     return Fail(Orchestrator.TaskFailure.NoOre, TaskStatus.ToReturnHome);
                 }
                 if (!fixedSite) boreDeposit = live;
@@ -260,20 +238,20 @@ namespace Automata.Drone
             // The ordered amount is in: enough, whatever room is left
             if (boreTargetKg > 0 && ore >= boreTargetKg)
             {
-                Report(StrMineAmountReached, ore, boreOre.String);
+                Report(MyStrings.Drone_MineOrderedAmountReachedKg, ore, boreOre.String);
                 return EndBore(true);
             }
             // Ore is heavy: in gravity the load limit usually comes long before full containers
             if (CargoFillRatio() >= 0.95 || IsLoadLimitReached)
             {
-                Report(IsLoadLimitReached ? StrMineMaxLoadReached : StrMineCargoFull);
+                Report(IsLoadLimitReached ? MyStrings.Drone_MineMaxLoadReached : MyStrings.Drone_MineCargoFull);
                 return EndBore(true);
             }
             // None of the job's ore for a while (only stone / other ores, or nothing: crushers, stone collection off):
             // this spot is done
             if (boreCollecting && now - oreGainFrame >= NO_ORE_TICKS)
             {
-                Report(StrMineNoOreFor, boreOre.String, NO_ORE_TICKS / 60);
+                Report(MyStrings.Drone_MineNoForS, boreOre.String, NO_ORE_TICKS / 60);
                 return EndBore(false);
             }
             // Backing up after getting stuck: once back, on along the bore again (drill on all the while)
@@ -285,7 +263,7 @@ namespace Automata.Drone
                     if (DispatchBore()) { boreGainFrame = now; return TaskStatus.Running; }
                     return EndBore(true);
                 }
-                if (now - boreBackUpFrame > BORE_STALL_TICKS) { Report(StrMineCantBackUp); return EndBore(true); }
+                if (now - boreBackUpFrame > BORE_STALL_TICKS) { Report(MyStrings.Drone_MineCantBackUpEither); return EndBore(true); }
                 return TaskStatus.Running;
             }
             // Stuck: pressing on rock it doesn't cut (hull wider than the bore, drill off / damaged) and nothing coming in:
@@ -297,10 +275,10 @@ namespace Automata.Drone
                 if (boreRetries < BORE_RETRIES_MAX && DispatchBackUp())
                 {
                     boreRetries++;
-                    Report(StrMineStuckBackingUp, toEnd, boreRetries, BORE_RETRIES_MAX);
+                    Report(MyStrings.Drone_MineStuckM, toEnd, boreRetries, BORE_RETRIES_MAX);
                     return TaskStatus.Running;
                 }
-                Report(StrMineBoreStuckMFrom, toEnd, MinedOre() > 0 ? Loc.T(StrTakingWhatItHas) : "");
+                Report(MyStrings.Drone_MineBoreStuckM, toEnd, MinedOre() > 0 ? Loc.T(MyStrings.Drone_TakingWhatItHas) : "");
                 return EndBore(true);
             }
             if (constructionOrder.Arrived)
@@ -312,7 +290,7 @@ namespace Automata.Drone
                     boreEnd += boreDir * MINE_BORE_EXTEND;
                     if (DispatchBore()) return TaskStatus.Running;
                 }
-                Report(StrMineNoMoreOre);
+                Report(MyStrings.Drone_MineNoMoreOreComing);
                 return EndBore(false);
             }
             if (elapsed > MINE_MAX_TICKS) return EndBore(true);
@@ -334,7 +312,7 @@ namespace Automata.Drone
             bool got = MinedOre() > 0;
             if (got) { jobBlocksDone++; return TaskStatus.Done; }
             if (CargoUsedVolume() > 0.01) return TaskStatus.Done;   // stone / other ores: delivered all the same (no claim about the deposit)
-            Report(StrMineNothingCollected);
+            Report(MyStrings.Drone_MineNothingCollected);
             return Fail(Orchestrator.TaskFailure.NoOre, TaskStatus.ToReturnHome);
         }
 
@@ -706,7 +684,7 @@ namespace Automata.Drone
             }
             if (!OreDetectorWorking)
             {
-                Report(StrSurveyNeedsAWorkingOre, oreDetector == null ? Loc.T(StrNone) : !oreDetector.Enabled ? Loc.T(StrSwitchedOff) : Loc.T(StrNotWorking));
+                Report(MyStrings.Drone_SurveyNeedsAWorkingOre, oreDetector == null ? Loc.T(MyStrings.Keen_None) : !oreDetector.Enabled ? Loc.T(MyStrings.Drone_SwitchedOff) : Loc.T(MyStrings.Drone_NotWorking));
                 return Fail(Orchestrator.TaskFailure.MissingEquipment, TaskStatus.ToReturnHome);
             }
             CaptureFlightState();
@@ -722,7 +700,7 @@ namespace Automata.Drone
             if (!taskScanner.Step(MiningConfig.ScanCellsPerUpdate, taskHits)) return;
             RecordSweep(taskScanner.Center, taskScanner.Radius, taskHits);
             surveysDone++;
-            Report(StrSurveyOreHitSM, taskHits.Count, taskScanner.Radius);
+            Report(MyStrings.Drone_SurveyOreHitM, taskHits.Count, taskScanner.Radius);
             taskHits.Clear();
         }
 
@@ -737,12 +715,14 @@ namespace Automata.Drone
         {
             if (!IsServer || !initialized || settings == null) return false;
             ClearRouteError();
-            Report(StrRecalled, by);
-            EndCombat(Loc.T(StrRecalledReason));
-            StopJob(Loc.T(StrRecalledReason));
+            Report(MyStrings.Drone_Recalled, by);
+            EndCombat(Loc.T(MyStrings.Drone_RecalledLower));
+            StopJob(Loc.T(MyStrings.Drone_RecalledLower));
             taskScanner.Cancel();
             ClearFlightOrder();
             if (!IsAtRest()) GoRest();
+            owesReturn = !IsAtRest() || departureFallback;   // no way back now: ReturnWhenIdle tries again
+            lastReturnTryFrame = MyAPIGateway.Session.GameplayFrameCounter;
             return true;
         }
         #endregion
@@ -756,7 +736,7 @@ namespace Automata.Drone
             if (taskScanner.Running) return;               // a scout job's scan is under way
             if (!OreDetectorWorking)
             {
-                if (!surveyWarned) { surveyWarned = true; Report(StrSurveyForOresNeedsA); }
+                if (!surveyWarned) { surveyWarned = true; Report(MyStrings.Drone_SurveyForOresNeeds); }
                 surveyScanner.Cancel();
                 return;
             }

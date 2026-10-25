@@ -101,27 +101,27 @@ namespace Automata.Construction
 
         static void CreateActions()
         {
-            AddAction(IdPrefix + "_X_Offset_Increase", Loc.Compose(MyStrings.ToolbarActionIncrease, MyStrings.ConstructionField, MyStrings.HorizontalOffset), ICON_PLUS, b => { b.Terminal_SetFieldOffset(0, b.Terminal_GetFieldOffset(0) + 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldOffset(0)); });
-            AddAction(IdPrefix + "_X_Offset_Decrease", Loc.Compose(MyStrings.ToolbarActionDecrease, MyStrings.ConstructionField, MyStrings.HorizontalOffset), ICON_DASH, b => { b.Terminal_SetFieldOffset(0, b.Terminal_GetFieldOffset(0) - 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldOffset(0)); });
-            AddAction(IdPrefix + "_Y_Offset_Increase", Loc.Compose(MyStrings.ToolbarActionIncrease, MyStrings.ConstructionField, MyStrings.VerticalOffset), ICON_PLUS, b => { b.Terminal_SetFieldOffset(1, b.Terminal_GetFieldOffset(1) + 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldOffset(1)); });
-            AddAction(IdPrefix + "_Y_Offset_Decrease", Loc.Compose(MyStrings.ToolbarActionDecrease, MyStrings.ConstructionField, MyStrings.VerticalOffset), ICON_DASH, b => { b.Terminal_SetFieldOffset(1, b.Terminal_GetFieldOffset(1) - 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldOffset(1)); });
-            AddAction(IdPrefix + "_Z_Offset_Increase", Loc.Compose(MyStrings.ToolbarActionIncrease, MyStrings.ConstructionField, MyStrings.ForwardOffset), ICON_PLUS, b => { b.Terminal_SetFieldOffset(2, b.Terminal_GetFieldOffset(2) + 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldOffset(2)); });
-            AddAction(IdPrefix + "_Z_Offset_Decrease", Loc.Compose(MyStrings.ToolbarActionDecrease, MyStrings.ConstructionField, MyStrings.ForwardOffset), ICON_DASH, b => { b.Terminal_SetFieldOffset(2, b.Terminal_GetFieldOffset(2) - 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldOffset(2)); });
+            AddAction(IdPrefix + "_X_Offset_Increase", Loc.T(MyStrings.Construction_IncreaseConstructionFieldHorizontalOffset), ICON_PLUS, b => { b.Terminal_SetFieldOffset(0, b.Terminal_GetFieldOffset(0) + 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldOffset(0)); });
+            AddAction(IdPrefix + "_X_Offset_Decrease", Loc.T(MyStrings.Construction_DecreaseConstructionFieldHorizontalOffset), ICON_DASH, b => { b.Terminal_SetFieldOffset(0, b.Terminal_GetFieldOffset(0) - 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldOffset(0)); });
+            AddAction(IdPrefix + "_Y_Offset_Increase", Loc.T(MyStrings.Construction_IncreaseConstructionFieldVerticalOffset), ICON_PLUS, b => { b.Terminal_SetFieldOffset(1, b.Terminal_GetFieldOffset(1) + 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldOffset(1)); });
+            AddAction(IdPrefix + "_Y_Offset_Decrease", Loc.T(MyStrings.Construction_DecreaseConstructionFieldVerticalOffset), ICON_DASH, b => { b.Terminal_SetFieldOffset(1, b.Terminal_GetFieldOffset(1) - 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldOffset(1)); });
+            AddAction(IdPrefix + "_Z_Offset_Increase", Loc.T(MyStrings.Construction_IncreaseConstructionFieldForwardOffset), ICON_PLUS, b => { b.Terminal_SetFieldOffset(2, b.Terminal_GetFieldOffset(2) + 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldOffset(2)); });
+            AddAction(IdPrefix + "_Z_Offset_Decrease", Loc.T(MyStrings.Construction_DecreaseConstructionFieldForwardOffset), ICON_DASH, b => { b.Terminal_SetFieldOffset(2, b.Terminal_GetFieldOffset(2) - 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldOffset(2)); });
 
-            AddAction(IdPrefix + "_X_Size_Increase", Loc.Compose(MyStrings.ToolbarActionIncrease, MyStrings.ConstructionField, MyStrings.Width), ICON_PLUS, b => { b.Terminal_SetFieldSize(0, b.Terminal_GetFieldSize(0) + 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldSize(0)); });
-            AddAction(IdPrefix + "_X_Size_Decrease", Loc.Compose(MyStrings.ToolbarActionDecrease, MyStrings.ConstructionField, MyStrings.Width), ICON_DASH, b => { b.Terminal_SetFieldSize(0, b.Terminal_GetFieldSize(0) - 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldSize(0)); });
-            AddAction(IdPrefix + "_Y_Size_Increase", Loc.Compose(MyStrings.ToolbarActionIncrease, MyStrings.ConstructionField, MyStrings.Height), ICON_PLUS, b => { b.Terminal_SetFieldSize(1, b.Terminal_GetFieldSize(1) + 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldSize(1)); });
-            AddAction(IdPrefix + "_Y_Size_Decrease", Loc.Compose(MyStrings.ToolbarActionDecrease, MyStrings.ConstructionField, MyStrings.Height), ICON_DASH, b => { b.Terminal_SetFieldSize(1, b.Terminal_GetFieldSize(1) - 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldSize(1)); });
-            AddAction(IdPrefix + "_Z_Size_Increase", Loc.Compose(MyStrings.ToolbarActionIncrease, MyStrings.ConstructionField, MyStrings.Depth), ICON_PLUS, b => { b.Terminal_SetFieldSize(2, b.Terminal_GetFieldSize(2) + 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldSize(2)); });
-            AddAction(IdPrefix + "_Z_Size_Decrease", Loc.Compose(MyStrings.ToolbarActionDecrease, MyStrings.ConstructionField, MyStrings.Depth), ICON_DASH, b => { b.Terminal_SetFieldSize(2, b.Terminal_GetFieldSize(2) - 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldSize(2)); });
+            AddAction(IdPrefix + "_X_Size_Increase", Loc.T(MyStrings.Construction_IncreaseConstructionFieldWidth), ICON_PLUS, b => { b.Terminal_SetFieldSize(0, b.Terminal_GetFieldSize(0) + 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldSize(0)); });
+            AddAction(IdPrefix + "_X_Size_Decrease", Loc.T(MyStrings.Construction_DecreaseConstructionFieldWidth), ICON_DASH, b => { b.Terminal_SetFieldSize(0, b.Terminal_GetFieldSize(0) - 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldSize(0)); });
+            AddAction(IdPrefix + "_Y_Size_Increase", Loc.T(MyStrings.Construction_IncreaseConstructionFieldHeight), ICON_PLUS, b => { b.Terminal_SetFieldSize(1, b.Terminal_GetFieldSize(1) + 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldSize(1)); });
+            AddAction(IdPrefix + "_Y_Size_Decrease", Loc.T(MyStrings.Construction_DecreaseConstructionFieldHeight), ICON_DASH, b => { b.Terminal_SetFieldSize(1, b.Terminal_GetFieldSize(1) - 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldSize(1)); });
+            AddAction(IdPrefix + "_Z_Size_Increase", Loc.T(MyStrings.Construction_IncreaseConstructionFieldDepth), ICON_PLUS, b => { b.Terminal_SetFieldSize(2, b.Terminal_GetFieldSize(2) + 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldSize(2)); });
+            AddAction(IdPrefix + "_Z_Size_Decrease", Loc.T(MyStrings.Construction_DecreaseConstructionFieldDepth), ICON_DASH, b => { b.Terminal_SetFieldSize(2, b.Terminal_GetFieldSize(2) - 1); }, (b, sb) => { sb.Append(b.Terminal_GetFieldSize(2)); });
 
-            AddAction(IdPrefix + "_ToggleEnableAI_ON", Loc.Compose(MyStrings.Toggle, MyStrings.EnableAI, MyStrings.On), ICON_ON, b => { if (!b.Terminal_IsEnabled) { b.Terminal_IsEnabled = true; } }, (b, sb) => sb.Append(Loc.T(MyStrings.On)));
-            AddAction(IdPrefix + "_ToggleEnableAI_OFF", Loc.Compose(MyStrings.Toggle, MyStrings.EnableAI, MyStrings.Off), ICON_OFF, b => { if (b.Terminal_IsEnabled) { b.Terminal_IsEnabled = false; } }, (b, sb) => sb.Append(Loc.T(MyStrings.Off)));
-            AddAction(IdPrefix + "_ToggleEnableAI_ON_OFF", Loc.Compose(MyStrings.Toggle, MyStrings.EnableAI, MyStrings.On_Off), ICON_TOGGLE, b => { b.Terminal_IsEnabled = !b.Terminal_IsEnabled; }, (b, sb) => sb.Append(b.Terminal_IsEnabled ? Loc.T(MyStrings.On) : Loc.T(MyStrings.Off)));
+            AddAction(IdPrefix + "_ToggleEnableAI_ON", Loc.T(MyStrings.Construction_ToggleEnableAIOn), ICON_ON, b => { if (!b.Terminal_IsEnabled) { b.Terminal_IsEnabled = true; } }, (b, sb) => sb.Append(Loc.T(MyStrings.Construction_On)));
+            AddAction(IdPrefix + "_ToggleEnableAI_OFF", Loc.T(MyStrings.Construction_ToggleEnableAIOff), ICON_OFF, b => { if (b.Terminal_IsEnabled) { b.Terminal_IsEnabled = false; } }, (b, sb) => sb.Append(Loc.T(MyStrings.Construction_Off)));
+            AddAction(IdPrefix + "_ToggleEnableAI_ON_OFF", Loc.T(MyStrings.Construction_ToggleEnableAIOnOff), ICON_TOGGLE, b => { b.Terminal_IsEnabled = !b.Terminal_IsEnabled; }, (b, sb) => sb.Append(b.Terminal_IsEnabled ? Loc.T(MyStrings.Construction_On) : Loc.T(MyStrings.Construction_Off)));
 
-            AddAction(IdPrefix + "_ToggleConstructionField_ON", Loc.Compose(MyStrings.Toggle, MyStrings.Draw, MyStrings.ConstructionField, MyStrings.On), ICON_ON, b => { if (!b.Terminal_DrawArea) { b.Terminal_DrawArea = true; } }, (b, sb) => sb.Append(Loc.T(MyStrings.On)));
-            AddAction(IdPrefix + "_ToggleConstructionField_OFF", Loc.Compose(MyStrings.Toggle, MyStrings.Draw, MyStrings.ConstructionField, MyStrings.Off), ICON_OFF, b => { if (b.Terminal_DrawArea) { b.Terminal_DrawArea = false; } }, (b, sb) => sb.Append(Loc.T(MyStrings.Off)));
-            AddAction(IdPrefix + "_ToggleConstructionField_ON_OFF", Loc.Compose(MyStrings.Toggle, MyStrings.Draw, MyStrings.ConstructionField, MyStrings.On_Off), ICON_TOGGLE, b => { b.Terminal_DrawArea = !b.Terminal_DrawArea; }, (b, sb) => sb.Append(b.Terminal_DrawArea ? Loc.T(MyStrings.On) : Loc.T(MyStrings.Off)));
+            AddAction(IdPrefix + "_ToggleConstructionField_ON", Loc.T(MyStrings.Construction_ToggleDrawConstructionFieldOn), ICON_ON, b => { if (!b.Terminal_DrawArea) { b.Terminal_DrawArea = true; } }, (b, sb) => sb.Append(Loc.T(MyStrings.Construction_On)));
+            AddAction(IdPrefix + "_ToggleConstructionField_OFF", Loc.T(MyStrings.Construction_ToggleDrawConstructionFieldOff), ICON_OFF, b => { if (b.Terminal_DrawArea) { b.Terminal_DrawArea = false; } }, (b, sb) => sb.Append(Loc.T(MyStrings.Construction_Off)));
+            AddAction(IdPrefix + "_ToggleConstructionField_ON_OFF", Loc.T(MyStrings.Construction_ToggleDrawConstructionFieldOnOff), ICON_TOGGLE, b => { b.Terminal_DrawArea = !b.Terminal_DrawArea; }, (b, sb) => sb.Append(b.Terminal_DrawArea ? Loc.T(MyStrings.Construction_On) : Loc.T(MyStrings.Construction_Off)));
 
         }
 
@@ -141,7 +141,7 @@ namespace Automata.Construction
                 var l = GetBlock(b);
                 if (l == null) return;
                 int n = l.Terminal_GetFieldSize(axis);
-                sb.AppendLoc(n == 1 ? MyStrings.Block : MyStrings.Blocks, n);
+                sb.AppendLoc(n == 1 ? MyStrings.Construction_Block : MyStrings.Construction_Blocks, n);
             };
             Add(c);
         }
@@ -161,7 +161,7 @@ namespace Automata.Construction
                 var l = GetBlock(b);
                 if (l == null) return;
                 int n = l.Terminal_GetFieldOffset(axis);
-                sb.AppendLoc(n == 1 || n == -1 ? MyStrings.Block : MyStrings.Blocks, n);
+                sb.AppendLoc(n == 1 || n == -1 ? MyStrings.Construction_Block : MyStrings.Construction_Blocks, n);
             };
             Add(c);
         }
@@ -183,21 +183,21 @@ namespace Automata.Construction
             }
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlButton, IMyProgrammableBlock>(IdPrefix + "RetryJobs");
-                c.Title = MyStrings.RetryJobs;
-                c.Tooltip = MyStrings.RetryJobsTip;
+                c.Title = MyStrings.Construction_RetryJobs;
+                c.Tooltip = MyStrings.Construction_RetryJobsTooltip;
                 c.SupportsMultipleBlocks = true;
                 c.Visible = Visible;
                 c.Action = b => { var l = GetBlock(b); if (l != null) l.Terminal_RetryJobs(); };
                 Add(c);
             }
             Separator();
-            Mode("WeldUnfinished", MyStrings.WeldUnfinished, MyStrings.BLANK, WorkModes.WeldUnfinishedBlocks);
-            Mode("Repair", MyStrings.Repair, MyStrings.BLANK, WorkModes.RepairDamagedBlocks);
-            Mode("WeldProjected", MyStrings.WeldProjected, MyStrings.BLANK, WorkModes.WeldProjectedBlocks);
-            Mode("Grind", MyStrings.Grind, MyStrings.BLANK, WorkModes.Grind);
+            Mode("WeldUnfinished", MyStrings.Construction_WeldUnfinishedBlocks, MyStrings.BLANK, WorkModes.WeldUnfinishedBlocks);
+            Mode("Repair", MyStrings.Construction_RepairDamagedBlocks, MyStrings.BLANK, WorkModes.RepairDamagedBlocks);
+            Mode("WeldProjected", MyStrings.Construction_BuildProjections, MyStrings.BLANK, WorkModes.WeldProjectedBlocks);
+            Mode("Grind", MyStrings.Construction_Grind, MyStrings.BLANK, WorkModes.Grind);
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlCombobox, IMyProgrammableBlock>(IdPrefix + "WorkPriority");
-                c.Title = MyStrings.WeldPriority;
+                c.Title = MyStrings.Construction_WeldPriority;
                 c.Tooltip = MyStrings.BLANK;
                 c.SupportsMultipleBlocks = true;
                 c.Visible = Visible;
@@ -208,8 +208,8 @@ namespace Automata.Construction
             }
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlColor, IMyProgrammableBlock>(IdPrefix + "GrindColor");
-                c.Title = MyStrings.GrindColor;
-                c.Tooltip = MyStrings.GrindColorTip;
+                c.Title = MyStrings.Construction_GrindColor;
+                c.Tooltip = MyStrings.Construction_GrindColorTooltip;
                 c.SupportsMultipleBlocks = true;
                 c.Visible = Visible;
                 c.Getter = b => { var l = GetBlock(b); return l != null ? l.Terminal_GrindColor : Color.Red; };
@@ -218,8 +218,8 @@ namespace Automata.Construction
             }
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlColor, IMyProgrammableBlock>(IdPrefix + "WeldIgnoreColor");
-                c.Title = MyStrings.WeldIgnoreColor;
-                c.Tooltip = MyStrings.WeldIgnoreColorTip;
+                c.Title = MyStrings.Construction_WeldIgnoreColor;
+                c.Tooltip = MyStrings.Construction_WeldIgnoreColorTooltip;
                 c.SupportsMultipleBlocks = true;
                 c.Visible = Visible;
                 c.Getter = b => { var l = GetBlock(b); return l != null ? l.Terminal_WeldIgnoreColor : new Color(255, 0, 255); };
@@ -229,25 +229,25 @@ namespace Automata.Construction
             Separator();
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlOnOffSwitch, IMyProgrammableBlock>(IdPrefix + "OnOff_DrawArea");
-                c.Title = MyStrings.ShowObservationArea;
-                c.Tooltip = MyStrings.ShowObservationAreaTip;
-                c.OnText = MyStrings.On;
-                c.OffText = MyStrings.Off;
+                c.Title = MyStrings.Construction_ShowConstructionField;
+                c.Tooltip = MyStrings.Construction_ShowConstructionFieldTooltip;
+                c.OnText = MyStrings.Construction_On;
+                c.OffText = MyStrings.Construction_Off;
                 c.SupportsMultipleBlocks = false;
                 c.Visible = Visible;
                 c.Getter = b => GetBlock(b)?.Terminal_DrawArea ?? false;
                 c.Setter = (b, v) => { var l = GetBlock(b); if (l != null) l.Terminal_DrawArea = v; };
                 Add(c);
             }
-            AreaSize(0, MyStrings.AreaWidth, MyStrings.BLANK);
-            AreaSize(1, MyStrings.AreaHeight, MyStrings.BLANK);
-            AreaSize(2, MyStrings.AreaDepth, MyStrings.BLANK);
-            AreaOffset(0, MyStrings.OffsetRight, MyStrings.BLANK);
-            AreaOffset(1, MyStrings.OffsetUp, MyStrings.BLANK);
-            AreaOffset(2, MyStrings.OffsetForward, MyStrings.BLANK);
-            Slider("ScanInterval", MyStrings.ScanInterval, MyStrings.BLANK, 10, 600, MyStrings.Seconds,
+            AreaSize(0, MyStrings.Construction_FieldWidth, MyStrings.BLANK);
+            AreaSize(1, MyStrings.Construction_FieldHeight, MyStrings.BLANK);
+            AreaSize(2, MyStrings.Construction_FieldDepth, MyStrings.BLANK);
+            AreaOffset(0, MyStrings.Construction_FieldOffsetRight, MyStrings.BLANK);
+            AreaOffset(1, MyStrings.Construction_FieldOffsetUp, MyStrings.BLANK);
+            AreaOffset(2, MyStrings.Construction_FieldOffsetForward, MyStrings.BLANK);
+            Slider("ScanInterval", MyStrings.Construction_ScanInterval, MyStrings.BLANK, 10, 600, MyStrings.Construction_Seconds,
                    l => l.Terminal_ScanInterval, (l, v) => l.Terminal_ScanInterval = (int)v);
-            Slider("BlocksPerJob", MyStrings.BlocksPerJob, MyStrings.BLANK, 1, 100, MyStringId.NullOrEmpty,
+            Slider("BlocksPerJob", MyStrings.Construction_BlocksPerJob, MyStrings.BLANK, 1, 100, MyStringId.NullOrEmpty,
                    l => l.Terminal_BlocksPerJob, (l, v) => l.Terminal_BlocksPerJob = (int)v);
             NicknameControl.Add<IMyProgrammableBlock, ConstructionComputerBlock>(IdPrefix + "Nick", GetBlock, l => l.Nickname, (l, v) => l.Terminal_Nickname = v);
             LcdTagControl.Add(IdPrefix + "LcdTag", GetBlock, l => l.Terminal_LcdTag, (l, v) => l.Terminal_LcdTag = v, "[ConstructionComputer]");

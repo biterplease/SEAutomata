@@ -5,6 +5,7 @@ using VRageMath;
 
 using Automata.Util;
 using Automata.Util.Logging;
+using Automata.Util.Strings;
 
 namespace Automata.Drone
 {
@@ -18,9 +19,6 @@ namespace Automata.Drone
     /// </summary>
     public partial class DroneControllerBlock
     {
-        private static readonly MyStringId StrNoBlockReachable = MyStringId.GetOrCompute("none of its {0} block(s) reachable (checked before loading)");
-        private static readonly MyStringId StrBlocksUnreachableNote = MyStringId.GetOrCompute("{0} ({1} block(s) unreachable)");
-
         private const double SITE_PROBE_MS = 25;   // per job; past it: the job runs as before
 
         private readonly HashSet<KeyValuePair<long, Vector3I>> probedUnreachable = new HashSet<KeyValuePair<long, Vector3I>>();
@@ -69,7 +67,7 @@ namespace Automata.Drone
             finally { strafeNext = strafeWas; siteProbing = false; }
             if (checkedCount == 0) return true;
             if (Log.DebugEnabled) Log.Debug("Drone {0}: pre-load check: none of {1} block(s) has a work site ({2:F1} ms): job given back", Entity.EntityId, checkedCount, sw.Elapsed.TotalMilliseconds);
-            jobAbortReason = Loc.F(StrNoBlockReachable, checkedCount);
+            jobAbortReason = Loc.F(MyStrings.Drone_NoneOfItsBlockReachable, checkedCount);
             return false;
         }
 
@@ -100,7 +98,7 @@ namespace Automata.Drone
             }
             // The reason names the last failure only (a later "NotAttached" hid the unreachable ones)
             if (r.Reason != null && r.Reason.IndexOf("Unreachable", System.StringComparison.OrdinalIgnoreCase) < 0)
-                r.Reason = Loc.F(StrBlocksUnreachableNote, r.Reason, jobUnreachable.Count);
+                r.Reason = Loc.F(MyStrings.Drone_BlockUnreachable, r.Reason, jobUnreachable.Count);
         }
     }
 }

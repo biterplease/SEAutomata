@@ -8,6 +8,7 @@ using VRage.Game.GUI.TextPanel;
 using VRage.Game.ModAPI;
 using VRageMath;
 using VRage.Utils;
+using Automata.Util.Strings;
 
 namespace Automata.Util
 {
@@ -18,9 +19,6 @@ namespace Automata.Util
     /// </summary>
     public class TaggedLcd
     {
-        #region UI strings
-        private static readonly MyStringId StrPage = MyStringId.GetOrCompute("Page: {0}/{1}");
-        #endregion
 
         #region Timing
         private const int RESCAN_TICKS = 600;
@@ -141,7 +139,7 @@ namespace Automata.Util
                     if (k < right.Count) frame.Add(new MySprite(SpriteType.TEXT, Fit(right[k], colChars), row + new Vector2(colW, 0), null, fg, HEADER_FONT, TextAlignment.LEFT, hScale));
                 }
                 if (pages > 1)
-                    frame.Add(new MySprite(SpriteType.TEXT, Loc.F(StrPage, page + 1, pages),
+                    frame.Add(new MySprite(SpriteType.TEXT, Loc.F(MyStrings.Common_PageColonArg0SlashArg1, page + 1, pages),
                                            origin + new Vector2(inner.X, hLine * (HEADER_ROWS + 1)), null, fg, HEADER_FONT, TextAlignment.RIGHT, hScale * 0.8f));
                 // Rule under the header, then the body
                 float ruleY = origin.Y + headerH;

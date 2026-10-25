@@ -4,6 +4,7 @@ using VRage.Utils;
 using Automata.Network;
 using Automata.Util;
 using Automata.Util.Logging;
+using Automata.Util.Strings;
 
 namespace Automata
 {
@@ -18,12 +19,6 @@ namespace Automata
     /// </summary>
     public partial class AutomataSession
     {
-        #region UI strings
-        private static readonly MyStringId StrBuildLocal = MyStringId.GetOrCompute("Debug build: {0}");
-        private static readonly MyStringId StrBuildServerClient = MyStringId.GetOrCompute("Debug build - server: {0} | this client: {1}");
-        private static readonly MyStringId StrBuildsDiffer = MyStringId.GetOrCompute("The server and this client run different builds of the mod.");
-        private static readonly MyStringId StrBuildUnversioned = MyStringId.GetOrCompute("unversioned (not deployed by mod_version_debug.ps1)");
-        #endregion
         #region Timing
         private const int BUILD_ANNOUNCE_DELAY_TICKS = 5 * 60;   // after the local player appears: the chat is up
         #endregion
@@ -32,7 +27,7 @@ namespace Automata
 
         internal static string BuildLabel(string version)
         {
-            return string.IsNullOrEmpty(version) ? Loc.T(StrBuildUnversioned) : version;
+            return string.IsNullOrEmpty(version) ? Loc.T(MyStrings.Common_UnversionedNotDeployedByMod) : version;
         }
 
         // The fingerprint: the first word ("" when unversioned)
@@ -55,7 +50,7 @@ namespace Automata
             buildAnnounced = true;
             if (MyAPIGateway.Multiplayer == null || MyAPIGateway.Multiplayer.IsServer)
             {
-                if (Log.DebugEnabled) MyAPIGateway.Utilities.ShowMessage(MOD_NAME, Loc.F(StrBuildLocal, BuildLabel(MOD_VERSION_DEBUG)));
+                if (Log.DebugEnabled) MyAPIGateway.Utilities.ShowMessage(MOD_NAME, Loc.F(MyStrings.Common_DebugBuild, BuildLabel(MOD_VERSION_DEBUG)));
                 return;
             }
             Net?.SendToServer(new BuildVersionRequestPacket { ClientVersion = MOD_VERSION_DEBUG ?? "" });
@@ -72,8 +67,8 @@ namespace Automata
         /// <summary>Client: the server's answer (it only answers in debug mode).</summary>
         internal static void AnnounceBuilds(string serverVersion)
         {
-            MyAPIGateway.Utilities.ShowMessage(MOD_NAME, Loc.F(StrBuildServerClient, BuildLabel(serverVersion), BuildLabel(MOD_VERSION_DEBUG)));
-            if (BuildHash(serverVersion) != BuildHash(MOD_VERSION_DEBUG)) MyAPIGateway.Utilities.ShowMessage(MOD_NAME, Loc.T(StrBuildsDiffer));
+            MyAPIGateway.Utilities.ShowMessage(MOD_NAME, Loc.F(MyStrings.Common_DebugBuildServerThisClient, BuildLabel(serverVersion), BuildLabel(MOD_VERSION_DEBUG)));
+            if (BuildHash(serverVersion) != BuildHash(MOD_VERSION_DEBUG)) MyAPIGateway.Utilities.ShowMessage(MOD_NAME, Loc.T(MyStrings.Common_TheServerAndThisClient));
         }
     }
 }

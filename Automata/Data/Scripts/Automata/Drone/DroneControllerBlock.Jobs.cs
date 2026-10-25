@@ -16,6 +16,7 @@ using Automata.Util;
 using Automata.Util.Logging;
 using Automata.VirtualNetwork;
 using VRage.Utils;
+using Automata.Util.Strings;
 
 namespace Automata.Drone
 {
@@ -32,49 +33,6 @@ namespace Automata.Drone
     /// </summary>
     public partial class DroneControllerBlock
     {
-        #region UI strings
-        private static readonly MyStringId StrTaskFailed = MyStringId.GetOrCompute("task failed");
-        private static readonly MyStringId StrTaskFailedReason = MyStringId.GetOrCompute("task failed ({0})");
-        private static readonly MyStringId StrTaskFailedSentHome = MyStringId.GetOrCompute("task failed ({0}), sent home");
-        private static readonly MyStringId StrReasonSentHome = MyStringId.GetOrCompute("{0}, sent home");
-        private static readonly MyStringId StrStopped = MyStringId.GetOrCompute("stopped");
-        private static readonly MyStringId StrCouldLoadOnly = MyStringId.GetOrCompute("Job: could load only {0}/{1} parts, check conveyors");
-        private static readonly MyStringId StrPartialLoad = MyStringId.GetOrCompute("Job: loaded {0}/{1} parts (the rest is missing): blocks it has no parts for are skipped");
-        private static readonly MyStringId StrOutOfPartsFor = MyStringId.GetOrCompute("Block {0}/{1}: out of parts for it, on to the next");
-        private static readonly MyStringId StrJobOutcomeReason = MyStringId.GetOrCompute("Job {0} ({3}): {1} ({2})");
-        private static readonly MyStringId StrJobOutcome = MyStringId.GetOrCompute("Job {0} ({2}): {1}");
-        private static readonly MyStringId StrStartingJobBlocksTasks = MyStringId.GetOrCompute("Starting Job {0} ({3}): blocks: {1}, tasks: {2}");
-        private static readonly MyStringId StrSentHomeLoadPower = MyStringId.GetOrCompute("sent home (load / power)");
-        private static readonly MyStringId StrBlocksLeftUndone = MyStringId.GetOrCompute("blocks left undone");
-        private static readonly MyStringId StrReturnHomeFailedTheJob = MyStringId.GetOrCompute("Return home failed ({0}): the job's work stands, trying again");
-        private static readonly MyStringId StrJobInterrupted = MyStringId.GetOrCompute("Job: interrupted");
-        private static readonly MyStringId StrInterruptedPlayerOrderGoHome = MyStringId.GetOrCompute("interrupted (player order / go home)");
-        private static readonly MyStringId StrBlockTaskFailed = MyStringId.GetOrCompute("Block {0}/{1}, task {2}/{3}: {4} failed: {5}");
-        private static readonly MyStringId StrLoadedItemsAtTheRest = MyStringId.GetOrCompute("Loaded {0}/{1} items at {2} (the rest was gone)");
-        private static readonly MyStringId StrJobBlocksLoadedParts = MyStringId.GetOrCompute("Job: {0} blocks, loaded {1} parts");
-        private static readonly MyStringId StrLoadedItemsAt = MyStringId.GetOrCompute("Loaded {0} items at {1}");
-        private static readonly MyStringId StrBlockDone = MyStringId.GetOrCompute("Block {0}/{1}: {2} done ({3})");
-        private static readonly MyStringId StrDockWaiting = MyStringId.GetOrCompute("Dock: {0} {1}, waiting");
-        private static readonly MyStringId StrDockUsingInstead = MyStringId.GetOrCompute("Dock: {0} instead ({1} {2})");
-        private static readonly MyStringId StrDockStillInUseAfter = MyStringId.GetOrCompute("Dock: {0} still in use after {1} min, giving up");
-        private static readonly MyStringId StrDockFreeAfterS = MyStringId.GetOrCompute("Dock: {0} free after {1:F0} s");
-        private static readonly MyStringId StrTask = MyStringId.GetOrCompute("Task");
-        private static readonly MyStringId StrPitchRollLimits = MyStringId.GetOrCompute("pitch {0:F0}° / roll {1:F0}°, limits {2:F0}° / {3:F0}°");
-        private static readonly MyStringId StrNoGravity = MyStringId.GetOrCompute("no gravity");
-        private static readonly MyStringId StrConstructionNeedsAWelder = MyStringId.GetOrCompute("Construction: needs a welder");
-        private static readonly MyStringId StrConstructionNeedsAGrinder = MyStringId.GetOrCompute("Construction: needs a grinder");
-        private static readonly MyStringId StrTaskSeconds = MyStringId.GetOrCompute("{0:F0} s");
-        private static readonly MyStringId StrCargoFull = MyStringId.GetOrCompute("cargo full");
-        private static readonly MyStringId StrCargoEmpty = MyStringId.GetOrCompute("cargo empty");
-        private static readonly MyStringId StrGridGone = MyStringId.GetOrCompute("grid gone");
-        private static readonly MyStringId StrDismounted = MyStringId.GetOrCompute("dismounted");
-        private static readonly MyStringId StrBlockGone = MyStringId.GetOrCompute("block gone");
-        private static readonly MyStringId StrFullIntegrity = MyStringId.GetOrCompute("full integrity");
-        private static readonly MyStringId StrNoPartsLeftForIt = MyStringId.GetOrCompute("no parts left for it in cargo");
-        private static readonly MyStringId StrIntegrity = MyStringId.GetOrCompute("integrity {0:F0}%");
-        private static readonly MyStringId StrJobAbandonedLowPower = MyStringId.GetOrCompute("Job abandoned: low power");
-        private static readonly MyStringId StrBusy = MyStringId.GetOrCompute("busy");
-        #endregion
 
         private enum JobSource : byte
         {
@@ -138,6 +96,8 @@ namespace Automata.Drone
             currentJob = job;
             jobAbortReason = null;
             jobSource = source;
+            owesReturn = false;            // the job ends with its own way home (FinishJob sets it again if that fails)
+            departureFallback = false;     // a fallback rest is not "at rest" for the job's ReturnHome: the usual way is tried first
             jobBlocksDone = 0;
             lastJobFailure = null;
             ClearSiteRejects(0, Vector3I.Zero);
@@ -169,7 +129,7 @@ namespace Automata.Drone
             }
             if (startIndex == 0 && source != JobSource.Housekeeping) PrepareCargoForJob(job);   // starts empty
             else clearTripInserted = false;
-            Report(StrStartingJobBlocksTasks, job.JobId, job.BlockCount, job.Tasks != null ? job.Tasks.Count : 0, Orchestrator.JobTypeExtensions.Label(job.JobType, job.WeldCategory));
+            Report(MyStrings.Drone_StartingJobBlocksTasks, job.JobId, job.BlockCount, job.Tasks != null ? job.Tasks.Count : 0, Orchestrator.JobTypeExtensions.Label(job.JobType, job.WeldCategory));
             if (Log.DebugEnabled) Log.Debug("Drone {0}: job {1}: {2}, {3}", Entity.EntityId, job.JobId, source, job.JobType);
             RunTasks();
         }
@@ -249,10 +209,10 @@ namespace Automata.Drone
                 bool complete = !failed && !noFieldContinuation && jobAbortReason == null
                                 && (currentJob.BlockCount == 0 || jobBlocksDone >= currentJob.BlockCount);
                 ReportJobOutcome(complete ? JobOutcome.Completed : JobOutcome.Aborted,
-                                 complete ? null : jobAbortReason ?? (failed ? (taskFailure != Orchestrator.TaskFailure.None ? Loc.F(StrTaskFailedReason, taskFailure) : Loc.T(StrTaskFailed))
-                                 : noFieldContinuation ? (taskFailure != Orchestrator.TaskFailure.None ? Loc.F(StrTaskFailedSentHome, taskFailure)
-                                                          : lastJobFailure != null ? Loc.F(StrReasonSentHome, lastJobFailure) : Loc.T(StrSentHomeLoadPower))
-                                 : lastJobFailure ?? Loc.T(StrBlocksLeftUndone)));
+                                 complete ? null : jobAbortReason ?? (failed ? (taskFailure != Orchestrator.TaskFailure.None ? Loc.F(MyStrings.Drone_TaskFailedArg0, taskFailure) : Loc.T(MyStrings.Drone_TaskFailed))
+                                 : noFieldContinuation ? (taskFailure != Orchestrator.TaskFailure.None ? Loc.F(MyStrings.Drone_TaskFailedSentHome, taskFailure)
+                                                          : lastJobFailure != null ? Loc.F(MyStrings.Drone_SentHome, lastJobFailure) : Loc.T(MyStrings.Drone_SentHomeLoadPower))
+                                 : lastJobFailure ?? Loc.T(MyStrings.Drone_BlocksLeftUndone)));
             }
             jobAbortReason = null;
             CancelPendingRoute();
@@ -270,10 +230,14 @@ namespace Automata.Drone
                 if (Log.DebugEnabled) Log.Debug("Drone {0}: trip made no progress, next scan in {1} s", Entity.EntityId, AutomataSession.GetConfig().ConstructionComputer.DroneScanIntervalSeconds);
             }
             else lastConstructionScanFrame = int.MinValue / 2;   // stand-alone: next trip right away
-            // Orchestrator jobs: back home to standby (the task list normally ends there already)
-            if (source == JobSource.Orchestrator && !IsAtRest() && (HasHomeConnector || ParkMode || ReturnsToDeparture || RestsAtAnyConnector)
-                && activeFlightOrder == null && !IsGoingToRest)
-                GoRest();
+            // Orchestrator jobs: back home to standby (the task list normally ends there already); still away (no way home
+            // now): ReturnWhenIdle tries again, the departure spot being the fallback (GoRest)
+            if (source == JobSource.Orchestrator && (!IsAtRest() || departureFallback))
+            {
+                owesReturn = true;
+                lastReturnTryFrame = MyAPIGateway.Session.GameplayFrameCounter;
+                if (activeFlightOrder == null && !IsGoingToRest) GoRest();
+            }
             // Cargo still aboard (a failed job, nothing to unload at its end): cleared before the next job
             if (source != JobSource.Housekeeping && currentJob == null) TryStartHousekeeping();
         }
@@ -281,7 +245,7 @@ namespace Automata.Drone
         /// <summary>Stops the current job (any source): tools off, no restart until the next scan / auction.</summary>
         public void StopJob(string reason = null)
         {
-            if (reason == null) reason = Loc.T(StrStopped);
+            if (reason == null) reason = Loc.T(MyStrings.Keen_Stopped);
             jobAbortReason = null;
             CancelPendingRoute();
             if (designatorCombat != DesignatorCombat.None)
@@ -422,14 +386,14 @@ namespace Automata.Drone
                         if (constructionOrder != null && IsConstructionOrderActive()) ClearFlightOrder();
                         // Only the way home failed: the work stands (completed, or the earlier reason); FinishJob tries home again
                         bool homeOnly = currentJob.Tasks[taskIndex].Type == Orchestrator.TaskType.ReturnHome;
-                        if (homeOnly) Report(StrReturnHomeFailedTheJob, lastJobFailure ?? "?");   // (taskFailure is reported and reset by now)
+                        if (homeOnly) Report(MyStrings.Drone_ReturnHomeFailedTheJobs, lastJobFailure ?? "?");   // (taskFailure is reported and reset by now)
                         FinishJob(!homeOnly);
                         lastConstructionScanFrame = MyAPIGateway.Session.GameplayFrameCounter;   // wait a scan interval
                         return;
                     case TaskStatus.Interrupted:
                         // A player order, Go home, power monitoring... took over: stop, and don't restart right away
-                        Report(StrJobInterrupted);
-                        StopJob(Loc.T(StrInterruptedPlayerOrderGoHome));
+                        Report(MyStrings.Drone_JobInterrupted);
+                        StopJob(Loc.T(MyStrings.Drone_InterruptedPlayerOrderGoHome));
                         PauseConstruction(AutomataSession.GetConfig().ConstructionComputer.DroneScanIntervalSeconds * 60);
                         return;
                 }
@@ -493,7 +457,7 @@ namespace Automata.Drone
             else if (task.Kind == Orchestrator.TaskKind.Tool && task.TargetEntityId != 0)
                 tripFailed.Add(new KeyValuePair<long, Vector3I>(task.TargetEntityId, task.TargetBlock.ToVector3I()));
             // Numbers within this job (one trip): the block being worked, and the task in the job's list
-            Report(StrBlockTaskFailed, BlockNumber(taskIndex), currentJob.BlockCount,
+            Report(MyStrings.Drone_BlockTaskFailed, BlockNumber(taskIndex), currentJob.BlockCount,
                    taskIndex + 1, currentJob.Tasks.Count, task.Type, taskFailure);
             lastJobFailure = task.Type + ": " + taskFailure;
             taskFailure = Orchestrator.TaskFailure.None;
@@ -534,7 +498,7 @@ namespace Automata.Drone
                     if (moved < planned && moved > 0 && currentJob.BlockCount == 0)
                     {
                         // Logistics: the supplier had less than it bid (used meanwhile): deliver what was loaded
-                        Report(StrLoadedItemsAtTheRest, moved, planned, source.CustomName);
+                        Report(MyStrings.Drone_LoadedItemsAtTheRest, moved, planned, source.CustomName);
                         return TaskStatus.Done;
                     }
                     if (moved < planned && moved > 0 && currentJob.BlockCount > 0 && moved >= planned * PARTIAL_LOAD_MIN_SHARE)
@@ -544,7 +508,7 @@ namespace Automata.Drone
                         // that runs out of parts moves on (WeldBlock); what is left undone goes back to the computer. Aborting
                         // the whole job (38 blocks for 2 missing parts) left the drones docked and the build waiting.
                         if (Log.DebugEnabled) Log.Debug("Drone {0}: partial load {1}/{2}: going with it", Entity.EntityId, moved, planned);
-                        ReportProblem(Loc.F(StrPartialLoad, moved, planned));
+                        ReportProblem(Loc.F(MyStrings.Drone_JobLoadedPartsTheRest, moved, planned));
                         return TaskStatus.Done;
                     }
                     if (moved < planned)
@@ -552,12 +516,12 @@ namespace Automata.Drone
                         // Materials gone meanwhile, no conveyor path, or cargo refused: don't fly a trip that can't be finished
                         UnloadCargo(task.Inventory);
                         UnloadCargo(null);
-                        ReportProblem(Loc.F(StrCouldLoadOnly, moved, planned));
+                        ReportProblem(Loc.F(MyStrings.Drone_JobCouldLoadOnlyParts, moved, planned));
                         return Fail(Orchestrator.TaskFailure.InsufficientMaterials, TaskStatus.Failed);
                     }
                     lastConstructionProblem = null;
-                    if (currentJob.BlockCount > 0) Report(StrJobBlocksLoadedParts, currentJob.BlockCount, moved);
-                    else Report(StrLoadedItemsAt, moved, source.CustomName);
+                    if (currentJob.BlockCount > 0) Report(MyStrings.Drone_JobBlocksLoadedParts, currentJob.BlockCount, moved);
+                    else Report(MyStrings.Drone_LoadedItemsAt, moved, source.CustomName);
                     return TaskStatus.Done;
                 }
 
@@ -729,7 +693,7 @@ namespace Automata.Drone
                     string why;
                     if (IsToolTaskDone(ref task, elapsed, out why))
                     {
-                        Report(StrBlockDone, BlockNumber(taskIndex), currentJob.BlockCount, task.Type, why);
+                        Report(MyStrings.Drone_BlockDone, BlockNumber(taskIndex), currentJob.BlockCount, task.Type, why);
                         jobBlocksDone++;
                         SetToolEnabled(task.Type, false);   // one block at a time: off before moving on
                         return TaskStatus.Done;
@@ -746,7 +710,7 @@ namespace Automata.Drone
                         if (slim != null && !slim.IsFullIntegrity && !CargoHasAnyOf(slim))
                         {
                             SetToolEnabled(task.Type, false);
-                            Report(StrOutOfPartsFor, BlockNumber(taskIndex), currentJob.BlockCount);
+                            Report(MyStrings.Drone_BlockOutOfParts, BlockNumber(taskIndex), currentJob.BlockCount);
                             return Fail(Orchestrator.TaskFailure.NoPartsAboard, TaskStatus.Done);
                         }
                     }
@@ -800,7 +764,7 @@ namespace Automata.Drone
                             // Taken (another drone parked there, a ship): a free one of the same station instead of waiting
                             var other = FreeSiblingConnector(target);
                             if (other == null) { lastCargoPortId = target.EntityId; return StartDockWait(target, busy); }
-                            Report(StrDockUsingInstead, other.CustomName, target.CustomName, busy);
+                            Report(MyStrings.Drone_DockInstead, other.CustomName, target.CustomName, busy);
                             task.TargetEntityId = other.EntityId;
                             currentJob.Tasks[taskIndex] = task;
                             target = other;
@@ -961,7 +925,7 @@ namespace Automata.Drone
                 CaptureFlightState();
                 OrderGoTo(flightState.Position);   // hold here
             }
-            Report(StrDockWaiting, target.CustomName, busy);
+            Report(MyStrings.Drone_DockWaiting, target.CustomName, busy);
             return TaskStatus.Running;
         }
 
@@ -979,7 +943,7 @@ namespace Automata.Drone
                     if (other != null)
                     {
                         dockWaitTarget = 0;
-                        Report(StrDockUsingInstead, other.CustomName, target.CustomName, ConnectorBusy(target));
+                        Report(MyStrings.Drone_DockInstead, other.CustomName, target.CustomName, ConnectorBusy(target));
                         var t = currentJob.Tasks[taskIndex];
                         t.TargetEntityId = other.EntityId;
                         currentJob.Tasks[taskIndex] = t;
@@ -995,13 +959,13 @@ namespace Automata.Drone
                 if (now - dockWaitFrame > DOCK_WAIT_MAX_TICKS)
                 {
                     dockWaitTarget = 0;
-                    Report(StrDockStillInUseAfter, target.CustomName, DOCK_WAIT_MAX_TICKS / 3600);
+                    Report(MyStrings.Drone_DockStillInUseAfter, target.CustomName, DOCK_WAIT_MAX_TICKS / 3600);
                     return Fail(Orchestrator.TaskFailure.Timeout, TaskStatus.ToReturnHome);
                 }
                 return TaskStatus.Running;
             }
             dockWaitTarget = 0;
-            Report(StrDockFreeAfterS, target.CustomName, (now - dockWaitFrame) / 60.0);
+            Report(MyStrings.Drone_DockFreeAfterS, target.CustomName, (now - dockWaitFrame) / 60.0);
             if (!DockAtConnector(target)) return Fail(Orchestrator.TaskFailure.Unreachable, TaskStatus.ToReturnHome);
             constructionOrder = activeFlightOrder;
             constructionLegs.Clear();
@@ -1063,7 +1027,7 @@ namespace Automata.Drone
             }
             if (stalled <= StallTimeoutTicks) return true;
             LogStall(o, d);
-            NoteSpeedTimeout(Loc.T(StrTask));
+            NoteSpeedTimeout(Loc.T(MyStrings.Drone_Task));
             return false;
         }
 
@@ -1331,7 +1295,7 @@ namespace Automata.Drone
             if (target == null) return false;
             var other = FreeSiblingConnector(target);
             if (other == null) return false;
-            Report(StrDockUsingInstead, other.CustomName, target.CustomName, why);
+            Report(MyStrings.Drone_DockInstead, other.CustomName, target.CustomName, why);
             PlanContactBackOut(Vector3D.Zero, false);
             t.TargetEntityId = other.EntityId;
             currentJob.Tasks[taskIndex] = t;
@@ -2297,7 +2261,7 @@ namespace Automata.Drone
                 roll = MathHelperD.ToDegrees(Math.Atan2(Vector3D.Dot(f.Up, levelRight), Vector3D.Dot(f.Up, levelUp)));
             }
             if (Math.Abs(pitch) <= settings.PGravityAlignMaxPitchDegrees + 1 && Math.Abs(roll) <= settings.PGravityAlignMaxRollDegrees + 1) return true;
-            need = Loc.F(StrPitchRollLimits, pitch, roll,
+            need = Loc.F(MyStrings.Drone_PitchRollLimits, pitch, roll,
                                  settings.PGravityAlignMaxPitchDegrees, settings.PGravityAlignMaxRollDegrees);
             return false;
         }
@@ -2305,7 +2269,7 @@ namespace Automata.Drone
         // Pitch / roll (degrees) of an attitude from level, for the logs
         private string DescribeAttitude(ref MatrixD f)
         {
-            if (!flightState.InGravity) return Loc.T(StrNoGravity);
+            if (!flightState.InGravity) return Loc.T(MyStrings.Drone_NoGravity);
             Vector3D gUp = flightState.GravityUp;
             double pitch = MathHelperD.ToDegrees(Math.Asin(MathHelperD.Clamp(Vector3D.Dot(f.Forward, gUp), -1, 1)));
             Vector3D levelUp = gUp - f.Forward * Vector3D.Dot(gUp, f.Forward);
@@ -2342,8 +2306,8 @@ namespace Automata.Drone
                 if (targets[i].Type == Orchestrator.JobType.Grind) needGrinder = true;
                 else needWelder = true;
             }
-            if (needWelder && !HasTool(Orchestrator.TaskType.WeldBlock)) { ReportProblem(Loc.T(StrConstructionNeedsAWelder)); return false; }
-            if (needGrinder && !HasTool(Orchestrator.TaskType.GrindBlock)) { ReportProblem(Loc.T(StrConstructionNeedsAGrinder)); return false; }
+            if (needWelder && !HasTool(Orchestrator.TaskType.WeldBlock)) { ReportProblem(Loc.T(MyStrings.Drone_ConstructionNeedsAWelder)); return false; }
+            if (needGrinder && !HasTool(Orchestrator.TaskType.GrindBlock)) { ReportProblem(Loc.T(MyStrings.Drone_ConstructionNeedsAGrinder)); return false; }
             return true;
         }
 
@@ -2490,10 +2454,10 @@ namespace Automata.Drone
             {
                 case Orchestrator.ToolTaskCompletionTrigger.Timespan:
                     if (elapsed < task.CompletionValue * 60) return false;
-                    why = Loc.F(StrTaskSeconds, task.CompletionValue);
+                    why = Loc.F(MyStrings.Drone_S, task.CompletionValue);
                     return true;
                 case Orchestrator.ToolTaskCompletionTrigger.DroneInventoryFull:
-                    if (CargoFillRatio() >= 0.95) { why = Loc.T(StrCargoFull); return true; }
+                    if (CargoFillRatio() >= 0.95) { why = Loc.T(MyStrings.Drone_CargoFull); return true; }
                     if (!onBlock) return false;
                     break;
                 case Orchestrator.ToolTaskCompletionTrigger.DroneInventoryEmpty:
@@ -2501,16 +2465,16 @@ namespace Automata.Drone
                     // few parts in a big container are under 0.1 % of it, and the welder pulls them out of the cargo
                     // anyway - welds ended as "cargo empty" the moment they started.
                     if (task.Type == Orchestrator.TaskType.WeldBlock ? !AnyComponentAboard() : CargoFillRatio() <= 0.001)
-                    { why = Loc.T(StrCargoEmpty); return true; }
+                    { why = Loc.T(MyStrings.Drone_CargoEmpty); return true; }
                     if (!onBlock) return false;
                     break;
             }
             bool gridGone;
             var slim = ToolTarget(ref task, out gridGone);
-            if (gridGone) { why = Loc.T(StrGridGone); return true; }
+            if (gridGone) { why = Loc.T(MyStrings.Drone_GridGone); return true; }
             if (task.Completion == Orchestrator.ToolTaskCompletionTrigger.DroneInventoryFull)
             {
-                if (slim == null || slim.IsFullyDismounted) { why = Loc.T(StrDismounted); return true; }
+                if (slim == null || slim.IsFullyDismounted) { why = Loc.T(MyStrings.Drone_Dismounted); return true; }
                 return false;
             }
             if (task.Completion == Orchestrator.ToolTaskCompletionTrigger.DroneInventoryEmpty)
@@ -2518,13 +2482,13 @@ namespace Automata.Drone
                 if (slim == null)
                 {
                     if (task.IsProjected) return false;   // projection: not built yet
-                    why = Loc.T(StrBlockGone);
+                    why = Loc.T(MyStrings.Drone_BlockGone);
                     return true;
                 }
-                if (slim.IsFullIntegrity && !slim.HasDeformation) { why = Loc.T(StrFullIntegrity); return true; }
+                if (slim.IsFullIntegrity && !slim.HasDeformation) { why = Loc.T(MyStrings.Drone_FullIntegrity); return true; }
                 if (!CargoHasAnyOf(slim))
                 {
-                    why = Loc.T(StrNoPartsLeftForIt);
+                    why = Loc.T(MyStrings.Drone_NoPartsLeft);
                     // Not finished: not planned again this trip (it would come straight back here); missing parts in the log
                     tripFailed.Add(new KeyValuePair<long, Vector3I>(task.TargetEntityId, task.TargetBlock.ToVector3I()));
                     missingBuffer.Clear();
@@ -2539,12 +2503,12 @@ namespace Automata.Drone
             switch (task.Completion)
             {
                 case Orchestrator.ToolTaskCompletionTrigger.BlockFullyDismounted:
-                    if (slim == null || slim.IsFullyDismounted) { why = Loc.T(StrDismounted); return true; }
+                    if (slim == null || slim.IsFullyDismounted) { why = Loc.T(MyStrings.Drone_Dismounted); return true; }
                     return false;
                 case Orchestrator.ToolTaskCompletionTrigger.BlockIntegrityPercent:
                     if (slim != null && slim.MaxIntegrity > 0 && slim.Integrity / slim.MaxIntegrity * 100f >= task.CompletionValue)
                     {
-                        why = Loc.F(StrIntegrity, task.CompletionValue);
+                        why = Loc.F(MyStrings.Drone_Integrity, task.CompletionValue);
                         return true;
                     }
                     return false;
@@ -2552,10 +2516,10 @@ namespace Automata.Drone
                     if (slim == null)
                     {
                         if (task.IsProjected) return false;   // gone meanwhile; projections: not built yet
-                        why = Loc.T(StrBlockGone);
+                        why = Loc.T(MyStrings.Drone_BlockGone);
                         return true;
                     }
-                    if (slim.IsFullIntegrity && !slim.HasDeformation) { why = Loc.T(StrFullIntegrity); return true; }
+                    if (slim.IsFullIntegrity && !slim.HasDeformation) { why = Loc.T(MyStrings.Drone_FullIntegrity); return true; }
                     return false;
             }
         }
@@ -2705,8 +2669,8 @@ namespace Automata.Drone
             if (savedSave != null) return;   // its saved job / pending bid come first
             if (cPhase == ConstructionPhase.Running && jobSource == JobSource.Orchestrator && (needsBatteryRecharge || needsHydrogenRefuel))
             {
-                Report(StrJobAbandonedLowPower);
-                StopJob(Loc.T(StrLowPower));   // MonitorPower sends the drone home
+                Report(MyStrings.Drone_JobAbandonedLowPower);
+                StopJob(Loc.T(MyStrings.Drone_LowPower));   // MonitorPower sends the drone home
                 return;
             }
             var queue = AutomataSession.GetMessageQueue();
@@ -2740,7 +2704,7 @@ namespace Automata.Drone
                     {
                         AnnouncerEntityId = award.AnnouncerEntityId, JobId = award.JobId, AuctionId = award.AuctionId,
                         OrchestratorEntityId = awardInbox[i].SenderId, DroneEntityId = _entityId, Outcome = JobOutcome.Declined,
-                        Reason = Loc.T(StrBusy),
+                        Reason = Loc.T(MyStrings.Drone_Busy),
                     });
                     continue;
                 }
@@ -2919,10 +2883,24 @@ namespace Automata.Drone
             return "?";
         }
 
+        private readonly List<IMyCubeGrid> constructGrids = new List<IMyCubeGrid>();
+
+        // Is this drone's construct (mechanical group) the one grid 'gridId' belongs to?
+        private bool OnConstructOf(long gridId)
+        {
+            constructGrids.Clear();
+            MyAPIGateway.GridGroups.GetGroup(block.CubeGrid, GridLinkTypeEnum.Mechanical, constructGrids);
+            bool found = false;
+            for (int i = 0; i < constructGrids.Count && !found; i++) found = constructGrids[i].EntityId == gridId;
+            constructGrids.Clear();
+            return found;
+        }
+
         private string WhyNotJob(Auction auction)
         {
             var caps = BidCapabilities;
             if (auction.OnlyDroneEntityId != 0 && auction.OnlyDroneEntityId != _entityId) return "ordered for another (tagged) drone";
+            if (auction.NoBidGridId != 0 && OnConstructOf(auction.NoBidGridId)) return "ordered by a target designator on this drone's own construct";
             if (batteryPercent == 0 && h2Percent <= 0) return "no power (batteries empty)";
             // Local jobs only (a relay / laser link reaches other bases): not for a job ordered for this drone by name
             string far = OutsideLocalRadius(auction);
@@ -3088,7 +3066,7 @@ namespace Automata.Drone
             reason = report.Reason;
             QueueJobReport(report);
             string label = Orchestrator.JobTypeExtensions.Label(jobAwardType, jobAwardWeld);
-            if (reason != null) Report(StrJobOutcomeReason, currentJob.JobId, outcome, reason, label); else Report(StrJobOutcome, currentJob.JobId, outcome, label);
+            if (reason != null) Report(MyStrings.Drone_Job, currentJob.JobId, outcome, reason, label); else Report(MyStrings.Drone_JobArg0Arg2ColonArg1, currentJob.JobId, outcome, label);
             jobAuctionId = 0;
             jobAnnouncerId = jobOrchestratorId = 0;
             minedOreKg = 0;
