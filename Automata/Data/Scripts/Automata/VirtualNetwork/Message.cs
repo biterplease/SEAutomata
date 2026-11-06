@@ -376,6 +376,9 @@ namespace Automata.VirtualNetwork
         /// job that starts at that station: no undock / dock again to load.</summary>
         [ProtoMember(25)] public long DockedConnectorId;
 
+        /// <summary>Mining: the drone's hull radius across its drill axis (m): how far apart pooled miners bore (0: unknown).</summary>
+        [ProtoMember(26)] public float BoreRadius;
+
     }
 
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
@@ -499,6 +502,26 @@ namespace Automata.VirtualNetwork
         [ProtoMember(15)] public bool PerBlock;
         /// <summary>Keepalives: where the drone was when it sent this (the last known position if it goes silent); null: unknown.</summary>
         [ProtoMember(16)] public Vector3DData LastPosition;
+        /// <summary>Mining: the ore (item key) - counted toward its order even by a surveyor that no longer holds the job.</summary>
+        [ProtoMember(17)] public string Ore;
+        /// <summary>Flight lanes found blocked on the way (the orchestrator redraws them); null: none.</summary>
+        [ProtoMember(18)] public List<LaneObstruction> LaneObstructions;
+        /// <summary>Scout jobs: ore hits its scans found (0: nothing - an order lane made for it is dropped).</summary>
+        [ProtoMember(19)] public int Finds;
+    }
+
+    /// <summary>A stretch of a flight lane a drone found blocked (rock, a tree, a static grid), and the way it flew round it.</summary>
+    [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
+    public class LaneObstruction
+    {
+        [ProtoMember(1)] public long Id;              // UTC ticks it was found (one per drone and obstruction)
+        [ProtoMember(2)] public int Lane;
+        [ProtoMember(3)] public bool AB;
+        [ProtoMember(4)] public byte Kind;            // Pathfinding.FlightLanes.ObstacleKind: 1 rock, 2 a tree, 3 a static grid
+        [ProtoMember(5)] public string What;
+        [ProtoMember(6)] public Vector3DData A;       // the stretch (the lane's slot points either side)
+        [ProtoMember(7)] public Vector3DData B;
+        [ProtoMember(8)] public List<Vector3DData> Detour;   // the way round (null / empty: none found)
     }
 
     /// <summary>A chat line for the player (PLAYER_ALERT): 'Text' is complete, it starts with the name of whoever meant to say it.</summary>

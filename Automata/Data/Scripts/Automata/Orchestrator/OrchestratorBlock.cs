@@ -666,6 +666,7 @@ namespace Automata.Orchestrator
             };
             auctions[auction.AuctionId] = open;
             _auctionJobs[auction.AuctionId] = job;
+            TraceJobLane(ja);
             string label = ja.Type.Label(auction.WeldCategory);
             AddEvent(Loc.F(MyStrings.Orchestrator_JobAuction, label));
             if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: job {1} ({2}) from {3}: auction {4} for {5}", entityId, ja.JobId, label, key.Key, auction.AuctionId, Describe(items));
@@ -1057,7 +1058,6 @@ namespace Automata.Orchestrator
 
         #region Grind / mine: pooled over every drone that bid
         private const int MAX_POOLED_DRONES = 10;     // drones one grind / mine job is split over, at most
-        private const double MINER_SPACING = 8.0;     // m between the bore starts of drones mining one deposit
 
         // A taker (logistics computer with room) and how much room is left in it for this job
         private sealed class TakerRoom { public Bid Bid; public double Room; }
@@ -1198,8 +1198,8 @@ namespace Automata.Orchestrator
         /// <summary>
         /// Mine: the job's amount is an estimate, not a cap, so it goes to as many drones as it takes to carry it (each mines
         /// until full or its spots run out of the ore): the best-ranked drones until their cargo adds up to the job's ore
-        /// volume, at most MAX_POOLED_DRONES. Each one bores from its own start, MINER_SPACING apart around the planned one
-        /// (same deposit), and unloads everything at the taker with the most room left it can dock at (refineries take the
+        /// volume, at most MAX_POOLED_DRONES. Each one gets its own bore (MineLanes: the surveyor's sites - other deposits,
+        /// other ways in - then parallel bores; every bore clear of the others by both hulls), and unloads everything at the taker with the most room left it can dock at (refineries take the
         /// stone). Ice: the ice to a computer with a working O2/H2 generator, the rest to the best refinery that bid
         /// (prototech, then refinery / industrial, then basic: a basic one can't take every ore); one stop when the
         /// generator's computer has as good a refinery, or no other has one.
@@ -1209,14 +1209,8 @@ namespace Automata.Orchestrator
         {
             assignments = null; droneId = 0; droneBid = 0;
             var a = open.Auction;
-            var site = new List<Task>();
-            if (open.Job.Tasks != null)
-                for (int i = 0; i < open.Job.Tasks.Count; i++)
-                {
-                    var t = open.Job.Tasks[i];
-                    if (t.Type == TaskType.NavigateToolTo || t.Type == TaskType.Mine || t.Type == TaskType.BackOut) site.Add(t);
-                }
-            if (site.Count == 0) { why = Loc.T(MyStrings.Orchestrator_TheJobHasNoSite); return false; }
+            var sites = MineSites(open.Job.Tasks);
+            if (sites.Count == 0) { why = Loc.T(MyStrings.Orchestrator_TheJobHasNoSite); return false; }
             var takers = Takers(lcs, a.ComponentsInventory, a.PositionData.ToVector3D());
             if (takers.Count == 0) { why = Loc.T(MyStrings.Orchestrator_NoLogisticsComputerTakes); return false; }
             bool ice = IsIceJob(a);
@@ -1228,16 +1222,17 @@ namespace Automata.Orchestrator
             int twoStops = 0;
             double carried = 0;
             int oreLeft = OreKg(a.ComponentsInventory);   // kg still to be mined: each drone stops there (or when full)
+            var slotDrones = new List<Bid>();
+            var slotKg = new List<int>();
             for (int i = 0; i < ranked.Count && result.Count < MAX_POOLED_DRONES && (result.Count == 0 || carried < total); i++)
             {
                 IOLocationData port, orePort = null;
                 var taker = ice ? IceTakerFor(takers, ranked[i], out port) : TakerFor(takers, ranked[i], out port);
                 if (taker == null) continue;
                 var oreTaker = ice ? RefineryTakerFor(takers, ranked[i], taker, out orePort) : null;
-                var tasks = new List<Task>();
-                int slot = result.Count;
-                for (int k = 0; k < site.Count; k++)
-                    tasks.Add(site[k].Type == TaskType.Mine ? WithOreAmount(site[k], oreLeft) : slot == 0 || site[k].Type != TaskType.NavigateToolTo ? site[k] : OffsetSite(site[k], slot));
+                var tasks = new List<Task>();   // the site goes in front (MineLanes, below)
+                slotDrones.Add(ranked[i]);
+                slotKg.Add(oreLeft);
                 tasks.Add(DockTask(port));
                 tasks.Add(Task.Unload(a.ComponentsInventory));   // every ore aboard, or (another unload follows) the ice only
                 if (oreTaker != null)
@@ -1255,8 +1250,19 @@ namespace Automata.Orchestrator
                 taker.Room -= TripVolume(ranked[i]);
             }
             if (result.Count == 0) { why = Loc.F(MyStrings.Orchestrator_NoDroneHasAConnectorForALogistics, DockFit.Describe(takers[0].Bid.DockSite)); return false; }
+            // Each drone's bore, in front of its tasks; a drone no clear bore is left for is dropped
+            var lanes = MineLanes(sites, slotDrones);
+            for (int s = 0; s < slotDrones.Count; s++)
+            {
+                var list = result[slotDrones[s].EntityId];
+                if (lanes[s] == null) { result.Remove(slotDrones[s].EntityId); continue; }
+                lanes[s][1] = WithOreAmount(lanes[s][1], slotKg[s]);
+                list.InsertRange(0, lanes[s]);
+            }
+            if (result.Count == 0) { why = Loc.T(MyStrings.Orchestrator_TheJobHasNoSite); return false; }
             assignments = result;
-            foreach (var k in result.Keys) { droneId = k; break; }
+            droneId = 0;
+            for (int s = 0; s < slotDrones.Count && droneId == 0; s++) if (result.ContainsKey(slotDrones[s].EntityId)) droneId = slotDrones[s].EntityId;
             droneBid = BidIdOf(drones, droneId);
             why = Loc.F(MyStrings.Orchestrator_DroneOfM3OfOre, result.Count, carried, total, lcsUsed.Count) + (twoStops > 0 ? Loc.F(MyStrings.Orchestrator_DroneIceToTheO2, twoStops) : "");
             return true;
@@ -1280,22 +1286,6 @@ namespace Automata.Orchestrator
             return mine;
         }
 
-        // The k-th extra miner's bore start: around the planned one, across the bore line, MINER_SPACING apart (the drone
-        // keeps the offset for an angled bore: PlanMineSite)
-        private static Task OffsetSite(Task nav, int k)
-        {
-            Vector3D p = nav.Position.ToVector3D(), ap = nav.ApproachFrom.ToVector3D();
-            Vector3D axis = ap - p;
-            if (axis.LengthSquared() < 1e-4) axis = Vector3D.Up;
-            axis.Normalize();
-            Vector3D u = Vector3D.CalculatePerpendicularVector(axis), v = Vector3D.Cross(axis, u);
-            double ang = (k - 1) * Math.PI / 3;   // 6 around the first ring, then the next ring
-            double r = MINER_SPACING * (1 + (k - 1) / 6);
-            Vector3D off = (u * Math.Cos(ang) + v * Math.Sin(ang)) * r;
-            nav.Position = Vector3DData.FromVector3D(p + off);
-            nav.ApproachFrom = Vector3DData.FromVector3D(ap + off);
-            return nav;
-        }
 
         private static bool IsIceJob(Auction a)
         {
@@ -1606,6 +1596,7 @@ namespace Automata.Orchestrator
                 if (r == null || r.OrchestratorEntityId != entityId || r.DroneEntityId != keepaliveInbox[i].SenderId
                     || !AnchorDirectory.IsAllowed(block.OwnerId, keepaliveInbox[i].SenderOwnerId)) continue;
                 droneWatch.Heard(r.DroneEntityId, r.JobId, now, AddEvent, r.LastPosition);
+                ApplyLaneObstructions(r);
                 NoteSeen(r.DroneEntityId, AutomataEntityType.DroneControllerBlock, now);
             }
             keepaliveInbox.Clear();
@@ -1652,6 +1643,10 @@ namespace Automata.Orchestrator
                     if (!AnchorDirectory.IsAllowed(block.OwnerId, reportInbox[i].SenderOwnerId)) continue;
                     NoteSeen(r.DroneEntityId, AutomataEntityType.DroneControllerBlock, now);
                     droneWatch.Done(r.DroneEntityId);
+                    ApplyLaneObstructions(r);
+                    if ((r.JobType == JobType.DesignatorScoutArea || r.JobType == JobType.DesignatorScoutPoint) && Pathfinding.PathfindingManager.Instance != null
+                        && Pathfinding.PathfindingManager.Instance.Lanes != null)
+                        Pathfinding.PathfindingManager.Instance.Lanes.OrderResult(entityId, r.JobId, r.Finds > 0);
                     var key = new KeyValuePair<long, uint>(r.AnnouncerEntityId, r.JobId);
                     ActiveJob active;
                     if (activeJobs.TryGetValue(key, out active)) active.Drones--;

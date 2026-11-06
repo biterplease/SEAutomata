@@ -103,6 +103,17 @@ namespace Automata.Drone
         private int mineRebores;               // rebores queued in this job
         private readonly List<Vector3D> boreLineStarts = new List<Vector3D>();   // this job's bores (drill point start / end)
         private readonly List<Vector3D> boreLineEnds = new List<Vector3D>();
+        private bool boreLane;                 // a pooled miner's lane (Mine task TargetBlock.X = 1): bored along the line as given
+        private Vector3D boreEntryDir;         // the bore's first direction (into the rock)
+        private readonly List<Vector3D> borePath = new List<Vector3D>();   // drill points where the bore began and bent: the way back out
+        private bool boreHold;                 // a grid in the bore ahead: holding where it is (flight control)
+        private int boreHoldFrame, boreHoldLast;   // holding (a grid ahead / for another drone) since, last held; 0: not
+        private int boreAheadCheck;            // RunMine calls until the next look along the bore
+        private const int BORE_AHEAD_EVERY = 2;            // RunMine calls between looks along the bore ahead (20 ticks)
+        private const double BORE_CHECK_BERTH = 0.5;       // m kept round the hull by the checks along a bore (pooled bores run close)
+        #region Timing
+        private const int BORE_HOLD_MAX_TICKS = 90 * 60;   // held in the bore this long (something stays ahead): the bore ends there
+        #endregion
 
         private static Config.ServerConfig.MiningConfig MiningConfig
         {
@@ -130,6 +141,9 @@ namespace Automata.Drone
                     return Fail(Orchestrator.TaskFailure.MissingEquipment, TaskStatus.ToReturnHome);
                 }
                 boreDeposit = task.Position.ToVector3D();
+                borePath.Clear();
+                boreHold = false;
+                boreHoldFrame = 0;
                 boreOre = MyStringHash.NullOrEmpty;
                 boreTargetKg = 0;
                 if (task.Inventory != null)
@@ -144,14 +158,24 @@ namespace Automata.Drone
                 Vector3D live;
                 bool fixedSite = mineSiteFixed;
                 mineSiteFixed = false;
-                if (!LiveDeposit(siteHits, boreDeposit, boreOre, out live) && !(fixedSite && OreWithin(boreDeposit, MINE_NEAR_RADIUS)))
+                // A pooled miner's lane: bored along the line as given (kept clear of the other miners' bores), so the
+                // ore only needs to be found round it
+                boreLane = task.TargetBlock.X == 1 && !fixedSite;
+                if (!LiveDeposit(siteHits, boreDeposit, boreOre, out live) && !(fixedSite && OreWithin(boreDeposit, MINE_NEAR_RADIUS))
+                    && !(boreLane && AnyOre(siteHits, boreOre)))
                 {
                     Report(MyStrings.Drone_MineNoLeft, boreOre.String);
                     return Fail(Orchestrator.TaskFailure.NoOre, TaskStatus.ToReturnHome);
                 }
-                if (!fixedSite) boreDeposit = live;
+                if (!fixedSite && !boreLane) boreDeposit = live;
                 Vector3D tool = ToolPointWorld();
                 if (mineAngled) boreDir = mineAngledDir;
+                else if (boreLane)
+                {
+                    boreDir = boreDeposit - task.ApproachFrom.ToVector3D();
+                    if (boreDir.LengthSquared() < 1) boreDir = flightState.WorldMatrix.Forward;
+                    boreDir.Normalize();
+                }
                 else
                 {
                     boreDir = boreDeposit - tool;
@@ -178,12 +202,18 @@ namespace Automata.Drone
                 oreGainFrame = now;
                 boreStart = tool;
                 boreStartSet = true;
+                boreEntryDir = boreDir;
+                borePath.Add(tool);
+                boreAheadCheck = 0;
                 if (!DispatchBore()) { FinishMine(); return Fail(Orchestrator.TaskFailure.Unreachable, TaskStatus.ToReturnHome); }
                 if (Log.DebugEnabled) Log.Debug("Drone {0}: mine {1}: boring {2:F0} m to the deposit ({3}, {4:F0}° from level), collecting within {5:F1} m of the ore{6}", Entity.EntityId, boreOre, Vector3D.Distance(tool, boreDeposit), mineAngled ? "angled" : "straight", flightState.InGravity ? MathHelperD.ToDegrees(Math.Asin(MathHelperD.Clamp(-Vector3D.Dot(boreDir, flightState.GravityUp), -1, 1))) : 0, boreCollectAt, boreCollecting ? " (there already)" : "");
                 return TaskStatus.Running;
             }
             if (!IsConstructionOrderActive()) { FinishMine(); return TaskStatus.Interrupted; }
             Vector3D at = ToolPointWorld();
+            // Something in the bore ahead (a grid, another drone): held there, never pushed into
+            TaskStatus held;
+            if (BoreHeld(now, at, out held)) return held;
             // Live: the nearest voxel of the ore from the drill point (every 3rd update), or the deposit point itself
             bool boreEndReached = constructionOrder.Arrived && !boreBackingUp;
             if (!boreCollecting && (--boreNearCheck < 0 || boreEndReached))
@@ -215,13 +245,14 @@ namespace Automata.Drone
                     Vector3D want = nearOre + boreDir * 2;
                     Vector3D off = want - boreEnd;
                     double lateral = (off - boreDir * Vector3D.Dot(off, boreDir)).Length();
-                    if (nearDist > MINE_REACH && lateral > MINE_STEER_LATERAL && boreSteers < MINE_STEERS_MAX)
+                    if (!boreLane && nearDist > MINE_REACH && lateral > MINE_STEER_LATERAL && boreSteers < MINE_STEERS_MAX)   // (a lane stays straight)
                     {
                         Vector3D old = boreEnd;
                         boreEnd = want;
                         if (DispatchBore())
                         {
                             boreSteers++;
+                            borePath.Add(at);   // the bore bends here: the way back out too
                             if (Log.DebugEnabled) Log.Debug("Drone {0}: mine: ore voxel {1:F1} m from the drill, {2:F1} m off the bore line: the bore's end moves to it ({3}/{4})", Entity.EntityId, nearDist, lateral, boreSteers, MINE_STEERS_MAX);
                         }
                         else boreEnd = old;
@@ -446,6 +477,196 @@ namespace Automata.Drone
             return found;
         }
 
+        private static bool AnyOre(List<OreHit> hits, MyStringHash ore)
+        {
+            for (int i = 0; i < hits.Count; i++) if (ore == MyStringHash.NullOrEmpty || hits[i].Ore == ore) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Boring, every BORE_AHEAD_EVERY calls: a grid in the rest of the bore (BoreBlockedAhead) holds the drone where it
+        /// is (boreHold), as does the shared-site watch (siteYielding: another drone in the way); held, the bore's clocks
+        /// wait. Held BORE_HOLD_MAX_TICKS: the bore ends there (what it has is delivered). A drone deeper in this bore
+        /// that wants out (backing out, held for this one): this one ends its bore and backs out first. True: 'status'
+        /// is this call's result.
+        /// </summary>
+        private bool BoreHeld(int now, Vector3D at, out TaskStatus status)
+        {
+            status = TaskStatus.Running;
+            if (boreBackingUp) { boreHold = false; boreHoldFrame = 0; return false; }
+            if (--boreAheadCheck < 0)
+            {
+                boreAheadCheck = BORE_AHEAD_EVERY;
+                string what;
+                bool was = boreHold;
+                boreHold = BoreBlockedAhead(at, boreEnd, out what);
+                if (boreHold && !was && Log.DebugEnabled) Log.Debug("Drone {0}: mine: {1} in the bore ahead: holding", Entity.EntityId, what);
+                if (!boreHold && was && Log.DebugEnabled) Log.Debug("Drone {0}: mine: the bore ahead is clear again", Entity.EntityId);
+            }
+            var other = siteYielding ? DroneById(siteYieldFor) : null;
+            if (other != null && other.InBoreBackingOut)
+            {
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: mine: drone {1} deeper in the bore wants out: backing out first", Entity.EntityId, other._entityId);
+                Report(MyStrings.Drone_MineDroneWantsOut, Nicknames.Of(other.block));
+                status = EndBore(true);
+                return true;
+            }
+            if (!boreHold && !siteYielding)
+            {
+                if (boreHoldFrame != 0 && now - boreHoldLast > 60) boreHoldFrame = 0;   // (the watch lets go for an update between its holds)
+                return false;
+            }
+            if (boreHoldFrame == 0) boreHoldFrame = now;
+            boreHoldLast = now;
+            boreProgressFrame = boreGainFrame = oreGainFrame = boreOreBestFrame = now;   // holding is no stall
+            if (now - boreHoldFrame < BORE_HOLD_MAX_TICKS) return true;
+            Report(MyStrings.Drone_MineBoreBlockedS, BORE_HOLD_MAX_TICKS / 60);
+            boreHold = false;
+            boreHoldFrame = 0;
+            status = EndBore(true);
+            return true;
+        }
+
+        /// <summary>
+        /// A grid in the bore from the drill point at 'from' to 'to' (not the drone's own; the rock it bores doesn't
+        /// count): the hull swept along it at its attitude, BORE_CHECK_BERTH round it, its front past the end, as far as
+        /// the drone's instruments see. 'what': its name.
+        /// </summary>
+        private bool BoreBlockedAhead(Vector3D from, Vector3D to, out string what)
+        {
+            what = null;
+            var pm = PathfindingManager.Instance;
+            if (pm == null || localHullBox.Max.X < localHullBox.Min.X || Vector3D.DistanceSquared(from, to) < 0.25) return false;
+            RefreshDroneGrids();
+            PathQuery q;
+            BuildPathQuery(out q);
+            q.NoVoxels = true;
+            q.Berth = BORE_CHECK_BERTH;
+            pm.BeginPlan();
+            Vector3D off = HullCentreWorld - from;
+            Vector3D hit;
+            IMyEntity e;
+            if (!pm.SegmentBlocked(ref q, from + off, to + off, 0, out hit, out e)) return false;
+            what = PathfindingManager.Describe(pm.LastHitBlock) ?? (e != null ? e.DisplayName : "?");
+            return true;
+        }
+
+        // Backing out of its bore (a BackOut after a Mine, the drill point still in past where the bore began)
+        private bool InBoreBackingOut
+        {
+            get
+            {
+                if (currentJob == null || borePath.Count == 0 || taskIndex < 1 || taskIndex >= currentJob.Tasks.Count) return false;
+                if (currentJob.Tasks[taskIndex].Type != Orchestrator.TaskType.BackOut || currentJob.Tasks[taskIndex - 1].Type != Orchestrator.TaskType.Mine) return false;
+                return Vector3D.Dot(ToolPointWorld() - borePath[0], boreEntryDir) > 0.5;
+            }
+        }
+
+        // Boring, or backing out of the bore
+        private bool InBore { get { return boring && !boreBackingUp || InBoreBackingOut; } }
+
+        /// <summary>
+        /// BackOut after a Mine: the way the drill came in - back through the bore's bends to where it began, then out to
+        /// 'target' (attitude held). The rock isn't checked (its own bore); grids are: another drone in the way that
+        /// watches the site (shared-site watch: it holds this one, or backs out first) is waited for; anything else ends
+        /// the way out before it. False: nothing to fly.
+        /// </summary>
+        private bool DispatchBoreBackOut(Vector3D target, Vector3D here, ref ToolMount mount)
+        {
+            var pts = new List<Vector3D>();
+            Vector3D prev = here;
+            for (int i = borePath.Count - 1; i >= 0; i--)
+            {
+                if (Vector3D.DistanceSquared(borePath[i], prev) < 1) continue;
+                pts.Add(borePath[i]);
+                prev = borePath[i];
+            }
+            if (Vector3D.DistanceSquared(target, prev) >= 1) pts.Add(target);
+            var pm = PathfindingManager.Instance;
+            if (pm != null && localHullBox.Max.X >= localHullBox.Min.X)
+            {
+                RefreshDroneGrids();
+                PathQuery q;
+                BuildPathQuery(out q);
+                q.NoVoxels = true;
+                q.Berth = BORE_CHECK_BERTH;
+                Vector3D off = HullCentreWorld - here;
+                Vector3D from = here;
+                for (int i = 0; i < pts.Count; i++)
+                {
+                    pm.BeginPlan();
+                    Vector3D hit;
+                    IMyEntity e;
+                    if (pm.SegmentBlocked(ref q, from + off, pts[i] + off, 0, out hit, out e))
+                    {
+                        string name = PathfindingManager.Describe(pm.LastHitBlock) ?? (e != null ? e.DisplayName : "?");
+                        var drone = DroneOf(e);
+                        if (drone != null && drone.WatchingSharedSite && WatchingSharedSite)
+                        {
+                            if (Log.DebugEnabled) Log.Debug("Drone {0}: back-out along the bore: drone {1} in the way, waiting for it", Entity.EntityId, drone._entityId);
+                            break;
+                        }
+                        Vector3D dir = pts[i] - from;
+                        double len = dir.Length();
+                        dir /= len;
+                        Vector3D dl = Vector3D.TransformNormal(dir, MatrixD.Transpose(flightState.WorldMatrix));
+                        Vector3D h = localHullBox.HalfExtents;
+                        double half = Math.Abs(dl.X) * h.X + Math.Abs(dl.Y) * h.Y + Math.Abs(dl.Z) * h.Z;
+                        double run = MathHelper.Clamp(Vector3D.Dot(hit - (from + off), dir) - half - FREE_RUN_MARGIN, 0, len);
+                        pts.RemoveRange(i, pts.Count - i);
+                        if (run >= BACK_OUT_MIN) pts.Add(from + dir * run);
+                        if (Log.DebugEnabled) Log.Debug("Drone {0}: back-out along the bore shortened: {1} behind", Entity.EntityId, name);
+                        break;
+                    }
+                    from = pts[i];
+                }
+            }
+            if (pts.Count == 0)
+            {
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: no back-out along the bore: something right behind; the next route starts here", Entity.EntityId);
+                return false;
+            }
+            Vector3D fwd = flightState.WorldMatrix.Forward, up = flightState.WorldMatrix.Up;
+            constructionLegs.Clear();
+            FlightOrder last = null;
+            for (int i = 0; i < pts.Count; i++)
+            {
+                FlightOrder o = i == 0 ? OrderGoTo(pts[0], here) : QueueGoTo(pts[i], Pathfinding.WaypointBehavior.FullStop, 0);
+                if (o == null) return false;
+                if (i == 0) o.TransitStart = o.ApproachFrom;
+                MakeDirect(o);
+                o.ReferenceOffset = Vector3DData.FromVector3D(mount.LocalPoint);
+                o.LineTolerance = CONSTRUCTION_LINE_TOLERANCE;
+                o.FinalSpeed = ApproachSpeed;
+                o.ArrivalTolerance = CONSTRUCTION_ROUTE_TOLERANCE;
+                o.LooseArrival = true;
+                MatrixD none = MatrixD.Identity;
+                SetExplicitAttitude(o, true, ref none, fwd, up);
+                if (i < pts.Count - 1) constructionLegs.Add(o);
+                last = o;
+            }
+            constructionOrder = last;
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: backing out along the bore ({1} point(s), {2} bend(s))", Entity.EntityId, pts.Count, Math.Max(0, borePath.Count - 1));
+            return true;
+        }
+
+        // The hull's radius round the drill's axis (bids: how far apart pooled miners bore); 0: not measured / no drill
+        private double BoreCrossRadius()
+        {
+            if (localHullBox.Max.X < localHullBox.Min.X || drillMount.Block == null) return 0;
+            Vector3D f = drillMount.LocalForward;
+            if (f.LengthSquared() < 0.5) return 0;
+            f.Normalize();
+            Vector3D c = localHullBox.Center, h = localHullBox.HalfExtents;
+            double best = 0;
+            for (int i = 0; i < 8; i++)
+            {
+                Vector3D corner = c + new Vector3D((i & 1) != 0 ? h.X : -h.X, (i & 2) != 0 ? h.Y : -h.Y, (i & 4) != 0 ? h.Z : -h.Z) - drillMount.LocalPoint;
+                best = Math.Max(best, (corner - f * Vector3D.Dot(corner, f)).Length());
+            }
+            return best;
+        }
+
         // A voxel of the job's ore within 'distance' of 'point' (the drill point), read live from the voxels
         private bool OreWithin(Vector3D point, double distance)
         {
@@ -486,7 +707,10 @@ namespace Automata.Drone
             MyStringHash ore = MyStringHash.NullOrEmpty;
             if (mine.Inventory != null) foreach (var item in mine.Inventory.GetAllItems()) { ore = item.Key; break; }
             Vector3D deposit = mine.Position.ToVector3D();
-            if (oreDetector != null && !oreDetector.Closed && oreDetector.IsFunctional)
+            // A pooled miner's lane: through its own end as given (not the deposit the detector finds: every lane would
+            // aim there), the way in by rock only (the same choice for its neighbours: the lanes stay side by side)
+            bool lane = mine.TargetBlock.X == 1;
+            if (!lane && oreDetector != null && !oreDetector.Closed && oreDetector.IsFunctional)
             {
                 planHits.Clear();
                 surveyScanner.Cancel();
@@ -511,7 +735,7 @@ namespace Automata.Drone
                 Vector3D dir = (e1 * Math.Cos(az) + e2 * Math.Sin(az)) * Math.Cos(angle) - up * Math.Sin(angle);
                 Vector3D entry;
                 if (!OreScanner.FindSurface(voxel, deposit, -dir, MINE_BORE_SEARCH, out entry, free)) continue;
-                double score = Vector3D.Distance(entry, deposit) + 0.05 * Vector3D.Distance(entry, flightState.Position);
+                double score = Vector3D.Distance(entry, deposit) + (lane ? 0 : 0.05 * Vector3D.Distance(entry, flightState.Position));
                 if (score >= bestScore) continue;
                 bestScore = score;
                 bestDir = dir;
@@ -522,8 +746,8 @@ namespace Automata.Drone
                 if (Log.DebugEnabled) Log.Debug("Drone {0}: mine: no angled way in within {1:F0} m at {2:F0}° ({3} drill): the planned site", Entity.EntityId, MINE_BORE_SEARCH, MathHelperD.ToDegrees(angle), face);
                 return;
             }
-            // Pooled miners: the orchestrator moved this drone's site (OffsetSite) away from the planned one (the Mine
-            // task's ApproachFrom): a parallel bore, the same offset across the line
+            // Pooled miners of an older orchestrator: the site moved away from the planned one (the Mine task's
+            // ApproachFrom): a parallel bore, the same offset across the line (lanes: already their own line, offset 0)
             Vector3D offset = nav.Position.ToVector3D() - mine.ApproachFrom.ToVector3D();
             offset -= bestDir * Vector3D.Dot(offset, bestDir);
             if (offset.LengthSquared() > 0.25)
@@ -571,6 +795,7 @@ namespace Automata.Drone
             Vector3D here = ToolPointWorld();
             var order = OrderGoTo(boreEnd, here);
             if (order == null) return false;
+            siteWatchEnd = boreEnd;   // the shared-site watch covers the whole bore
             order.TransitStart = order.ApproachFrom;
             order.HoldAttitudeInTransit = true;
             order.ReferenceOffset = Vector3DData.FromVector3D(drillMount.LocalPoint);
@@ -618,6 +843,8 @@ namespace Automata.Drone
         private void FinishMine()
         {
             boring = false;
+            boreHold = false;
+            boreHoldFrame = 0;
             boreCollecting = false;   // the survey (suppressed while collecting) runs again
             SetToolEnabled(Orchestrator.TaskType.Mine, false);
             RestoreDrillClearing();
@@ -779,6 +1006,7 @@ namespace Automata.Drone
                 Radius = (float)radius,
                 ScannedUtcTicks = DateTime.UtcNow.Ticks,
             };
+            jobFinds += hits.Count;   // (scout jobs: their order lane is kept when something was found)
             for (int i = 0; i < hits.Count; i++)
                 sweep.Hits.Add(new MiningOreDepositSample { Ore = hits[i].Ore.String, Position = Vector3DData.FromVector3D(hits[i].Position),
                                                              Voxels = hits[i].Voxels, VoxelId = hits[i].VoxelId });

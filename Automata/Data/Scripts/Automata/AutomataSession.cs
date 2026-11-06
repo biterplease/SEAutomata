@@ -156,6 +156,15 @@ namespace Automata
         private readonly HashSet<IDebugDrawable> drawRequests = new HashSet<IDebugDrawable>();
         private readonly List<IDebugDrawable> drawSnapshot = new List<IDebugDrawable>();
 
+        /// <summary>Every overlay this client draws, off (this player's only: overlays are local). How many there were.</summary>
+        public int StopAllDebugDraw()
+        {
+            var all = new List<IDebugDrawable>(drawRequests);   // (stopping one may unregister it)
+            drawRequests.Clear();
+            for (int i = 0; i < all.Count; i++) all[i].StopDebugDraw();
+            return all.Count;
+        }
+
         public void RequestDraw(IDebugDrawable drone, bool enabled)
         {
             if (drone == null) return;
@@ -188,9 +197,7 @@ namespace Automata
             catch (Exception ex)
             {
                 MyLog.Default.WriteLine($"Automata: Draw exception: {ex}");
-                foreach (var drone in drawRequests)
-                    drone.StopDebugDraw();
-                drawRequests.Clear();
+                StopAllDebugDraw();
             }
         }
 

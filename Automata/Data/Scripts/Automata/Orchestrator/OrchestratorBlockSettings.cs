@@ -41,6 +41,8 @@ namespace Automata.Orchestrator
         [ProtoMember(19)] public bool LaneDrawPending;
         [ProtoMember(20)] public string LaneDrawNameAB = "";
         [ProtoMember(21)] public string LaneDrawNameBA = "";
+        [ProtoMember(24)] public System.Collections.Generic.List<double> LaneDrawUpAB = new System.Collections.Generic.List<double>();   // "up" at each point
+        [ProtoMember(25)] public System.Collections.Generic.List<double> LaneDrawUpBA = new System.Collections.Generic.List<double>();
         // ProtoMember 22 (DesignatorCameraId) and 23 (DesignatorLcdTag) moved to the target designator block: never reuse them.
     }
 

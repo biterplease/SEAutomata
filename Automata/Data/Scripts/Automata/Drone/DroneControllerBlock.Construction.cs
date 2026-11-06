@@ -246,6 +246,17 @@ namespace Automata.Drone
                     s.Orchestrator = jobOrchestratorId;
                     s.MinedOreKg = minedOreKg;
                     s.SharedSite = jobSharedSite;
+                    s.Finds = jobFinds;
+                    if (laneObstructions.Count > 0) s.LaneObstructions = new List<VirtualNetwork.LaneObstruction>(laneObstructions);
+                }
+                // In its bore (the Mine begun, or backing out after it): the way back out
+                var t = taskIndex < currentJob.Tasks.Count ? currentJob.Tasks[taskIndex].Type : Orchestrator.TaskType.None;
+                if (borePath.Count > 0 && (t == Orchestrator.TaskType.Mine && taskStarted
+                    || t == Orchestrator.TaskType.BackOut && taskIndex > 0 && currentJob.Tasks[taskIndex - 1].Type == Orchestrator.TaskType.Mine))
+                {
+                    s.BorePath = new List<Vector3DData>(borePath.Count);
+                    for (int i = 0; i < borePath.Count; i++) s.BorePath.Add(Vector3DData.FromVector3D(borePath[i]));
+                    s.BoreEntryDir = Vector3DData.FromVector3D(boreEntryDir);
                 }
             }
             if (Log.DebugEnabled) Log.Debug("Drone {0}: state saved: job {1} at task {2}, pending bid {3}", Entity.EntityId, s.Job != null ? s.Job.JobId : 0, s.TaskIndex, s.PendingBidAuctionId);
@@ -307,7 +318,9 @@ namespace Automata.Drone
         }
 
         // The saved job goes on from the start of the task group it was in: a tool / back-out task from its
-        // NavigateToolTo, a load / unload from the DockAt before it (the drone may have drifted, docked or undocked)
+        // NavigateToolTo, a load / unload from the DockAt before it (the drone may have drifted, docked or undocked).
+        // Saved in its bore: from the BackOut after the Mine, along the saved bore (planning from inside the rock found
+        // no way out: the miners stayed in Error in their bores)
         private void ResumeSavedJob(DroneJobState s)
         {
             bidIdCounter = System.Math.Max(bidIdCounter, s.BidCounter);
@@ -327,7 +340,14 @@ namespace Automata.Drone
             }
             int index = System.Math.Min(System.Math.Max(0, s.TaskIndex), s.Job.Tasks.Count - 1);
             var type = s.Job.Tasks[index].Type;
-            if (s.Job.Tasks[index].Kind == Orchestrator.TaskKind.Tool || type == Orchestrator.TaskType.BackOut)
+            bool boreOut = s.BorePath != null && s.BorePath.Count > 0
+                           && (type == Orchestrator.TaskType.Mine && index + 1 < s.Job.Tasks.Count && s.Job.Tasks[index + 1].Type == Orchestrator.TaskType.BackOut
+                               || type == Orchestrator.TaskType.BackOut && index > 0 && s.Job.Tasks[index - 1].Type == Orchestrator.TaskType.Mine);
+            if (boreOut)
+            {
+                if (type == Orchestrator.TaskType.Mine) index++;
+            }
+            else if (s.Job.Tasks[index].Kind == Orchestrator.TaskKind.Tool || type == Orchestrator.TaskType.BackOut)
             {
                 while (index > 0 && s.Job.Tasks[index].Type != Orchestrator.TaskType.NavigateToolTo) index--;
             }
@@ -344,6 +364,14 @@ namespace Automata.Drone
             jobAwardWeld = s.Job.WeldCategory;
             minedOreKg = s.MinedOreKg;
             jobSharedSite = s.SharedSite && (JobSource)s.Source == JobSource.Orchestrator;
+            jobFinds = s.Finds;
+            if (s.LaneObstructions != null) laneObstructions.AddRange(s.LaneObstructions);
+            if (boreOut)
+            {
+                for (int i = 0; i < s.BorePath.Count; i++) borePath.Add(s.BorePath[i].ToVector3D());
+                boreEntryDir = s.BoreEntryDir.ToVector3D();
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: saved in its bore: backing out along it ({1} point(s))", Entity.EntityId, borePath.Count);
+            }
             jobBlocksDone = s.BlocksDone;
             fieldContinuations = s.FieldContinuations;
             if (Log.DebugEnabled) Log.Debug("Drone {0}: job {1} ({2}) resumed after load at task {3} ({4}), saved at {5}", Entity.EntityId, s.Job.JobId, (JobSource)s.Source, index, s.Job.Tasks[index].Type, s.TaskIndex);

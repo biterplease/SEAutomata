@@ -12,15 +12,17 @@ namespace Automata.Drone
     /// strongest thruster group along the leg, burn to a cruise speed, coast with every thruster at zero (dampeners off),
     /// flip so that group faces the travel direction, burn to brake. The normal controller takes the last
     /// ECO_HANDOVER metres (and anything that doesn't fit: a replan, a leg it can't start cleanly, a flip that comes
-    /// too late). Gyros (power) do the pointing; thrusters (fuel) fire only in the burns and in short drift
-    /// corrections while coasting.
+    /// too late). Gyros (power) do the pointing; the strongest group pushes along the leg (burns, brake); the other faces
+    /// only correct the course (EcoLateralForce: back onto the line, against the sideways speed, outside a deadband) while
+    /// it burns, coasts and brakes - drift alone took a drone out of its lane box into the one coming the other way.
     ///  - Only watched route legs (FlyRoute / Docking routes), not work, dock or attitude-held legs; not anchored to a
     ///    moving grid; not while the drone moves sideways to the leg (a replan mid-flight: normal control for that leg).
     ///  - Runtime only (a load starts the leg again with normal control until the next leg).
     ///
     /// Economy flight, natural gravity (TODO/07, quad-copter). A long route leg is flown with the lift group alone (the
     /// group that pushes against gravity: Up or Down): the drone tilts it with the gyros towards the direction of
-    /// travel, so every other thruster stays at zero. Per tick: velocity error -> wanted acceleration -> thrust vector
+    /// travel; the other faces (not the lift group's axis) only correct the course, as in space. Per tick: velocity
+    /// error -> wanted acceleration -> thrust vector
     /// T = m (a - g) -> attitude (the group along T, heading kept) and throttle (T along the group). The tilt is bounded
     /// (the P-Gravity align limits, and what the group can lift), and so is the speed: the brake is planned with the
     /// horizontal acceleration that tilt gives. The last ECO_G_HANDOVER metres are flown normally.
@@ -71,6 +73,11 @@ namespace Automata.Drone
         private const int ECO_REST_TICKS = 10;           // coasting, pointed and still: the flight tick runs once per this many ticks
         private const double ECO_REST_ALIGN = 0.035;     // rad (~2°): pointed enough to rest
         private const double ECO_REST_SPIN = 0.01;       // rad/s: still enough to rest
+        private const double ECO_LAT_KP = 0.1;           // 1/s: speed back towards the line per m off it...
+        private const double ECO_LAT_SPEED = 5;          // ...at most this (m/s)
+        private const double ECO_LAT_KV = 0.5;           // 1/s: sideways acceleration per m/s of sideways velocity error
+        private const double ECO_LAT_DEADBAND = 0.25;    // m/s: a sideways velocity error under this: the side faces rest (fuel)
+        private const double ECO_LAT_ALONG = 0.7;        // a face pushing this much along the excluded axis doesn't correct
 
         private FlightOrder ecoOrder;
         private EcoPhase ecoPhase;
@@ -96,6 +103,7 @@ namespace Automata.Drone
         private FlightOrder ecoRestOrder;                // coasting: the order whose flight tick rests...
         private int ecoRestUntil;                        // ...until this frame (EcoMaybeRest)
         private bool flightTickSkipped;                  // ticks were skipped (coast rest, dampener hold): per-tick differences restart
+        private bool ecoSideFiring;                      // this tick: faces other than the group correct the course
 
         // Economy flight owns the thrusters from the first burn to the handover: no replan may cut in
         private bool EconomyFlying()
@@ -361,12 +369,13 @@ namespace Automata.Drone
             return true;
         }
 
-        // The thrust of one tick: the lift group alone, as much as T asks along its actual axis
-        private void QuadThrust()
+        // The thrust of one tick: the lift group as much as T asks along its actual axis; the other faces correct the course
+        private void QuadThrust(Vector3D d, Vector3D crossTrack, Vector3D vLat)
         {
             double max = EffectiveMax(ecoGroup);
-            double along = Vector3D.Dot(flightState.WorldMatrix.GetDirectionVector(ecoGroup), ecoThrust);
-            EcoThrust(max > 0 ? MathHelperD.Clamp(along / max, 0, 1) : 0);
+            Vector3D lift = flightState.WorldMatrix.GetDirectionVector(ecoGroup);
+            double along = Vector3D.Dot(lift, ecoThrust);
+            EcoThrust(max > 0 ? MathHelperD.Clamp(along / max, 0, 1) : 0, EcoLateralForce(d, crossTrack, vLat), lift);
         }
         #endregion
 
@@ -442,6 +451,7 @@ namespace Automata.Drone
         {
             if (ecoPhase != EcoPhase.Coast || !ReferenceEquals(ecoOrder, o)) return;
             if (orientationError > ECO_REST_ALIGN || flightState.AngularVelocity.LengthSquared() > ECO_REST_SPIN * ECO_REST_SPIN) return;
+            if (ecoSideFiring) return;   // correcting the course: every tick
             Vector3D d, crossTrack, vLat;
             double len, remaining, vAlong;
             if (!EcoLeg(o, out d, out len, out remaining, out crossTrack, out vAlong, out vLat)) return;
@@ -501,10 +511,10 @@ namespace Automata.Drone
             Vector3D d, crossTrack, vLat;
             double len, remaining, vAlong;
             if (!EcoLeg(o, out d, out len, out remaining, out crossTrack, out vAlong, out vLat)) { CoastThrusters(); return; }
-            if (ecoPhase == EcoPhase.Quad) { QuadThrust(); return; }
+            if (ecoPhase == EcoPhase.Quad) { QuadThrust(d, crossTrack, vLat); return; }
             double vHand = Math.Min(MaxSpeed, Math.Max(ExitSpeedFor(o), ECO_HAND_SPEED));
-            // The one group (ecoGroup) is the only thruster that fires: forward to the cruise speed, and after the flip
-            // the same group against the motion. Everything else stays at zero.
+            // The one group (ecoGroup) pushes along the leg: forward to the cruise speed, and after the flip against the
+            // motion. The other faces only correct the course while it burns, coasts and brakes (not while it turns)
             double throttle = 0;
             switch (ecoPhase)
             {
@@ -532,7 +542,23 @@ namespace Automata.Drone
             // Not pointed (yet): no push, it would go the wrong way
             if (throttle > 0 && Vector3D.Dot(flightState.WorldMatrix.GetDirectionVector(ecoGroup), ecoAim) < Math.Cos(ECO_THRUST_ALIGN))
                 throttle = 0;
-            EcoThrust(throttle * EcoThrottleCap(EffectiveMax(ecoGroup)));
+            bool side = ecoPhase == EcoPhase.Burn || ecoPhase == EcoPhase.Coast || ecoPhase == EcoPhase.Brake;
+            EcoThrust(throttle * EcoThrottleCap(EffectiveMax(ecoGroup)), side ? EcoLateralForce(d, crossTrack, vLat) : Vector3D.Zero, d);
+        }
+
+        /// <summary>
+        /// The force (N, world) the side faces correct the course with: a speed back towards the line from how far off it is
+        /// (ECO_LAT_KP, at most ECO_LAT_SPEED), the sideways velocity brought to it (ECO_LAT_KV); zero within ECO_LAT_DEADBAND.
+        /// </summary>
+        private Vector3D EcoLateralForce(Vector3D d, Vector3D crossTrack, Vector3D vLat)
+        {
+            Vector3D off = crossTrack - d * Vector3D.Dot(crossTrack, d);
+            Vector3D vWant = off * ECO_LAT_KP;
+            double vl = vWant.Length();
+            if (vl > ECO_LAT_SPEED) vWant *= ECO_LAT_SPEED / vl;
+            Vector3D err = vWant - vLat;
+            if (err.Length() < ECO_LAT_DEADBAND) return Vector3D.Zero;
+            return err * (ECO_LAT_KV * physicalMass);
         }
 
         // The group's throttle at full burn under the Max thrust setting (the cap is a share of the strongest face)
@@ -541,10 +567,28 @@ namespace Automata.Drone
             return groupMax > 0 ? MathHelperD.Clamp(ThrustFraction * StrongestFaceThrust() / groupMax, 0, 1) : 1;
         }
 
-        // ecoGroup at 'throttle', every other thruster at zero, dampeners off
-        private void EcoThrust(double throttle)
+        // ecoGroup at 'throttle'; 'side' (N, world) from the faces that don't push along 'exclude' (the leg in space, the lift
+        // axis in gravity), each its share by its own thrust; the rest at zero, dampeners off
+        private void EcoThrust(double throttle, Vector3D side, Vector3D exclude)
         {
-            for (int i = 0; i < 6; i++) SetDirectionalThrustOverride((Base6Directions.Direction)i, i == (int)ecoGroup ? throttle : 0);
+            ecoSideFiring = false;
+            bool any = side.LengthSquared() > 1e-6;
+            for (int i = 0; i < 6; i++)
+            {
+                var face = (Base6Directions.Direction)i;
+                double t = i == (int)ecoGroup ? throttle : 0;
+                if (any)
+                {
+                    Vector3D push = flightState.WorldMatrix.GetDirectionVector(face);
+                    double f = Vector3D.Dot(side, push), max = EffectiveMax(face);
+                    if (f > 0 && max > 0 && Math.Abs(Vector3D.Dot(push, exclude)) < ECO_LAT_ALONG)
+                    {
+                        t = Math.Min(EcoThrottleCap(max), t + f / max);
+                        ecoSideFiring = true;
+                    }
+                }
+                SetDirectionalThrustOverride(face, t);
+            }
             thrustOverridesActive = true;
             if (shipController != null && shipController.DampenersOverride) shipController.DampenersOverride = false;
             ResetIntegralTerms();

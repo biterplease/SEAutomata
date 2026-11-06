@@ -36,6 +36,8 @@ namespace Automata.Pathfinding
         public double MaxPitch;
         /// <summary>Legs get the attitude of their direction (nose = controller forward), within MaxPitch.</summary>
         public bool AlignToRoute;
+        /// <summary>In gravity: legs fly level (no pitch, thrust down along gravity); MaxPitch still bounds held attitudes.</summary>
+        public bool LevelLegs;
         /// <summary>m above the surface for the route between take-off and landing (planets; 0 = none).</summary>
         public double MinAltitude;
         /// <summary>The goal may be right next to something (a point the player picked): no berth beyond it.</summary>
@@ -58,6 +60,8 @@ namespace Automata.Pathfinding
         public Vector3I IgnoreMin, IgnoreMax;
         /// <summary>The berth counts everywhere, also where the hull starts / ends (work site way in).</summary>
         public bool StrictEnds;
+        /// <summary>Rock is no obstacle (a drone checking its own bore for grids).</summary>
+        public bool NoVoxels;
         /// <summary>
         /// Blocks of this grid in the way (their cell boxes) are checked once more against their real shape - rays
         /// through the swept box against the grid's physics (slopes, panels, thin models): only a ray hitting inside the
@@ -150,6 +154,8 @@ namespace Automata.Pathfinding
         public RouteMemory Memory { get; private set; }
         /// <summary>Directional flight lanes; null on clients.</summary>
         public FlightLanes Lanes { get; private set; }
+        /// <summary>Asteroid area sweeps' orbits, mapped once per order for its drones; null on clients.</summary>
+        public SweepCache Sweeps { get; private set; }
         internal LocalScene LiveScene { get { return liveScene; } }
         /// <summary>A worker's planner: set when the world unloads, its search stops at the next check.</summary>
         internal volatile bool CancelSearch;
@@ -169,10 +175,33 @@ namespace Automata.Pathfinding
             {
                 Instance.Lanes = new FlightLanes(config);
                 Instance.Lanes.Load(MyAPIGateway.Session != null ? MyAPIGateway.Session.GameplayFrameCounter : 0);
+                Instance.Sweeps = new SweepCache();
+                Instance.Sweeps.Load();
             }
             if (config.PathSearchWorkers > 0 && config.AllowLazyTheta && (MyAPIGateway.Multiplayer == null || MyAPIGateway.Multiplayer.IsServer))
                 Instance.Searches = new PathSearchQueue(Instance, config);
             if (Log.DebugEnabled) Log.Debug("Pathfinding: chain straight line > {0} > {1} > repositioning", config.UsePathMemory ? "memory" : "(memory off)", config.AllowLazyTheta ? "Lazy Theta*" : "(Lazy Theta* off)");
+        }
+
+        /// <summary>
+        /// A route request's lane step: a flight lane of the drone's network that fits start -> goal, and the slot in it its
+        /// size gets (FlightLanes.FindLane): its line appended to 'waypoints'. Wait: no slot free at the entrance yet (the drone
+        /// holds outside and asks again). The drone only sees waypoints.
+        /// </summary>
+        public FlightLanes.Join LaneRoute(long owner, long droneId, Vector3D start, Vector3D goal, Vector3D hullHalf, List<Vector3D> waypoints,
+                                          out string name, out int number, out bool ab)
+        {
+            name = null; number = 0; ab = true;
+            if (Lanes == null) return FlightLanes.Join.None;
+            return Lanes.FindLane(owner, droneId, start, goal, hullHalf, MyAPIGateway.Session.GameplayFrameCounter, waypoints, out name, out number, out ab);
+        }
+
+        /// <summary>What blocks the straight stretch a -> b for the query's hull (null: nothing): a lane obstruction's kind.</summary>
+        public IMyEntity StretchObstacle(ref PathQuery q, Vector3D a, Vector3D b)
+        {
+            Vector3D hit;
+            IMyEntity e;
+            return SegmentBlocked(ref q, a, b, 0.5, out hit, out e) ? e : null;
         }
 
         /// <summary>World save (session SaveData): the memory goes to world storage.</summary>
@@ -180,6 +209,7 @@ namespace Automata.Pathfinding
         {
             if (Memory != null) Memory.Save(frame);
             if (Lanes != null) Lanes.Save(frame);
+            if (Sweeps != null) Sweeps.Save();
         }
 
         public static void Unload()
@@ -244,12 +274,12 @@ namespace Automata.Pathfinding
             return HullFitsOriented(ref q, centre, ref frame, 0);
         }
 
-        /// <summary>Same, the box grown by 'margin' m on every side.</summary>
-        public bool HullFitsOriented(ref PathQuery q, Vector3D centre, ref MatrixD frame, double margin)
+        /// <summary>Same, the box grown by 'margin' m on every side ('voxels' false: asteroid rock doesn't count - a park on it).</summary>
+        public bool HullFitsOriented(ref PathQuery q, Vector3D centre, ref MatrixD frame, double margin, bool voxels = true)
         {
-            if (q.LocalHull.Max.X < q.LocalHull.Min.X) return HullSpaceFree(ref q, centre, HullRadius(ref q));
+            if (q.LocalHull.Max.X < q.LocalHull.Min.X) return HullSpaceFree(ref q, centre, HullRadius(ref q), voxels);
             var box = new MyOrientedBoundingBoxD(centre, q.LocalHull.HalfExtents + new Vector3D(margin), Quaternion.CreateFromRotationMatrix(frame));
-            return BoxFree(ref q, ref box);
+            return BoxFree(ref q, ref box, voxels);
         }
 
         // The hull's horizontal reach and half height about its centre, level ('level': any heading, up = gravity up)
@@ -288,6 +318,8 @@ namespace Automata.Pathfinding
         private const double SWEEP_CHUNK_MIN = 20.0;    // m: long sweeps are checked in pieces (tighter boxes)
         private const int DETOUR_STEPS = 4;             // offsets tried: step, 2x, 4x, 8x
         private const int STAGE1_DETOURS = 3;           // greedy detours before the chain moves on (when Lazy Theta* is there)
+        private const double ARC_STEP_DEGREES = 15;     // asteroid arcs: a point every this many degrees round its centre
+        private const double ARC_MARGIN = 20;           // m an arc keeps over the rock's outer radius, past the hull and clearance
         /// <summary>Turns below this many degrees are flown through at speed (Classify; the drone's attitude-change rule too).</summary>
         public const double RUN_THROUGH_DEGREES = 25;
         // Corner rounding (RoundCorners): sharper turns become an arc of chords, each turning at most CORNER_SEGMENT_DEGREES;
@@ -328,9 +360,7 @@ namespace Automata.Pathfinding
             if (Memory != null) Memory.Update(frame);
             if (Lanes != null)
             {
-                // Idle: nothing planned this tick (or the last), and the simulation keeps up
-                bool idle = frame - lastPlanFrame > 1 && MyAPIGateway.Physics.SimulationRatio > 0.9f;
-                Lanes.Update(this, frame, idle);
+                Lanes.Update(frame);
             }
         }
 
@@ -682,7 +712,7 @@ namespace Automata.Pathfinding
                 doorBlocks.Clear();
                 doorGrids.Clear();
             }
-            if (voxels)
+            if (voxels && !q.NoVoxels)
             {
                 // Asteroids: the hull-sized ray bundle, only where there is one
                 Vector3D vh;
@@ -700,7 +730,14 @@ namespace Automata.Pathfinding
             return true;
         }
 
-        /// <summary>The 5-ray bundle (hull centre + the four sides of the cross-section plus the berth): look-ahead, asteroids.</summary>
+        /// <summary>
+        /// Rays along the leg. Grids (look-ahead, long legs; not with 'voxelsOnly'): the 5-ray bundle (hull centre + the
+        /// four sides of the cross-section plus the berth). Asteroids: the rock bundle (hull centre, the hull's edges and
+        /// corners, the same plus the berth - a rock edge between rays of the 5-ray bundle clipped the hull), only where
+        /// the voxel storage has rock near the swept volume; near where the drone is / arrives only what the hull itself
+        /// would touch counts (as blocks in SegmentBlocked: a drone hovering a few metres off a rock face saw every leg
+        /// along it blocked).
+        /// </summary>
         private bool RaySegmentBlocked(ref PathQuery q, ref MatrixD attitude, Vector3D a, Vector3D b, double skipStart,
                                        out Vector3D hit, out IMyEntity hitEntity, bool extendPastEnd, bool frontBerth, bool voxelsOnly)
         {
@@ -721,32 +758,107 @@ namespace Automata.Pathfinding
             CrossSection(ref q, ref attitude, dir, out side1, out s1, out side2, out s2);
             double berth = Berth(ref q);
             Vector3D halfBox = HalfBox(ref q);
-            double end = Math.Min(len + (extendPastEnd ? HalfSizeAlong(ref attitude, ref halfBox, dir) + (frontBerth ? berth : 0) : 0), seen);
+            double halfAlong = HalfSizeAlong(ref attitude, ref halfBox, dir);
+            double end = Math.Min(len + (extendPastEnd ? halfAlong + (frontBerth ? berth : 0) : 0), seen);
             Vector3D centre = q.HullCentred ? Vector3D.Zero : Vector3D.TransformNormal(q.LocalHull.Center, attitude);
+            double w1 = s1 + berth, w2 = s2 + berth;
             double best = double.MaxValue;
-            for (int r = 0; r < 5; r++)
-            {
-                Vector3D o = centre + (r == 0 ? Vector3D.Zero
-                                     : r == 1 ? side1 * (s1 + berth) : r == 2 ? -side1 * (s1 + berth)
-                                     : r == 3 ? side2 * (s2 + berth) : -side2 * (s2 + berth));
-                Vector3D from = a + o, to = a + o + dir * end;
-                hits.Clear();
-                planRays++;
-                MyAPIGateway.Physics.CastRay(from, to, hits);
-                for (int i = 0; i < hits.Count; i++)
+            // Rock the hull's box already overlaps where it is (a bore, a face it worked at), behind its centre: left
+            // behind, not in the way (as blocks in SegmentBlocked; not at work site way-ins)
+            rockStartSet = !q.StrictEnds;
+            if (rockStartSet) rockStartHull = new MyOrientedBoundingBoxD(a + skipStart * dir + centre, HalfBox(ref q) + 0.5, Quaternion.CreateFromRotationMatrix(attitude));
+            if (!voxelsOnly)
+                for (int r = 0; r < 5; r++)
                 {
-                    var e = hits[i].HitEntity;
-                    if (e == null || !IsObstacle(ref q, e)) continue;
-                    if (voxelsOnly && !IsAsteroid(e.GetTopMostParent())) continue;
-                    double t = Vector3D.Dot(hits[i].Position - from, dir);
-                    if (t < skipStart || t >= best) continue;
-                    best = t;
-                    hit = a + dir * (t + Vector3D.Dot(o, dir));   // along the path of the controller
-                    hitEntity = e.GetTopMostParent();
+                    Vector3D o = centre + (r == 0 ? Vector3D.Zero
+                                         : r == 1 ? side1 * w1 : r == 2 ? -side1 * w1
+                                         : r == 3 ? side2 * w2 : -side2 * w2);
+                    BundleRay(ref q, a, o, dir, end, skipStart, false, double.MinValue, double.MaxValue, ref best, ref hit, ref hitEntity);
+                }
+            if (RockNearSweep(a + centre, dir, skipStart, end, Math.Max(w1, w2)))
+            {
+                double startZone = q.StrictEnds ? double.MinValue : skipStart + halfAlong + berth;
+                double endZone = extendPastEnd && !q.StrictEnds ? len - halfAlong - berth : double.MaxValue;
+                bool inner = Math.Max(s1, s2) >= ROCK_INNER_RING_MIN;
+                for (int r = 0; r < 17; r++)
+                {
+                    if (r >= 9 && !inner) break;
+                    // 0: centre; 1-8: the berth's edges and corners (they count away from the ends only); 9-16: the hull's
+                    int k = r == 0 ? 0 : (r - 1) % 8;
+                    bool outer = r >= 1 && r <= 8;
+                    double u = r == 0 ? 0 : outer ? w1 : s1, v = r == 0 ? 0 : outer ? w2 : s2;
+                    double cu = k == 0 || k == 4 || k == 5 ? 1 : k == 1 || k == 6 || k == 7 ? -1 : 0;
+                    double cv = k == 2 || k == 4 || k == 6 ? 1 : k == 3 || k == 5 || k == 7 ? -1 : 0;
+                    if (r == 0) cu = cv = 0;
+                    Vector3D o = centre + side1 * (cu * u) + side2 * (cv * v);
+                    BundleRay(ref q, a, o, dir, end, skipStart, true, outer ? startZone : double.MinValue, outer ? endZone : double.MaxValue,
+                              ref best, ref hit, ref hitEntity);
                 }
             }
             hits.Clear();
+            rockStartSet = false;
             return best != double.MaxValue;
+        }
+
+        private bool rockStartSet;
+        private MyOrientedBoundingBoxD rockStartHull;
+
+        private const double ROCK_INNER_RING_MIN = 1.0;   // m: smaller hulls have their centre ray only inside the berth ring
+        private const double ROCK_SWEEP_PIECE = 50;      // m: the swept volume asked of the voxel storage in pieces this long...
+        private const int ROCK_SWEEP_PIECES_MAX = 8;      // ...or longer: this many at most
+
+        // One ray of a bundle: from a + o along dir for 'end' m; 'voxels': asteroid hits only, else other obstacles only.
+        // Hits nearer than 'zoneLo' or farther than 'zoneHi' along it don't count (the berth near the ends).
+        private void BundleRay(ref PathQuery q, Vector3D a, Vector3D o, Vector3D dir, double end, double skipStart, bool voxels,
+                               double zoneLo, double zoneHi, ref double best, ref Vector3D hit, ref IMyEntity hitEntity)
+        {
+            Vector3D from = a + o, to = a + o + dir * end;
+            hits.Clear();
+            planRays++;
+            MyAPIGateway.Physics.CastRay(from, to, hits);
+            for (int i = 0; i < hits.Count; i++)
+            {
+                var e = hits[i].HitEntity;
+                if (e == null || !IsObstacle(ref q, e)) continue;
+                if (IsAsteroid(e.GetTopMostParent()) != voxels) continue;
+                if (voxels)
+                {
+                    // From inside rock (a ray starting in the drone's own bore / the rock its box is in): the far side's
+                    // face, facing along the ray - nothing the hull runs into
+                    if (Vector3D.Dot(hits[i].Normal, dir) > 0) continue;
+                    Vector3D hp = hits[i].Position;
+                    if (rockStartSet && rockStartHull.Contains(ref hp) && Vector3D.Dot(hp - rockStartHull.Center, dir) <= 0) continue;
+                }
+                double t = Vector3D.Dot(hits[i].Position - from, dir);
+                if (t < skipStart || t >= best || t < zoneLo || t > zoneHi) continue;
+                best = t;
+                hit = a + dir * (t + Vector3D.Dot(o, dir));   // along the path of the controller
+                hitEntity = e.GetTopMostParent();
+            }
+            hits.Clear();
+        }
+
+        private readonly List<LocalScene.Entry> rockEntries = new List<LocalScene.Entry>();
+
+        // Asteroid rock possibly near the volume swept from c + dir t0 to c + dir t1, 'w' m around the line (the voxel
+        // storage's own test, no voxels read: its box is the asteroid's whole storage cube, the rock is in its middle)
+        private bool RockNearSweep(Vector3D c, Vector3D dir, double t0, double t1, double w)
+        {
+            double piece = Math.Max(ROCK_SWEEP_PIECE, (t1 - t0) / ROCK_SWEEP_PIECES_MAX);
+            for (double p0 = t0; p0 < t1; p0 += piece)
+            {
+                double p1 = Math.Min(t1, p0 + piece);
+                Vector3D e0 = c + dir * p0, e1 = c + dir * p1, grow = new Vector3D(w);
+                var box = new BoundingBoxD(Vector3D.Min(e0, e1) - grow, Vector3D.Max(e0, e1) + grow);
+                scene.Ensure(new BoundingSphereD(box.Center, box.HalfExtents.Length()), frame);
+                scene.Overlapping(ref box, rockEntries, frame);
+                bool rock = false;
+                for (int i = 0; i < rockEntries.Count && !rock; i++)
+                    rock = rockEntries[i].Voxel && RockPossible(rockEntries[i].Entity as MyVoxelBase, ref box);
+                rockEntries.Clear();
+                if (rock) return true;
+            }
+            return false;
         }
 
         private static bool IsObstacle(ref PathQuery q, IMyEntity e)
@@ -985,6 +1097,12 @@ namespace Automata.Pathfinding
 
         public static double HullRadiusOf(ref PathQuery q) { return HullRadius(ref q); }
 
+        /// <summary>The end zone of a leg along 'dir' (unit) at 'attitude': half the hull plus the berth (see SegmentBlocked).</summary>
+        public double EndZoneLength(ref PathQuery q, ref MatrixD attitude, Vector3D dir)
+        {
+            return HullHalfSizeAlong(ref q, ref attitude, dir) + Berth(ref q);
+        }
+
         private static double HullRadius(ref PathQuery q)
         {
             return q.LocalHull.Max.X >= q.LocalHull.Min.X ? q.LocalHull.HalfExtents.Length() : 2.5;
@@ -1051,8 +1169,12 @@ namespace Automata.Pathfinding
             return true;
         }
 
-        /// <summary>No block (that the drone sees, not ignored) intersects 'box'? Grids only. LastHitBlock: the first one.</summary>
-        public bool BoxFree(ref PathQuery q, ref MyOrientedBoundingBoxD box)
+        /// <summary>
+        /// No block (that the drone sees, not ignored) intersects 'box', and no asteroid rock where the drone sees (the box
+        /// centre; 'voxels' false: blocks only - the Lazy Theta* probe tests rock itself)? LastHitBlock: the first block
+        /// (null for rock).
+        /// </summary>
+        public bool BoxFree(ref PathQuery q, ref MyOrientedBoundingBoxD box, bool voxels = true)
         {
             planChecks++;
             LastHitBlock = null;
@@ -1063,7 +1185,12 @@ namespace Automata.Pathfinding
             for (int i = 0; i < entryBuffer.Count && free; i++)
             {
                 var entry = entryBuffer[i];
-                if (entry.Voxel || IsOwn(ref q, entry.Grid)) continue;
+                if (entry.Voxel)
+                {
+                    if (voxels && Seen(ref q, box.Center) && RockInBox(entry.Entity as MyVoxelBase, ref box)) free = false;
+                    continue;
+                }
+                if (IsOwn(ref q, entry.Grid)) continue;
                 var blocks = scene.BlocksOf(entry);
                 if (blocks == null) continue;
                 var grid = entry.Grid;
@@ -1130,9 +1257,10 @@ namespace Automata.Pathfinding
 
         /// <summary>
         /// No block of another grid (built: projections have no physics) within 'radius' of 'centre', among what
-        /// the drone sees? From the scene's block boxes. Voxels are left to the rays / terrain checks.
+        /// the drone sees, and no asteroid rock there (read from the voxel data, when the centre is seen; 'voxels' false:
+        /// blocks only - the Lazy Theta* probe tests rock itself)? Planets are left to the terrain checks.
         /// </summary>
-        public bool HullSpaceFree(ref PathQuery q, Vector3D centre, double radius)
+        public bool HullSpaceFree(ref PathQuery q, Vector3D centre, double radius, bool voxels = true)
         {
             planChecks++;
             LastHitBlock = null;
@@ -1144,7 +1272,12 @@ namespace Automata.Pathfinding
             for (int i = 0; i < entryBuffer.Count && free; i++)
             {
                 var entry = entryBuffer[i];
-                if (entry.Voxel || IsOwn(ref q, entry.Grid)) continue;
+                if (entry.Voxel)
+                {
+                    if (voxels && Seen(ref q, centre) && RockInSphere(entry.Entity as MyVoxelBase, centre, radius)) free = false;
+                    continue;
+                }
+                if (IsOwn(ref q, entry.Grid)) continue;
                 var blocks = scene.BlocksOf(entry);
                 if (blocks == null) continue;
                 var grid = entry.Grid;
@@ -1176,15 +1309,64 @@ namespace Automata.Pathfinding
         /// </summary>
         public bool CheckAhead(ref PathQuery q, Vector3D from, Vector3D to, out Vector3D hit)
         {
+            return CheckAhead(ref q, ref q.Controller, from, to, out hit);
+        }
+
+        /// <summary>Same, the hull in the leg's attitude ('attitude': the one the planner checked the leg with).</summary>
+        public bool CheckAhead(ref PathQuery q, ref MatrixD attitude, Vector3D from, Vector3D to, out Vector3D hit)
+        {
             hit = Vector3D.Zero;
-            if (raysLeft < 5) return false;
-            raysLeft -= 5;
+            // The 5 grid rays always; the rock bundle (up to 17 more) only near an asteroid's rock: charged as cast
+            if (raysLeft < Math.Min(LOOKAHEAD_RAYS_RESERVE, config.RaysPerTick)) return false;
+            int before = planRays;
             IMyEntity e;
-            if (!RaySegmentBlocked(ref q, ref q.Controller, from, to, 0.5, out hit, out e, false, false, false)) return false;
+            bool blocked = RaySegmentBlocked(ref q, ref attitude, from, to, 0.5, out hit, out e, false, false, false);
+            raysLeft -= Math.Max(1, planRays - before);
+            if (!blocked) return false;
             if (!(e is IMyCubeGrid)) return true;
             // A grid: confirmed by the scene check the routes were planned with (same rules where the drone already
             // is), so a route the planner accepted isn't refused here over and over
-            return SegmentBlocked(ref q, ref q.Controller, from, to, 0.5, out hit, out e, false);
+            return SegmentBlocked(ref q, ref attitude, from, to, 0.5, out hit, out e, false);
+        }
+        private const int LOOKAHEAD_RAYS_RESERVE = 22;
+
+        /// <summary>
+        /// Look-ahead along a path mapped beforehand (scout sweeps): grids, trees and anything else with physics along the
+        /// stretch (the 5-ray bundle, hull cross-section plus the berth, in 'attitude'), as far as the drone sees; asteroid
+        /// rock too when 'rock' (a second bundle: the map is coarse; planet voxels never). Rationed like CheckAhead (false
+        /// when the tick's rays are spent).
+        /// </summary>
+        public bool EntitiesAhead(ref PathQuery q, ref MatrixD attitude, Vector3D from, Vector3D to, out Vector3D hit, out IMyEntity hitEntity,
+                                  bool rock = false)
+        {
+            hit = Vector3D.Zero;
+            hitEntity = null;
+            if (offThread || raysLeft < (rock ? 10 : 5)) return false;
+            Vector3D along = to - from;
+            double len = along.Length();
+            if (len < 0.5) return false;
+            Vector3D dir = along / len;
+            double seenFrom, seen;
+            if (!SeenSpan(ref q, from, dir, len, out seenFrom, out seen)) return false;
+            double end = Math.Min(len, seen);
+            if (end <= seenFrom) return false;
+            Vector3D side1, side2;
+            double s1, s2;
+            CrossSection(ref q, ref attitude, dir, out side1, out s1, out side2, out s2);
+            double berth = Berth(ref q);
+            Vector3D centre = q.HullCentred ? Vector3D.Zero : Vector3D.TransformNormal(q.LocalHull.Center, attitude);
+            double w1 = s1 + berth, w2 = s2 + berth, best = double.MaxValue;
+            int before = planRays;
+            for (int pass = 0; pass < (rock ? 2 : 1); pass++)
+                for (int r = 0; r < 5; r++)
+                {
+                    Vector3D o = centre + (r == 0 ? Vector3D.Zero
+                                         : r == 1 ? side1 * w1 : r == 2 ? -side1 * w1
+                                         : r == 3 ? side2 * w2 : -side2 * w2);
+                    BundleRay(ref q, from, o, dir, end, seenFrom, pass == 1, double.MinValue, double.MaxValue, ref best, ref hit, ref hitEntity);
+                }
+            raysLeft -= planRays - before;
+            return best != double.MaxValue;
         }
         #endregion
 
@@ -1214,12 +1396,12 @@ namespace Automata.Pathfinding
         /// drone sees), not rationed like the look-ahead. Grids that aren't moving are confirmed by the scene check the
         /// route was planned with; moving ones (another drone) count as they are.
         /// </summary>
-        public bool LegRaysBlocked(ref PathQuery q, Vector3D from, Vector3D to, out Vector3D hit, out IMyEntity hitEntity)
+        public bool LegRaysBlocked(ref PathQuery q, ref MatrixD attitude, Vector3D from, Vector3D to, out Vector3D hit, out IMyEntity hitEntity)
         {
-            if (!RaySegmentBlocked(ref q, ref q.Controller, from, to, 0.5, out hit, out hitEntity, false, false, false)) return false;
+            if (!RaySegmentBlocked(ref q, ref attitude, from, to, 0.5, out hit, out hitEntity, false, false, false)) return false;
             var grid = hitEntity as IMyCubeGrid;
             if (grid == null || (grid.Physics != null && grid.Physics.LinearVelocity.LengthSquared() > 0.25)) return true;
-            return SegmentBlocked(ref q, ref q.Controller, from, to, 0.5, out hit, out hitEntity, false);
+            return SegmentBlocked(ref q, ref attitude, from, to, 0.5, out hit, out hitEntity, false);
         }
 
         #region Query signature, failed routes, stage time limits
@@ -1240,7 +1422,7 @@ namespace Automata.Pathfinding
                 h = h * 31 + (q.MaxPitch >= 0 ? (int)(q.MaxPitch * 100) : -1);
                 int bits = (q.HullCentred ? 1 : 0) | (q.LooseGoal ? 2 : 0) | (q.StrictEnds ? 4 : 0) | (q.NoHeldTurn ? 8 : 0)
                          | (q.AlignToRoute ? 16 : 0) | (q.SeeAll ? 32 : 0) | (q.GravityUp.LengthSquared() > 0.5 ? 64 : 0)
-                         | (q.RealShapeGrid != null ? 128 : 0) | (q.HoldAttitude ? 256 : 0) | (q.EyesSet ? 512 : 0);
+                         | (q.RealShapeGrid != null ? 128 : 0) | (q.HoldAttitude ? 256 : 0) | (q.EyesSet ? 512 : 0) | (q.LevelLegs ? 1024 : 0);
                 h = h * 31 + bits;
                 if (q.IgnoreGrid != null) h = h * 31 + q.IgnoreGrid.EntityId.GetHashCode() + q.IgnoreMin.GetHashCode() * 7 + q.IgnoreMax.GetHashCode() * 13;
                 if (q.RealShapeGrid != null) h = h * 31 + q.RealShapeGrid.EntityId.GetHashCode();
@@ -1513,6 +1695,61 @@ namespace Automata.Pathfinding
         }
 
         private readonly List<Vector3D> memoryPoints = new List<Vector3D>();
+        private readonly List<Vector3D> roundPoints = new List<Vector3D>();   // an asteroid arc's points
+        private readonly HashSet<long> arcRounded = new HashSet<long>();   // asteroids rounded in this straight stage
+
+        /// <summary>
+        /// Round an asteroid whose body lies across a -> b (the line's point nearest its centre is inside the rock's outer
+        /// radius that way; a bump beside the line is DetourPoint's): points on an arc round its centre, in the plane of a,
+        /// b and the centre, every ARC_STEP_DEGREES, each at the rock's outer radius there and at its neighbours + the hull,
+        /// the clearance and ARC_MARGIN (chords included); first out over a, last over b (radially), when they are lower.
+        /// Shortcut drops the points not needed. The detours (a few hull widths) and the box's top couldn't round a
+        /// few-hundred-metre asteroid: a work site on its far side had no route. False: nothing to round ('pts' empty).
+        /// </summary>
+        private bool AsteroidArc(ref PathQuery q, Vector3D a, Vector3D b, MyVoxelBase v, List<Vector3D> pts)
+        {
+            pts.Clear();
+            BoundingBoxD box = v.PositionComp.WorldAABB;
+            Vector3D c = box.Center;
+            double maxR = box.HalfExtents.Length();
+            Vector3D ab = b - a;
+            double len2 = ab.LengthSquared();
+            if (len2 < 1) return false;
+            Vector3D mc = a + ab * MathHelperD.Clamp(Vector3D.Dot(c - a, ab) / len2, 0, 1) - c;
+            double md = mc.Length();
+            // Passes clear beside the body (a line grazing it - within the hull and clearance - is rounded too: the local
+            // detours couldn't get four scouts onto their orbits, "no way around")
+            if (md > 1 && md > RockRadius(v, c, mc / md, maxR) + HullRadius(ref q) + q.Clearance) return false;
+            Vector3D u = a - c;
+            double ad = u.Length();
+            if (ad < 1) return false;
+            u /= ad;
+            Vector3D w = b - c;
+            double bd = w.Length();
+            Vector3D side = w - u * Vector3D.Dot(w, u);
+            if (side.LengthSquared() < 1) side = md > 1 ? mc - u * Vector3D.Dot(mc, u) : Vector3D.Zero;   // b straight behind a
+            if (side.LengthSquared() < 1e-6) side = Vector3D.CalculatePerpendicularVector(u);
+            side.Normalize();
+            double phi = Math.Atan2(Vector3D.Dot(w, side), Vector3D.Dot(w, u));   // 0..pi
+            int n = Math.Max(1, (int)Math.Ceiling(phi / MathHelperD.ToRadians(ARC_STEP_DEGREES)));
+            double step = phi / n;
+            var r = new double[n + 1];
+            for (int i = 0; i <= n; i++) r[i] = RockRadius(v, c, u * Math.Cos(i * step) + side * Math.Sin(i * step), maxR);
+            double extra = HullRadius(ref q) + q.Clearance + ARC_MARGIN, chord = 1 / Math.Cos(step / 2);
+            double lo = double.MaxValue, hi = 0;
+            for (int i = 0; i <= n; i++)
+            {
+                double ri = Math.Max(r[i], Math.Max(i > 0 ? r[i - 1] : 0, i < n ? r[i + 1] : 0));
+                double radius = (ri + extra) * chord;
+                if (i == 0 && ad >= radius || i == n && bd >= radius) continue;   // a / b out there already
+                pts.Add(c + (u * Math.Cos(i * step) + side * Math.Sin(i * step)) * radius);
+                lo = Math.Min(lo, radius);
+                hi = Math.Max(hi, radius);
+            }
+            if (pts.Count == 0) return false;
+            if (Log.DebugEnabled) Log.Debug("Pathfinding: round asteroid {0}: {1} point(s) over {2:F0}°, {3:F0}-{4:F0} m from its centre", v.EntityId, pts.Count, MathHelperD.ToDegrees(phi), lo, hi);
+            return true;
+        }
 
         // Memory points are hull centres; routes not hull-centred are controller positions
         private static Vector3D HullToController(ref PathQuery q, Vector3D hullCentre)
@@ -1538,6 +1775,7 @@ namespace Automata.Pathfinding
         {
             why = null;
             points.Clear();
+            arcRounded.Clear();
             points.Add(start);
             ShapeForPlanet(ref q, start, goal, points);
             shaped = points.Count > 1;   // planet arcs / altitude points: kept as they are
@@ -1570,6 +1808,14 @@ namespace Automata.Pathfinding
                 if (SegmentBlocked(ref q, ref q.Controller, a, b, 0.5, out hit, out entity, !(toGoal && q.LooseGoal)))
                 {
                     if (++detours > maxDetours) { why = "too many obstacles"; LastBlocker = entity; points.Clear(); return false; }
+                    // An asteroid's body across the line (not a bump beside it): round it, once per asteroid
+                    var rock = entity as MyVoxelBase;
+                    if (rock != null && IsAsteroid(rock) && !arcRounded.Contains(rock.EntityId) && AsteroidArc(ref q, a, b, rock, roundPoints))
+                    {
+                        arcRounded.Add(rock.EntityId);
+                        points.InsertRange(i + 1, roundPoints);
+                        continue;   // a -> the arc's first point next
+                    }
                     Vector3D p;
                     int seenBefore = unseen;   // detour candidates aren't the route: not counted as unseen stretches
                     bool found = DetourPoint(ref q, a, b, hit, entity, out p);
@@ -2043,7 +2289,8 @@ namespace Automata.Pathfinding
                 }
                 h.Normalize();
                 double pitch = Math.Atan2(Vector3D.Dot(dir, g), Vector3D.Dot(dir, h));
-                if (q.MaxPitch >= 0) pitch = MathHelperD.Clamp(pitch, -q.MaxPitch, q.MaxPitch);
+                if (q.LevelLegs) pitch = 0;
+                else if (q.MaxPitch >= 0) pitch = MathHelperD.Clamp(pitch, -q.MaxPitch, q.MaxPitch);
                 fwd = h * Math.Cos(pitch) + g * Math.Sin(pitch);
                 up = g * Math.Cos(pitch) - h * Math.Sin(pitch);
                 return true;

@@ -175,8 +175,11 @@
   <data name="Common_DebugBuildServerThisClient" xml:space="preserve">
     <value>Debug build - server: {0} | this client: {1}</value>
   </data>
-  <data name="Common_DebugDrawOffWithinM" xml:space="preserve">
-    <value>Debug draw off within {0} m: {1} drone route(s), {2} drone field(s), {3} construction field(s), {4} parking area(s).</value>
+  <data name="Common_DebugDrawOffAll" xml:space="preserve">
+    <value>Debug draw off: {0} overlay(s) stopped.</value>
+  </data>
+  <data name="Common_DebugDrawLanesWithinM" xml:space="preserve">
+    <value>Debug draw: {0} lane(s) of your orchestrators within {1} m.</value>
   </data>
   <data name="Common_DebugDrawOnWithinM" xml:space="preserve">
     <value>Debug draw on within {0} m: {1} drone route(s), {2} drone field(s), {3} construction field(s), {4} parking area(s).</value>
@@ -243,9 +246,6 @@
   </data>
   <data name="Common_Logistics" xml:space="preserve">
     <value>Logistics: {0}</value>
-  </data>
-  <data name="Common_LostInLane" xml:space="preserve">
-    <value>{0}: lost in lane {1}</value>
   </data>
   <data name="Common_MaxPitchDeviationTooltip" xml:space="preserve">
     <value>Maximum pitch away from level while aligned to gravity (degrees).</value>
@@ -371,7 +371,7 @@
     <value>Update error: {0}</value>
   </data>
   <data name="Common_UsageAutomataDebugdrawDronenavDroneobs" xml:space="preserve">
-    <value>Usage: /automata debugdraw [dronenav] [droneobs] [ccobs] [park] [off] (none: all)</value>
+    <value>Usage: /automata debugdraw [dronenav] [droneobs] [ccobs] [park] [lanes] [range m: 300 default, 2000 max] [off] (no kind: all; off: everything you draw, anywhere)</value>
   </data>
   <data name="Common_UseBroadcastController" xml:space="preserve">
     <value>Use broadcast controller</value>
@@ -1592,6 +1592,9 @@ Space: burn, cruise, flip-and-burn.</value>
   <data name="Drone_MinAltitudeTooltip" xml:space="preserve">
     <value>P-Gravity: keep altitude above surface. Work requiring lower altitude ignores.</value>
   </data>
+  <data name="Drone_MineBoreBlockedS" xml:space="preserve">
+    <value>Mine: something stays in the bore ahead ({0} s): taking what it has</value>
+  </data>
   <data name="Drone_MineBoreStuckM" xml:space="preserve">
     <value>Mine: bore stuck {0:F0} m from its end{1}</value>
   </data>
@@ -1600,6 +1603,9 @@ Space: burn, cruise, flip-and-burn.</value>
   </data>
   <data name="Drone_MineCargoFull" xml:space="preserve">
     <value>Mine: cargo full</value>
+  </data>
+  <data name="Drone_MineDroneWantsOut" xml:space="preserve">
+    <value>Mine: {0} deeper in the bore wants out: backing out first</value>
   </data>
   <data name="Drone_MineMaxLoadReached" xml:space="preserve">
     <value>Mine: max load reached</value>
@@ -1754,6 +1760,9 @@ Space: burn, cruise, flip-and-burn.</value>
   <data name="Drone_NoPowerToFlyStopped" xml:space="preserve">
     <value>No power to fly: {0}. Stopped; checked again every {1} s</value>
   </data>
+  <data name="Drone_NoProgressOnTheWayStopped" xml:space="preserve">
+    <value>No progress on the way for {0} s: stopped</value>
+  </data>
   <data name="Drone_NoRoomMOff" xml:space="preserve">
     <value>no room {0:F2} m off the connector ({1} within {2:F1} m)</value>
   </data>
@@ -1907,6 +1916,9 @@ NOTE: AI must be disabled to change.</value>
   </data>
   <data name="Drone_PreFlightThrusterThatWere" xml:space="preserve">
     <value>Pre-flight: {0} thruster(s) that were off switched on</value>
+  </data>
+  <data name="Drone_PressedAgainstSomethingOnStopped" xml:space="preserve">
+    <value>Pressed against something on the way, no way round it: stopped</value>
   </data>
   <data name="Drone_QueueWaypoint" xml:space="preserve">
     <value>Queue waypoint</value>
@@ -2108,6 +2120,30 @@ NOTE: AI must be disabled to change.</value>
   </data>
   <data name="Drone_SurveyOreHitM" xml:space="preserve">
     <value>Survey: {0} ore hit(s) ({1:F0} m)</value>
+  </data>
+  <data name="Drone_SweepDone" xml:space="preserve">
+    <value>Sweep done: {0} ore scan(s)</value>
+  </data>
+  <data name="Drone_SweepEndedEarly" xml:space="preserve">
+    <value>Sweep ended early ({0}): {1} ore scan(s)</value>
+  </data>
+  <data name="Drone_SweepMapped" xml:space="preserve">
+    <value>Sweep: {0} mapped: {1:F0} m, {2} point(s), {3} ore scan(s) to take</value>
+  </data>
+  <data name="Drone_SweepNoProgress" xml:space="preserve">
+    <value>no progress</value>
+  </data>
+  <data name="Drone_SweepNoWayOn" xml:space="preserve">
+    <value>no way on</value>
+  </data>
+  <data name="Drone_SweepPressed" xml:space="preserve">
+    <value>pressed against something</value>
+  </data>
+  <data name="Drone_SweepTargetGone" xml:space="preserve">
+    <value>Sweep: the asteroid is gone</value>
+  </data>
+  <data name="Drone_SweepTooManyObstacles" xml:space="preserve">
+    <value>too many obstacles on the way</value>
   </data>
   <data name="Drone_SwitchedOff" xml:space="preserve">
     <value>switched off</value>

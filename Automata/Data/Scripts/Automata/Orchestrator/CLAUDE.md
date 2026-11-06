@@ -68,7 +68,7 @@ Job announcements are queued (de-duplicated per announcer + job id) and auctione
 - Awards are not 1 drone : 1 LC. Weld / logistics already split over several drones (round-robin shares / trips); grind
   and mine are pooled too (`AssignGrind` / `AssignMine`, up to `MAX_POOLED_DRONES` 10). A job bigger than one trip of
   every drone that bid waits up to `AUCTION_POOL_TICKS` (15 s) for more bids (`BidsCoverOneTrip`), then is split over
-  all usable bids, even a single block. Mining amount is an estimate: several miners, sites offset by `MINER_SPACING`.
+  all usable bids, even a single block. Mining amount is an estimate: several miners, one bore each (`MineLanes`, Mining/CLAUDE.md 2026-11-03).
   Sequential weld jobs (2026-10-13, `JobAnnouncement` / `Auction.Sequential`: a construction computer's projection line, each
   block attached to the one before): no pooling wait, and the best-ranked drone with a useful trip share gets every trip
   (up to 64), one after another - other drones would only wait on its blocks and crowd it.
@@ -99,7 +99,7 @@ Job announcements are queued (de-duplicated per announcer + job id) and auctione
 Weld / grind auctions in gravity carry `ToolFaceWeights` (top / side / bottom access of the job's blocks, CC). `ToolReach` scores each bid's best tool over that mix, per face kind: 3 = the tool points into the face with the drone level (top: tool down), 2 = reachable by tilting within its pitch / roll (top with a forward tool needs ~40°), 1 = needs upside down and `CanFlyInverted`, 0.5 = needs more tilt than its limits, 0 = upside down and can't. The value is added to the bid score (scores 0..1, profile bonus 10): the kinds rank above distance / cargo, below the profile. A bid whose value is 0 (nothing of the job reachable) is left out. Tool elevations per face kind mirror the drone's approach tilts (top -90..-40°, side -50..17.5°, bottom 10..90°).
 
 ## Mining award (2026-10-11)
-`AssignMine`: pooled drones as before (OffsetSite); per drone, ice jobs: `IceTakerFor` (generator) then `RefineryTakerFor` (higher refinery tier than the ice taker's, most room on a tie) as a second Dock + Unload. Mining/CLAUDE.md, mining workflow.
+`AssignMine`: pooled drones as before (sites / lanes since 2026-11-03: `OrchestratorBlock.MineSites.cs`); per drone, ice jobs: `IceTakerFor` (generator) then `RefineryTakerFor` (higher refinery tier than the ice taker's, most room on a tie) as a second Dock + Unload. Mining/CLAUDE.md, mining workflow.
 
 ## Shared sites (2026-10-11)
 `IsSharedSite` (QueueWinner): weld / grind awards to several drones, or near (60 m) another weld / grind job in `activeJobs` with drones out, get `AuctionWinnerAnnouncement.SharedSite`; `ActiveJob` keeps the job type and position. Drone side: Drone/CLAUDE.md, shared job sites.

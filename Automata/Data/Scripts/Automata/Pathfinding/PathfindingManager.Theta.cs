@@ -29,6 +29,8 @@ namespace Automata.Pathfinding
     public sealed partial class PathfindingManager
     {
         private const double THETA_UNSEEN_COST = 1.5;     // cost factor through cells the drone can't see
+        private ThetaNode thetaForcedGoal;                 // the goal node when its cell is blocked (see ThetaSearch)
+        private int thetaGoalX, thetaGoalY, thetaGoalZ;
         private const double THETA_CELL_MIN = 1.5;        // m
         private const double THETA_CELL_HULL = 0.75;      // cell size per m of hull radius
 
@@ -494,10 +496,15 @@ namespace Automata.Pathfinding
                     if (CellOf(p, out gx, out gy, out gz)) { goalNode = LeafNode(ref q, gx, gy, gz); if (goalNode != null) target = p; }
                 }
             }
+            thetaForcedGoal = null;
             if (goalNode == null && !far)
             {
-                // The goal next to something (the hull's clearance is counted generously here): its own cell, as it is
+                // The goal next to something (the hull's clearance is counted generously here): its own cell, as it is.
+                // Neighbours offers it from the free cells next to it (LeafNode never returns a blocked cell: the goal was
+                // never queued and every such search spent its whole budget)
                 goalNode = NodeAt(ref q, 0, gx, gy, gz);
+                thetaForcedGoal = goalNode;
+                thetaGoalX = gx; thetaGoalY = gy; thetaGoalZ = gz;
             }
             if (goalNode == null) { why = "no free space towards the goal"; return false; }
             goalNode.Pos = target;
@@ -705,6 +712,8 @@ namespace Automata.Pathfinding
                                     int z = dz < 0 ? z0 - 1 : dz > 0 ? z0 + m : z0 + (int)(m * (l + 0.5) / k);
                                     if (x < 0 || y < 0 || z < 0 || x >= thetaN || y >= thetaN || z >= thetaN) continue;
                                     var leaf = LeafNode(ref q, x, y, z);
+                                    if (leaf == null && thetaForcedGoal != null && x == thetaGoalX && y == thetaGoalY && z == thetaGoalZ)
+                                        leaf = thetaForcedGoal;   // the goal in a blocked cell: reached from a free cell next to it
                                     if (leaf == null || leaf == n || !thetaSeenKeys.Add(leaf.Key)) continue;
                                     thetaNeighbours.Add(leaf);
                                 }
@@ -735,18 +744,22 @@ namespace Automata.Pathfinding
             double hull = tight ? thetaHullTight : thetaHull;
             double reach = (level == 0 ? size * 0.25 : size * 0.8660254) + hull;
             bool seen = Seen(ref q, centre);
+            // Rock is tested where any of the brick is seen (its centre or a corner): a big brick whose centre was out of
+            // view but whose near side is seen rock was "free", the answer went through the rock and was refused
+            bool seenAny = seen || (thetaAsteroids.Count > 0 && SeenCorner(ref q, min, size));
             st = CellState.Free;
             if (thetaHeld)
             {
                 // The hull box in the held attitude, anywhere in the brick / near the cell's centre
                 double grow = reach - hull;
                 var box = new MyOrientedBoundingBoxD(centre, (tight ? thetaBoxHalfTight : thetaBoxHalf) + new Vector3D(grow), thetaRot);
-                if (!BoxFree(ref q, ref box)) st = CellState.Mixed;
+                if (!BoxFree(ref q, ref box, false)) st = CellState.Mixed;
             }
-            else if (!HullSpaceFree(ref q, centre, reach)) st = CellState.Mixed;
-            if (seen && thetaAsteroids.Count > 0)
+            else if (!HullSpaceFree(ref q, centre, reach, false)) st = CellState.Mixed;
+            if (seenAny && thetaAsteroids.Count > 0)
             {
-                var vox = VoxelState(min - new Vector3D(thetaHull), min + new Vector3D(size + thetaHull));
+                // (the escape zone's tight clearance for rock too, as for blocks)
+                var vox = VoxelState(min - new Vector3D(hull), min + new Vector3D(size + hull));
                 if (vox == ContainmentType.Contains && st == CellState.Free) st = CellState.Blocked;
                 else if (vox != ContainmentType.Disjoint) st = CellState.Mixed;
             }
@@ -754,6 +767,14 @@ namespace Automata.Pathfinding
             if (st == CellState.Free && !seen && level == 0) st = CellState.FreeUnseen;
             cache[k] = st;
             return st;
+        }
+
+        // A corner of the brick at 'min' ('size' a side) the drone sees
+        private bool SeenCorner(ref PathQuery q, Vector3D min, double size)
+        {
+            for (int c = 0; c < 8; c++)
+                if (Seen(ref q, min + new Vector3D((c & 1) != 0 ? size : 0, (c & 2) != 0 ? size : 0, (c & 4) != 0 ? size : 0))) return true;
+            return false;
         }
 
         // Asteroids against a world box: Disjoint (no rock), Contains (all rock) or Intersects

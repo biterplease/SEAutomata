@@ -99,6 +99,8 @@ namespace Automata.Drone
             owesReturn = false;            // the job ends with its own way home (FinishJob sets it again if that fails)
             departureFallback = false;     // a fallback rest is not "at rest" for the job's ReturnHome: the usual way is tried first
             jobBlocksDone = 0;
+            jobFinds = 0;
+            laneObstructions.Clear();
             lastJobFailure = null;
             ClearSiteRejects(0, Vector3I.Zero);
             jobSharedSite = false;
@@ -106,10 +108,12 @@ namespace Automata.Drone
             siteYielding = false;
             mineAngled = false;
             mineSiteFixed = false;
-            scoutSkips = 0;
             lastKeepaliveFrame = int.MinValue / 2;   // the first keepalive at once: its announcer starts watching
             mineRebores = 0;
             boreLineStarts.Clear();
+            borePath.Clear();
+            boreHold = false;
+            boreHoldFrame = 0;
             boreLineEnds.Clear();
             fieldContinuations = 0;
             noFieldContinuation = false;
@@ -648,12 +652,12 @@ namespace Automata.Drone
                     }
                     if (routeFailed) return NavigateFailed(Orchestrator.TaskFailure.Unreachable);
                     if (!IsConstructionOrderActive()) return TaskStatus.Interrupted;
-                    if (constructionOrder.Arrived) { scoutSkips = 0; return TaskStatus.Done; }
+                    if (constructionOrder.Arrived) return TaskStatus.Done;
                     // Scouting: a fly-by. Close enough to the waypoint is there (no stop): the scan starts and the drone flies on
                     if (activeFlightOrder == constructionOrder && taskIndex + 1 < currentJob.Tasks.Count
                         && currentJob.Tasks[taskIndex + 1].Type == Orchestrator.TaskType.Survey
                         && Vector3D.DistanceSquared(ReferencePoint(constructionOrder), constructionOrder.Target.ToVector3D()) < SCOUT_PASS_DISTANCE * SCOUT_PASS_DISTANCE)
-                    { scoutSkips = 0; return TaskStatus.Done; }
+                        return TaskStatus.Done;
                     return WatchProgress() ? TaskStatus.Running : NavigateFailed(Orchestrator.TaskFailure.Timeout);
                 }
 
@@ -662,6 +666,9 @@ namespace Automata.Drone
 
                 case Orchestrator.TaskType.Survey:
                     return RunSurvey(starting);
+
+                case Orchestrator.TaskType.Sweep:
+                    return RunSweep(ref task, starting);
 
                 case Orchestrator.TaskType.Engage:
                 case Orchestrator.TaskType.Escort:
@@ -826,43 +833,32 @@ namespace Automata.Drone
         #region Timing
         private const int DOCK_WAIT_MAX_TICKS = 10 * 60 * 60;
         #endregion
-        private const double SCOUT_PASS_DISTANCE = 15;   // m: a scout waypoint this close counts as reached
-        private const int SCOUT_SKIPS_MAX = 3;           // area sweep: waypoints in a row it may skip (unreachable, stalled) before going home
+        private const double SCOUT_PASS_DISTANCE = 15;   // m: a spot check's waypoint this close counts as reached
         private const int SCOUT_SPACE_TIMEOUT_MIN = 120; // s: scout jobs out of natural gravity (asteroids): the stall timeout is at least this...
         private const int SCOUT_SPACE_TIMEOUT_FACTOR = 3;// ...and this x the drone's task timeout
-        private int scoutSkips;
+        private const int SWEEP_SPACE_TIMEOUT_MIN = 300; // s: an asteroid area sweep (full orbits round rough rock): at least this...
+        private const int SWEEP_SPACE_TIMEOUT_FACTOR = 6;// ...and this x the drone's task timeout
 
-        // A NavigateTo that failed. An area sweep's waypoint (a Survey follows): skipped with its scan, up to
-        // SCOUT_SKIPS_MAX in a row (a ring point inside an asteroid's rock ended the whole sweep); otherwise home
-        private bool SweepWaypointActive()
-        {
-            return currentJob != null && currentJob.JobType == Orchestrator.JobType.DesignatorScoutArea
-                   && taskIndex + 1 < currentJob.Tasks.Count && currentJob.Tasks[taskIndex + 1].Type == Orchestrator.TaskType.Survey;
-        }
-
+        // A NavigateTo that failed: home
         private TaskStatus NavigateFailed(Orchestrator.TaskFailure failure)
         {
-            bool sweepPoint = SweepWaypointActive();
-            if (sweepPoint && ++scoutSkips <= SCOUT_SKIPS_MAX)
-            {
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: sweep waypoint {1}/{2} skipped ({3}), {4}/{5} in a row", Entity.EntityId, taskIndex / 2 + 1, currentJob.Tasks.Count / 2, failure, scoutSkips, SCOUT_SKIPS_MAX);
-                routeFailed = false;
-                ClearFlightOrder();
-                return Fail(failure, TaskStatus.SkipBlock);
-            }
             return Fail(failure, TaskStatus.ToReturnHome);
         }
 
-        // The stall timeout: the drone's task timeout; scout jobs out of natural gravity get longer (long legs between
-        // asteroid ring points, the turn to face each one)
+        // The stall timeout: the drone's task timeout; scout jobs out of natural gravity get longer (long flights round
+        // rough rock: a sweep's mapped path, a spot check's standoff point)
         private int StallTimeoutTicks
         {
             get
             {
                 int t = TaskTimeoutTicks;
-                if (currentJob != null && !flightState.InGravity
-                    && (currentJob.JobType == Orchestrator.JobType.DesignatorScoutArea || currentJob.JobType == Orchestrator.JobType.DesignatorScoutPoint))
-                    t = Math.Max(t * SCOUT_SPACE_TIMEOUT_FACTOR, SCOUT_SPACE_TIMEOUT_MIN * 60);
+                if (currentJob != null && !flightState.InGravity)
+                {
+                    if (currentJob.JobType == Orchestrator.JobType.DesignatorScoutArea)
+                        t = Math.Max(t * SWEEP_SPACE_TIMEOUT_FACTOR, SWEEP_SPACE_TIMEOUT_MIN * 60);
+                    else if (currentJob.JobType == Orchestrator.JobType.DesignatorScoutPoint)
+                        t = Math.Max(t * SCOUT_SPACE_TIMEOUT_FACTOR, SCOUT_SPACE_TIMEOUT_MIN * 60);
+                }
                 return t;
             }
         }
@@ -1619,6 +1615,7 @@ namespace Automata.Drone
                      out frame, out sphereCentre, out approach);
             nav.Position = WorldToTask(anchor, ref am, point);   // the face actually used
             siteWatchCenter = point;
+            siteWatchEnd = point;
             siteWatchCenterSet = true;
             nav.ApproachFrom = WorldToTask(anchor, ref am, approach);
             currentJob.Tasks[taskIndex] = nav;
@@ -1795,6 +1792,8 @@ namespace Automata.Drone
             Vector3D target = TaskToWorld(anchor, ref am, task.Position);
             Vector3D here = flightState.Position + Vector3D.TransformNormal(mount.LocalPoint, flightState.WorldMatrix);
             if (Vector3D.DistanceSquared(here, target) < CONSTRUCTION_ROUTE_TOLERANCE * CONSTRUCTION_ROUTE_TOLERANCE) return false;
+            // Out of a bore: the way the drill came in (bends and all), not straight across to the back-out point
+            if (toolType == Orchestrator.TaskType.Mine && world && borePath.Count > 0) return DispatchBoreBackOut(target, here, ref mount);
             // Backing out blind ran drones into the frame behind them (pinned there, no route from it): as far as it is clear
             {
                 Vector3D dir = target - here;
@@ -2724,13 +2723,11 @@ namespace Automata.Drone
                         job.JobType = tasks[k].Type == Orchestrator.TaskType.GrindBlock ? Orchestrator.JobType.Grind
                                     : tasks[k].Type == Orchestrator.TaskType.Mine ? Orchestrator.JobType.MineOre : Orchestrator.JobType.Weld;
                 }
-                int surveys = 0;
-                for (int k = 0; k < tasks.Count; k++) if (tasks[k].Type == Orchestrator.TaskType.Survey) surveys++;
                 for (int k = 0; k < tasks.Count && job.JobType == Orchestrator.JobType.None; k++)
                 {
-                    // One scan: a spot check; several: an area sweep sector
-                    if (tasks[k].Type == Orchestrator.TaskType.Survey)
-                        job.JobType = surveys > 1 ? Orchestrator.JobType.DesignatorScoutArea : Orchestrator.JobType.DesignatorScoutPoint;
+                    // A scan: a spot check; a Sweep task: an area sweep sector
+                    if (tasks[k].Type == Orchestrator.TaskType.Survey) job.JobType = Orchestrator.JobType.DesignatorScoutPoint;
+                    else if (tasks[k].Type == Orchestrator.TaskType.Sweep) job.JobType = Orchestrator.JobType.DesignatorScoutArea;
                     else if (tasks[k].Type == Orchestrator.TaskType.Engage) job.JobType = Orchestrator.JobType.DesignatorEngage;
                     else if (tasks[k].Type == Orchestrator.TaskType.Escort) job.JobType = Orchestrator.JobType.DesignatorEscort;
                 }
@@ -3009,6 +3006,7 @@ namespace Automata.Drone
                     MaxLoadIn1G = (MyFixedPoint)maxLoad1G,
                     OptimalLoadIn1G = (MyFixedPoint)optimalLoad,   // within the player's max-load setting (gravity)
                     MaxCargoVolume = (MyFixedPoint)DroneCargoFreeVolume(),
+                    BoreRadius = (float)BoreCrossRadius(),
                 },
                 MessageId = IdGenerator.GenerateId(ref jobMessageCounter, _entityId),
                 CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
@@ -3061,7 +3059,12 @@ namespace Automata.Drone
                 AnnouncerEntityId = jobAnnouncerId, JobId = currentJob.JobId, AuctionId = jobAuctionId, OrchestratorEntityId = jobOrchestratorId,
                 DroneEntityId = _entityId, Outcome = outcome, Reason = reason, BlocksDone = jobBlocksDone, BlocksTotal = currentJob.BlockCount,
                 JobType = jobAwardType, OreKg = minedOreKg, WeldCategory = jobAwardWeld,
+                Ore = jobAwardType == Orchestrator.JobType.MineOre ? JobOre() : null,
+                Finds = jobFinds,
+                LaneObstructions = laneObstructions.Count > 0 ? new List<LaneObstruction>(laneObstructions) : null,   // (queued with it: delivered when in range)
             };
+            laneObstructions.Clear();
+            jobFinds = 0;
             FillUnreachable(report);
             reason = report.Reason;
             QueueJobReport(report);
@@ -3073,6 +3076,19 @@ namespace Automata.Drone
         }
 
         private double minedOreKg;   // MineOre: ore unloaded at the job's logistics computer so far
+
+        // MineOre: the ore of the job's Mine task (item key); null: none
+        private string JobOre()
+        {
+            if (currentJob == null || currentJob.Tasks == null) return null;
+            for (int i = 0; i < currentJob.Tasks.Count; i++)
+            {
+                var t = currentJob.Tasks[i];
+                if (t.Type != Orchestrator.TaskType.Mine || t.Inventory == null) continue;
+                foreach (var item in t.Inventory.GetAllItems()) return item.Key.String;
+            }
+            return null;
+        }
 
         private void QueueJobReport(JobStatusReport r)
         {
@@ -3112,6 +3128,7 @@ namespace Automata.Drone
                     DroneEntityId = _entityId, Outcome = JobOutcome.Working, BlocksDone = jobBlocksDone, BlocksTotal = currentJob.BlockCount,
                     JobType = jobAwardType, OreKg = minedOreKg, WeldCategory = jobAwardWeld,
                     LastPosition = Vector3DData.FromVector3D(block.GetPosition()),
+                    LaneObstructions = laneObstructions.Count > 0 ? new List<LaneObstruction>(laneObstructions) : null,   // (at once when in range; the job's report carries them for sure)
                 },
                 MessageId = IdGenerator.GenerateId(ref jobMessageCounter, _entityId),
                 CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),

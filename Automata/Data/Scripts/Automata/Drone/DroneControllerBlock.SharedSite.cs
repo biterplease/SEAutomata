@@ -48,6 +48,7 @@ namespace Automata.Drone
         private int siteYieldStart;
         private long siteYieldFor;
         private Vector3D siteWatchCenter;    // the current work site (DispatchToolTo)
+        private Vector3D siteWatchEnd;       // ...to here: a bore's end (DispatchBore); else the site itself
         private bool siteWatchCenterSet;
         private uint wayAroundJob;           // the work site (job, nav task) chosen again once for a drone holding in the way
         private int wayAroundTask = -1;
@@ -84,16 +85,34 @@ namespace Automata.Drone
             allDrones.Clear();
         }
 
-        // Watching right now: orchestrator job (weld / grind), site shared, near the site
+        // Watching right now: orchestrator job (weld / grind / mine), site shared (mine: always - another job's miners
+        // may bore near), near the site (a bore: anywhere along it)
         private bool WatchingSharedSite
         {
             get
             {
-                return jobSharedSite && currentJob != null && cPhase == ConstructionPhase.Running && jobSource == JobSource.Orchestrator
+                return currentJob != null && (jobSharedSite || currentJob.JobType == Orchestrator.JobType.MineOre)
+                    && cPhase == ConstructionPhase.Running && jobSource == JobSource.Orchestrator
                     && settings != null && settings.OperationMode == OperationMode.ManagedByOrchestrator
                     && IsSiteJob(currentJob.JobType)
-                    && siteWatchCenterSet && Vector3D.DistanceSquared(flightState.Position, siteWatchCenter) < SITE_WATCH_RADIUS * SITE_WATCH_RADIUS;
+                    && siteWatchCenterSet && SegmentDistance(siteWatchCenter, siteWatchEnd, flightState.Position) < SITE_WATCH_RADIUS;
             }
+        }
+
+        private static DroneControllerBlock DroneById(long id)
+        {
+            for (int i = 0; i < allDrones.Count; i++) if (allDrones[i]._entityId == id) return allDrones[i];
+            return null;
+        }
+
+        // The drone whose grids 'e' is part of (null: not a drone of this mod)
+        private static DroneControllerBlock DroneOf(VRage.ModAPI.IMyEntity e)
+        {
+            var grid = e as VRage.Game.ModAPI.IMyCubeGrid;
+            if (grid == null) return null;
+            for (int i = 0; i < allDrones.Count; i++)
+                if (allDrones[i].block != null && !allDrones[i].block.Closed && (allDrones[i].block.CubeGrid == grid || allDrones[i].droneGrids.Contains(grid))) return allDrones[i];
+            return null;
         }
 
         // Jobs worked at a site several drones may share: weld, grind, mine (one deposit)
@@ -209,6 +228,9 @@ namespace Automata.Drone
                 // It holds for this one already: go on; if this move runs into where it holds, a new way (below)
                 if (otherWatches && other.siteYielding && other.siteYieldFor == _entityId)
                 {
+                    // In a bore nobody goes on through a drone that holds for it: both hold, and the one boring backs out
+                    // first (BoreHeld) - one boring on into the other pinned it in (2026-11-03)
+                    if (mineHitsIt && (InBore || other.InBore)) { blocker = other; break; }
                     if (mineHitsIt) holder = other;
                     continue;
                 }

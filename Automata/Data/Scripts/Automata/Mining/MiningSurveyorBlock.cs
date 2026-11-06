@@ -26,7 +26,8 @@ namespace Automata.Mining
     /// (<see cref="OreScanner"/>), and drones' survey data (MINING_DATA_FOUND_ANNOUNCEMENT) when they come into antenna
     /// range. Same ore within the merge distance (50 m) of a known deposit is that deposit; a scan that covers a known
     /// deposit without finding it again marks it depleted. Ore orders ("Ore/Iron:100000", kg) turn into MineOre jobs on
-    /// the nearest known deposit, each counted off its order when announced and settled by the drone's report (what
+    /// the nearest known deposit no other job is on (else the nearest), with more sites for pooled miners (CreateJob:
+    /// other deposits of the ore first, then other ways in), each counted off its order when announced and settled by the drone's report (what
     /// it really unloaded); "keep orders constant" never counts down. Jobs go to orchestrators like a construction
     /// computer's (cached, holds, awards, drone reports). Deposits can be shown to the owner as temporary GPS markers.
     /// Server only; deposits and jobs are kept through a world save.
@@ -46,6 +47,16 @@ namespace Automata.Mining
         private const int KNOWN_ORES_TICKS = 600;                // the terminal's ore list sent to players at most this often
         #endregion
         private const double BORE_SEARCH_METERS = 400;
+        // Sites of one job, for the miners an orchestrator pools on it (one each, in this order: other deposits of the ore,
+        // then other ways in to them; past these the orchestrator bores parallel to them)
+        private const int SITE_DEPOSITS_MAX = 4;                 // deposits of the ore one job offers
+        private const int SITE_ENTRIES_MAX = 3;                  // ways in per deposit (space): the radial one and others
+        private const int SITES_MAX = 8;
+        private const double ENTRY_ANGLE_MIN = 45;               // degrees between two ways in to one deposit
+        private const double ENTRY_FREE = 30;                    // m of open line out of a way in (approach point and on: no closed cave)
+        private const double ENTRY_LONGER = 1.5;                 // another way in: at most this x the radial bore...
+        private const double ENTRY_SLACK = 40;                   // ...plus this
+        private const double MINE_APPROACH_OUT = 20;             // m out along the bore line: the approach / back-out point
         private const double DEPLETION_MARGIN = 10;              // a deposit this close to a scan's edge isn't judged by it
         public const int JOB_SIZE_MIN = 1000, JOB_SIZE_MAX = 200000;
 
@@ -86,6 +97,7 @@ namespace Automata.Mining
             public double Kg;
             public Message<JobAnnouncement> Message;
             public int LastAnnounced = int.MinValue / 2, Assigned, HeldUntil, DronesOut;
+            public List<Vector3D> Used;  // assigned: where the award's miners bore (runtime; null: every site the job offers)
             public double DeliveredKg;   // reported so far by the drones of the award (several miners on one job)
             public bool Announced;
             public bool Pending;   // an announcement is in the network: told whether it was taken once its life is up
@@ -93,6 +105,9 @@ namespace Automata.Mining
         }
         private readonly List<MiningJob> jobs = new List<MiningJob>();
         private int jobCounter, messageCounter, deliveredCount, failedCount;
+        private long lastStateSignature;
+        private int lastStateWrite = int.MinValue / 2;
+        private const int STATE_WRITE_TICKS = 10 * 60;           // the state written into the storage on a change, at most this often
         private MiningSurveyorState pendingState;
 
         private readonly OreScanner scanner = new OreScanner();
@@ -331,6 +346,7 @@ namespace Automata.Mining
                 RestoreState(pendingState);
                 pendingState = null;
             }
+            if (IsServer) SaveStateOnChange(now);
             if (!settings.Enabled || !block.IsWorking)
             {
                 status = !settings.Enabled ? Loc.T(MyStrings.Mining_OffTerminal) : Loc.T(MyStrings.Mining_NotWorkingPowerDamage);
@@ -553,18 +569,98 @@ namespace Automata.Mining
             if (changed) gpsDirty = true;
         }
 
+        // The nearest deposit of the ore no job is on (miners at work or offered it), else the nearest of all
         private Deposit NearestDeposit(MyStringHash ore)
         {
             Vector3D here = block.GetPosition();
-            Deposit best = null;
-            double bestD = double.MaxValue;
+            Deposit best = null, bestFree = null;
+            double bestD = double.MaxValue, bestFreeD = double.MaxValue;
             for (int i = 0; i < deposits.Count; i++)
             {
                 if (deposits[i].Ore != ore) continue;
                 double d = Vector3D.DistanceSquared(deposits[i].Position, here);
                 if (d < bestD) { bestD = d; best = deposits[i]; }
+                if (d < bestFreeD && !DepositBusy(deposits[i])) { bestFreeD = d; bestFree = deposits[i]; }
             }
-            return best;
+            return bestFree ?? best;
+        }
+
+        // A job's miners bore there (awarded), or an auction offers it (every site of the job)
+        private bool DepositBusy(Deposit d)
+        {
+            double merge = MiningConfig.DepositMergeMeters;
+            for (int j = 0; j < jobs.Count; j++)
+            {
+                var job = jobs[j];
+                if (job.Ore != d.Ore) continue;
+                if (job.Used != null)
+                {
+                    for (int k = 0; k < job.Used.Count; k++)
+                        if (Vector3D.DistanceSquared(job.Used[k], d.Position) <= merge * merge) return true;
+                    continue;
+                }
+                var tasks = job.Message != null && job.Message.Payload != null ? job.Message.Payload.Tasks : null;
+                if (tasks == null) continue;
+                for (int k = 0; k < tasks.Count; k++)
+                    if (tasks[k].Type == Orchestrator.TaskType.Mine && Vector3D.DistanceSquared(tasks[k].Position.ToVector3D(), d.Position) <= merge * merge) return true;
+            }
+            return false;
+        }
+
+        private struct WayIn { public Vector3D Surface, Outward; }
+        private static readonly Vector3D[] entryDirs = EntryDirs();
+
+        // 26 directions: the cube's faces, edges and corners
+        private static Vector3D[] EntryDirs()
+        {
+            var list = new List<Vector3D>();
+            for (int x = -1; x <= 1; x++)
+                for (int y = -1; y <= 1; y++)
+                    for (int z = -1; z <= 1; z++)
+                        if (x != 0 || y != 0 || z != 0) list.Add(Vector3D.Normalize(new Vector3D(x, y, z)));
+            return list.ToArray();
+        }
+
+        /// <summary>
+        /// Ways in to a deposit: the radial one first (away from the body's centre: the shortest bore, as before); in space
+        /// also others, shortest first, ENTRY_ANGLE_MIN apart, at most ENTRY_LONGER x the radial bore + ENTRY_SLACK. All
+        /// with ENTRY_FREE m of open line out (not into a closed cave or a hollow mined out before) and through tunnels
+        /// bored before (OreScanner.FindSurface: the radial way began at an old bore's end, its approach inside the tunnel,
+        /// where no hull fits). Empty: no way in.
+        /// </summary>
+        private static List<WayIn> WaysIn(IMyVoxelBase voxel, Vector3D deposit, bool space, int max)
+        {
+            var ways = new List<WayIn>();
+            Vector3D outward = deposit - voxel.PositionComp.WorldAABB.Center;
+            if (outward.LengthSquared() < 1) outward = Vector3D.Up;
+            outward.Normalize();
+            Vector3D surface;
+            if (!OreScanner.FindSurface(voxel, deposit, outward, BORE_SEARCH_METERS, out surface, ENTRY_FREE)) return ways;
+            ways.Add(new WayIn { Surface = surface, Outward = outward });
+            if (!space || max <= 1) return ways;
+            double longest = Math.Min(BORE_SEARCH_METERS, Vector3D.Distance(surface, deposit) * ENTRY_LONGER + ENTRY_SLACK);
+            var lens = new List<double>();
+            var found = new List<WayIn>();
+            for (int i = 0; i < entryDirs.Length; i++)
+            {
+                Vector3D d = entryDirs[i];
+                if (Vector3D.Dot(d, outward) > Math.Cos(MathHelperD.ToRadians(ENTRY_ANGLE_MIN))) continue;
+                Vector3D s;
+                if (!OreScanner.FindSurface(voxel, deposit, d, longest, out s, ENTRY_FREE)) continue;
+                double len = Vector3D.Distance(s, deposit);
+                int at = lens.Count;
+                while (at > 0 && lens[at - 1] > len) at--;
+                lens.Insert(at, len);
+                found.Insert(at, new WayIn { Surface = s, Outward = d });
+            }
+            double cosMin = Math.Cos(MathHelperD.ToRadians(ENTRY_ANGLE_MIN));
+            for (int i = 0; i < found.Count && ways.Count < max; i++)
+            {
+                bool apart = true;
+                for (int k = 0; k < ways.Count && apart; k++) apart = Vector3D.Dot(found[i].Outward, ways[k].Outward) <= cosMin;
+                if (apart) ways.Add(found[i]);
+            }
+            return ways;
         }
 
         private bool DepositKnown(MyStringHash ore, Vector3D at)
@@ -669,6 +765,12 @@ namespace Automata.Mining
             }
         }
 
+        /// <summary>
+        /// A MineOre job on 'deposit'. Its tasks are sites (NavigateToolTo, Mine, BackOut each), the first one as before
+        /// (bored from outside, away from the body's centre: the radial way in); the others for miners an orchestrator pools
+        /// on the job, one site each, in this order: other deposits of the ore no job is on (nearest the first, at most
+        /// SITE_DEPOSITS_MAX), then other ways in to them (space: WaysIn), at most SITES_MAX sites.
+        /// </summary>
         private MiningJob CreateJob(Deposit deposit, double kg, int now)
         {
             IMyEntity e;
@@ -679,32 +781,53 @@ namespace Automata.Mining
                 if (Log.DebugEnabled) Log.Debug("MS {0}: deposit {1} at {2}: its voxel map is gone", entityId, deposit.Ore, deposit.Position);
                 return null;
             }
-            // Bored from outside: away from the asteroid's / planet's centre, through to the deposit
-            Vector3D outward = deposit.Position - voxel.PositionComp.WorldAABB.Center;
-            if (outward.LengthSquared() < 1) outward = Vector3D.Up;
-            outward.Normalize();
-            Vector3D surface;
-            if (!OreScanner.FindSurface(voxel, deposit.Position, outward, BORE_SEARCH_METERS, out surface))
+            float interference;
+            bool space = MyAPIGateway.Physics.CalculateNaturalGravityAt(deposit.Position, out interference).Length() < JobAnnouncement.SPACE_GRAVITY;
+            var first = WaysIn(voxel, deposit.Position, space, SITE_ENTRIES_MAX);
+            if (first.Count == 0)
             {
                 if (Log.DebugEnabled) Log.Debug("MS {0}: deposit {1} at {2}: no way in within {3:F0} m", entityId, deposit.Ore, deposit.Position, BORE_SEARCH_METERS);
                 return null;
             }
-            float interference;
-            float g = MyAPIGateway.Physics.CalculateNaturalGravityAt(surface, out interference).Length();
+            // Other deposits of the ore for pooled miners: nearest this one first, none another job is on
+            var chosen = new List<Deposit> { deposit };
+            var chosenWays = new List<List<WayIn>> { first };
+            var others = new List<Deposit>();
+            for (int i = 0; i < deposits.Count; i++)
+                if (deposits[i] != deposit && deposits[i].Ore == deposit.Ore && !DepositBusy(deposits[i])) others.Add(deposits[i]);
+            others.Sort((a, b) => Vector3D.DistanceSquared(a.Position, deposit.Position).CompareTo(Vector3D.DistanceSquared(b.Position, deposit.Position)));
+            for (int i = 0; i < others.Count && chosen.Count < SITE_DEPOSITS_MAX; i++)
+            {
+                IMyEntity oe;
+                var ov = MyAPIGateway.Entities.TryGetEntityById(others[i].VoxelId, out oe) ? oe as IMyVoxelBase : null;
+                if (ov == null) continue;
+                bool oSpace = MyAPIGateway.Physics.CalculateNaturalGravityAt(others[i].Position, out interference).Length() < JobAnnouncement.SPACE_GRAVITY;
+                var ways = WaysIn(ov, others[i].Position, oSpace, SITE_ENTRIES_MAX);
+                if (ways.Count == 0) continue;
+                chosen.Add(others[i]);
+                chosenWays.Add(ways);
+            }
             var items = new DiscreteInventory();
             items.AddItem(deposit.Ore, (int)Math.Ceiling(kg));
-            Vector3D approach = surface + outward * 20;
-            var mine = Orchestrator.Task.Mine();
-            mine.Position = Vector3DData.FromVector3D(deposit.Position);   // the bore's end
-            mine.ApproachFrom = Vector3DData.FromVector3D(surface);
-            mine.TargetEntityId = deposit.VoxelId;
-            mine.Inventory = items;
-            var tasks = new List<Orchestrator.Task>
-            {
-                Orchestrator.Task.NavigateToolTo(0, surface, approach, g),
-                mine,
-                Orchestrator.Task.BackOut(0, approach),
-            };
+            var tasks = new List<Orchestrator.Task>();
+            for (int w = 0; w < SITE_ENTRIES_MAX && tasks.Count < SITES_MAX * 3; w++)
+                for (int d = 0; d < chosen.Count && tasks.Count < SITES_MAX * 3; d++)
+                {
+                    if (w >= chosenWays[d].Count) continue;
+                    var way = chosenWays[d][w];
+                    float sg = MyAPIGateway.Physics.CalculateNaturalGravityAt(way.Surface, out interference).Length();
+                    Vector3D ap = way.Surface + way.Outward * MINE_APPROACH_OUT;
+                    var m = Orchestrator.Task.Mine();
+                    m.Position = Vector3DData.FromVector3D(chosen[d].Position);   // the bore's end
+                    m.ApproachFrom = Vector3DData.FromVector3D(way.Surface);
+                    m.TargetEntityId = chosen[d].VoxelId;
+                    m.Inventory = items;
+                    tasks.Add(Orchestrator.Task.NavigateToolTo(0, way.Surface, ap, sg));
+                    tasks.Add(m);
+                    tasks.Add(Orchestrator.Task.BackOut(0, ap));
+                }
+            Vector3D surface = first[0].Surface;
+            float g = MyAPIGateway.Physics.CalculateNaturalGravityAt(surface, out interference).Length();
             uint jobId = IdGenerator.GenerateId(ref jobCounter, entityId);
             var ja = new JobAnnouncement
             {
@@ -724,8 +847,15 @@ namespace Automata.Mining
             };
             AddEvent(Loc.F(MyStrings.Mining_JobKgAtMBore, jobId, kg, ShortOre(deposit.Ore),
                                    Vector3D.Distance(deposit.Position, block.GetPosition()), Vector3D.Distance(surface, deposit.Position)));
-            if (Log.DebugEnabled) Log.Debug("MS {0}: job {1}: {2:F0} kg {3} at {4}, bore from {5} ({6:F0} m)", entityId, jobId, kg, deposit.Ore, deposit.Position, surface, Vector3D.Distance(surface, deposit.Position));
+            if (Log.DebugEnabled) Log.Debug("MS {0}: job {1}: {2:F0} kg {3} at {4}, bore from {5} ({6:F0} m); {7} site(s): {8} deposit(s), ways in {9}", entityId, jobId, kg, deposit.Ore, deposit.Position, surface, Vector3D.Distance(surface, deposit.Position), tasks.Count / 3, chosen.Count, WaysText(chosenWays));
             return new MiningJob { JobId = jobId, Ore = deposit.Ore, Deposit = deposit.Position, Kg = kg, Message = AnnouncementMessage(ja) };
+        }
+
+        private static string WaysText(List<List<WayIn>> ways)
+        {
+            var sb = new StringBuilder();
+            for (int i = 0; i < ways.Count; i++) sb.Append(i > 0 ? "/" : "").Append(ways[i].Count);
+            return sb.ToString();
         }
 
         private Message<JobAnnouncement> AnnouncementMessage(JobAnnouncement ja)
@@ -789,6 +919,13 @@ namespace Automata.Mining
                 job.Assigned = now;
                 job.HeldUntil = 0;
                 job.DronesOut = award.TaskAssignments != null ? award.TaskAssignments.Count : 0;
+                // Where its miners bore: those deposits are taken (the job's other sites free for the next job)
+                job.Used = new List<Vector3D>();
+                if (award.TaskAssignments != null)
+                    foreach (var list in award.TaskAssignments.Values)
+                        if (list != null)
+                            for (int k = 0; k < list.Count; k++)
+                                if (list[k].Type == Orchestrator.TaskType.Mine) job.Used.Add(list[k].Position.ToVector3D());
                 job.LastResult = Loc.T(MyStrings.Mining_Assigned);
                 long drone = 0;
                 if (award.TaskAssignments != null) foreach (var k in award.TaskAssignments.Keys) { drone = k; break; }
@@ -826,7 +963,7 @@ namespace Automata.Mining
                         || !AnchorDirectory.IsAllowed(block.OwnerId, reportInbox[i].SenderOwnerId)) continue;
                     droneWatch.Done(r.DroneEntityId);
                     var job = FindJob(r.JobId);
-                    if (job == null) continue;   // (an award never heard here still counts: the drone did the job)
+                    if (job == null) { CountUnheldDelivery(r); continue; }
                     if (job.Assigned == 0) job.DronesOut = Math.Max(job.DronesOut, 1);
                     job.DronesOut--;
                     job.DeliveredKg += Math.Max(0, r.OreKg);
@@ -842,6 +979,23 @@ namespace Automata.Mining
                 }
                 reportInbox.Clear();
             }
+        }
+
+        // A report of a job not held here (settled already, or the surveyor's saved state older than its drones' after a
+        // load: 47,870 kg of Platinum went uncounted): its ore still counts toward the order
+        private void CountUnheldDelivery(JobStatusReport r)
+        {
+            if (r.OreKg <= 0 || string.IsNullOrEmpty(r.Ore)) return;
+            var ore = MyStringHash.GetOrCompute(r.Ore);
+            deliveredCount += (int)r.OreKg;
+            OrderProgress op;
+            if (progress.TryGetValue(ore, out op))
+            {
+                op.DeliveredKg += r.OreKg;
+                if (!settings.KeepOrdersConstant) op.RemainingKg = Math.Max(0, op.RemainingKg - r.OreKg);
+            }
+            AddEvent(Loc.F(MyStrings.Mining_DeliveredDroneOreKg, Nicknames.Of(r.DroneEntityId), ShortOre(ore), r.OreKg));
+            if (Log.DebugEnabled) Log.Debug("MS {0}: job {1} not held here: {2:F0} kg of {3} counted", entityId, r.JobId, r.OreKg, r.Ore);
         }
 
         // Drones still mining for an awarded job: its expiry starts again (a dead / destroyed / lost drone stops sending)
@@ -1008,6 +1162,47 @@ namespace Automata.Mining
         #endregion
 
         #region Save / load
+        // The state into the block's storage when it changed (jobs, orders, deliveries, deposits), not only at world save:
+        // a load brought back the surveyor without its jobs and order progress while its drones held theirs (newer), so their
+        // deliveries weren't counted and the job ids started over
+        private void SaveStateOnChange(int now)
+        {
+            if (now - lastStateWrite < STATE_WRITE_TICKS) return;
+            long sig = StateSignature();
+            if (sig == lastStateSignature) return;
+            lastStateSignature = sig;
+            lastStateWrite = now;
+            WriteStorage();
+        }
+
+        private long StateSignature()
+        {
+            unchecked
+            {
+                long h = jobCounter;
+                h = h * 31 + deliveredCount;
+                h = h * 31 + failedCount;
+                h = h * 31 + deposits.Count;
+                h = h * 31 + depleted.Count;
+                foreach (var kv in progress)
+                {
+                    h = h * 31 + kv.Key.GetHashCode();
+                    h = h * 31 + kv.Value.OrderKg;
+                    h = h * 31 + (long)kv.Value.RemainingKg;
+                    h = h * 31 + (long)kv.Value.DeliveredKg;
+                }
+                for (int i = 0; i < jobs.Count; i++)
+                {
+                    var j = jobs[i];
+                    h = h * 31 + j.JobId;
+                    h = h * 31 + (j.Assigned != 0 ? 1 : 0) + (j.Announced ? 2 : 0) + (j.HeldUntil != 0 ? 4 : 0);
+                    h = h * 31 + j.DronesOut;
+                    h = h * 31 + (long)j.DeliveredKg;
+                }
+                return h;
+            }
+        }
+
         private MiningSurveyorState CaptureState()
         {
             var s = new MiningSurveyorState { JobCounter = jobCounter, MessageCounter = messageCounter, Delivered = deliveredCount, Failed = failedCount };

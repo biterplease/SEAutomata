@@ -49,6 +49,15 @@ namespace Automata.Drone
         [ProtoMember(14)] public double MinedOreKg;
         /// <summary>Orchestrator weld / grind job whose site other drones share (award flag): the shared-site watch.</summary>
         [ProtoMember(15)] public bool SharedSite;
+        /// <summary>
+        /// Saved in a bore (its Mine started, or the BackOut after it): the drill points where the bore began and bent, its
+        /// first direction. After a load the drone backs out along them (a route from inside the rock has no way out).
+        /// </summary>
+        [ProtoMember(16)] public List<Util.Vector3DData> BorePath;
+        [ProtoMember(17)] public Util.Vector3DData BoreEntryDir;
+        /// <summary>Lane obstructions not sent with a job report yet; the scout's finds so far.</summary>
+        [ProtoMember(18)] public List<LaneObstruction> LaneObstructions;
+        [ProtoMember(19)] public int Finds;
     }
 
     /// <summary>What the drone learnt or was in the middle of, that can't be recomputed from the world after a load.</summary>
