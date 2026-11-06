@@ -918,7 +918,7 @@ namespace Automata.Drone
             Vector3D probe = hullCentre + n * 0.5;
             // Under the ground (grid ceilings). Voxel spots: VoxelSpotClear instead (a cave is below the planet's surface)
             if (!voxel && flightState.InGravity && PathfindingManager.HeightAboveTerrain(probe) < q.LocalHull.HalfExtents.Length() * 0.25) return false;
-            return pm.HullFitsOriented(ref q, probe, ref frame);
+            return pm.HullFitsOriented(ref q, probe, ref frame, 0, false);   // blocks only: a spot's rock (its floor, around a pad) is VoxelSpotClear's
         }
 
         // How far out along the surface normal the final approach starts (under a ceiling: no deeper than the ground allows)

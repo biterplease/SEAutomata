@@ -14,8 +14,11 @@ namespace Automata
 {
     /// <summary>
     /// Chat commands (clients / single player / host; registered in AutomataSession.LoadData).
-    /// /automata debugdraw [dronenav] [droneobs] [ccobs] [park] [off]: this player's debug overlays on the Automata
-    /// blocks they own (not faction) within 1000 m. No kind = all. The overlays switch off after the server's
+    /// /automata debugdraw [dronenav] [droneobs] [ccobs] [park] [lanes] [range m] [off]: this player's debug overlays on
+    /// the Automata blocks they own (not faction) within the range (DEBUGDRAW_RANGE_METERS, at most DEBUGDRAW_RANGE_MAX);
+    /// "lanes": the flight lanes of the orchestrators they own with a line within the range (Pathfinding.LaneOverlay: the
+    /// lanes live on the server, a multiplayer client asks it). No kind = all. "off": every overlay this player has on, wherever it is (kinds and range ignored; overlays are
+    /// local to the player's client: nobody else's change). The overlays switch off after the server's
     /// DebugDrawTimeoutSeconds, like the terminal toggles.
     /// </summary>
     public class AutomataSessionCommandHandler
@@ -29,11 +32,14 @@ namespace Automata
         private const string DD_DRONEOBS = "droneobs";
         private const string DD_CCOBS = "ccobs";
         private const string DD_PARK = "park";
+        private const string DD_LANES = "lanes";
         private const string DD_OFF = "off";
         private const double DEBUGDRAW_RANGE_METERS = 300;
+        private const double DEBUGDRAW_RANGE_MAX = 2000;
+        private const double DEBUGDRAW_RANGE_MIN = 10;
 
         [Flags]
-        private enum DrawKinds { None = 0, DroneNav = 1, DroneObs = 2, CcObs = 4, Park = 8, All = 15 }
+        private enum DrawKinds { None = 0, DroneNav = 1, DroneObs = 2, CcObs = 4, Park = 8, Lanes = 16, All = 31 }
 
         private readonly List<IMyEntity> entityBuffer = new List<IMyEntity>();
 
@@ -77,28 +83,52 @@ namespace Automata
 
             DrawKinds kinds = DrawKinds.None;
             bool on = true;
+            double range = DEBUGDRAW_RANGE_METERS;
             for (int i = 1; i < args.Length; i++)
             {
+                int metres;   // (a failed parse sets its out to 0: not 'range' itself, or a word after the number reset it)
+                if (int.TryParse(args[i], out metres))
+                {
+                    range = metres;
+                    continue;
+                }
                 switch (args[i])
                 {
                     case DD_DRONENAV: kinds |= DrawKinds.DroneNav; break;
                     case DD_DRONEOBS: kinds |= DrawKinds.DroneObs; break;
                     case DD_CCOBS: kinds |= DrawKinds.CcObs; break;
                     case DD_PARK: kinds |= DrawKinds.Park; break;
+                    case DD_LANES: kinds |= DrawKinds.Lanes; break;
                     case DD_OFF: on = false; break;
                     default:
                         MyAPIGateway.Utilities.ShowMessage(AutomataSession.MOD_NAME, Loc.T(MyStrings.Common_UsageAutomataDebugdrawDronenavDroneobs));
                         return;
                 }
             }
+            if (!on)
+            {
+                // Everything this player draws, anywhere: overlays live on this client only
+                int stopped = AutomataSession.Instance != null ? AutomataSession.Instance.StopAllDebugDraw() : 0;
+                MyAPIGateway.Utilities.ShowMessage(AutomataSession.MOD_NAME, Loc.F(MyStrings.Common_DebugDrawOffAll, stopped));
+                return;
+            }
             if (kinds == DrawKinds.None) kinds = DrawKinds.All;
-            if (on) Drone.DroneControllerBlock.RequestClientSettings();   // multiplayer clients: the server's draw timeout
+            Drone.DroneControllerBlock.RequestClientSettings();   // multiplayer clients: the server's draw timeout
 
             long me = player.IdentityId;
             Vector3D pos = player.GetPosition();
-            double rangeSq = DEBUGDRAW_RANGE_METERS * DEBUGDRAW_RANGE_METERS;
-            var sphere = new BoundingSphereD(pos, DEBUGDRAW_RANGE_METERS);
+            range = MathHelperD.Clamp(range, DEBUGDRAW_RANGE_MIN, DEBUGDRAW_RANGE_MAX);
+            double rangeSq = range * range;
+            var sphere = new BoundingSphereD(pos, range);
             int nav = 0, obs = 0, cc = 0, park = 0;
+            if ((kinds & DrawKinds.Lanes) != 0)
+            {
+                // The lanes are the server's: drawn here at once (single player / host), else when its answer comes
+                if (MyAPIGateway.Multiplayer.IsServer) Pathfinding.LaneOverlay.Show(Pathfinding.LaneOverlay.Collect(me, pos, range), range);
+                else if (AutomataSession.Instance != null && AutomataSession.Instance.Net != null)
+                    AutomataSession.Instance.Net.SendToServer(new Network.LaneDrawRequestPacket { Centre = Vector3DData.FromVector3D(pos), Range = range });
+                if (kinds == DrawKinds.Lanes) return;
+            }
 
             entityBuffer.Clear();
             entityBuffer.AddRange(MyAPIGateway.Entities.GetTopMostEntitiesInSphere(ref sphere));
@@ -116,13 +146,13 @@ namespace Automata
                     {
                         if ((kinds & DrawKinds.DroneNav) != 0)
                         {
-                            drone.Terminal_DrawNavigationTargets = on;
+                            drone.Terminal_DrawNavigationTargets = true;
                             nav++;
                         }
                         if ((kinds & DrawKinds.DroneObs) != 0)
                         {
-                            drone.Terminal_ObservationAreaDraw = on;
-                            if (!on || drone.Terminal_ObservationAreaDraw) obs++;   // needs a home connector
+                            drone.Terminal_ObservationAreaDraw = true;
+                            if (drone.Terminal_ObservationAreaDraw) obs++;   // needs a home connector
                         }
                         continue;
                     }
@@ -131,7 +161,7 @@ namespace Automata
                         var computer = tb.GameLogic.GetAs<Construction.ConstructionComputerBlock>();
                         if (computer != null)
                         {
-                            computer.Terminal_DrawArea = on;
+                            computer.Terminal_DrawArea = true;
                             cc++;
                             continue;
                         }
@@ -141,15 +171,15 @@ namespace Automata
                         var orchestrator = tb.GameLogic.GetAs<Orchestrator.OrchestratorBlock>();
                         if (orchestrator != null)
                         {
-                            orchestrator.Terminal_StagingDraw = on;
-                            if (!on || orchestrator.Terminal_StagingDraw) park++;   // needs the protocol on, parking area mode
+                            orchestrator.Terminal_StagingDraw = true;
+                            if (orchestrator.Terminal_StagingDraw) park++;   // needs the protocol on, parking area mode
                         }
                     }
                 }
             }
             entityBuffer.Clear();
             MyAPIGateway.Utilities.ShowMessage(AutomataSession.MOD_NAME,
-                Loc.F(on ? MyStrings.Common_DebugDrawOnWithinM : MyStrings.Common_DebugDrawOffWithinM, (int)DEBUGDRAW_RANGE_METERS, nav, obs, cc, park));
+                Loc.F(MyStrings.Common_DebugDrawOnWithinM, (int)range, nav, obs, cc, park));
         }
         #endregion
 

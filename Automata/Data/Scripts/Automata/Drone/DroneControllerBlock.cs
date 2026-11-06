@@ -400,12 +400,12 @@ namespace Automata.Drone
                     else
                     {
                         // Shared site: holding still for another drone (UpdateSharedSite10), the order waits
-                        Vector3D v = RateLimitCommand(siteYielding ? flightState.FrameVelocity : ComputeApproachVelocity(o, orientationError));
+                        Vector3D v = RateLimitCommand(siteYielding || boreHold ? flightState.FrameVelocity : ComputeApproachVelocity(o, orientationError));
                         UpdateTranslation(ref v);
                         WatchPush(v - flightState.FrameVelocity);
                     }
                     KeepPhysicsAwake();
-                    if (!siteYielding) AdvanceFlightPhase(o, orientationError);
+                    if (!siteYielding && !boreHold) AdvanceFlightPhase(o, orientationError);
 
                     Vector3D rWorld = Vector3D.TransformNormal(o.ReferenceOffset.ToVector3D(), flightState.WorldMatrix);
                     double tol = o.ArrivalTolerance;
@@ -469,6 +469,7 @@ namespace Automata.Drone
                     UpdateConnectorPower();
                     CheckLegStart();
                     UpdateRouteWatch();
+                    UpdateFreeFlightWatch();
                     RecordFlight10();
                     RecordTrail10();
                     UpdateRecovery10();
@@ -1450,7 +1451,8 @@ namespace Automata.Drone
                     ? o.ApproachFrom.ToVector3D() - o.TransitStart.ToVector3D()
                     : (o.UseApproachLine ? o.ApproachFrom.ToVector3D() : o.Target.ToVector3D()) - flightState.Position;
                 if (fwd.LengthSquared() < 1e-6) fwd = flightState.WorldMatrix.Forward;
-                up = flightState.InGravity ? flightState.GravityUp : flightState.WorldMatrix.Up;
+                if (flightState.InGravity) { LevelFrame(ref fwd, out up); return; }
+                up = flightState.WorldMatrix.Up;
                 FinalizeFrame(ref fwd, ref up, false);
                 return;
             }
@@ -1467,10 +1469,27 @@ namespace Automata.Drone
                 default:   // FaceTravel
                     fwd = o.Target.ToVector3D() - o.ApproachFrom.ToVector3D();
                     if (fwd.LengthSquared() < 1e-6) fwd = flightState.WorldMatrix.Forward;
+                    if (flightState.InGravity && !o.IgnoreGravityLimits) { LevelFrame(ref fwd, out up); return; }
                     up = flightState.InGravity ? flightState.GravityUp : flightState.WorldMatrix.Up;
                     break;
             }
             FinalizeFrame(ref fwd, ref up, o.IgnoreGravityLimits);
+        }
+
+        // Travel in gravity: level, heading along 'fwd' (the current heading when it points straight up / down), down
+        // thrust along gravity. The P-Gravity pitch / roll limits are for work attitudes, corridors and economy tilt.
+        private void LevelFrame(ref Vector3D fwd, out Vector3D up)
+        {
+            up = flightState.GravityUp;
+            Vector3D h = fwd - up * Vector3D.Dot(fwd, up);
+            if (h.LengthSquared() < 1e-4 * fwd.LengthSquared())
+            {
+                Vector3D cur = flightState.WorldMatrix.Forward;
+                h = cur - up * Vector3D.Dot(cur, up);
+                if (h.LengthSquared() < 1e-6) { cur = flightState.WorldMatrix.Up; h = cur - up * Vector3D.Dot(cur, up); }   // nose down: the belly's way
+            }
+            if (h.LengthSquared() < 1e-9) h = Vector3D.CalculatePerpendicularVector(up);
+            fwd = Vector3D.Normalize(h);
         }
         // Returns true when settled on the target orientation.
         private bool UpdateOrientation(ref Vector3D targetFwd, ref Vector3D targetUp, out double angleRemaining)
@@ -2285,7 +2304,9 @@ namespace Automata.Drone
             double remaining = len - s;
             legDir = d;
             legRemaining = remaining;
-            legPassed = len > 1e-3 && Vector3D.Dot(p - t, d) >= 0;     // crossed the plane through the waypoint
+            // Crossed the plane through the waypoint, or inside its bubble (pass-through legs: the waypoint tolerance)
+            double passBubble = WaypointBubble(o, len);
+            legPassed = len > 1e-3 && (Vector3D.Dot(p - t, d) >= 0 || (passBubble > 0 && Vector3D.DistanceSquared(p, t) < passBubble * passBubble));
 
             // Brake to the exit speed when a next leg is known, else to a stop (final-leg rules apply only then)
             double vExit = ExitSpeedFor(o);
@@ -2527,9 +2548,10 @@ namespace Automata.Drone
                 var box = new MyOrientedBoundingBoxD(HullCentreWorld, localHullBox.HalfExtents + new Vector3D(0.3),
                                                      Quaternion.CreateFromRotationMatrix(flightState.WorldMatrix));
                 pm.BeginPlan();
-                if (!pm.BoxFree(ref q, ref box) && pm.LastHitBlock != null)
+                bool free = pm.BoxFree(ref q, ref box);
+                if (!free && pm.LastHitBlock != null)
                     sb.AppendFormat(", hull (+0.3 m) touches {0} on '{1}'", pm.LastHitBlock.BlockDefinition.Id.SubtypeName, pm.LastHitBlock.CubeGrid.DisplayName);
-                else sb.Append(", hull (+0.3 m) touches nothing");
+                else sb.Append(free ? ", hull (+0.3 m) touches nothing" : ", hull (+0.3 m) touches asteroid rock");
             }
             return sb.ToString();
         }
@@ -2963,6 +2985,19 @@ namespace Automata.Drone
         public const float WAYPOINT_TOLERANCE_MIN = 0f, WAYPOINT_TOLERANCE_MAX = 500f;   // combat drones: arriving "near" is enough
         private const float TRANSIT_TOLERANCE_MAX = 50f;   // orders other than player / combat route legs (work, docking, job legs): the old limit
         private float WaypointTol { get { return settings != null ? Math.Max(0.5f, settings.WaypointTolerance) : 5f; } }   // 0 means as close as it gets
+
+        /// <summary>
+        /// Radius round a pass-through leg's waypoint within which it counts as passed (handed over to the next leg): the
+        /// drone's waypoint tolerance, at most TRANSIT_TOLERANCE_MAX and half the leg. 0 (only the plane through the
+        /// waypoint): full stops, strict / corridor legs, direct approaches, the work position, the dock. Before, route and
+        /// sweep legs ignored the tolerance: line control held the drone on the exact point until it crossed that plane.
+        /// </summary>
+        private double WaypointBubble(FlightOrder o, double len)
+        {
+            if (o.Behavior == WaypointBehavior.FullStop || o.LineTolerance > 0 || o.DirectApproach
+                || ReferenceEquals(o, constructionOrder) || ReferenceEquals(o, dockingOrder)) return 0;
+            return Math.Min(Math.Min(WaypointTol, TRANSIT_TOLERANCE_MAX), len * 0.5);
+        }
         public float Terminal_WaypointTolerance
         {
             get { return settings != null ? settings.WaypointTolerance : 5f; }
@@ -3584,6 +3619,8 @@ namespace Automata.Drone
         public void StopDebugDraw()
         {
             if (settings != null) settings.ObservationAreaDraw = false;
+            // Multiplayer client: the server stops sending this player the route (else only its subscription's expiry did)
+            if (navDrawOn && !IsServer) RequestAction(new DroneActionPacket { Action = DroneAction.DrawNavigation, Code = 0 });
             StopNavigationDraw();
         }
 

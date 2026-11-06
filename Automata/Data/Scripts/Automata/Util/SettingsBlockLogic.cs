@@ -59,7 +59,7 @@ namespace Automata.Util
         // Set once the storage was read: before that (no physics yet, concealed grid...) saving would write defaults over it
         private bool storageRead;
 
-        private void WriteStorage()
+        protected void WriteStorage()
         {
             if (!storageRead) return;
             BlockSave.WriteText(Entity, SaveText());

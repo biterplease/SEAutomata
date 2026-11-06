@@ -68,10 +68,7 @@ namespace Automata.Util
                 if (silent > FORGET_TICKS) { scratch.Add(kv.Key); continue; }
                 if (e.Warned || silent < SILENT_TICKS) continue;
                 e.Warned = true;
-                // Last seen flying a lane: said so (and the lane is suspended)
-                var lanes = Pathfinding.PathfindingManager.Instance != null ? Pathfinding.PathfindingManager.Instance.Lanes : null;
-                string lane = lanes != null ? lanes.Lost(kv.Key, now) : null;
-                string text = lane != null ? Loc.F(MyStrings.Common_LostInLane, Nicknames.Of(kv.Key), lane) : Loc.F(MyStrings.Common_DroneHasNotBeenHeard, Nicknames.Of(kv.Key), SILENT_TICKS / 3600);
+                string text = Loc.F(MyStrings.Common_DroneHasNotBeenHeard, Nicknames.Of(kv.Key), SILENT_TICKS / 3600);
                 if (e.HasPos)
                 {
                     string name = (Nicknames.Of(kv.Key) + " last seen").Replace(':', ' ');

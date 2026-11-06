@@ -273,8 +273,11 @@ namespace Automata.Pointer
             if (session == null || session.Player == null) return;
             var character = session.Player.Character;
             var kind = character != null ? KindOf(character.EquippedTool) : PointerKind.None;
-            // Holstered / swapped (another tool, the other designator, none): the tag memory is forgotten
-            if (localTagCount > 0 && kind != localTagKind) ClearTags("put away");
+            // Holstered / swapped (another tool, the other designator, none): the tag memory is forgotten. Only on putting
+            // that designator away: tags made with a target designator block (its camera; the player holds no designator,
+            // or sits in a cockpit) were forgotten the frame they came in, so a sweep never had more than one sector
+            if (localTagCount > 0 && lastEquippedKind == localTagKind && kind != localTagKind) ClearTags("put away");
+            lastEquippedKind = kind;
             if (character == null || session.ControlledObject != character || session.IsCameraUserControlledSpectator || kind == PointerKind.None
                 || MyAPIGateway.Gui.ChatEntryVisible || MyAPIGateway.Gui.IsCursorVisible)
             {
@@ -344,6 +347,7 @@ namespace Automata.Pointer
 
         #region Tag memory, client side (the server keeps the list: TagMemory)
         private static int localTagCount;            // drones the server holds for this player (designator light)
+        private static PointerKind lastEquippedKind;   // the designator held last frame (None: none)
         private static PointerKind localTagKind;
 
         /// <summary>The server's count of this player's tagged drones (0: memory empty / cleared).</summary>
@@ -846,6 +850,11 @@ namespace Automata.Pointer
                 }
                 if (scouts.Count < tagged.Count)
                     if (Log.DebugEnabled) Log.Debug("Pointer: [server] player {0}: area sweep: {1} of {2} tagged drone(s) are ore scouts, the others left out", identity, scouts.Count, tagged.Count);
+                if (scouts.Count > ScoutPlanner.MAX_SCOUTS)
+                {
+                    if (Log.DebugEnabled) Log.Debug("Pointer: [server] player {0}: area sweep: {1} tagged ore scouts, the first {2} take it", identity, scouts.Count, ScoutPlanner.MAX_SCOUTS);
+                    scouts = scouts.GetRange(0, ScoutPlanner.MAX_SCOUTS);
+                }
                 tagged = scouts;
             }
             string how;

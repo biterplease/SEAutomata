@@ -29,6 +29,8 @@ namespace Digi.NetworkLib
     [ProtoInclude(25, typeof(Automata.Pointer.DesignatorCameraPacket))]
     [ProtoInclude(26, typeof(Automata.Network.BuildVersionRequestPacket))]
     [ProtoInclude(27, typeof(Automata.Network.BuildVersionPacket))]
+    [ProtoInclude(28, typeof(Automata.Network.LaneDrawRequestPacket))]
+    [ProtoInclude(29, typeof(Automata.Network.LaneDrawPacket))]
     public abstract partial class PacketBase
     {
     }
@@ -197,6 +199,43 @@ namespace Automata.Network
         {
             if (MyAPIGateway.Multiplayer.IsServer) return;
             DroneControllerBlock.ApplyClientSettings(this);
+        }
+    }
+
+    /// <summary>Client -> server: "/automata debugdraw lanes", the sender's lanes with a line within Range of Centre.</summary>
+    [ProtoContract]
+    public class LaneDrawRequestPacket : PacketBase
+    {
+        public LaneDrawRequestPacket() { }
+
+        [ProtoMember(1)] public Vector3DData Centre;
+        [ProtoMember(2)] public double Range;
+
+        public override void Received(ref PacketInfo packetInfo, ulong senderSteamId)
+        {
+            if (!MyAPIGateway.Multiplayer.IsServer) return;
+            long identity = MyAPIGateway.Players.TryGetIdentityId(senderSteamId);
+            AutomataSession.Instance?.Net?.SendToPlayer(new LaneDrawPacket
+            {
+                Lanes = Pathfinding.LaneOverlay.Collect(identity, Centre.ToVector3D(), Range),
+                Range = Range,
+            }, senderSteamId);
+        }
+    }
+
+    /// <summary>Server -> the client that asked: the lanes to draw.</summary>
+    [ProtoContract]
+    public class LaneDrawPacket : PacketBase
+    {
+        public LaneDrawPacket() { }
+
+        [ProtoMember(1)] public List<Pathfinding.LaneShape> Lanes = new List<Pathfinding.LaneShape>();
+        [ProtoMember(2)] public double Range;
+
+        public override void Received(ref PacketInfo packetInfo, ulong senderSteamId)
+        {
+            if (MyAPIGateway.Multiplayer.IsServer) return;
+            Pathfinding.LaneOverlay.Show(Lanes, Range);
         }
     }
 

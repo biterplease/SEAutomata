@@ -13,8 +13,10 @@ using BlendTypeEnum = VRageRender.MyBillboard.BlendTypeEnum;
 namespace Automata.Drone
 {
     /// <summary>
-    /// Debug overlay "Draw navigation targets": red dots on the route's points (approach points, waypoints, final
-    /// target), blue lines between them, starting at the point the active order steers. Local to the player who
+    /// Debug overlay "Draw navigation targets": a red dot on each of the route's points (approach points, waypoints, final
+    /// target), blue lines between them starting at the point the active order steers, and on the first NAV_TOL_MAX
+    /// points the drone's waypoint tolerance: six thin green lines out from the point along the drone's axes, each the
+    /// tolerance long. Local to the player who
     /// switched it on; off again after the server's DebugDrawTimeoutSeconds. The route lives on the server: single player / host draws it
     /// directly, multiplayer clients subscribe and get it (only when it changes) from the server.
     /// </summary>
@@ -24,8 +26,10 @@ namespace Automata.Drone
         private const int NAV_SUBSCRIPTION_MARGIN_TICKS = 10 * 60;    // server side, on top of the draw timeout, in case the "off" is lost
         #endregion
         private const double NAV_POINT_EPSILON = 0.1;                 // m: same point / not worth resending
+        private const int NAV_TOL_MAX = 48;                           // points with their tolerance drawn (sweep paths have hundreds)
         private static readonly MyStringId NavDotMaterial = MyStringId.GetOrCompute("WhiteDot");
         private static readonly Color NavDotColor = Color.Red;
+        private static readonly Color NavTolColor = new Color(40, 220, 60);
         private static readonly Color NavLineColor = new Color(40, 110, 255);
 
         // This player's overlay
@@ -106,7 +110,8 @@ namespace Automata.Drone
 
             MatrixD wm = shipController.WorldMatrix;
             Vector3D camera = MyAPIGateway.Session.Camera != null ? MyAPIGateway.Session.Camera.Position : wm.Translation;
-            Vector4 dot = NavDotColor.ToVector4();
+            Vector4 dot = NavDotColor.ToVector4(), tolColor = NavTolColor.ToVector4();
+            float tol = WaypointTol;
             Vector4 line = NavLineColor.ToVector4();
             Vector3D prev = wm.Translation + Vector3D.TransformNormal(navDrawOffset, wm);
             for (int i = 0; i < navDrawPoints.Count; i++)
@@ -115,8 +120,19 @@ namespace Automata.Drone
                 // Sizes grow with distance so far routes stay visible
                 float lineWidth = (float)MathHelper.Clamp(Vector3D.Distance(camera, (prev + p) * 0.5) * 0.002, 0.02, 0.5);
                 MySimpleObjectDraw.DrawLine(prev, p, DrawMaterial, ref line, lineWidth, BlendTypeEnum.SDR);
-                float radius = (float)MathHelper.Clamp(Vector3D.Distance(camera, p) * 0.006, 0.1, 3.0);
+                double toCamera = Vector3D.Distance(camera, p);
+                float radius = (float)MathHelper.Clamp(toCamera * 0.006, 0.1, 3.0);
                 MyTransparentGeometry.AddPointBillboard(NavDotMaterial, dot, p, radius, 0, -1, BlendTypeEnum.SDR);
+                if (i < NAV_TOL_MAX && tol > 0)
+                {
+                    float thin = (float)MathHelper.Clamp(toCamera * 0.0008, 0.01, 0.15);
+                    for (int k = 0; k < 6; k++)
+                    {
+                        Vector3D axis = (k >> 1) == 0 ? wm.Right : (k >> 1) == 1 ? wm.Up : wm.Forward;
+                        Vector3D end = p + axis * ((k & 1) == 0 ? tol : -tol);
+                        MySimpleObjectDraw.DrawLine(p, end, DrawMaterial, ref tolColor, thin, BlendTypeEnum.SDR);
+                    }
+                }
                 prev = p;
             }
             return true;

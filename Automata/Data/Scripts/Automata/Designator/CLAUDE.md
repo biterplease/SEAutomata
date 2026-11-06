@@ -23,3 +23,6 @@ Nickname, LCD tag, LCD style, camera dropdown (combobox, key = camera entity id,
 
 ## Untested in play
 Camera on a rotor head, same grid, detached head, no orchestrator in reach, two orchestrators, tagged drones, area sweep, escort / self-escort, recall, CLEAR, LCD on surface 0, toolbar from a cockpit.
+
+## Tags from a target designator block kept (2026-11-03)
+`ScoutPointer.HandleInput` forgot the tag memory whenever the held tool wasn't that designator - so tags made with a target designator block's camera (no hand-held designator equipped, or seated) were cleared the frame the count came back ("tagged drones forgotten (put away)" right after each tag), and an area sweep never had more than one sector. Now only on putting the hand-held designator away (`lastEquippedKind` was the tag kind, now isn't).

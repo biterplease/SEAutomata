@@ -247,37 +247,58 @@ namespace Automata.Mining
         }
 
         private static readonly MyStorageData probe = new MyStorageData(MyStorageDataTypeFlags.Content);
+        private const double TUNNEL_RING = 8;        // m round a bore line read for a tunnel along it (wider than the tunnels)
+        private const int TUNNEL_RING_POINTS = 6;
+        private const int TUNNEL_RING_ROCK = 3;      // ring points in rock: the line is in a tunnel
 
         /// <summary>
-        /// Where a bore from 'inside' going 'outward' leaves the voxel map: the first of three solid-free samples 2 m
-        /// apart (a cave or the surface), or 'minFree' metres of it when asked for more (a bore line leaving a pit, a
-        /// shaft or a cave: the open air of the pit isn't the surface). False when still solid after 'maxDistance'.
+        /// Where a bore from 'inside' going 'outward' leaves the rock: the first of 'minFree' metres (6 at least) of open
+        /// line, samples 2 m apart. Open: no rock on the line, and none in most of a ring TUNNEL_RING m round it. A tunnel
+        /// bored before (narrower than the ring) is rock: the bore begins outside it, at the real surface, and drills its
+        /// air again (nothing keeps the tunnels: a way in at the tunnel's end had its approach inside it, where the hull
+        /// doesn't fit). A pit or a cave wider than the ring is open: only a run of 'minFree' m is the surface. False when
+        /// still in rock after 'maxDistance'.
         /// </summary>
         public static bool FindSurface(IMyVoxelBase v, Vector3D inside, Vector3D outward, double maxDistance, out Vector3D surface, double minFree = 6)
         {
             surface = inside;
             if (v == null || v.Storage == null) return false;
-            var storage = v.Storage;
+            VRage.ModAPI.IMyStorage storage = v.Storage;
             var size = storage.Size;
             Vector3D corner = v.PositionLeftBottomCorner;
             probe.Resize(Vector3I.One);
+            Vector3D u = Vector3D.CalculatePerpendicularVector(outward), w = Vector3D.Cross(outward, u);
             int air = 0, need = Math.Max(3, (int)Math.Ceiling(minFree / 2));
             Vector3D firstAir = inside;
             for (double t = 0; t <= maxDistance; t += 2)
             {
                 Vector3D p = inside + outward * t;
-                Vector3I local = Vector3I.Floor(p - corner);
-                bool solid = false;
-                if (local.X >= 0 && local.Y >= 0 && local.Z >= 0 && local.X < size.X && local.Y < size.Y && local.Z < size.Z)
+                bool open = !Solid(storage, size, corner, p);
+                if (open)
                 {
-                    storage.ReadRange(probe, MyStorageDataTypeFlags.Content, 0, local, local);
-                    solid = probe.Content(0) > 127;
+                    // In a tunnel along the line: rock all round it (the ring read only off the rock: cheap)
+                    int rock = 0;
+                    for (int k = 0; k < TUNNEL_RING_POINTS && rock < TUNNEL_RING_ROCK; k++)
+                    {
+                        double a = k * MathHelperD.TwoPi / TUNNEL_RING_POINTS;
+                        if (Solid(storage, size, corner, p + (u * Math.Cos(a) + w * Math.Sin(a)) * TUNNEL_RING)) rock++;
+                    }
+                    open = rock < TUNNEL_RING_ROCK;
                 }
-                if (solid) { air = 0; continue; }
+                if (!open) { air = 0; continue; }
                 if (air == 0) firstAir = p;
                 if (++air >= need) { surface = firstAir; return true; }
             }
             return false;
+        }
+
+        // Rock at 'p': the storage voxel there more than half full (outside the storage: none)
+        private static bool Solid(VRage.ModAPI.IMyStorage storage, Vector3I size, Vector3D corner, Vector3D p)
+        {
+            Vector3I local = Vector3I.Floor(p - corner);
+            if (local.X < 0 || local.Y < 0 || local.Z < 0 || local.X >= size.X || local.Y >= size.Y || local.Z >= size.Z) return false;
+            storage.ReadRange(probe, MyStorageDataTypeFlags.Content, 0, local, local);
+            return probe.Content(0) > 127;
         }
 
         /// <summary>The ore item key a voxel material gives when mined, if it is an ore the detectors mark (rare).</summary>

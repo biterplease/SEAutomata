@@ -21,7 +21,7 @@ namespace Automata.Drone
     public partial class DroneControllerBlock
     {
 
-        private enum RouteOwner : byte { None, FlyRoute, Docking, Player }
+        private enum RouteOwner : byte { None, FlyRoute, Docking, Player, Sweep }
 
         #region Timing
         private const int ROUTE_WATCH_EVERY = 2;          // UpdateBeforeSimulation10 calls: a look-ahead every 20 ticks
@@ -118,6 +118,7 @@ namespace Automata.Drone
             routeFailed = false;
             routeReplans = 0;
             routeWatchCounter = 0;
+            if (!replanning) ResetFreeFlightWatch();   // (a replan goes on with the flight's counts)
         }
 
         private void BuildPathQuery(out PathQuery q)
@@ -135,12 +136,14 @@ namespace Automata.Drone
                 HullCentred = true,
                 SleepingIds = settings != null ? settings.SleepingBlockIds : null,
                 AlignToRoute = true,
+                // In gravity the route's legs fly level: the pitch / roll limits are for work, corridors and economy tilt
+                LevelLegs = flightState.InGravity,
                 // Align to P-Gravity: the pitch limit; otherwise the drone may point anywhere
                 MaxPitch = flightState.InGravity && settings != null && settings.AlignToPGravity
                     ? MathHelperD.ToRadians(settings.PGravityAlignMaxPitchDegrees) : -1,
                 // Every flight; the planner drops it for hops shorter than the altitude (work at ground level) and the
                 // route takes off / lands straight up / down at the ends, so connectors and blocks on the ground are reached
-                MinAltitude = settings != null ? settings.MinAltitude : 0,
+                MinAltitude = settings != null && !SweepIgnoresMinAltitude ? settings.MinAltitude : 0,   // (a scout sweep in gravity: low)
             };
         }
 
@@ -280,16 +283,28 @@ namespace Automata.Drone
             if (avoidObservationArea && PlanObservationAreaDetour(start, goal, routeScratch, areaOnlyFromOutside))
                 if (Log.DebugEnabled) Log.Debug("Drone {0}: around the observation area ({1} waypoints)", Entity.EntityId, routeScratch.Count);
             var pm = PathfindingManager.Instance;
-            // A flight lane of this drone's network from near the start to near the goal: through it (its points are
-            // the route's preferred waypoints, each stretch planned and checked as usual)
+            // A flight lane of this drone's network from near the start to near the goal: through the slot the pathfinder
+            // gives it (its points are the route's preferred waypoints, each stretch planned and checked as usual). No slot
+            // free at the entrance yet: it holds outside and asks again (a planner that can wait only)
             string laneName = null;
-            int laneFirst = -1, laneLast = -1;
-            if (routeScratch.Count == 0 && pm != null && pm.Lanes != null && localHullBox.Max.X >= localHullBox.Min.X
-                && pm.Lanes.FindLane(jobOrchestratorId, start, goal, localHullBox.HalfExtents.Length(), routeScratch, out laneName))
+            int laneFirst = -1, laneLast = -1, laneNumber = 0;
+            bool laneAB = true;
+            if (routeScratch.Count == 0 && pm != null && localHullBox.Max.X >= localHullBox.Min.X)
             {
-                laneFirst = 0;
-                laneLast = routeScratch.Count - 1;
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: through lane {1} ({2} points)", Entity.EntityId, laneName, routeScratch.Count);
+                var join = pm.LaneRoute(jobOrchestratorId, Entity.EntityId, start, goal, localHullBox.HalfExtents, routeScratch, out laneName, out laneNumber, out laneAB);
+                if (join == FlightLanes.Join.Wait)
+                {
+                    if (asyncPlanOk) throw PlanPendingException.Instance;
+                    routeScratch.Clear();
+                    laneName = null;
+                }
+                else if (join != FlightLanes.Join.None)
+                {
+                    laneFirst = 0;
+                    laneLast = routeScratch.Count - 1;
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: {1} lane {2} ({3} points)", Entity.EntityId, join == FlightLanes.Join.Beside ? "beside" : "through", laneName, routeScratch.Count);
+                }
+                else laneName = null;
             }
             bool usePathfinder = pm != null && AutomataSession.GetConfig().Pathfinding.AllowDirectPathfinding();
             PathQuery q = default(PathQuery);
@@ -325,10 +340,11 @@ namespace Automata.Drone
                 int before = points.Count;
                 RouteResult rr = usePathfinder ? pm.PlanRoute(ref q, from, to, points) : RouteResult.Direct;
                 if (rr == RouteResult.Pending) throw PlanPendingException.Instance;   // FlyRoute holds the drone and plans again later
-                // A stretch inside the lane that needed a way round: the lane is checked again (twice: suspended)
+                // A stretch inside the lane that needed a way round: rock, a tree or a static grid in it is reported to the
+                // lane's orchestrator (with the way round), which redraws the lane
                 if (laneName != null && i > laneFirst && i <= laneLast && (rr == RouteResult.Blocked || points.Count > before))
                 {
-                    pm.Lanes.StretchBlocked(laneName);
+                    QueueLaneObstruction(laneNumber, laneAB, laneName, from, to, points, before, rr == RouteResult.Blocked, pm.StretchObstacle(ref q, from, to));
                     laneName = null;
                 }
                 if (usePathfinder && rr == RouteResult.Blocked)
@@ -944,6 +960,13 @@ namespace Automata.Drone
                                 cPhase == ConstructionPhase.Running && currentJob != null)
                        == Orchestrator.TaskFailure.None;
             }
+            if (routeOwner == RouteOwner.Sweep)
+            {
+                int replans = routeReplans;
+                bool ok = SweepReplan();
+                routeReplans = replans;   // SweepFlyFrom starts a new count: keep this flight's
+                return ok;
+            }
             if (routeOwner == RouteOwner.Player)
             {
                 var remaining = new List<Vector3D>();
@@ -996,13 +1019,23 @@ namespace Automata.Drone
             // turn point can be 0.5 m off it): nothing past the end counts (the corridor / turn checks cleared that
             // spot), or the station itself blocked the leg and the drone replanned until it gave up
             if (routeOwner == RouteOwner.Docking && dockingOrder != null) looseEnd = true;
+            // A scout sweep's planned stretch ends on its mapped path, close over the surface: nothing past its end counts
+            if (routeOwner == RouteOwner.Sweep) looseEnd = true;
             // Checked in the leg's own attitude (the one the planner checked it with: a held attitude turned to at the
             // start of the route isn't the drone's yet when the leg starts)
-            MatrixD legAtt = q.Controller;
-            if (o.Orientation == FlightOrientationMode.Explicit && o.Forward.ToVector3D().LengthSquared() > 0.5 && o.Up.ToVector3D().LengthSquared() > 0.5)
-                legAtt = MatrixD.CreateWorld(Vector3D.Zero, Vector3D.Normalize(o.Forward.ToVector3D()), Vector3D.Normalize(o.Up.ToVector3D()));
+            MatrixD legAtt = LegAttitude(o, ref q);
+            // The final order of a work route ends at the work point itself - a mining bore's entry is the rock: nothing
+            // past its end counts and its end zone (the hull's front half plus the berth) isn't checked. It counted the
+            // rock being mined as "in the way": 10 replans at the approach point, route error, the deposit skipped
+            if (o == constructionOrder)
+            {
+                looseEnd = true;
+                double keep = len - pm.EndZoneLength(ref q, ref legAtt, (to - from) / len);
+                if (keep < 1) return;
+                to = from + (to - from) * (keep / len);
+            }
             bool blocked = scene ? pm.SegmentBlocked(ref q, ref legAtt, from, to, 0.5, out hit, out hitEntity, !looseEnd)
-                                 : pm.LegRaysBlocked(ref q, from, to, out hit, out hitEntity);
+                                 : pm.LegRaysBlocked(ref q, ref legAtt, from, to, out hit, out hitEntity);
             // Terrain under the leg (planets are no ray / scene obstacles), its end excepted
             // Taking off from the ground (or a bore hole): the first stretch is exempt as well
             double t0 = TakingOff(from) ? Math.Min(TERRAIN_WATCH_END, len) / len : 0;
@@ -1075,11 +1108,6 @@ namespace Automata.Drone
             if (pm.Memory != null) pm.Memory.Record(Entity.EntityId, o.AnchorEntityId, pos, hull, now);
             memoryChained = true;
             if (pm.Lanes == null) return;
-            var pf = AutomataSession.GetConfig().Pathfinding;
-            var asleep = settings != null ? settings.SleepingBlockIds : null;
-            bool sensed = !pf.RequireSensorsForPathfinding();
-            for (int i = 0; i < sensors.Count && !sensed; i++) if (PathfindingManager.InstrumentOn(sensors[i], asleep)) sensed = true;
-            pm.Lanes.OnRecord(Entity.EntityId, jobOrchestratorId, pos, hull, sensed);
             Vector3D vel = flightState.LinearVelocity;
             double speed = vel.Length();
             double fullA = speed > 0.5 ? UsableAccel(-vel / speed) : 1;   // the most it will brake (Max thrust setting)
@@ -1154,6 +1182,10 @@ namespace Automata.Drone
 
             PathQuery q;
             BuildPathQuery(out q);
+            // The leg's attitude (as the planner checked it); a work route's final order: not its end zone (CheckLegStart)
+            MatrixD legAtt = LegAttitude(o, ref q);
+            double rayLook = look;
+            if (o == constructionOrder) rayLook = Math.Min(look, remaining - pm.EndZoneLength(ref q, ref legAtt, along / remaining));
             Vector3D hit = Vector3D.Zero;
             // Terrain ahead (planets are no ray obstacles): away from the leg's end, where work near the ground happens
             bool terrain = false;
@@ -1162,7 +1194,7 @@ namespace Automata.Drone
                 Vector3D tEnd = from + along / remaining * Math.Min(look, remaining - TERRAIN_WATCH_END);
                 terrain = PathfindingManager.TerrainTooClose(from, tEnd, TerrainNeed(), out hit);
             }
-            if (!terrain && !pm.CheckAhead(ref q, from, to, out hit)) return;
+            if (!terrain && (rayLook < 1 || !pm.CheckAhead(ref q, ref legAtt, from, from + along / remaining * rayLook, out hit))) return;
             if (terrain) if (Log.DebugEnabled) Log.Debug("Drone {0}: terrain {1:F0} m ahead closer than {2:F1} m below the route", Entity.EntityId, Vector3D.Distance(from, hit), TerrainNeed());
 
             lastReplanFrame = now;
@@ -1171,6 +1203,111 @@ namespace Automata.Drone
             if (ok && Replan()) return;
             RouteStopped(Loc.F(MyStrings.Drone_RouteBlockedMAheadStopped, Vector3D.Distance(from, hit)));
         }
+
+        // The attitude the planner checked a leg with: its explicit one, else the drone's own
+        private MatrixD LegAttitude(FlightOrder o, ref PathQuery q)
+        {
+            if (o.Orientation == FlightOrientationMode.Explicit && o.Forward.ToVector3D().LengthSquared() > 0.5 && o.Up.ToVector3D().LengthSquared() > 0.5)
+                return MatrixD.CreateWorld(Vector3D.Zero, Vector3D.Normalize(o.Forward.ToVector3D()), Vector3D.Normalize(o.Up.ToVector3D()));
+            return q.Controller;
+        }
+
+        #region Flights outside a job
+        // No task watches a flight outside a job (Go home, auto-home, return to rest / to where it left from, player
+        // routes, combat launches): pressed against something the look-ahead didn't see, it pushed and wiggled until its
+        // power ran out. Now: pressed (WatchPush), it backs off and plans again, a few times; no progress for the stall
+        // timeout, it plans again once; then it stops (Standby) where it is.
+        private const int FREE_CONTACT_REPLANS_MAX = 3;
+        private const int FREE_STALL_REPLANS_MAX = 1;
+        private const int FREE_STALL_MIN_TICKS = 60 * 60;   // at least this long without progress (task timeouts can be short)
+        private int freeContactReplans, freeStallReplans;
+        private FlightOrder freeWatchedOrder;
+        private FlightPhase freeWatchedPhase;
+        private double freeBestDistance;
+        private int freeProgressFrame;
+
+        private void ResetFreeFlightWatch()
+        {
+            freeContactReplans = freeStallReplans = 0;
+            freeWatchedOrder = null;
+        }
+
+        /// <summary>UpdateBeforeSimulation10, AI on: contact and progress watch of flights no task watches.</summary>
+        private void UpdateFreeFlightWatch()
+        {
+            var o = activeFlightOrder;
+            int now = MyAPIGateway.Session.GameplayFrameCounter;
+            if (o == null || routeOwner == RouteOwner.None || preflightStage != 0 || isParked
+                || (cPhase == ConstructionPhase.Running && currentJob != null))   // job flights: the task watches them
+            {
+                freeWatchedOrder = null;
+                return;
+            }
+            // Waits that aren't stalls: the dock's final approach and lock (UpdateDocking times them), a park landing (its
+            // own timeout), an escort's station keeping, holding still, a route search, arrived
+            if (o == dockingOrder || dockWaitTarget != 0 || (parkPhase != ParkPhase.None && o == parkOrder) || o.FollowEntityId != 0
+                || holdActive || siteYielding || boring || routePending || arrivalReported)
+            {
+                freeWatchedOrder = null;
+                return;
+            }
+            Vector3D away;
+            if (PushBlocked(out away))
+            {
+                CaptureFlightState();
+                if (NearDockArea(HullCentreWorld)) return;   // next to the platform: the docking's own watch
+                pushBlockedTicks = 0;
+                bool again = ++freeContactReplans <= FREE_CONTACT_REPLANS_MAX;
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: pressed against something on the way ({1}/{2}, no task): {3}", Entity.EntityId, freeContactReplans, FREE_CONTACT_REPLANS_MAX, again ? "backing off, new route" : "stopping");
+                if (again)
+                {
+                    PlanContactBackOut(away, false);
+                    lastReplanFrame = now;
+                    if (Replan())
+                    {
+                        // The command wound up against the obstacle (it kept rising while the drone didn't move) stays behind:
+                        // the back-out starts from the real speed, not from a push into what it touches
+                        commandedVelocity = flightState.LinearVelocity;
+                        freeWatchedOrder = null;
+                        return;
+                    }
+                }
+                RouteStopped(Loc.T(MyStrings.Drone_PressedAgainstSomethingOnStopped));
+                return;
+            }
+            // Progress: 0.5 m closer to what the order flies to now (30% of it close in), the clock running across legs.
+            // Not toward a threat (a scramble re-routes to where it is now, every few seconds)
+            if (combatPhase == CombatPhase.Scramble) { freeWatchedOrder = null; return; }
+            bool toApproachPoint = o.UseApproachLine && (o.Phase == FlightPhase.Transit || o.Phase == FlightPhase.Align);
+            double d = Vector3D.Distance(ReferencePoint(o), toApproachPoint ? o.ApproachFrom.ToVector3D() : o.Target.ToVector3D());
+            if (o != freeWatchedOrder)
+            {
+                if (freeWatchedOrder == null) freeProgressFrame = now;   // watching (again): the clock starts
+                freeWatchedOrder = o;
+                freeWatchedPhase = o.Phase;
+                freeBestDistance = d;
+                return;
+            }
+            if (o.Phase != freeWatchedPhase || d < freeBestDistance - Math.Min(0.5, Math.Max(0.05, freeBestDistance * 0.3)))
+            {
+                freeWatchedPhase = o.Phase;
+                freeBestDistance = d;
+                freeProgressFrame = now;
+                return;
+            }
+            int limit = Math.Max(StallTimeoutTicks, FREE_STALL_MIN_TICKS);
+            if (now - freeProgressFrame <= limit) return;
+            freeProgressFrame = now;
+            bool replan = ++freeStallReplans <= FREE_STALL_REPLANS_MAX;
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: no progress on the way for {1} s ({2:F1} m to its target, no task): {3}", Entity.EntityId, limit / 60, d, replan ? "new route" : "stopping");
+            if (replan)
+            {
+                lastReplanFrame = now;
+                if (Replan()) { freeWatchedOrder = null; return; }
+            }
+            RouteStopped(Loc.F(MyStrings.Drone_NoProgressOnTheWayStopped, limit / 60));
+        }
+        #endregion
 
         // No way on: stop; the task fails (Unreachable), outside jobs the drone waits
         private void RouteStopped(string why)

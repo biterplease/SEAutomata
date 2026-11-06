@@ -368,7 +368,7 @@ namespace Automata.Drone
             Vector3D axisLocal = Vector3D.TransformNormal(axis, MatrixD.Transpose(rot));
             Vector3D grow = new Vector3D(1 - Math.Abs(axisLocal.X), 1 - Math.Abs(axisLocal.Y), 1 - Math.Abs(axisLocal.Z)) * q.Berth;
             var box = new MyOrientedBoundingBoxD(p1, localHullBox.HalfExtents + grow, Quaternion.CreateFromRotationMatrix(rot));
-            if (localHullBox.Max.X >= localHullBox.Min.X && !pm.BoxFree(ref q, ref box))
+            if (localHullBox.Max.X >= localHullBox.Min.X && !pm.BoxFree(ref q, ref box, false))   // (blocks: the corridor is about the station)
             {
                 how = Loc.F(MyStrings.Drone_NoRoomMOff, CORRIDOR_SLIDE, PathfindingManager.Describe(pm.LastHitBlock), q.Berth);
                 return false;

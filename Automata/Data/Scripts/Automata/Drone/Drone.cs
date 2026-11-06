@@ -262,6 +262,8 @@ namespace Automata.Drone
         public bool Watched;
         /// <summary>A waypoint the player gave (debug orders); detour legs in between are not. Runtime only.</summary>
         public bool PlayerWaypoint;
+        /// <summary>Scout sweep: the index of the mapped path point this leg flies to (-1: not a path point). Runtime only.</summary>
+        public int SweepIndex = -1;
         /// <summary>
         /// Route leg / back-out: arrived within ~10° of its attitude and below 0.3 m/s (the order after it settles the
         /// rest), not the 3° / 0.1 m/s a work or dock position needs. Runtime only.

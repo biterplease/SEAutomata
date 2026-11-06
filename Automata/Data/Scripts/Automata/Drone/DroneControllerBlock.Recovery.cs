@@ -82,7 +82,7 @@ namespace Automata.Drone
         private bool TryRecoverRoute(Vector3D start, Vector3D goal, List<Vector3D> points, int count, Vector3D startForward, Vector3D startUp,
                                      PathfindingManager pm, ref PathQuery q)
         {
-            if (!recoverPlanning || pm == null || SweepWaypointActive()) return false;   // a sweep waypoint nobody can reach is skipped, not a drone that is stuck
+            if (!recoverPlanning || pm == null) return false;
             if (recoverAttempts >= RECOVER_MAX)
             {
                 routeErrorPending = Loc.F(MyStrings.Drone_NoRouteAfterRepositions, RECOVER_MAX);

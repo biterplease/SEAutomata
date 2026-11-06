@@ -275,6 +275,14 @@ namespace Automata.Orchestrator
         /// <summary>While docked: the drone's own inventories (cargo, tools) emptied of components, ores and ingots into the
         /// network there. Drone-side only (clearing before a job / before resting); orchestrators never send it.</summary>
         [ProtoEnum] ClearCargo = 15,
+        /// <summary>
+        /// Scout area sweep, one sector: Position the pointed spot, ApproachFrom where the player stood (open space: the
+        /// sweep's plane faces them), TargetEntityId the asteroid (0: a planet or open space), TargetBlock (sector, sector
+        /// count, detector range in m), CompletionValue the asteroid orbits' first tilt (rad, shared by every sector),
+        /// NaturalGravity at the spot. The drone flies there; within SweepPlanner.MAP_RANGE it maps the whole sector's
+        /// path at once (coarse voxels / the heightmap, not its instruments) and flies it, an ore scan every few tens of m.
+        /// </summary>
+        [ProtoEnum] Sweep = 16,
     }
 
     /// <summary>Which fields a task uses; derived from its type (not sent).</summary>
@@ -354,7 +362,9 @@ namespace Automata.Orchestrator
         [ProtoMember(2)] public long RelativeBeaconEntityId;
         /// <summary>Tool tasks: the grid (projections: the grid the block will be built on). DockAt: the connector.</summary>
         [ProtoMember(6)] public long TargetEntityId;
-        /// <summary>Tool tasks: the block's cell in that grid (projections: the cell it will occupy).</summary>
+        /// <summary>Tool tasks: the block's cell in that grid (projections: the cell it will occupy). Mine: X = 1 marks a
+        /// pooled miner's lane (bored straight from ApproachFrom along to Position, kept clear of the others: no aiming at
+        /// the ore the drone finds, no bending; Y = its slot).</summary>
         [ProtoMember(7)] public Vector3IData TargetBlock;
         /// <summary>Magnitude of natural gravity at Position (m/s²), for planning.</summary>
         [ProtoMember(5)] public float NaturalGravity;
@@ -374,7 +384,8 @@ namespace Automata.Orchestrator
                 case TaskType.NavigateToolTo:
                 case TaskType.DockAt:
                 case TaskType.BackOut:
-                case TaskType.ReturnHome:      return TaskKind.Navigation;
+                case TaskType.ReturnHome:
+                case TaskType.Sweep:           return TaskKind.Navigation;
                 case TaskType.LoadInventory:
                 case TaskType.UnloadInventory:
                 case TaskType.ClearCargo:      return TaskKind.Inventory;
@@ -465,6 +476,18 @@ namespace Automata.Orchestrator
             return new Task { Type = TaskType.Survey };
         }
 
+        /// <summary>A scout area sweep sector (see TaskType.Sweep).</summary>
+        public static Task Sweep(Vector3D spot, Vector3D playerPos, long asteroidId, int sector, int sectors, double detectorRange,
+                                 double tiltStart, float naturalGravity)
+        {
+            return new Task
+            {
+                Type = TaskType.Sweep, Position = Vector3DData.FromVector3D(spot), ApproachFrom = Vector3DData.FromVector3D(playerPos),
+                TargetEntityId = asteroidId, TargetBlock = Vector3IData.FromVector3I(new Vector3I(sector, sectors, (int)Math.Round(detectorRange))),
+                CompletionValue = (float)tiltStart, NaturalGravity = naturalGravity,
+            };
+        }
+
         public static Task Engage(long targetId, Vector3D position)
         {
             return new Task { Type = TaskType.Engage, TargetEntityId = targetId, Position = Vector3DData.FromVector3D(position) };
@@ -525,7 +548,7 @@ namespace Automata.Orchestrator
             if (Tasks == null) return false;
             for (int i = 0; i < Tasks.Count; i++)
             {
-                if (Tasks[i].Type == TaskType.NavigateToolTo || Tasks[i].Type == TaskType.NavigateTo)
+                if (Tasks[i].Type == TaskType.NavigateToolTo || Tasks[i].Type == TaskType.NavigateTo || Tasks[i].Type == TaskType.Sweep)
                 {
                     site = Tasks[i];
                     return true;
