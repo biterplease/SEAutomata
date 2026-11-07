@@ -74,6 +74,8 @@ namespace Automata.Orchestrator
         public uint AcceptDesignatorJob(JobAnnouncement ja, long origin, long senderOwner)
         {
             int now = MyAPIGateway.Session.GameplayFrameCounter;
+            uint merged;
+            if (ja.Type == JobType.DesignatorQuarry && MergeQuarryOrder(ja, origin, out merged)) return merged;   // 0: refused
             PlayerOrder order;
             if (ja.OrderId == 0 || !playerOrders.TryGetValue(ja.OrderId, out order))
             {
@@ -94,14 +96,109 @@ namespace Automata.Orchestrator
             };
             if (order.Type == JobType.None) order.Type = ja.Type;
             order.Jobs++;
+            // A hand-held quarry preparation is held QUARRY_HOLD_SECONDS (more orders there add benches); the rest are queued now
+            bool hold = ja.Type == JobType.DesignatorQuarry && origin == 0;
+            DateTime heldUntil = DateTime.UtcNow.AddSeconds(hold ? QUARRY_HOLD_SECONDS : 0);
             playerJobs[jobId] = new PlayerJob { JobId = jobId, OrderId = order.OrderId, Announcement = job, RequiredDrone = ja.RequiredDrone,
-                                                ExpiresAt = DateTime.UtcNow.AddSeconds(PointerConfig().ConfirmTimeoutSeconds) };
+                                                ExpiresAt = heldUntil.AddSeconds(PointerConfig().ConfirmTimeoutSeconds),
+                                                Held = hold, HeldUntil = heldUntil, SenderOwner = senderOwner };
             var key = new KeyValuePair<long, uint>(entityId, jobId);
             knownJobs[key] = int.MaxValue;
-            jobQueue.Add(new QueuedJob { Announcement = job, Key = key, SenderOwner = senderOwner, Received = now });
+            if (!hold) jobQueue.Add(new QueuedJob { Announcement = job, Key = key, SenderOwner = senderOwner, Received = now });
             AddEvent(Loc.F(MyStrings.Orchestrator_OrderedByAPlayer, jobId, ja.Type, ja.What));
             if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: player job {1} ({2}, order {3}, player {4}, from {5}): {6} task(s), {7}{8}", entityId, jobId, ja.Type, order.OrderId, ja.Identity, origin != 0 ? "designator " + origin : "a hand-held designator", job.Tasks.Count, ja.What, ja.RequiredDrone != 0 ? ", tagged drone " + ja.RequiredDrone : "");
             return jobId;
+        }
+
+        private const double QUARRY_MERGE_METERS = 50;   // another quarry preparation this close: the same quarry
+        private const double QUARRY_HOLD_SECONDS = 5;    // a hand-held one waits this long after its last order (debounce)
+
+        /// <summary>
+        /// A quarry preparation within QUARRY_MERGE_METERS of one this orchestrator has: still held (hand-held, more orders
+        /// coming) - one bench more, held again; taken already - refused (logs, the designator block told). True: handled
+        /// ('jobId' the held job, 0 when refused). False: a new quarry.
+        /// </summary>
+        private uint quarryMergedOrder, quarryMergedJob;   // the incoming order last merged / refused (its other drones' jobs: the same pull)
+
+        private bool MergeQuarryOrder(JobAnnouncement ja, long origin, out uint jobId)
+        {
+            jobId = 0;
+            if (ja.OrderId != 0 && ja.OrderId == quarryMergedOrder) { jobId = quarryMergedJob; return true; }   // (one step per pull)
+            Vector3D at = ja.PositionData.ToVector3D();
+            foreach (var pj in playerJobs.Values)
+            {
+                if (pj.Announcement == null || pj.Announcement.Type != JobType.DesignatorQuarry) continue;
+                if (ja.OrderId != 0 && pj.OrderId == ja.OrderId) continue;   // this pull's own sections
+                Vector3D there = pj.Announcement.PositionData.ToVector3D();
+                if (Vector3D.DistanceSquared(there, at) > QUARRY_MERGE_METERS * QUARRY_MERGE_METERS) continue;
+                quarryMergedOrder = ja.OrderId;
+                if (pj.Held)
+                {
+                    // Q deeper: every held section of that order, its marker renamed with the depth
+                    int orders = 0;
+                    DateTime until = DateTime.UtcNow.AddSeconds(QUARRY_HOLD_SECONDS);
+                    foreach (var other in playerJobs.Values)
+                    {
+                        if (other.OrderId != pj.OrderId || !other.Held) continue;
+                        orders = AddQuarryBench(other.Announcement);
+                        other.HeldUntil = until;
+                        other.ExpiresAt = until.AddSeconds(PointerConfig().ConfirmTimeoutSeconds);
+                    }
+                    double depth = orders * QuarrySide(pj.Announcement);
+                    PlayerOrder order;
+                    if (playerOrders.TryGetValue(pj.OrderId, out order))
+                    {
+                        order.Name = ScoutPlanner.QuarryMarker(depth);
+                        if (order.Gps != null)
+                        {
+                            try { order.Gps.Name = order.Name; MyAPIGateway.Session.GPS.ModifyGps(order.Identity, order.Gps); }
+                            catch (Exception ex) { Log.Error("Orchestrator {0}: GPS name for order {1}: {2}", entityId, order.OrderId, ex.Message); }
+                        }
+                    }
+                    AddEvent(Loc.F(MyStrings.Orchestrator_QuarryBenchAdded, GpsText(there), depth));
+                    jobId = quarryMergedJob = pj.JobId;
+                    return true;
+                }
+                quarryMergedJob = 0;
+                string text = Loc.F(MyStrings.Orchestrator_QuarryInProgress, GpsText(there));
+                AddEvent(text);
+                if (origin != 0) SendOrderUpdate(new PlayerOrder { OrderId = ja.OrderId, OriginBlock = origin }, 0, DesignatorOrderState.Cancelled, text);
+                if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: quarry preparation at {1} refused: job {2} there is under way", entityId, at, pj.JobId);
+                return true;
+            }
+            return false;
+        }
+
+        // One bench more on a quarry preparation's Mine task; the count now
+        private static int AddQuarryBench(JobAnnouncement ja)
+        {
+            if (ja.Tasks == null) return 0;
+            for (int i = 0; i < ja.Tasks.Count; i++)
+            {
+                var t = ja.Tasks[i];
+                if (t.Type != TaskType.Mine || t.Completion != ToolTaskCompletionTrigger.QuarryPrepared) continue;
+                t.CompletionValue = Math.Max(1, t.CompletionValue) + 1;
+                ja.Tasks[i] = t;
+                return (int)t.CompletionValue;
+            }
+            return 0;
+        }
+
+        // m: a quarry preparation's shaft side (its Mine task's TargetBlock.Z, dm; 0: unknown)
+        private static double QuarrySide(JobAnnouncement ja)
+        {
+            if (ja == null || ja.Tasks == null) return 0;
+            for (int i = 0; i < ja.Tasks.Count; i++)
+                if (ja.Tasks[i].Type == TaskType.Mine && ja.Tasks[i].Completion == ToolTaskCompletionTrigger.QuarryPrepared) return ja.Tasks[i].TargetBlock.Z / 10.0;
+            return 0;
+        }
+
+        private static int QuarryBenches(JobAnnouncement ja)
+        {
+            if (ja == null || ja.Tasks == null) return 0;
+            for (int i = 0; i < ja.Tasks.Count; i++)
+                if (ja.Tasks[i].Type == TaskType.Mine && ja.Tasks[i].Completion == ToolTaskCompletionTrigger.QuarryPrepared) return Math.Max(1, (int)ja.Tasks[i].CompletionValue);
+            return 0;
         }
 
         // The designator block that sent an order: told how it is going (kept and sent again for a while until it took it)
@@ -157,6 +254,7 @@ namespace Automata.Orchestrator
                 case JobType.DesignatorScoutArea:  label = "AREA  "; break;
                 case JobType.DesignatorEngage:     label = "ENGAGE"; break;
                 case JobType.DesignatorEscort:     label = "ESCORT"; break;
+                case JobType.DesignatorQuarry:     label = "QUARRY"; break;
                 default: return null;
             }
             var drones = new List<string>();

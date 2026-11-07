@@ -124,7 +124,8 @@ namespace Automata
             if ((kinds & DrawKinds.Lanes) != 0)
             {
                 // The lanes are the server's: drawn here at once (single player / host), else when its answer comes
-                if (MyAPIGateway.Multiplayer.IsServer) Pathfinding.LaneOverlay.Show(Pathfinding.LaneOverlay.Collect(me, pos, range), range);
+                if (MyAPIGateway.Multiplayer.IsServer) Pathfinding.LaneOverlay.Show(Pathfinding.LaneOverlay.Collect(me, pos, range), range,
+                                                                                  Config.ServerConfig.Instance.Drone.DebugDrawTimeoutSeconds);
                 else if (AutomataSession.Instance != null && AutomataSession.Instance.Net != null)
                     AutomataSession.Instance.Net.SendToServer(new Network.LaneDrawRequestPacket { Centre = Vector3DData.FromVector3D(pos), Range = range });
                 if (kinds == DrawKinds.Lanes) return;

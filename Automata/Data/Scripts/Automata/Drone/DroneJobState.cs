@@ -58,6 +58,9 @@ namespace Automata.Drone
         /// <summary>Lane obstructions not sent with a job report yet; the scout's finds so far.</summary>
         [ProtoMember(18)] public List<LaneObstruction> LaneObstructions;
         [ProtoMember(19)] public int Finds;
+        /// <summary>Saved digging a quarry (its Mine started): resumed digging (planned again: what is dug already is air,
+        /// skipped), not backed out.</summary>
+        [ProtoMember(20)] public bool QuarryActive;
     }
 
     /// <summary>What the drone learnt or was in the middle of, that can't be recomputed from the world after a load.</summary>
@@ -76,6 +79,8 @@ namespace Automata.Drone
         [ProtoMember(6)] public List<SweepFrameState> Frames = new List<SweepFrameState>();
         /// <summary>Ore scans not delivered to a mining surveyor yet.</summary>
         [ProtoMember(7)] public List<VirtualNetwork.SurveySweep> Surveys = new List<VirtualNetwork.SurveySweep>();
+        /// <summary>Chat lines kept until an orchestrator takes them (a blocked quarry), with the drone's nickname.</summary>
+        [ProtoMember(8)] public List<string> Alerts = new List<string>();
     }
 
     [ProtoContract]

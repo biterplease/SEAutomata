@@ -39,6 +39,18 @@ namespace Automata.Pathfinding
             return 0;
         }
 
+        /// <summary>Outer radius of asteroid 'v's rock along 'dir' from 'c' (FlightLanes: where a lane's end goes).</summary>
+        public double AsteroidRockRadius(MyVoxelBase v, Vector3D c, Vector3D dir, double max)
+        {
+            return RockRadius(v, c, dir, max);
+        }
+
+        /// <summary>Rock of asteroid 'v' within 'r' of 'c' (FlightLanes: lane ends clear of it).</summary>
+        public bool RockNear(MyVoxelBase v, Vector3D c, double r)
+        {
+            return RockInSphere(v, c, r);
+        }
+
         /// <summary>Rock of asteroid 'v' within 'r' of 'c' (a voxel counts when its centre is within r + half a voxel).</summary>
         private bool RockInSphere(MyVoxelBase v, Vector3D c, double r)
         {

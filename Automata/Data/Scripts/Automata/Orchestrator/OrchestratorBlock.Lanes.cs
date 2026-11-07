@@ -38,6 +38,7 @@ namespace Automata.Orchestrator
         private int laneSelected;
         private bool laneDraw;
         private int laneDrawStart, laneDrawWanted;
+        private DateTime laneDrawUntil;   // real time: frames stretch with a low simulation speed
         private int laneClearArmed = int.MinValue / 2;
         private readonly List<IMyGps> laneGps = new List<IMyGps>();
         private int laneGpsNumber;
@@ -237,6 +238,8 @@ namespace Automata.Orchestrator
             laneDrawWanted = laneSelected;
             laneDraw = true;
             laneDrawStart = MyAPIGateway.Session.GameplayFrameCounter;
+            laneDrawUntil = DateTime.MinValue;   // set when the lane arrives (clients: the server's timeout by then)
+            Automata.Drone.DroneControllerBlock.RequestClientSettings();
             if (AutomataSession.Instance != null) AutomataSession.Instance.RequestDraw(this, true);
             return true;
         }
@@ -249,9 +252,14 @@ namespace Automata.Orchestrator
         {
             if (!laneDraw || Entity == null || Entity.MarkedForClose) { StopLaneDraw(); return false; }
             int now = MyAPIGateway.Session.GameplayFrameCounter;
-            if (now - laneDrawStart > DrawTimeoutTicks) { StopLaneDraw(); return false; }
             if (settings.LaneDrawNumber != laneDrawWanted || settings.LaneDrawAB == null || settings.LaneDrawAB.Count < 6)
-                return now - laneDrawStart < 10 * 60;   // waiting for the server (10 s at most)
+            {
+                if (now - laneDrawStart < 10 * 60) return true;   // waiting for the server (10 s at most)
+                StopLaneDraw();
+                return false;
+            }
+            if (laneDrawUntil == DateTime.MinValue) laneDrawUntil = DateTime.UtcNow.AddSeconds(Config.ServerConfig.Instance.Drone.DebugDrawTimeoutSeconds);
+            if (DateTime.UtcNow > laneDrawUntil) { StopLaneDraw(); return false; }
             float alpha = settings.LaneDrawPending ? 0.35f : 0.9f;
             float phase = (now / 60f * LANE_CRAWL) % (LANE_DASH + LANE_GAP);
             DrawBox(settings.LaneDrawAB, settings.LaneDrawUpAB, Color.DeepSkyBlue * alpha, phase);

@@ -252,7 +252,7 @@ namespace Automata.Drone
         private static void AddIgnoreLists(bool crops)
         {
             string id = crops ? "Crops" : "Ores";
-            AddListbox("Listbox_Known" + id, crops ? MyStrings.Drone_Crops : MyStrings.Drone_Crops,
+            AddListbox("Listbox_Known" + id, crops ? MyStrings.Drone_Crops : MyStrings.Common_Ores,
                 crops ? MyStrings.Drone_IgnoreSpecificCropsTooltip : MyStrings.Drone_IgnoreSpecificOresTooltip,
                 6, true, (l, items, sel) => l.Terminal_KnownListContent(crops, items, sel), (l, sel) => l.Terminal_SelectKnown(crops, sel), null, true);
             AddButton("Button_Ignore" + id, MyStrings.Drone_IgnoreSelected,
@@ -806,6 +806,27 @@ namespace Automata.Drone
             AddCheckbox("Checkbox_SurveyForOres", MyStrings.Drone_SurveyForOres,
                 MyStrings.BLANK,
                 l => l.Terminal_SurveyForOres, (l, v) => l.Terminal_SurveyForOres = v);
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlCombobox, IMyRemoteControl>(IdPrefix + "Combo_MiningMethod");
+                c.Title = MyStrings.Drone_MiningMethod;
+                c.Tooltip = MyStrings.Drone_MiningMethodTooltip;
+                c.Visible = CustomVisibleCondition;
+                c.ComboBoxContent = (list) =>
+                {
+                    list.Add(new MyTerminalControlComboBoxItem { Key = (long)MiningMethod.Bore, Value = MyStrings.Drone_MiningBore });
+                    list.Add(new MyTerminalControlComboBoxItem { Key = (long)MiningMethod.Quarry, Value = MyStrings.Drone_MiningQuarry });
+                };
+                c.Getter = (b) => GetBlock(b)?.Terminal_MiningMethod ?? 0;
+                c.Setter = (b, v) => { var l = GetBlock(b); if (l != null) l.Terminal_MiningMethod = v; };
+                c.SupportsMultipleBlocks = true;
+                MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+            }
+            // 0 to 100: below 5 is "unset" (the drone's size decides)
+            AddSlider("Slider_QuarryDimension", MyStrings.Drone_QuarryDimension,
+                MyStrings.Drone_QuarryDimensionTooltip,
+                0f, DroneControllerBlock.QUARRY_DIMENSION_MAX,
+                l => l.Terminal_QuarryDimension, (l, v) => l.Terminal_QuarryDimension = v,
+                (l, sb) => { if (l.Terminal_QuarryDimension <= 0) sb.AppendLoc(MyStrings.Drone_QuarryUnset, l.QuarryEffectiveSize); else sb.AppendLoc(MyStrings.Drone_Metres, l.Terminal_QuarryDimension.ToString("F0")); });
 
             AddIgnoreLists(false);
 

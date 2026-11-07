@@ -197,9 +197,35 @@ namespace Automata.Mining
         /// </summary>
         public static bool NearestOre(Vector3D point, double radius, MyStringHash ore, out Vector3D at, out double distance)
         {
+            MyStringHash found;
             at = point;
             distance = double.MaxValue;
             if (ore == MyStringHash.NullOrEmpty) return false;
+            return Nearest(point, radius, ore, MyStringHash.NullOrEmpty, null, out found, out at, out distance);
+        }
+
+        /// <summary>
+        /// The quarry's ore guard: the nearest voxel of any ore but 'except' (NullOrEmpty: any ore at all) within 'radius' of
+        /// 'point' (the same LOD 1 read as NearestOre). False when there is none.
+        /// </summary>
+        public static bool NearestOtherOre(Vector3D point, double radius, MyStringHash except, out MyStringHash ore, out Vector3D at, out double distance)
+        {
+            return Nearest(point, radius, MyStringHash.NullOrEmpty, except, null, out ore, out at, out distance);
+        }
+
+        /// <summary>Same, the ores in 'skip' left out too (a drone's ignore list: dug like rock). 'skip' may be null.</summary>
+        public static bool NearestOtherOre(Vector3D point, double radius, MyStringHash except, HashSet<MyStringHash> skip, out MyStringHash ore, out Vector3D at, out double distance)
+        {
+            return Nearest(point, radius, MyStringHash.NullOrEmpty, except, skip, out ore, out at, out distance);
+        }
+
+        // 'ore' set: that ore only; else any ore but 'except' and those in 'skip'
+        private static bool Nearest(Vector3D point, double radius, MyStringHash ore, MyStringHash except, HashSet<MyStringHash> skip, out MyStringHash foundOre,
+                                    out Vector3D at, out double distance)
+        {
+            at = point;
+            distance = double.MaxValue;
+            foundOre = MyStringHash.NullOrEmpty;
             var box = new BoundingBoxD(point - radius, point + radius);
             nearMaps.Clear();
             nearByStorage.Clear();
@@ -232,12 +258,14 @@ namespace Automata.Mining
                 v.Storage.ReadRange(nearCache, MyStorageDataTypeFlags.Material, 1, lo, hi, ref flags);
                 for (int i = 0; i < n; i++)
                 {
-                    if (nearCache.Content(i) <= 127 || OreOf(nearCache.Material(i)) != ore) continue;
+                    if (nearCache.Content(i) <= 127) continue;
+                    var m = OreOf(nearCache.Material(i));
+                    if (ore != MyStringHash.NullOrEmpty ? m != ore : m == MyStringHash.NullOrEmpty || m == except || (skip != null && skip.Contains(m))) continue;
                     Vector3I p;
                     nearCache.ComputePosition(i, out p);
                     Vector3D world = corner + (Vector3D)(p + lo) * 2 + 1;   // LOD 1 voxel -> LOD 0 metres, voxel centre
                     double d2 = Vector3D.DistanceSquared(world, point);
-                    if (d2 < best) { best = d2; at = world; }
+                    if (d2 < best) { best = d2; at = world; foundOre = m; }
                 }
             }
             nearByStorage.Clear();
@@ -290,6 +318,14 @@ namespace Automata.Mining
                 if (++air >= need) { surface = firstAir; return true; }
             }
             return false;
+        }
+
+        /// <summary>Rock at 'p' in 'v' (its LOD 0 voxel more than half full).</summary>
+        public static bool Rock(IMyVoxelBase v, Vector3D p)
+        {
+            if (v == null || v.Storage == null) return false;
+            probe.Resize(Vector3I.One);
+            return Solid(v.Storage, v.Storage.Size, v.PositionLeftBottomCorner, p);
         }
 
         // Rock at 'p': the storage voxel there more than half full (outside the storage: none)

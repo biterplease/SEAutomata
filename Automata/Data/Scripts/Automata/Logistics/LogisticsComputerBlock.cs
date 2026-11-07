@@ -276,7 +276,7 @@ namespace Automata.Logistics
                 lastQuotaCheck = now;
                 CheckQuotas(now);
             }
-            else if (quotaKeys.Count == 0) { requestJob = null; pushJob = null; }
+            else if (quotaKeys.Count == 0) { requestJob = null; pushJob = null; oreShortfall.Clear(); }
             ReadFailures(now);
             ReadJobReports(now);
             ReadKeepalives(now);
@@ -484,14 +484,22 @@ namespace Automata.Logistics
             if (Has(OperationMode.Request) && minimums.Count > 0)
             {
                 var missing = new DiscreteInventory();
+                oreShortfall.Clear();
+                bool mine = settings.OreRequestsMine;
                 foreach (var m in minimums)
                 {
                     int count = have.GetItemCount(m.Key);
-                    if (count < m.Value) missing.AddItem(m.Key, m.Value - count);
+                    if (count >= m.Value) continue;
+                    if (mine && IsOreKey(m.Key))
+                    {
+                        oreShortfall[m.Key] = m.Value - count;   // mined for it, never hauled (OreRequests)
+                        continue;
+                    }
+                    missing.AddItem(m.Key, m.Value - count);
                 }
                 requestJob = UpdateJob(requestJob, missing, have, Orchestrator.JobType.DeliverMissingInventory, now);
             }
-            else requestJob = null;
+            else { requestJob = null; oreShortfall.Clear(); }
             if (Has(OperationMode.Push) && maximums.Count > 0)
             {
                 var excess = new DiscreteInventory();

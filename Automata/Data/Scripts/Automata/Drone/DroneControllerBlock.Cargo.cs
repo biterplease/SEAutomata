@@ -42,6 +42,58 @@ namespace Automata.Drone
 
         private static readonly string INGOT_TYPE = "MyObjectBuilder_Ingot";
 
+        private const int CLEAR_UNREACHABLE_TICKS = 5 * 60 * 60;   // a clear port the drone couldn't dock at: left alone this long
+        private readonly Dictionary<long, int> clearUnreachable = new Dictionary<long, int>();
+        private bool cargoStuck;
+        private int cargoStuckFrame = int.MinValue / 2;
+        private const int CARGO_STUCK_CHECK_TICKS = 10 * 60;
+
+        // The port couldn't be docked at lately, or had no room for what is aboard
+        private bool ClearPortBlocked(long id)
+        {
+            int now = MyAPIGateway.Session.GameplayFrameCounter, until;
+            if (clearUnreachable.TryGetValue(id, out until))
+            {
+                if (now < until) return true;
+                clearUnreachable.Remove(id);
+            }
+            return id == clearNoRoomPort && now - clearNoRoomFrame < CLEAR_NO_ROOM_TICKS;
+        }
+
+        // The task at 'index' is the dock of a clear trip (DockAt, then ClearCargo)
+        private bool IsClearDockAt(int index)
+        {
+            return currentJob != null && index + 1 < currentJob.Tasks.Count && currentJob.Tasks[index].Type == Orchestrator.TaskType.DockAt
+                   && currentJob.Tasks[index + 1].Type == Orchestrator.TaskType.ClearCargo;
+        }
+
+        // The clear trip's dock failed: that port is left alone CLEAR_UNREACHABLE_TICKS, the job goes on past the clear
+        private void SkipClearDock()
+        {
+            var dock = currentJob.Tasks[taskIndex];
+            clearUnreachable[dock.TargetEntityId] = MyAPIGateway.Session.GameplayFrameCounter + CLEAR_UNREACHABLE_TICKS;
+            if (lastCargoPortId == dock.TargetEntityId) lastCargoPortId = 0;
+            cargoStuckFrame = int.MinValue / 2;
+            var c = AnchorDirectory.Resolve(block, dock.TargetEntityId) as IMyShipConnector;
+            Report(MyStrings.Drone_ClearDockSkipped, c != null ? c.CustomName : dock.TargetEntityId.ToString(), taskFailure, CLEAR_UNREACHABLE_TICKS / 3600);
+            taskFailure = Orchestrator.TaskFailure.None;
+            if (constructionOrder != null && IsConstructionOrderActive()) ClearFlightOrder();
+            NextTask(2);
+        }
+
+        /// <summary>Cargo aboard that can't be cleared now (no port, its port unreachable / without room); checked every 10 s.</summary>
+        private bool CargoStuck()
+        {
+            int now = MyAPIGateway.Session.GameplayFrameCounter;
+            if (now - cargoStuckFrame < CARGO_STUCK_CHECK_TICKS) return cargoStuck;
+            cargoStuckFrame = now;
+            cargoStuck = false;
+            if (!ClearsCargo || !HasCargoToClear()) return false;
+            var port = ClearPort();
+            cargoStuck = port == null || ClearPortBlocked(port.EntityId);
+            return cargoStuck;
+        }
+
         // Every tool of the construct that holds items: connectors, collectors, welders, grinders, drills (refreshed per
         // clear / unload: a welder aborting with job components on it, a grinder's parts, a drill's ore and stone)
         private readonly List<IMyTerminalBlock> toolStores = new List<IMyTerminalBlock>();
@@ -214,8 +266,8 @@ namespace Automata.Drone
         private IMyShipConnector ClearPort()
         {
             var home = GetHomeConnector();
-            if (home != null && !home.Closed && home.IsFunctional) return home;
-            if (lastCargoPortId != 0)
+            if (home != null && !home.Closed && home.IsFunctional && !clearUnreachable.ContainsKey(home.EntityId)) return home;
+            if (lastCargoPortId != 0 && !clearUnreachable.ContainsKey(lastCargoPortId))
             {
                 var c = AnchorDirectory.Resolve(block, lastCargoPortId) as IMyShipConnector;
                 if (c != null && !c.Closed && c.IsFunctional) return c;
@@ -253,7 +305,7 @@ namespace Automata.Drone
                 foreach (var c in grid.GetFatBlocks<IMyShipConnector>())
                 {
                     double d = Vector3D.DistanceSquared(c.GetPosition(), at);
-                    if (d >= bestD || !DockableFree(c, faces, smallFaces, g) || !NetworkHasRoom(grid)) continue;
+                    if (d >= bestD || ClearPortBlocked(c.EntityId) || !DockableFree(c, faces, smallFaces, g) || !NetworkHasRoom(grid)) continue;
                     bestD = d;
                     best = c;
                 }
@@ -303,12 +355,12 @@ namespace Automata.Drone
         private void PrepareCargoForJob(Orchestrator.Job job)
         {
             clearTripInserted = false;
-            if (!ClearsCargo || job == null || job.Tasks == null || Orchestrator.JobTypeExtensions.IsDesignator(job.JobType) || !HasCargoToClear()) return;
+            if (!ClearsCargo || job == null || job.Tasks == null || Orchestrator.JobTypeExtensions.IsDesignator(job.JobType) && !clearForPlayerOrder || !HasCargoToClear()) return;
             var docked = DockedConnector();
             if (docked != null && ClearCargoAt(docked)) return;
             if (job.Tasks.Count > 1 && job.Tasks[0].Type == Orchestrator.TaskType.DockAt && job.Tasks[1].Type == Orchestrator.TaskType.LoadInventory) return;
             var port = ClearPort();
-            if (port == null || (docked != null && docked.EntityId == port.EntityId)) return;   // nowhere else / no room here
+            if (port == null || (docked != null && docked.EntityId == port.EntityId) || ClearPortBlocked(port.EntityId)) return;   // nowhere else / no room here / unreachable
             job.Tasks.Insert(0, ClearCargoTask());
             job.Tasks.Insert(0, DockTaskFor(port));
             if (Log.DebugEnabled) Log.Debug("Drone {0}: job {1}: cargo aboard, clearing it at {2} first", Entity.EntityId, job.JobId, port.CustomName);
@@ -325,7 +377,7 @@ namespace Automata.Drone
             var docked = DockedConnector();
             if (docked != null && ClearCargoAt(docked)) return false;
             var port = ClearPort();
-            if (port == null || (docked != null && docked.EntityId == port.EntityId)) return false;
+            if (port == null || (docked != null && docked.EntityId == port.EntityId) || ClearPortBlocked(port.EntityId)) return false;
             currentJob.Tasks.Insert(taskIndex, ClearCargoTask());
             currentJob.Tasks.Insert(taskIndex, DockTaskFor(port));
             taskStarted = false;
@@ -340,6 +392,7 @@ namespace Automata.Drone
         private bool TryStartHousekeeping()
         {
             if (!IsServer || currentJob != null || cPhase != ConstructionPhase.Idle || !ClearsCargo || !initialized || Grounded) return false;
+            if (LowPower || powerRemnant != null) return false;   // charging first; an aborted job's cargo goes where that job meant it to
             int now = MyAPIGateway.Session.GameplayFrameCounter;
             if (now < clearRetryFrame) return false;
             double volume = ClearableVolume();
@@ -354,7 +407,7 @@ namespace Automata.Drone
                 return false;
             }
             if (docked != null && docked.EntityId == port.EntityId) return false;   // here already: no room
-            if (port.EntityId == clearNoRoomPort && now - clearNoRoomFrame < CLEAR_NO_ROOM_TICKS) return false;   // full there a moment ago
+            if (ClearPortBlocked(port.EntityId)) return false;   // full there a moment ago / couldn't dock there
             var job = new Orchestrator.Job { JobType = Orchestrator.JobType.None };
             job.Tasks.Add(DockTaskFor(port));
             job.Tasks.Add(ClearCargoTask());

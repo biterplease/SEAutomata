@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 using ProtoBuf;
@@ -28,7 +29,8 @@ namespace Automata.Pathfinding
     /// <summary>
     /// "/automata debugdraw lanes": the flight lanes of the orchestrators the player owns with a line within the range,
     /// drawn like the orchestrator's Visualize (dashes crawling toward each line's end, pending / suspended faint, names
-    /// at the line starts as local GPS) until DebugDrawTimeoutSeconds or "debugdraw off". The lanes live on the server:
+    /// at the line starts as local GPS) until the server's DebugDrawTimeoutSeconds (real seconds: frames stretch with a low
+    /// simulation speed; the server sends its value with the lanes) or "debugdraw off". The lanes live on the server:
     /// Collect there (multiplayer: LaneDrawRequestPacket), Show on the player's client.
     /// </summary>
     public sealed class LaneOverlay : IDebugDrawable
@@ -36,7 +38,7 @@ namespace Automata.Pathfinding
         private static LaneOverlay instance;
         private readonly List<LaneShape> shapes = new List<LaneShape>();
         private readonly List<IMyGps> gps = new List<IMyGps>();
-        private int start;
+        private DateTime until;
 
         /// <summary>Server: the lanes owned by 'identity's orchestrators with a line within 'range' of 'centre'.</summary>
         public static List<LaneShape> Collect(long identity, Vector3D centre, double range)
@@ -63,7 +65,7 @@ namespace Automata.Pathfinding
         }
 
         /// <summary>Client: draws these, in place of the last ones.</summary>
-        public static void Show(List<LaneShape> lanes, double range)
+        public static void Show(List<LaneShape> lanes, double range, int timeoutSeconds)
         {
             if (instance == null) instance = new LaneOverlay();
             instance.StopDebugDraw();
@@ -71,7 +73,7 @@ namespace Automata.Pathfinding
             MyAPIGateway.Utilities.ShowMessage(AutomataSession.MOD_NAME, Loc.F(MyStrings.Common_DebugDrawLanesWithinM, n, (int)range));
             if (n == 0 || AutomataSession.Instance == null) return;
             instance.shapes.AddRange(lanes);
-            instance.start = MyAPIGateway.Session.GameplayFrameCounter;
+            instance.until = DateTime.UtcNow.AddSeconds(MathHelper.Clamp(timeoutSeconds, 10, 3600));
             instance.AddGps();
             AutomataSession.Instance.RequestDraw(instance, true);
         }
@@ -79,7 +81,7 @@ namespace Automata.Pathfinding
         public bool DrawDebug()
         {
             int now = MyAPIGateway.Session.GameplayFrameCounter;
-            if (shapes.Count == 0 || now - start > Config.ServerConfig.Instance.Drone.DebugDrawTimeoutSeconds * 60)
+            if (shapes.Count == 0 || DateTime.UtcNow > until)
             {
                 StopDebugDraw();
                 return false;

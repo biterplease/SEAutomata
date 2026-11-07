@@ -9,6 +9,8 @@ namespace Automata.Util.Strings
 
         public static readonly MyStringId Logistics_AcceptOresIce = MyStringId.GetOrCompute("{LOC:Logistics_AcceptOresIce}"); // "Accept ores/ice"
         public static readonly MyStringId Logistics_AcceptOresIceTooltip = MyStringId.GetOrCompute("{LOC:Logistics_AcceptOresIceTooltip}"); // "Bid volume for ore/ice without refineries or O2/H2 generators"
+        public static readonly MyStringId Logistics_OreRequestsMine = MyStringId.GetOrCompute("{LOC:Logistics_OreRequestsMine}"); // "Ore requests mine"
+        public static readonly MyStringId Logistics_OreRequestsMineTooltip = MyStringId.GetOrCompute("{LOC:Logistics_OreRequestsMineTooltip}"); // "Ore requests will issue a mining job"
         public static readonly MyStringId Logistics_Active = MyStringId.GetOrCompute("{LOC:Logistics_Active}"); // "Active"
         public static readonly MyStringId Logistics_AddManually = MyStringId.GetOrCompute("{LOC:Logistics_AddManually}"); // "Add manually"
         public static readonly MyStringId Logistics_Announced = MyStringId.GetOrCompute("{LOC:Logistics_Announced}"); // "announced"

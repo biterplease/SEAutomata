@@ -71,5 +71,7 @@ namespace Automata.Mining
         [ProtoMember(6)] public int HoldTicksLeft;
         [ProtoMember(7)] public int DronesOut;
         [ProtoMember(8)] public bool Announced;
+        /// <summary>Mined for this logistics computer's ore request (0: the surveyor's own order).</summary>
+        [ProtoMember(9)] public long ForLc;
     }
 }

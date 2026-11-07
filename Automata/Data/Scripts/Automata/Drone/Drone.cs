@@ -122,6 +122,13 @@ namespace Automata.Drone
         [ProtoEnum] LiftLt1000t = 1048576,
 
     }
+    /// <summary>How a mining drone gets to the ore (terminal, Mining): a tunnel straight to it, or a stepped pit first.</summary>
+    public enum MiningMethod : byte
+    {
+        [ProtoEnum] Bore = 0,
+        [ProtoEnum] Quarry = 1,
+    }
+
     /// <summary>
     /// A drone's role (one per drone, terminal). Values are bits so orchestrators test them with &amp;; ushort since the
     /// job profiles (2026-10-05) outgrew a byte (protobuf writes the number either way).

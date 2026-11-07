@@ -128,7 +128,7 @@ namespace Automata.Drone
                 Controller = flightState.WorldMatrix,
                 Owner = Entity.EntityId,
                 LocalHull = localHullBox,
-                OwnGrids = droneGrids,
+                OwnGrids = PathOwnGrids(),   // (quarry lane mates too)
                 Cameras = cameraBlocks,
                 Sensors = sensors,
                 GravityUp = flightState.InGravity ? flightState.GravityUp : Vector3D.Zero,
@@ -1046,7 +1046,9 @@ namespace Automata.Drone
                 hitEntity = null;
                 scene = false;
             }
-            if (!blocked) return;
+            if (!blocked) { if (routeWaitFor != 0) EndYield("the leg is clear"); return; }
+            if (RouteWaitForDrone(hitEntity)) return;   // a drone in the way near the work site: held until it clears
+            if (routeWaitFor != 0) EndYield("something else in the way");
             var pf = AutomataSession.GetConfig().Pathfinding;
             lastReplanFrame = MyAPIGateway.Session.GameplayFrameCounter;
             bool ok = pf.AllowRepathing() && ++routeReplans <= pf.MaxRepositionAttempts();
@@ -1134,6 +1136,7 @@ namespace Automata.Drone
 
         private void UpdateRouteWatch()
         {
+            if (routeWaitFor != 0) return;   // held for a drone in the way (CheckLegStart checks the leg again)
             var o = activeFlightOrder;
             if (o == null || !o.Watched || preflightStage != 0 || routeOwner == RouteOwner.None) return;
             if (parkPhase != ParkPhase.None && o == parkOrder) return;   // landing on the surface it parks on

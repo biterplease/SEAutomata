@@ -135,3 +135,12 @@ Blueprints: industrial = HandDrill cost (any assembler / survival kit); hostile 
 ## Alerts, targeted awards (2026-10-21)
 - `PLAYER_ALERT` (directed `PlayerAlert`) from any block: `ReadPlayerAlerts` adds it to the events and writes it to chat when "use broadcast controller" is on; the same line is not repeated within 30 s. Its own missing-drone alert: 10 min unheard (`DroneWatch.SILENT_TICKS`), "<orchestrator nickname>: Drone X has not been heard of for 10 min! Last known position GPS:...".
 - Awards are directed (`RecipientId`): one per winning drone (its own assignments only), per source LC, per announcer. Losers (and every other bidder when an auction ends without them) get an empty-assignment award from `closedOutbox` so they bid again at once. See VirtualNetwork/CLAUDE.md.
+
+## Quarry jobs (2026-11-06, TODO/19)
+- `JobType.DesignatorQuarry` (10, a designator type: `IsDesignator` now ends there): RequiredProfile / PreferredProfile Mining drone, CanDrill, `AssignDesignator` (+ ReturnHome). Tasks: NavigateToolTo, Mine (`Task.QuarryPrepare`: Completion `QuarryPrepared`, CompletionValue benches), BackOut.
+- `AcceptDesignatorJob` -> `MergeQuarryOrder`: another quarry order within 50 m of a held one adds a bench (`AddQuarryBench`) and restarts the 5 s hold; of one already queued / taken: refused (`Orchestrator_QuarryInProgress`, the designator block told Cancelled). Hand-held ones are held (`PlayerJob.Held` / `HeldUntil`, not queued; `ReleaseHeldPlayerJobs` from `ExpirePlayerJobs`), designator blocks' queued at once. Held state is runtime only.
+- `AssignMine`: a quarry bidder (`Bid.Quarry`) mines alone: skipped as a second drone, and no drone after it.
+
+## Preempted jobs (2026-11-06)
+- `OpenAuction` / `ActiveJob` keep the announcement and sender owner (runtime). A report Aborted with `Preempted` (a tagged drone took a player's order), its last drone, not a player job: queued again (`knownJobs` = MaxValue). Mining surveyors keep such a job assigned (no settle, not announced twice); the next drone's report settles it.
+- Held hand-held quarry preparations count as running in `ForgetJobs` (`IsHeldPlayerJob`): before, every one ended the moment it was ordered ("no report from the drone").

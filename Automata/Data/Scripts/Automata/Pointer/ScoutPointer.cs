@@ -618,15 +618,95 @@ namespace Automata.Pointer
         // Area sweeps: the tagged drones that are ore scouts (the others can only take spot checks)
         private static List<long> OreScoutsOf(List<long> tagged)
         {
-            var scouts = new List<long>();
+            return OfProfile(tagged, Drone.BehaviourProfile.IsOreScout);
+        }
+
+        private static readonly Random groupRandom = new Random();
+
+        // Area sweeps: the tagged mining drones (they prepare a quarry there instead)
+        private static List<long> MinersOf(List<long> tagged)
+        {
+            return OfProfile(tagged, Drone.BehaviourProfile.IsMiningDrone);
+        }
+
+        private static List<long> OfProfile(List<long> tagged, Drone.BehaviourProfile profile)
+        {
+            var found = new List<long>();
             for (int i = 0; i < tagged.Count; i++)
             {
                 IMyEntity e;
                 var tb = MyAPIGateway.Entities.TryGetEntityById(tagged[i], out e) ? e as IMyTerminalBlock : null;
                 var d = tb != null && tb.GameLogic != null ? tb.GameLogic.GetAs<Drone.DroneControllerBlock>() : null;
-                if (d != null && d.Profile == Drone.BehaviourProfile.IsOreScout) scouts.Add(tagged[i]);
+                if (d != null && d.Profile == profile) found.Add(tagged[i]);
             }
-            return scouts;
+            return found;
+        }
+
+        /// <summary>
+        /// Blue with a mining drone tagged: a quarry preparation at the point, for the first tagged miner. Scouts tagged
+        /// with it: refused (the designator block's log and the orchestrator's; not broadcast). The tags are kept: more
+        /// orders at the same spot (within 50 m, while the orchestrator still holds the job) add benches.
+        /// </summary>
+        private static void QuarryOrder(ScoutPointerPacket p, long identity, Vector3D at, Vector3D hit, OrderSink sink, List<long> tagged, List<long> miners)
+        {
+            if (OreScoutsOf(tagged).Count > 0)
+            {
+                string text = Loc.T(MyStrings.Common_QuarryScoutsAndMiners);
+                if (sink.Designator != null) sink.Designator.AddLog(text);
+                var orch = sink.Orch ?? CoveringOrchestrator(at, identity);
+                if (orch != null) orch.Notice(text);
+                if (Log.DebugEnabled) Log.Debug("Pointer: [server] player {0}: quarry refused: ore scouts and mining drones tagged together", identity);
+                Feedback(identity, DesignatorSignal.Error);
+                return;
+            }
+            // One shaft: the largest Q of the tagged miners, split into as many sections as fit (each holds the widest hull
+            // across the shaft among them: tall drones dig lanes); the drones that don't fit are left out (they keep their jobs)
+            var drones = new List<Drone.DroneControllerBlock>();
+            var ids = new List<long>();
+            for (int i = 0; i < miners.Count; i++)
+            {
+                IMyEntity e;
+                var tb = MyAPIGateway.Entities.TryGetEntityById(miners[i], out e) ? e as IMyTerminalBlock : null;
+                var d = tb != null && tb.GameLogic != null ? tb.GameLogic.GetAs<Drone.DroneControllerBlock>() : null;
+                if (d == null) continue;
+                drones.Add(d);
+                ids.Add(miners[i]);
+            }
+            if (drones.Count == 0) { Feedback(identity, DesignatorSignal.Error); return; }
+            float interference;
+            bool inGravity = MyAPIGateway.Physics.CalculateNaturalGravityAt(hit, out interference).LengthSquared() > 0.01f;
+            double side = 0, narrow = 0, wide = 0;
+            for (int i = 0; i < drones.Count; i++)
+            {
+                double n, w;
+                drones[i].QuarryFootprint(inGravity, out n, out w);
+                side = Math.Max(side, drones[i].QuarryEffectiveSize);
+                narrow = Math.Max(narrow, n);
+                wide = Math.Max(wide, w);
+            }
+            int cols, rows;
+            int fit = QuarryPlanner.Layout(side, narrow, wide, drones.Count, out cols, out rows);
+            if (fit < drones.Count)
+            {
+                string text = Loc.F(MyStrings.Common_QuarryDronesFit, fit, drones.Count, side);
+                if (sink.Designator != null) sink.Designator.AddLog(text);
+                var orch = sink.Orch ?? CoveringOrchestrator(at, identity);
+                if (orch != null) orch.Notice(text);
+                if (Log.DebugEnabled) Log.Debug("Pointer: [server] player {0}: {1}", identity, text);
+            }
+            int group;
+            lock (groupRandom) group = groupRandom.Next(1, int.MaxValue);
+            uint order = 0, first = 0;
+            for (int s = 0; s < fit; s++)
+            {
+                uint job = sink.Submit(Orchestrator.JobType.DesignatorQuarry, ScoutPlanner.QuarryPrepare(hit, p.HitNormal.ToVector3D(), side, s, cols, rows, group), hit,
+                                       Loc.T(MyStrings.Common_QuarryPreparation), identity, p.Kind, ScoutPlanner.QuarryMarker(side), ref order, ids[s]);
+                if (s == 0) first = job;
+                if (job == 0 && !sink.IsCamera) break;   // refused (in progress there) / merged into one held: the order's other drones too
+            }
+            if (first == 0 && !sink.IsCamera) { Feedback(identity, DesignatorSignal.Error); return; }   // refused: in progress there (its log says so)
+            if (Log.DebugEnabled) Log.Debug("Pointer: [server] quarry preparation at {0} for player {1}: {2:F1} m shaft, {3} x {4} section(s), {5} of {6} drone(s)", hit, identity, side, cols, rows, fit, drones.Count);
+            Feedback(identity, DesignatorSignal.Requested);
         }
 
         // Tagged drones still there (removed / closed ones dropped from the memory)
@@ -810,7 +890,7 @@ namespace Automata.Pointer
             if (!p.Hit && !selfEscort) { Feedback(identity, DesignatorSignal.Error); return; }
             Vector3D hit = p.Hit ? p.HitPosition.ToVector3D() : at;
             double dist = Vector3D.Distance(at, hit);
-            if (p.Mode == PointerMode.Green) { Recall(p.HitEntityId, hit, identity); return; }
+            if (p.Mode == PointerMode.Green) { Recall(p.HitEntityId, at, hit, identity); return; }
             // Orders: the tagged drones (tag mode) take them, one job each; none tagged: one drone of the profile
             var memory = TagsFor(identity, p.Kind);
             var tagged = LiveTags(memory);   // empty: one drone, any of the profile (as before tagging)
@@ -841,6 +921,8 @@ namespace Automata.Pointer
             // ore scouts (spot-check only) don't take a sector; only such drones tagged: refused, the tags kept
             if (tagged.Count > 0)
             {
+                var miners = MinersOf(tagged);
+                if (miners.Count > 0) { QuarryOrder(p, identity, at, hit, sink, tagged, miners); return; }
                 var scouts = OreScoutsOf(tagged);
                 if (scouts.Count == 0)
                 {
@@ -1105,7 +1187,7 @@ namespace Automata.Pointer
 
         // Green: the pointed drone (the player's / faction's) comes home; else the order whose marker is pointed at (its
         // drones come home, jobs not yet taken are cancelled)
-        private static void Recall(long entityId, Vector3D hit, long identity)
+        private static void Recall(long entityId, Vector3D from, Vector3D hit, long identity)
         {
             IMyEntity e;
             var grid = MyAPIGateway.Entities.TryGetEntityById(entityId, out e) ? e as IMyCubeGrid : null;
@@ -1124,7 +1206,7 @@ namespace Automata.Pointer
                     var o = OrchestratorBlock.All[i];
                     int drones, cancelled;
                     if (!o.IsRunning || !Drone.AnchorDirectory.IsAllowed(o.OwnerId, identity)) continue;
-                    if (o.RecallOrderAt(hit, RECALL_MARKER_RADIUS, Loc.T(MyStrings.Common_ScoutLaser), out drones, out cancelled)) n = drones + cancelled;
+                    if (o.RecallOrderAt(from, hit, RECALL_MARKER_RADIUS, Loc.T(MyStrings.Common_ScoutLaser), out drones, out cancelled)) n = drones + cancelled;
                 }
             }
             Feedback(identity, n > 0 ? DesignatorSignal.Recall : DesignatorSignal.Error);

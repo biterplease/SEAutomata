@@ -784,12 +784,13 @@ namespace Automata.Drone
         private readonly List<DateTime> unsentAlertTimes = new List<DateTime>();
         private readonly List<Message<PlayerAlert>> unsentAlertSent = new List<Message<PlayerAlert>>();
 
-        private void Broadcast(string text)
+        // 'keep': no time limit, saved with the drone (a blocked quarry: sent whenever an orchestrator is reached)
+        private void Broadcast(string text, bool keep = false)
         {
             if (!IsServer || string.IsNullOrEmpty(text)) return;
             if (unsentAlerts.Count >= ALERT_PENDING_MAX) RemoveUnsentAlert(0);
             unsentAlerts.Add(Nicknames.Of(_entityId) + ": " + text);
-            unsentAlertTimes.Add(DateTime.UtcNow);
+            unsentAlertTimes.Add(keep ? DateTime.MaxValue : DateTime.UtcNow);
             unsentAlertSent.Add(null);
             FlushAlerts();
         }

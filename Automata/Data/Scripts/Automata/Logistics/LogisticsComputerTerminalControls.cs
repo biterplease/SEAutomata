@@ -151,6 +151,11 @@ namespace Automata.Logistics
                      MyStrings.Logistics_AcceptOresIceTooltip,
                      CustomVisibleCondition, b => BlockConfig.AllowLogistics,
                      l => l.Terminal_AcceptOreWithoutRefinery, (l, v) => l.Terminal_AcceptOreWithoutRefinery = v);
+            Checkbox("CheckboxLCOreRequestsMine", MyStrings.Logistics_OreRequestsMine,
+                     MyStrings.Logistics_OreRequestsMineTooltip,
+                     b => CustomVisibleCondition(b) && BlockConfig.AllowLogistics && BlockConfig.AllowNetworkRequests,
+                     b => BlockConfig.AllowLogistics && BlockConfig.AllowNetworkRequests,
+                     l => l.Terminal_OreRequestsMine, (l, v) => l.Terminal_OreRequestsMine = v);
             Separator();
             Label(IdPrefix + "LabelItems", MyStrings.Logistics_ItemsItemMinMax);
             {

@@ -219,6 +219,7 @@ namespace Automata.Network
             {
                 Lanes = Pathfinding.LaneOverlay.Collect(identity, Centre.ToVector3D(), Range),
                 Range = Range,
+                TimeoutSeconds = Config.ServerConfig.Instance.Drone.DebugDrawTimeoutSeconds,
             }, senderSteamId);
         }
     }
@@ -231,11 +232,12 @@ namespace Automata.Network
 
         [ProtoMember(1)] public List<Pathfinding.LaneShape> Lanes = new List<Pathfinding.LaneShape>();
         [ProtoMember(2)] public double Range;
+        [ProtoMember(3)] public int TimeoutSeconds;          // the server's DebugDrawTimeoutSeconds
 
         public override void Received(ref PacketInfo packetInfo, ulong senderSteamId)
         {
             if (MyAPIGateway.Multiplayer.IsServer) return;
-            Pathfinding.LaneOverlay.Show(Lanes, Range);
+            Pathfinding.LaneOverlay.Show(Lanes, Range, TimeoutSeconds);
         }
     }
 

@@ -106,12 +106,13 @@ namespace Automata.Drone
             jobSharedSite = false;
             siteWatchCenterSet = false;
             siteYielding = false;
+            routeWaitFor = 0;
             mineAngled = false;
             mineSiteFixed = false;
             lastKeepaliveFrame = int.MinValue / 2;   // the first keepalive at once: its announcer starts watching
             mineRebores = 0;
             boreLineStarts.Clear();
-            borePath.Clear();
+            if (!keepBorePath) borePath.Clear();   // (a player's order backing out of a bore first keeps it)
             boreHold = false;
             boreHoldFrame = 0;
             boreLineEnds.Clear();
@@ -220,6 +221,7 @@ namespace Automata.Drone
             }
             jobAbortReason = null;
             CancelPendingRoute();
+            Pointer.QuarrySites.Release(_entityId);
             var source = jobSource;
             currentJob = null;
             constructionOrder = null;
@@ -259,6 +261,7 @@ namespace Automata.Drone
                 ClearFlightOrder();
             }
             if (jobSource == JobSource.Orchestrator && currentJob != null) ReportJobOutcome(JobOutcome.Aborted, reason);
+            Pointer.QuarrySites.Release(_entityId);
             if (cPhase == ConstructionPhase.Running)
             {
                 ToolsOff();
@@ -333,6 +336,14 @@ namespace Automata.Drone
                     ResetRoute();
                 }
                 TaskStatus status = StepTask(starting);
+                // The dock of a clear trip (cargo left from before) failed: that connector is left alone for a while, the
+                // job goes on with the cargo aboard (a mining job unloads it at its end) - it aborted the job before, and
+                // the drone won and dropped 265 jobs in 34 min at a connector whose way in was blocked (2026-11-06)
+                if (status != TaskStatus.Running && status != TaskStatus.Done && taskFailure != Orchestrator.TaskFailure.None && IsClearDockAt(taskIndex))
+                {
+                    SkipClearDock();
+                    continue;
+                }
                 if (taskFailure != Orchestrator.TaskFailure.None) ReportTaskFailure();
                 switch (status)
                 {
@@ -538,7 +549,18 @@ namespace Automata.Drone
                     // Mining: every ore aboard (stone, other ores: refineries take them), unless another unload follows
                     // (ice jobs: the ice at the O2/H2 generators' computer first, the rest at the refinery's)
                     bool allOre = currentJob.JobType == Orchestrator.JobType.MineOre && currentJob.IndexOf(Orchestrator.TaskType.UnloadInventory, taskIndex + 1) < 0;
-                    if (!UnloadCargo(task.Inventory, allOre))
+                    // Mining: the job's ore counts for the surveyor's order when it comes off here (not what was aboard: a
+                    // full base kept it all aboard and the order counted it delivered)
+                    var jobOre = currentJob.JobType == Orchestrator.JobType.MineOre ? JobOreKey() : MyStringHash.NullOrEmpty;
+                    double oreBefore = jobOre != MyStringHash.NullOrEmpty ? OreAboardKg(jobOre) : 0;
+                    bool unloaded = UnloadCargo(task.Inventory, allOre);
+                    if (jobOre != MyStringHash.NullOrEmpty)
+                    {
+                        double off = Math.Max(0, oreBefore - OreAboardKg(jobOre));
+                        minedOreKg += off;
+                        if (Log.DebugEnabled) Log.Debug("Drone {0}: unload at {1}: {2:F0} kg of {3} delivered ({4:F0} kg this job)", Entity.EntityId, target.CustomName, off, jobOre, minedOreKg);
+                    }
+                    if (!unloaded)
                     {
                         if (Log.DebugEnabled) Log.Debug("Drone {0}: unload at {1}: no room for everything", Entity.EntityId, target.CustomName);
                         return Fail(Orchestrator.TaskFailure.NoCargoSpace, TaskStatus.Failed);
@@ -565,7 +587,11 @@ namespace Automata.Drone
                             if (Log.DebugEnabled) Log.Debug("Drone {0}: block {1}: no work site (pre-load check): skipped", Entity.EntityId, tool.TargetBlock.ToVector3I());
                             return Fail(Orchestrator.TaskFailure.Unreachable, TaskStatus.SkipBlock);
                         }
-                        if (tool.Type == Orchestrator.TaskType.Mine && !mineSiteFixed) PlanMineSite(ref task, ref tool);   // angled bore for a sideways drill (rebores: set already)
+                        if (QuarryWanted(ref tool))
+                        {
+                            if (!PlanQuarrySite(ref task, ref tool)) return Fail(Orchestrator.TaskFailure.Unreachable, TaskStatus.ToReturnHome);   // (reported)
+                        }
+                        else if (tool.Type == Orchestrator.TaskType.Mine && !mineSiteFixed) PlanMineSite(ref task, ref tool);   // angled bore for a sideways drill (rebores: set already)
                         var failure = DispatchToolTo(ref task, ref tool);
                         if (failure == Orchestrator.TaskFailure.MissingEquipment) return Fail(failure, TaskStatus.ToReturnHome);
                         return failure == Orchestrator.TaskFailure.None ? TaskStatus.Running : Fail(failure, TaskStatus.SkipBlock);
@@ -1613,6 +1639,8 @@ namespace Automata.Drone
             else if (grid == null) { siteUnit = false; siteShift = Vector3D.Zero; }
             WorkSite(ref mount, point, dirW, dirA, grid != null, false, grid != null && !strafe, null, Vector3I.Zero, Vector3I.Zero, siteUnit, siteShift,
                      out frame, out sphereCentre, out approach);
+            if (tool.Type == Orchestrator.TaskType.Mine && quarryPlanned) QuarrySquareFrame(ref frame);   // square to its lane before the neighbours are beside it
+            else if (tool.Type == Orchestrator.TaskType.Mine && grid == null && !strafe) approach = MineApproachThatFits(sphereCentre, approach, mount.LocalPoint, ref frame);
             nav.Position = WorldToTask(anchor, ref am, point);   // the face actually used
             siteWatchCenter = point;
             siteWatchEnd = point;
@@ -2656,6 +2684,7 @@ namespace Automata.Drone
                     && cPhase == ConstructionPhase.Idle && currentJob == null
                     && combatPhase == CombatPhase.Idle   // combat drones out on their own detection: busy
                     && currentState != State.Error && !needsBatteryRecharge && !needsHydrogenRefuel
+                    && powerRemnant == null   // an aborted job's cargo still to deliver
                     && preflightStage == 0 && activeFlightOrder == null && dockingHomeId == 0
                     && (capabilities & (Capabilities.CanFlyAtmosphere | Capabilities.CanFlySpace)) != 0;
             }
@@ -2666,10 +2695,9 @@ namespace Automata.Drone
         {
             if (!IsServer || settings == null || !settings.IsEnabled || settings.OperationMode != OperationMode.ManagedByOrchestrator) return;
             if (savedSave != null) return;   // its saved job / pending bid come first
-            if (cPhase == ConstructionPhase.Running && jobSource == JobSource.Orchestrator && (needsBatteryRecharge || needsHydrogenRefuel))
+            if (cPhase == ConstructionPhase.Running && jobSource == JobSource.Orchestrator && LowPower)
             {
-                Report(MyStrings.Drone_JobAbandonedLowPower);
-                StopJob(Loc.T(MyStrings.Drone_LowPower));   // MonitorPower sends the drone home
+                PowerShortCircuit();   // MonitorPower sends the drone to charge
                 return;
             }
             var queue = AutomataSession.GetMessageQueue();
@@ -2690,13 +2718,15 @@ namespace Automata.Drone
                 if (award == null || award.AuctionId != pendingBidAuctionId || pendingBidAuctionId == 0) continue;
                 if (!AnchorDirectory.IsAllowed(block.OwnerId, awardInbox[i].SenderOwnerId)) continue;
                 pendingBidAuctionId = 0;   // decided either way: free to bid again
+                bool takeOver = award.AuctionId == preemptBidAuctionId && !IsAvailableForJobs && PlayerOrderCanPreempt;
+                preemptBidAuctionId = 0;
                 List<Orchestrator.Task> tasks;
                 if (award.TaskAssignments == null || !award.TaskAssignments.TryGetValue(_entityId, out tasks) || tasks == null || tasks.Count == 0)
                 {
                     if (Log.DebugEnabled) Log.Debug("Drone {0}: auction {1} (job {2}) went to another drone", _entityId, award.AuctionId, award.JobId);
                     continue;
                 }
-                if (!IsAvailableForJobs)
+                if (!IsAvailableForJobs && !takeOver)
                 {
                     if (Log.DebugEnabled) Log.Debug("Drone {0}: award for job {1} declined, busy", _entityId, award.JobId);
                     QueueJobReport(new JobStatusReport
@@ -2721,7 +2751,9 @@ namespace Automata.Drone
                     job.BlockCount++;
                     if (job.JobType == Orchestrator.JobType.None)
                         job.JobType = tasks[k].Type == Orchestrator.TaskType.GrindBlock ? Orchestrator.JobType.Grind
-                                    : tasks[k].Type == Orchestrator.TaskType.Mine ? Orchestrator.JobType.MineOre : Orchestrator.JobType.Weld;
+                                    : tasks[k].Type == Orchestrator.TaskType.Mine
+                                      ? (tasks[k].Completion == Orchestrator.ToolTaskCompletionTrigger.QuarryPrepared ? Orchestrator.JobType.DesignatorQuarry : Orchestrator.JobType.MineOre)
+                                    : Orchestrator.JobType.Weld;
                 }
                 for (int k = 0; k < tasks.Count && job.JobType == Orchestrator.JobType.None; k++)
                 {
@@ -2732,6 +2764,9 @@ namespace Automata.Drone
                     else if (tasks[k].Type == Orchestrator.TaskType.Escort) job.JobType = Orchestrator.JobType.DesignatorEscort;
                 }
                 job.CalculateTotalInventory();
+                List<Orchestrator.Task> takeOverFirst = null;
+                bool takeOverClear = false;
+                if (takeOver) takeOverFirst = PreemptForPlayerOrder(job, out takeOverClear);   // (reports the job it drops first)
                 jobAnnouncerId = award.AnnouncerEntityId;
                 jobAuctionId = award.AuctionId;
                 jobOrchestratorId = awardInbox[i].SenderId;
@@ -2739,7 +2774,8 @@ namespace Automata.Drone
                 jobAwardWeld = job.JobType == Orchestrator.JobType.Weld ? job.WeldCategory : Orchestrator.JobTypeExtensions.WELD_ANY;
                 Report(BidWonText(award, job));
                 if (Log.DebugEnabled) Log.Debug("Drone {0}: job {1} awarded: {2} tasks{3}", _entityId, award.JobId, tasks.Count, award.SharedSite ? ", shared site" : "");
-                StartJob(job, JobSource.Orchestrator);
+                if (takeOver) StartPlayerOrder(job, takeOverFirst, takeOverClear);
+                else StartJob(job, JobSource.Orchestrator);
                 jobSharedSite = currentJob != null && award.SharedSite && settings.OperationMode == OperationMode.ManagedByOrchestrator;
                 break;   // one job at a time
             }
@@ -2822,6 +2858,12 @@ namespace Automata.Drone
                     pendingBidAuctionId = 0;   // lost / dropped / never announced
                 }
             }
+            // A player's order for this drone (tagged): bid on while busy, it takes over (DroneControllerBlock.PlayerOrders)
+            if (!IsAvailableForJobs && pendingBidAuctionId == 0 && TryPlayerOrderBid(queue, now))
+            {
+                auctionInbox.Clear();
+                return;
+            }
             if (!IsAvailableForJobs || pendingBidAuctionId != 0)
             {
                 if (auctionInbox.Count > 0 && Log.DebugEnabled) Log.Debug("Drone {0}: {1} auction(s) read, no bid: {2}", _entityId, auctionInbox.Count, pendingBidAuctionId != 0 ? "waiting for the outcome of auction " + pendingBidAuctionId : WhyNotAvailable());
@@ -2875,6 +2917,7 @@ namespace Automata.Drone
             if (combatPhase != CombatPhase.Idle) return "combat (own detection) " + combatPhase;
             if (currentState == State.Error) return "in error";
             if (needsBatteryRecharge || needsHydrogenRefuel) return "recharging / refuelling";
+            if (powerRemnant != null) return "an aborted job's cargo to deliver first";
             if (preflightStage != 0 || activeFlightOrder != null || dockingHomeId != 0) return "flying / docking";
             if ((capabilities & (Capabilities.CanFlyAtmosphere | Capabilities.CanFlySpace)) == 0) return "can't fly (no thrust for its mass: capabilities " + capabilities + ")";
             return "?";
@@ -2925,6 +2968,10 @@ namespace Automata.Drone
                         return "not an ore scout (behaviour profile; area sweeps need one)";
                     if ((caps & Capabilities.CanScoutOre) == 0) return "needs an ore detector";
                     break;
+                case Orchestrator.JobType.DesignatorQuarry:       // quarry preparation: mining drones only
+                    if (settings.BehaviourProfile != BehaviourProfile.IsMiningDrone) return "not a mining drone (behaviour profile; quarries need one)";
+                    if ((caps & Capabilities.CanDrill) == 0) return "needs a drill";
+                    break;
                 case Orchestrator.JobType.DesignatorEngage:
                 case Orchestrator.JobType.DesignatorEscort:
                     if (settings.BehaviourProfile != BehaviourProfile.IsCombatDrone) return "not a combat drone (behaviour profile)";
@@ -2935,6 +2982,8 @@ namespace Automata.Drone
                     if (DockFaces().Count == 0 && (!SmallConnectorsAllowed || DockFaces(true).Count == 0)) return "no usable connector";
                     break;
             }
+            // Cargo left aboard with nowhere to clear it (no room, the port unreachable): hauling jobs would end the same way
+            if (!Orchestrator.JobTypeExtensions.IsDesignator(auction.JobType) && CargoStuck()) return "cargo aboard and nowhere to clear it (no room / port unreachable)";
             // Jobs that carry something need room (the orchestrator refuses a bid without): cleared when idle (ClearWhenIdle)
             if (!Orchestrator.JobTypeExtensions.IsDesignator(auction.JobType) && auction.JobType != Orchestrator.JobType.MineOre
                 && (caps & Capabilities.CargoVolumeNil) == 0 && DroneCargoFreeVolume() < 0.01)
@@ -2955,6 +3004,7 @@ namespace Automata.Drone
                 case Orchestrator.JobType.MineOre: if ((caps & Capabilities.CanDrill) == 0 || (caps & Capabilities.CanScoutOre) == 0) return false; break;
                 case Orchestrator.JobType.DesignatorScoutPoint:
                 case Orchestrator.JobType.DesignatorScoutArea: if ((caps & Capabilities.CanScoutOre) == 0) return false; break;
+                case Orchestrator.JobType.DesignatorQuarry: if ((caps & Capabilities.CanDrill) == 0) return false; break;
                 case Orchestrator.JobType.DesignatorEngage:
                 case Orchestrator.JobType.DesignatorEscort: if ((caps & Capabilities.HasDefenseSystems) == 0) return false; break;
                 default:                           if ((caps & Capabilities.CargoVolumeNil) != 0) return false; break;
@@ -3007,6 +3057,7 @@ namespace Automata.Drone
                     OptimalLoadIn1G = (MyFixedPoint)optimalLoad,   // within the player's max-load setting (gravity)
                     MaxCargoVolume = (MyFixedPoint)DroneCargoFreeVolume(),
                     BoreRadius = (float)BoreCrossRadius(),
+                    Quarry = settings.MiningMethod == MiningMethod.Quarry,
                 },
                 MessageId = IdGenerator.GenerateId(ref jobMessageCounter, _entityId),
                 CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
@@ -3062,6 +3113,7 @@ namespace Automata.Drone
                 Ore = jobAwardType == Orchestrator.JobType.MineOre ? JobOre() : null,
                 Finds = jobFinds,
                 LaneObstructions = laneObstructions.Count > 0 ? new List<LaneObstruction>(laneObstructions) : null,   // (queued with it: delivered when in range)
+                Preempted = jobPreempted,
             };
             laneObstructions.Clear();
             jobFinds = 0;
@@ -3075,7 +3127,13 @@ namespace Automata.Drone
             minedOreKg = 0;
         }
 
-        private double minedOreKg;   // MineOre: ore unloaded at the job's logistics computer so far
+        private double minedOreKg;   // MineOre: ore unloaded at the job's logistics computer so far (UnloadInventory)
+
+        private MyStringHash JobOreKey()
+        {
+            string ore = JobOre();
+            return ore != null ? MyStringHash.GetOrCompute(ore) : MyStringHash.NullOrEmpty;
+        }
 
         // MineOre: the ore of the job's Mine task (item key); null: none
         private string JobOre()

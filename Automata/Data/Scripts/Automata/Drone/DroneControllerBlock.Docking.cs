@@ -1478,17 +1478,27 @@ namespace Automata.Drone
                 }
             }
 
-            // Level-triggered: keep trying to get home (refused, replaced by another order...) with a back-off
-            // (docked somewhere else, e.g. at a job's connector, still counts as "not home")
-            if ((needsBatteryRecharge || needsHydrogenRefuel) && !Grounded && !CombatHoldsControl && preflightStage == 0 && now - lastAutoHomeFrame >= AUTO_HOME_RETRY_TICKS)
+            // Under a threshold: whatever job runs is dropped (PowerShortCircuit: backs out of a block / bore first); levels
+            // back: the dropped job's cargo delivered first (StartPowerRemnant)
+            if (LowPower && !Grounded) PowerShortCircuit();
+            else if (!LowPower) StartPowerRemnant();
+            // Level-triggered: keep trying to get to a charger (refused, replaced by another order...) with a back-off, once
+            // no job runs (a back-out out of a bore finishes first). Home (docked somewhere else, e.g. at a job's connector,
+            // still counts as "not home"); no home, or home unusable: any free connector it can dock at, every drone
+            // (2026-11-07: only Park mode drones did; the others ran flat where they were)
+            if (LowPower && !Grounded && !CombatHoldsControl && preflightStage == 0 && currentJob == null && cPhase == ConstructionPhase.Idle
+                && now - lastAutoHomeFrame >= AUTO_HOME_RETRY_TICKS)
             {
                 if (HasHomeConnector && !IsDockedAtHome() && !IsGoingHome)
                 {
                     lastAutoHomeFrame = now;
-                    GoHome();
+                    if (!GoHome() && !AnyConnectorsConnected() && dockingHomeId == 0)
+                    {
+                        if (parkPhase != ParkPhase.None) EndPark(null);
+                        GoCharge();
+                    }
                 }
-                // Park mode: any connector it can dock at (not while a job runs: the job ends at low power itself)
-                else if (ParkMode && !AnyConnectorsConnected() && dockingHomeId == 0 && cPhase == ConstructionPhase.Idle && currentJob == null)
+                else if (!HasHomeConnector && !AnyConnectorsConnected() && dockingHomeId == 0)
                 {
                     lastAutoHomeFrame = now;
                     if (parkPhase != ParkPhase.None) EndPark(null);
