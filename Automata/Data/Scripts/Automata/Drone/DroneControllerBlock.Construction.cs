@@ -180,12 +180,12 @@ namespace Automata.Drone
                 if (cPhase != ConstructionPhase.Idle) StopJob();
                 return;
             }
-            if (needsBatteryRecharge || needsHydrogenRefuel)
+            if (LowPower || powerRemnant != null)
             {
-                if (cPhase != ConstructionPhase.Idle)
+                if (cPhase != ConstructionPhase.Idle && LowPower)
                 {
                     Report(MyStrings.Drone_ConstructionPausedLowPower);
-                    StopJob();   // MonitorPower sends the drone home
+                    PowerShortCircuit();   // MonitorPower sends the drone to charge
                 }
                 return;
             }
@@ -258,6 +258,7 @@ namespace Automata.Drone
                     for (int i = 0; i < borePath.Count; i++) s.BorePath.Add(Vector3DData.FromVector3D(borePath[i]));
                     s.BoreEntryDir = Vector3DData.FromVector3D(boreEntryDir);
                 }
+                s.QuarryActive = quarryActive && t == Orchestrator.TaskType.Mine && taskStarted;
             }
             if (Log.DebugEnabled) Log.Debug("Drone {0}: state saved: job {1} at task {2}, pending bid {3}", Entity.EntityId, s.Job != null ? s.Job.JobId : 0, s.TaskIndex, s.PendingBidAuctionId);
             return s;
@@ -281,6 +282,8 @@ namespace Automata.Drone
             }
             if (workedGrids.Count > 0) BuildPlanner.ExportFrames(workedGrids, o.Frames);
             o.Surveys.AddRange(surveyBuffer);
+            for (int i = 0; i < unsentAlerts.Count; i++)
+                if (unsentAlertTimes[i] == DateTime.MaxValue) o.Alerts.Add(unsentAlerts[i]);
             return o;
         }
 
@@ -306,6 +309,8 @@ namespace Automata.Drone
                         unreachableBlocks.Add(new UnreachableBlock { Grid = o.Unreachable[i].Grid, Cell = new Vector3I(o.Unreachable[i].X, o.Unreachable[i].Y, o.Unreachable[i].Z),
                                                                      Until = now + o.Unreachable[i].TicksLeft });
                 if (o.Surveys != null) surveyBuffer.AddRange(o.Surveys);
+                if (o.Alerts != null)
+                    for (int i = 0; i < o.Alerts.Count; i++) { unsentAlerts.Add(o.Alerts[i]); unsentAlertTimes.Add(DateTime.MaxValue); unsentAlertSent.Add(null); }
                 if (o.Frames != null)
                 {
                     BuildPlanner.ImportFrames(o.Frames);
@@ -340,12 +345,18 @@ namespace Automata.Drone
             }
             int index = System.Math.Min(System.Math.Max(0, s.TaskIndex), s.Job.Tasks.Count - 1);
             var type = s.Job.Tasks[index].Type;
-            bool boreOut = s.BorePath != null && s.BorePath.Count > 0
+            // Saved digging a quarry: on with it (the Mine starts again; its shaft is planned again and what is dug is skipped)
+            bool quarryOn = s.QuarryActive && type == Orchestrator.TaskType.Mine;
+            bool boreOut = !quarryOn && s.BorePath != null && s.BorePath.Count > 0
                            && (type == Orchestrator.TaskType.Mine && index + 1 < s.Job.Tasks.Count && s.Job.Tasks[index + 1].Type == Orchestrator.TaskType.BackOut
                                || type == Orchestrator.TaskType.BackOut && index > 0 && s.Job.Tasks[index - 1].Type == Orchestrator.TaskType.Mine);
             if (boreOut)
             {
                 if (type == Orchestrator.TaskType.Mine) index++;
+            }
+            else if (quarryOn)
+            {
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: saved digging a quarry: digging on", Entity.EntityId);
             }
             else if (s.Job.Tasks[index].Kind == Orchestrator.TaskKind.Tool || type == Orchestrator.TaskType.BackOut)
             {

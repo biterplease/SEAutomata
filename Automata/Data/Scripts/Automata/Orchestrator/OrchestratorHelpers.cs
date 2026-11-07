@@ -158,6 +158,10 @@ namespace Automata.Orchestrator
         /// low power or recall. Combat drones only.</summary>
         [ProtoEnum]
         DesignatorEscort = 9,
+        /// <summary>Industrial designator, blue, a mining drone tagged: dig a quarry (benches) at the point, home. One
+        /// mining drone, the tagged one (Mine task, Completion QuarryPrepared; TODO/19).</summary>
+        [ProtoEnum]
+        DesignatorQuarry = 10,
     }
 
     public static class JobTypeExtensions
@@ -165,7 +169,7 @@ namespace Automata.Orchestrator
         /// <summary>A Designator- job: ordered by a player with a target designator.</summary>
         public static bool IsDesignator(this JobType t)
         {
-            return t >= JobType.DesignatorScoutPoint && t <= JobType.DesignatorEscort;
+            return t >= JobType.DesignatorScoutPoint && t <= JobType.DesignatorQuarry;
         }
 
         /// <summary>Hostile designator jobs (engage / escort): combat drones with the three AI blocks.</summary>
@@ -313,6 +317,8 @@ namespace Automata.Orchestrator
         [ProtoEnum] DroneInventoryEmpty = 4,
         /// <summary>CompletionValue = seconds.</summary>
         [ProtoEnum] Timespan = 5,
+        /// <summary>Mine: a designator's quarry preparation (no ore: dig the benches, then done). CompletionValue = benches.</summary>
+        [ProtoEnum] QuarryPrepared = 6,
     }
 
     /// <summary>Why a task could not be carried out. Reported by the drone; the job goes on or ends by task type.</summary>
@@ -501,6 +507,21 @@ namespace Automata.Orchestrator
         public static Task Mine(ToolTaskCompletionTrigger completion = ToolTaskCompletionTrigger.DroneInventoryFull, float value = 0)
         {
             return new Task { Type = TaskType.Mine, Completion = completion, CompletionValue = value };
+        }
+
+        /// <summary>
+        /// A quarry preparation (designator): a 'side' shaft centred at 'target' on the surface of 'voxelId', 'orders' x side
+        /// deep; this drone's section 'index' of a cols x rows split, 'group' shared by the order's drones (TargetBlock: X
+        /// index | cols &lt;&lt; 8 | rows &lt;&lt; 16, Y group, Z side in dm).
+        /// </summary>
+        public static Task QuarryPrepare(Vector3D target, long voxelId, int orders, double side = 0, int index = 0, int cols = 1, int rows = 1, int group = 0)
+        {
+            return new Task
+            {
+                Type = TaskType.Mine, Completion = ToolTaskCompletionTrigger.QuarryPrepared, CompletionValue = orders,
+                Position = Vector3DData.FromVector3D(target), ApproachFrom = Vector3DData.FromVector3D(target), TargetEntityId = voxelId,
+                TargetBlock = new Vector3IData((index & 0xFF) | ((cols & 0xFF) << 8) | ((rows & 0xFF) << 16), group, (int)Math.Round(side * 10)),
+            };
         }
     }
 

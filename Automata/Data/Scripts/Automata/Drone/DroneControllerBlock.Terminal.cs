@@ -375,6 +375,38 @@ namespace Automata.Drone
                 SyncSetting(DroneSettingKey.SurveyForOres);
             }
         }
+
+        /// <summary>Mining method (MiningMethod as a combobox key).</summary>
+        public long Terminal_MiningMethod
+        {
+            get { return settings != null ? (long)settings.MiningMethod : 0L; }
+            set
+            {
+                if (settings == null) return;
+                var v = value == (long)MiningMethod.Quarry ? MiningMethod.Quarry : MiningMethod.Bore;
+                if (v == settings.MiningMethod) return;
+                settings.MiningMethod = v;
+                SaveSettings();
+                SyncSetting(DroneSettingKey.MiningMethod);
+            }
+        }
+
+        public const float QUARRY_DIMENSION_MIN = 5f, QUARRY_DIMENSION_MAX = 100f;
+
+        /// <summary>Quarry dimension: 0 (unset), else QUARRY_DIMENSION_MIN to _MAX m (the slider's bottom notch below 5 is "unset").</summary>
+        public float Terminal_QuarryDimension
+        {
+            get { return settings != null ? settings.QuarryDimension : 0f; }
+            set
+            {
+                if (settings == null) return;
+                float v = value < QUARRY_DIMENSION_MIN ? 0f : VRageMath.MathHelper.Clamp((float)Math.Round(value), QUARRY_DIMENSION_MIN, QUARRY_DIMENSION_MAX);
+                if (v == settings.QuarryDimension) return;
+                settings.QuarryDimension = v;
+                SaveSettings();
+                SyncSetting(DroneSettingKey.QuarryDimension);
+            }
+        }
         #endregion
 
         private static bool IsKnownProfile(BehaviourProfile v)

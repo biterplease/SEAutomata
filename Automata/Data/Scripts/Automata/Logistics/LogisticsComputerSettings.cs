@@ -33,5 +33,7 @@ namespace Automata.Logistics
         /// <summary>The name its logs (and other blocks' logs) show; empty: the block's name.</summary>
         [ProtoMember(9)] public string Nickname = "";
         [ProtoMember(10)] public Util.LcdStyle Lcd = new Util.LcdStyle();
+        /// <summary>Ores under their Min are mined for this computer by a Mining Surveyor in reach, not hauled (LogisticsComputerBlock.OreRequests).</summary>
+        [ProtoMember(11)] public bool OreRequestsMine;
     }
 }

@@ -71,6 +71,8 @@ namespace Automata.Drone
         EconomyFlight,
         MaxThrustPercent,
         LocalJobRadius,
+        MiningMethod,
+        QuarryDimension,
     }
 
     /// <summary>Things a player can order the drone to do from the terminal.</summary>
@@ -176,6 +178,8 @@ namespace Automata.Drone
                 case DroneSettingKey.MaxSpeed:                    p.Number = s.MaxSpeed; break;
                 case DroneSettingKey.MaxThrustPercent:            p.Number = s.MaxThrustPercent; break;
                 case DroneSettingKey.LocalJobRadius:              p.Number = s.LocalJobRadius; break;
+                case DroneSettingKey.MiningMethod:                p.Number = (double)s.MiningMethod; break;
+                case DroneSettingKey.QuarryDimension:             p.Number = s.QuarryDimension; break;
                 case DroneSettingKey.ApproachSpeed:               p.Number = s.ApproachSpeed; break;
                 case DroneSettingKey.SafeSpeed:                   p.Number = s.SafeSpeed; break;
                 case DroneSettingKey.MaxLoadGravity:              p.Number = s.MaxLoadGravity; break;
@@ -278,6 +282,8 @@ namespace Automata.Drone
                 case DroneSettingKey.MaxSpeed:                    Terminal_MaxSpeed = f; break;
                 case DroneSettingKey.MaxThrustPercent:            Terminal_MaxThrustPercent = f; break;
                 case DroneSettingKey.LocalJobRadius:              Terminal_LocalJobRadius = f; break;
+                case DroneSettingKey.MiningMethod:                Terminal_MiningMethod = (long)p.Number; break;
+                case DroneSettingKey.QuarryDimension:             Terminal_QuarryDimension = f; break;
                 case DroneSettingKey.ApproachSpeed:               Terminal_ApproachSpeed = f; break;
                 case DroneSettingKey.SafeSpeed:                   Terminal_SafeSpeed = f; break;
                 case DroneSettingKey.MaxLoadGravity:              Terminal_MaxLoadGravity = f; break;

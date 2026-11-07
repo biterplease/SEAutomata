@@ -44,6 +44,31 @@ namespace Automata.Pointer
             return new List<Task> { Task.NavigateTo(0, at, at, Gravity(at)), Task.Survey() };
         }
 
+        /// <summary>
+        /// A quarry preparation (an area sweep with a mining drone tagged): the drill onto the pointed surface point down the
+        /// quarry's axis, one bench (more orders there add benches, the orchestrator), back out (QuarryPlanner).
+        /// </summary>
+        public static List<Task> QuarryPrepare(Vector3D hit, Vector3D normal, double side = 0, int index = 0, int cols = 1, int rows = 1, int group = 0)
+        {
+            var body = NearestBody(hit);
+            Vector3D up;
+            if (!QuarryPlanner.Axis(body, hit, out up)) up = normal.LengthSquared() > 0.5 ? Vector3D.Normalize(normal) : Vector3D.Up;
+            Vector3D approach = hit + up * QUARRY_APPROACH;
+            return new List<Task>
+            {
+                Task.NavigateToolTo(0, hit, approach, Gravity(hit)),
+                Task.QuarryPrepare(hit, body != null ? body.EntityId : 0, 1, side, index, cols, rows, group),
+                Task.BackOut(0, approach),
+            };
+        }
+        private const double QUARRY_APPROACH = 20;   // m out along the axis: approach / back-out point
+
+        /// <summary>The order's GPS marker: "Quarry preparation (60m)", the expected depth.</summary>
+        public static string QuarryMarker(double depth)
+        {
+            return Util.Loc.T(Util.Strings.MyStrings.Common_QuarryPreparation) + string.Format(System.Globalization.CultureInfo.InvariantCulture, " ({0:F0}m)", depth);
+        }
+
         /// <summary>One task list (a Sweep task) per drone (sector), at most MAX_SCOUTS.</summary>
         public static List<List<Task>> AreaSweep(Vector3D center, Vector3D playerPos, int sectors, out string how, double detectorRange = 0)
         {

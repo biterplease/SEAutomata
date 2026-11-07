@@ -107,8 +107,6 @@ namespace Automata.Config
 
         public class DroneControllerBlockConfig
         {
-            public bool DefaultMonitorHydrogen { get; internal set; } = false;
-            public bool DefaultMonitorBattery { get; internal set; } = false;
             public float DefaultHydrogenRefuelThreshold { get; internal set; } = 25.0f;
             public float DefaultHydrogenOperationalThreshold { get; internal set; } = 50.0f;
             public float DefaultBatteryRefuelThreshold { get; internal set; } = 20.0f;
@@ -503,8 +501,6 @@ namespace Automata.Config
             OrchestratorServerSettings.StateUpdateIntervalTicks.Assigning = Math.Max(10, ReadIniSchedulerStateInterval(ini, schedState, schedLegacy, "Assigning", "AssigningUpdateInterval", OrchestratorServerSettings.StateUpdateIntervalTicks.Assigning));
 
             // Parse Drone section
-            Drone.DefaultMonitorHydrogen = ini.Get("Drone", "DefaultMonitorHydrogen").ToBoolean(Drone.DefaultMonitorHydrogen);
-            Drone.DefaultMonitorBattery = ini.Get("Drone", "DefaultMonitorBattery").ToBoolean(Drone.DefaultMonitorBattery);
             Drone.DefaultHydrogenRefuelThreshold = MathHelper.Clamp(ini.Get("Drone", "DefaultHydrogenRefuelThreshold").ToSingle(Drone.DefaultHydrogenRefuelThreshold), 5.0f, 95.0f);
             Drone.DefaultHydrogenOperationalThreshold = MathHelper.Clamp(ini.Get("Drone", "DefaultHydrogenOperationalThreshold").ToSingle(Drone.DefaultHydrogenOperationalThreshold), Drone.DefaultHydrogenRefuelThreshold + 5.0f, 95.0f);
             Drone.DefaultBatteryRefuelThreshold = MathHelper.Clamp(ini.Get("Drone", "DefaultBatteryRefuelThreshold").ToSingle(Drone.DefaultBatteryRefuelThreshold), 5.0f, 95.0f);

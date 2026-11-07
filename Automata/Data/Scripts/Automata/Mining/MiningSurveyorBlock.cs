@@ -58,6 +58,21 @@ namespace Automata.Mining
         private const double ENTRY_SLACK = 40;                   // ...plus this
         private const double MINE_APPROACH_OUT = 20;             // m out along the bore line: the approach / back-out point
         private const double DEPLETION_MARGIN = 10;              // a deposit this close to a scan's edge isn't judged by it
+        private const int BAD_WAY_TICKS = 30 * 60 * 60;          // a way in a miner couldn't reach: left out of new jobs this long
+        private const double BAD_WAY_NEAR = 5;                   // m: a way in starting this close to a bad one is that one
+
+        // Ways in a miner reported unreachable (2026-11-07: the same unreachable Platinum way in was issued 10 times, a
+        // 10 km round trip each): left out of new jobs for BAD_WAY_TICKS (runtime only)
+        private struct BadWay { public Vector3D Surface; public int Until; }
+        private readonly List<BadWay> badWays = new List<BadWay>();
+
+        private bool IsBadWay(Vector3D surface, int now)
+        {
+            badWays.RemoveAll(b => b.Until <= now);
+            for (int i = 0; i < badWays.Count; i++)
+                if (Vector3D.DistanceSquared(badWays[i].Surface, surface) <= BAD_WAY_NEAR * BAD_WAY_NEAR) return true;
+            return false;
+        }
         public const int JOB_SIZE_MIN = 1000, JOB_SIZE_MAX = 200000;
 
         private MiningSurveyorSettings settings = new MiningSurveyorSettings();
@@ -98,10 +113,12 @@ namespace Automata.Mining
             public Message<JobAnnouncement> Message;
             public int LastAnnounced = int.MinValue / 2, Assigned, HeldUntil, DronesOut;
             public List<Vector3D> Used;  // assigned: where the award's miners bore (runtime; null: every site the job offers)
+            public Dictionary<long, List<Vector3D>> WaysOf;   // assigned: each miner's ways in (their bore start points; runtime)
             public double DeliveredKg;   // reported so far by the drones of the award (several miners on one job)
             public bool Announced;
             public bool Pending;   // an announcement is in the network: told whether it was taken once its life is up
             public string LastResult;
+            public long ForLc;           // mined for this logistics computer's ore request (0: the surveyor's own order)
         }
         private readonly List<MiningJob> jobs = new List<MiningJob>();
         private int jobCounter, messageCounter, deliveredCount, failedCount;
@@ -732,7 +749,7 @@ namespace Automata.Mining
         private void Settle(MiningJob job, double deliveredKg, string why)
         {
             OrderProgress p;
-            if (!settings.KeepOrdersConstant && progress.TryGetValue(job.Ore, out p))
+            if (job.ForLc == 0 && !settings.KeepOrdersConstant && progress.TryGetValue(job.Ore, out p))
                 p.RemainingKg = Math.Max(0, p.RemainingKg + job.Kg - deliveredKg);
             if (Log.DebugEnabled) Log.Debug("MS {0}: job {1} ({2}, {3:F0} kg) settled: {4:F0} kg delivered, {5}", entityId, job.JobId, job.Ore, job.Kg, deliveredKg, why);
         }
@@ -763,6 +780,7 @@ namespace Automata.Mining
                 jobs.Add(job);
                 published++;
             }
+            PlanLcJobs(now, ref published);
         }
 
         /// <summary>
@@ -771,7 +789,7 @@ namespace Automata.Mining
         /// on the job, one site each, in this order: other deposits of the ore no job is on (nearest the first, at most
         /// SITE_DEPOSITS_MAX), then other ways in to them (space: WaysIn), at most SITES_MAX sites.
         /// </summary>
-        private MiningJob CreateJob(Deposit deposit, double kg, int now)
+        private MiningJob CreateJob(Deposit deposit, double kg, int now, long deliverTo = 0)
         {
             IMyEntity e;
             var voxel = MyAPIGateway.Entities.TryGetEntityById(deposit.VoxelId, out e) ? e as IMyVoxelBase : null;
@@ -789,6 +807,41 @@ namespace Automata.Mining
                 if (Log.DebugEnabled) Log.Debug("MS {0}: deposit {1} at {2}: no way in within {3:F0} m", entityId, deposit.Ore, deposit.Position, BORE_SEARCH_METERS);
                 return null;
             }
+            int bad = first.RemoveAll(w => IsBadWay(w.Surface, now));
+            if (first.Count == 0)
+            {
+                // Every way in to it unreachable lately: another deposit of the ore leads (none: no job for now)
+                Deposit alt = null;
+                List<WayIn> altWays = null;
+                double best = double.MaxValue;
+                for (int i = 0; i < deposits.Count; i++)
+                {
+                    var o = deposits[i];
+                    if (o == deposit || o.Ore != deposit.Ore || DepositBusy(o)) continue;
+                    double dd = Vector3D.DistanceSquared(o.Position, deposit.Position);
+                    if (dd >= best) continue;
+                    IMyEntity oe;
+                    var ov = MyAPIGateway.Entities.TryGetEntityById(o.VoxelId, out oe) ? oe as IMyVoxelBase : null;
+                    if (ov == null) continue;
+                    bool oSpace = MyAPIGateway.Physics.CalculateNaturalGravityAt(o.Position, out interference).Length() < JobAnnouncement.SPACE_GRAVITY;
+                    var w = WaysIn(ov, o.Position, oSpace, SITE_ENTRIES_MAX);
+                    w.RemoveAll(x => IsBadWay(x.Surface, now));
+                    if (w.Count == 0) continue;
+                    best = dd;
+                    alt = o;
+                    altWays = w;
+                }
+                if (alt == null)
+                {
+                    if (Log.DebugEnabled) Log.Debug("MS {0}: deposit {1} at {2}: its {3} way(s) in unreachable lately, no other deposit of it: no job for now", entityId, deposit.Ore, deposit.Position, bad);
+                    return null;
+                }
+                if (Log.DebugEnabled) Log.Debug("MS {0}: deposit {1} at {2}: its {3} way(s) in unreachable lately: the deposit at {4} leads", entityId, deposit.Ore, deposit.Position, bad, alt.Position);
+                deposit = alt;
+                first = altWays;
+                voxel = MyAPIGateway.Entities.TryGetEntityById(deposit.VoxelId, out e) ? e as IMyVoxelBase : voxel;
+            }
+            else if (bad > 0 && Log.DebugEnabled) Log.Debug("MS {0}: deposit {1} at {2}: {3} way(s) in left out (unreachable lately)", entityId, deposit.Ore, deposit.Position, bad);
             // Other deposits of the ore for pooled miners: nearest this one first, none another job is on
             var chosen = new List<Deposit> { deposit };
             var chosenWays = new List<List<WayIn>> { first };
@@ -803,6 +856,7 @@ namespace Automata.Mining
                 if (ov == null) continue;
                 bool oSpace = MyAPIGateway.Physics.CalculateNaturalGravityAt(others[i].Position, out interference).Length() < JobAnnouncement.SPACE_GRAVITY;
                 var ways = WaysIn(ov, others[i].Position, oSpace, SITE_ENTRIES_MAX);
+                ways.RemoveAll(x => IsBadWay(x.Surface, now));
                 if (ways.Count == 0) continue;
                 chosen.Add(others[i]);
                 chosenWays.Add(ways);
@@ -844,12 +898,94 @@ namespace Automata.Mining
                 Tasks = tasks,
                 BlockCount = 1,
                 RequesterEntityId = entityId,
+                DeliverTo = deliverTo,
             };
             AddEvent(Loc.F(MyStrings.Mining_JobKgAtMBore, jobId, kg, ShortOre(deposit.Ore),
                                    Vector3D.Distance(deposit.Position, block.GetPosition()), Vector3D.Distance(surface, deposit.Position)));
             if (Log.DebugEnabled) Log.Debug("MS {0}: job {1}: {2:F0} kg {3} at {4}, bore from {5} ({6:F0} m); {7} site(s): {8} deposit(s), ways in {9}", entityId, jobId, kg, deposit.Ore, deposit.Position, surface, Vector3D.Distance(surface, deposit.Position), tasks.Count / 3, chosen.Count, WaysText(chosenWays));
-            return new MiningJob { JobId = jobId, Ore = deposit.Ore, Deposit = deposit.Position, Kg = kg, Message = AnnouncementMessage(ja) };
+            return new MiningJob { JobId = jobId, Ore = deposit.Ore, Deposit = deposit.Position, Kg = kg, Message = AnnouncementMessage(ja), ForLc = deliverTo };
         }
+
+        #region Logistics computers' ore requests
+        private const double LC_JOB_MIN_KG = 100;   // a shortfall less than this past the jobs already out for it: no job
+        private readonly List<KeyValuePair<MyStringHash, int>> lcShort = new List<KeyValuePair<MyStringHash, int>>();
+
+        // A logistics computer with "Ore requests mine" on that this surveyor reaches through the network (same grid group,
+        // antennas: the requirement), of an owner it works for
+        private bool LcInReach(Logistics.LogisticsComputerBlock lc)
+        {
+            return lc != null && lc.OreRequestsMine && lc.Grid != null && messaging != null
+                && AnchorDirectory.IsAllowed(block.OwnerId, lc.OwnerId)
+                && messaging.Relays.Reaches(lc.Grid, block.CubeGrid, lc.OwnerId);
+        }
+
+        /// <summary>
+        /// LC "Ore requests mine" (2026-11-07, LogisticsComputerBlock.OreRequests): every reachable computer's ore shortfall
+        /// becomes MineOre jobs here, like an order (the nearest known deposit, Job size kg at a time, one job per ore waiting
+        /// for a drone at a time, Max published jobs shared), unloaded at that computer when it bids room (DeliverTo). The
+        /// computer never hauls those ores. Not counted in this surveyor's own orders.
+        /// A request gone (filled, Min lowered, unticked, out of reach): its jobs no drone has taken yet are withdrawn.
+        /// </summary>
+        private void PlanLcJobs(int now, ref int published)
+        {
+            var config = MiningConfig;
+            for (int i = 0; i < Logistics.LogisticsComputerBlock.All.Count; i++)
+            {
+                var lc = Logistics.LogisticsComputerBlock.All[i];
+                if (!LcInReach(lc)) continue;
+                lc.OreShortfall(lcShort);
+                for (int k = 0; k < lcShort.Count; k++)
+                {
+                    var ore = lcShort[k].Key;
+                    int kg = lcShort[k].Value;
+                    if (kg <= 0 || IsIgnoredOre(ore.String)) continue;   // stone: never mined (nor hauled: the box is absolute)
+                    var deposit = NearestDeposit(ore);
+                    if (deposit == null) continue;   // none known: nothing for it until one is
+                    double open = 0;
+                    bool waiting = false;
+                    for (int j = 0; j < jobs.Count; j++)
+                    {
+                        if (jobs[j].Ore != ore) continue;
+                        if (jobs[j].ForLc == lc.EntityId) open += Math.Max(0, jobs[j].Kg - jobs[j].DeliveredKg);
+                        if (jobs[j].Assigned == 0) waiting = true;
+                    }
+                    double left = kg - open;
+                    if (waiting || left < LC_JOB_MIN_KG || published >= config.MaxPublishedJobs) continue;
+                    var job = CreateJob(deposit, Math.Min(left, settings.JobSizeKg), now, lc.EntityId);
+                    if (job == null) continue;
+                    jobs.Add(job);
+                    published++;
+                    AddEvent(Loc.F(MyStrings.Mining_JobForLc, Nicknames.Of(lc.EntityId), job.Kg, ShortOre(ore), job.JobId));
+                    if (Log.DebugEnabled) Log.Debug("MS {0}: LC {1} short of {2:F0} kg {3} ({4:F0} kg out for it already): job {5}, {6:F0} kg", entityId, lc.EntityId, kg, ore, open, job.JobId, job.Kg);
+                }
+                lcShort.Clear();
+            }
+            for (int j = jobs.Count - 1; j >= 0; j--)
+            {
+                var job = jobs[j];
+                if (job.ForLc == 0 || job.Assigned != 0 || LcStillShort(job.ForLc, job.Ore)) continue;
+                if (job.Announced || job.Pending) Withdraw(job, Loc.T(MyStrings.Mining_LcRequestGone));
+                if (Log.DebugEnabled) Log.Debug("MS {0}: job {1} ({2}) dropped: LC {3}'s request filled or gone", entityId, job.JobId, job.Ore, job.ForLc);
+                jobs.RemoveAt(j);
+            }
+        }
+
+        private bool LcStillShort(long lcId, MyStringHash ore)
+        {
+            for (int i = 0; i < Logistics.LogisticsComputerBlock.All.Count; i++)
+            {
+                var lc = Logistics.LogisticsComputerBlock.All[i];
+                if (lc.EntityId != lcId) continue;
+                if (!LcInReach(lc)) return false;
+                lc.OreShortfall(lcShort);
+                bool shortOf = false;
+                for (int k = 0; k < lcShort.Count && !shortOf; k++) shortOf = lcShort[k].Key == ore && lcShort[k].Value > 0;
+                lcShort.Clear();
+                return shortOf;
+            }
+            return false;
+        }
+        #endregion
 
         private static string WaysText(List<List<WayIn>> ways)
         {
@@ -921,11 +1057,21 @@ namespace Automata.Mining
                 job.DronesOut = award.TaskAssignments != null ? award.TaskAssignments.Count : 0;
                 // Where its miners bore: those deposits are taken (the job's other sites free for the next job)
                 job.Used = new List<Vector3D>();
+                job.WaysOf = new Dictionary<long, List<Vector3D>>();
                 if (award.TaskAssignments != null)
-                    foreach (var list in award.TaskAssignments.Values)
-                        if (list != null)
-                            for (int k = 0; k < list.Count; k++)
-                                if (list[k].Type == Orchestrator.TaskType.Mine) job.Used.Add(list[k].Position.ToVector3D());
+                    foreach (var kv in award.TaskAssignments)
+                    {
+                        var list = kv.Value;
+                        if (list == null) continue;
+                        var ways = new List<Vector3D>();
+                        for (int k = 0; k < list.Count; k++)
+                            if (list[k].Type == Orchestrator.TaskType.Mine)
+                            {
+                                job.Used.Add(list[k].Position.ToVector3D());
+                                ways.Add(list[k].ApproachFrom.ToVector3D());   // the bore's start (WayIn.Surface)
+                            }
+                        job.WaysOf[kv.Key] = ways;
+                    }
                 job.LastResult = Loc.T(MyStrings.Mining_Assigned);
                 long drone = 0;
                 if (award.TaskAssignments != null) foreach (var k in award.TaskAssignments.Keys) { drone = k; break; }
@@ -964,12 +1110,24 @@ namespace Automata.Mining
                     droneWatch.Done(r.DroneEntityId);
                     var job = FindJob(r.JobId);
                     if (job == null) { CountUnheldDelivery(r); continue; }
+                    if (r.Preempted && r.Outcome == JobOutcome.Aborted)
+                    {
+                        // The drone was taken by a player's order: the orchestrator auctions the job again; kept assigned
+                        // (not announced twice), its next drone's report settles it
+                        job.DronesOut = Math.Max(0, job.DronesOut - 1);
+                        job.Assigned = MyAPIGateway.Session.GameplayFrameCounter;
+                        job.DeliveredKg += Math.Max(0, r.OreKg);
+                        AddEvent(Loc.F(MyStrings.Mining_MiningDroneOre, Nicknames.Of(r.DroneEntityId), r.Outcome, ShortOre(job.Ore)) + (string.IsNullOrEmpty(r.Reason) ? "" : "\n  " + r.Reason));
+                        if (Log.DebugEnabled) Log.Debug("MS {0}: job {1}: drone {2} taken by a player's order, the orchestrator auctions it again", entityId, job.JobId, r.DroneEntityId);
+                        continue;
+                    }
                     if (job.Assigned == 0) job.DronesOut = Math.Max(job.DronesOut, 1);
                     job.DronesOut--;
+                    MarkBadWays(job, r);
                     job.DeliveredKg += Math.Max(0, r.OreKg);
                     if (r.OreKg > 0) deliveredCount += (int)r.OreKg;
                     OrderProgress op;
-                    if (r.OreKg > 0 && progress.TryGetValue(job.Ore, out op)) op.DeliveredKg += r.OreKg;   // the header's requests
+                    if (r.OreKg > 0 && job.ForLc == 0 && progress.TryGetValue(job.Ore, out op)) op.DeliveredKg += r.OreKg;   // the header's requests
                     AddEvent(r.OreKg > 0 ? Loc.F(MyStrings.Mining_DeliveredDroneOreKg, Nicknames.Of(r.DroneEntityId), ShortOre(job.Ore), r.OreKg)
                                          : Loc.F(MyStrings.Mining_MiningDroneOre, Nicknames.Of(r.DroneEntityId), r.Outcome, ShortOre(job.Ore))
                                            + (string.IsNullOrEmpty(r.Reason) ? "" : "\n  " + r.Reason));
@@ -979,6 +1137,20 @@ namespace Automata.Mining
                 }
                 reportInbox.Clear();
             }
+        }
+
+        // A miner aborted unreachable with nothing delivered: its ways in left out of new jobs for a while. (The reason
+        // is the drone's last failure text, the TaskFailure name untranslated: "NavigateToolTo: Unreachable"; a failed
+        // way home after it overwrote it once - "ReturnHome: Unreachable" - and counts too.)
+        private void MarkBadWays(MiningJob job, JobStatusReport r)
+        {
+            if (r.Outcome != JobOutcome.Aborted || r.OreKg > 0 || string.IsNullOrEmpty(r.Reason)
+                || r.Reason.IndexOf("Unreachable", StringComparison.OrdinalIgnoreCase) < 0) return;
+            List<Vector3D> ways;
+            if (job.WaysOf == null || !job.WaysOf.TryGetValue(r.DroneEntityId, out ways) || ways.Count == 0) return;
+            int until = MyAPIGateway.Session.GameplayFrameCounter + BAD_WAY_TICKS;
+            for (int i = 0; i < ways.Count; i++) badWays.Add(new BadWay { Surface = ways[i], Until = until });
+            if (Log.DebugEnabled) Log.Debug("MS {0}: job {1}: drone {2} couldn't reach its {3} way(s) in: left out of new jobs for {4} min", entityId, job.JobId, r.DroneEntityId, ways.Count, BAD_WAY_TICKS / 3600);
         }
 
         // A report of a job not held here (settled already, or the surveyor's saved state older than its drones' after a
@@ -1218,7 +1390,7 @@ namespace Automata.Mining
                 {
                     Announcement = job.Message.Payload, Ore = job.Ore.String, Deposit = Vector3DData.FromVector3D(job.Deposit), Kg = job.Kg,
                     AssignedAgeTicks = job.Assigned != 0 ? BlockSave.Age(job.Assigned) : -1, HoldTicksLeft = job.HeldUntil > now ? job.HeldUntil - now : 0,
-                    DronesOut = job.DronesOut, Announced = job.Announced,
+                    DronesOut = job.DronesOut, Announced = job.Announced, ForLc = job.ForLc,
                 });
             }
             if (Log.DebugEnabled) Log.Debug("MS {0}: state saved: {1} deposit(s), {2} depleted, {3} order(s), {4} job(s)", entityId, s.Deposits.Count, s.Depleted.Count, s.Orders.Count, s.Jobs.Count);
@@ -1261,7 +1433,7 @@ namespace Automata.Mining
                         JobId = js.Announcement.JobId, Ore = MyStringHash.GetOrCompute(js.Ore), Deposit = js.Deposit.ToVector3D(), Kg = js.Kg,
                         Message = AnnouncementMessage(js.Announcement),
                         Assigned = js.AssignedAgeTicks >= 0 ? Math.Max(1, BlockSave.FrameFromAge(js.AssignedAgeTicks)) : 0,
-                        HeldUntil = js.HoldTicksLeft > 0 ? now + js.HoldTicksLeft : 0, DronesOut = js.DronesOut,
+                        HeldUntil = js.HoldTicksLeft > 0 ? now + js.HoldTicksLeft : 0, DronesOut = js.DronesOut, ForLc = js.ForLc,
                         Announced = false,   // once more soon (orchestrators de-duplicate)
                     });
                 }

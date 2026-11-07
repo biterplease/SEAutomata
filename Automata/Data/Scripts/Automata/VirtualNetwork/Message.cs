@@ -233,6 +233,8 @@ namespace Automata.VirtualNetwork
         /// <summary>The designator block that sent it (0: a hand-held one): answered on DESIGNATOR_ORDER_UPDATE; a Drone Controller
         /// on its construct never takes the job.</summary>
         [ProtoMember(27)] public long OriginBlockId;
+        /// <summary>MineOre for a logistics computer's ore request (its entity id): unloaded there when it bids room; 0: anywhere.</summary>
+        [ProtoMember(28)] public long DeliverTo;
 
         /// <summary>Summary fields from the job's first work site and total inventory.</summary>
         public static JobAnnouncement FromJob(Orchestrator.Job job, AutomataEntityType entityType, bool isStaticGrid)
@@ -379,6 +381,9 @@ namespace Automata.VirtualNetwork
         /// <summary>Mining: the drone's hull radius across its drill axis (m): how far apart pooled miners bore (0: unknown).</summary>
         [ProtoMember(26)] public float BoreRadius;
 
+        /// <summary>Mining: the drone digs a quarry (Mining method Quarry): it mines a job alone (no pooled miners with it).</summary>
+        [ProtoMember(27)] public bool Quarry;
+
     }
 
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
@@ -508,6 +513,9 @@ namespace Automata.VirtualNetwork
         [ProtoMember(18)] public List<LaneObstruction> LaneObstructions;
         /// <summary>Scout jobs: ore hits its scans found (0: nothing - an order lane made for it is dropped).</summary>
         [ProtoMember(19)] public int Finds;
+        /// <summary>Aborted for a player's designator order (the drone was tagged): the orchestrator auctions the job again,
+        /// its announcer keeps it open.</summary>
+        [ProtoMember(20)] public bool Preempted;
     }
 
     /// <summary>A stretch of a flight lane a drone found blocked (rock, a tree, a static grid), and the way it flew round it.</summary>

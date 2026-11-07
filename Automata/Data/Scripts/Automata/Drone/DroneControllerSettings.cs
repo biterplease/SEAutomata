@@ -72,7 +72,7 @@ namespace Automata.Drone
                         /// Disable if your drone is electric.
                         /// </summary>
                 [ProtoMember(16)]
-                public bool MonitorHydrogenLevels = false;
+                public bool MonitorHydrogenLevels = true;   // (2026-11-07: off by default, drones ran dry in the field)
                 /// <summary>
                         /// When hydrogen tank levels are below this threshold, percentage-wise, drone will return home
                         /// </summary>
@@ -91,7 +91,7 @@ namespace Automata.Drone
                 /// Disable if your drone has a reactor and will never run out of power.
                 /// </summary>
                 [ProtoMember(20)]
-                public bool MonitorBatteryLevels = false;
+                public bool MonitorBatteryLevels = true;    // (2026-11-07: off by default, drones ran flat in the field)
                 /// <summary>
                 /// When battery storage levels are below this threshold, drone will return to home connector and recharge.
                 /// </summary>
@@ -301,5 +301,14 @@ namespace Automata.Drone
                 /// static grid when it left from voxel; 0 = none. It rests there again after a job.</summary>
                 [ProtoMember(78)]
                 public long DepartureGridId;
+
+                /// <summary>Mining: Bore (a tunnel straight to the ore) or Quarry (stepped benches first, TODO/19).</summary>
+                [ProtoMember(79)]
+                public MiningMethod MiningMethod;
+
+                /// <summary>Quarry: the side of the lowest bench and the step of the others, m; 0 = unset (1.5 x the drone's
+                /// longest dimension, which is also the floor of a set value). 0, 5 to 100.</summary>
+                [ProtoMember(80)]
+                public float QuarryDimension;
         }
 }

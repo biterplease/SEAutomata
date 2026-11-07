@@ -55,6 +55,8 @@ namespace Automata.Util.Strings
         public static readonly MyStringId Mining_OnHold = MyStringId.GetOrCompute("{LOC:Mining_OnHold}"); // "on hold ({0})"
         public static readonly MyStringId Mining_Order = MyStringId.GetOrCompute("{LOC:Mining_Order}"); // "Order"
         public static readonly MyStringId Mining_OrderRemoved = MyStringId.GetOrCompute("{LOC:Mining_OrderRemoved}"); // "order removed"
+        public static readonly MyStringId Mining_LcRequestGone = MyStringId.GetOrCompute("{LOC:Mining_LcRequestGone}"); // "the logistics computer's request is filled or gone"
+        public static readonly MyStringId Mining_JobForLc = MyStringId.GetOrCompute("{LOC:Mining_JobForLc}"); // "{0}: {1:F0} kg of {2} requested: mining job {3}"
         public static readonly MyStringId Mining_Orders = MyStringId.GetOrCompute("{LOC:Mining_Orders}"); // "Orders"
         public static readonly MyStringId Mining_OrdersOreKg = MyStringId.GetOrCompute("{LOC:Mining_OrdersOreKg}"); // "Orders (ore:kg)"
         public static readonly MyStringId Mining_OrdersTooltip = MyStringId.GetOrCompute("{LOC:Mining_OrdersTooltip}"); // "Ore to mine, kg. Each mining job is counted off its order; at 0 no more jobs go out (unless kept constant)."

@@ -71,6 +71,8 @@ namespace Automata.Orchestrator
         {
             public Auction Auction;
             public Job Job;
+            public JobAnnouncement Announcement;   // (runtime: a job preempted by a player's order is auctioned again from it)
+            public long SenderOwner;
             public Message<Auction> Message;
             public KeyValuePair<long, uint> JobKey;
             public int Started, LastBroadcast;
@@ -106,7 +108,7 @@ namespace Automata.Orchestrator
         private readonly BlockLog log = new BlockLog();
         // Awarded jobs whose drones haven't all reported (header "Active jobs"), until the job's memory ends
         private readonly Dictionary<KeyValuePair<long, uint>, ActiveJob> activeJobs = new Dictionary<KeyValuePair<long, uint>, ActiveJob>();
-        private sealed class ActiveJob { public int Drones; public int Until; public JobType Type; public Vector3D Position; }
+        private sealed class ActiveJob { public int Drones; public int Until; public JobType Type; public Vector3D Position; public JobAnnouncement Announcement; public long SenderOwner; }
         private const double SHARED_SITE_RADIUS = 60;   // m: weld / grind jobs this close share a site
         // Jobs whose announcer was told to hold them (header "Jobs Held"): no logistics computer / no drone, until the hold ends
         private readonly Dictionary<KeyValuePair<long, uint>, HeldJob> heldJobs = new Dictionary<KeyValuePair<long, uint>, HeldJob>();
@@ -594,11 +596,11 @@ namespace Automata.Orchestrator
                 jobQueue.RemoveAt(0);
                 if (!PlayerJobStillWanted(q.Key)) continue;
                 if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: job {1} from {2} out of the queue after {3:F0} s", entityId, q.Key.Value, q.Key.Key, (now - q.Received) / 60.0);
-                StartAuction(q.Announcement, q.Key, now);
+                StartAuction(q.Announcement, q.Key, now, q.SenderOwner);
             }
         }
 
-        private void StartAuction(JobAnnouncement ja, KeyValuePair<long, uint> key, int now)
+        private void StartAuction(JobAnnouncement ja, KeyValuePair<long, uint> key, int now, long senderOwner = 0)
         {
             switch (ja.Type)
             {
@@ -611,6 +613,7 @@ namespace Automata.Orchestrator
                 case JobType.DesignatorScoutArea:
                 case JobType.DesignatorEngage:
                 case JobType.DesignatorEscort:
+                case JobType.DesignatorQuarry:
                     break;
                 default:
                     AddEvent(Loc.F(MyStrings.Orchestrator_NotHandledYet, ja.Type));
@@ -659,6 +662,8 @@ namespace Automata.Orchestrator
             {
                 Auction = auction,
                 Job = job,
+                Announcement = ja,
+                SenderOwner = senderOwner,
                 JobKey = key,
                 Started = now,
                 LastBroadcast = int.MinValue / 2,
@@ -784,6 +789,7 @@ namespace Automata.Orchestrator
                 case JobType.MineOre: return (caps & Drone.Capabilities.CanDrill) != 0 && (caps & Drone.Capabilities.CanScoutOre) != 0;
                 case JobType.DesignatorScoutPoint:
                 case JobType.DesignatorScoutArea: return (caps & Drone.Capabilities.CanScoutOre) != 0;
+                case JobType.DesignatorQuarry: return (caps & Drone.Capabilities.CanDrill) != 0;
                 // AI Defensive + AI Flight + AI Offensive on the drone (combat handover)
                 case JobType.DesignatorEngage:
                 case JobType.DesignatorEscort: return (caps & Drone.Capabilities.HasDefenseSystems) != 0;
@@ -851,7 +857,7 @@ namespace Automata.Orchestrator
                         QueueWinner(open, assignments, droneBid, sources);
                         assignedCount++;
                         activeJobs[open.JobKey] = new ActiveJob { Drones = assignments.Count, Until = now + JOB_MEMORY_TICKS, Type = open.Auction.JobType,
-                                                                  Position = open.Auction.PositionData.ToVector3D() };
+                                                                  Position = open.Auction.PositionData.ToVector3D(), Announcement = open.Announcement, SenderOwner = open.SenderOwner };
                         heldJobs.Remove(open.JobKey);
                         AddEvent(WonText(open, assignments, sources));
                         if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: auction {1} (job {2}, {3}) won by drone {4}: {5}", entityId, open.Auction.AuctionId, open.Auction.JobId, LabelOf(open.Auction), droneId, why);
@@ -929,6 +935,7 @@ namespace Automata.Orchestrator
                 case JobType.DesignatorScoutArea:
                 case JobType.DesignatorEngage:
                 case JobType.DesignatorEscort:
+                case JobType.DesignatorQuarry:
                     return AssignDesignator(open, drones, out assignments, out droneId, out droneBid, out why);
             }
             why = Loc.F(MyStrings.Orchestrator_JobTypeNotHandled, a.JobType);
@@ -1213,6 +1220,13 @@ namespace Automata.Orchestrator
             if (sites.Count == 0) { why = Loc.T(MyStrings.Orchestrator_TheJobHasNoSite); return false; }
             var takers = Takers(lcs, a.ComponentsInventory, a.PositionData.ToVector3D());
             if (takers.Count == 0) { why = Loc.T(MyStrings.Orchestrator_NoLogisticsComputerTakes); return false; }
+            // A logistics computer's ore request (its "Ore requests mine"): unloaded there when it bid room, else as any
+            long deliverTo = open.Announcement != null ? open.Announcement.DeliverTo : 0;
+            if (deliverTo != 0)
+            {
+                var only = takers.FindAll(t => t.Bid != null && t.Bid.EntityId == deliverTo);
+                if (only.Count > 0) takers = only;
+            }
             bool ice = IsIceJob(a);
             double total = (double)a.TotalVolume;
             if (total <= 0 && a.ComponentsInventory != null) total = (double)a.ComponentsInventory.TotalInventoryVolume(AutomataSession.Instance);
@@ -1224,8 +1238,10 @@ namespace Automata.Orchestrator
             int oreLeft = OreKg(a.ComponentsInventory);   // kg still to be mined: each drone stops there (or when full)
             var slotDrones = new List<Bid>();
             var slotKg = new List<int>();
-            for (int i = 0; i < ranked.Count && result.Count < MAX_POOLED_DRONES && (result.Count == 0 || carried < total); i++)
+            bool quarry = false;   // a quarry drone mines alone (one quarry, one drone; TODO/19)
+            for (int i = 0; i < ranked.Count && result.Count < MAX_POOLED_DRONES && (result.Count == 0 || carried < total) && !quarry; i++)
             {
+                if (ranked[i].Quarry && result.Count > 0) continue;
                 IOLocationData port, orePort = null;
                 var taker = ice ? IceTakerFor(takers, ranked[i], out port) : TakerFor(takers, ranked[i], out port);
                 if (taker == null) continue;
@@ -1244,6 +1260,7 @@ namespace Automata.Orchestrator
                 }
                 tasks.Add(Task.ReturnHome());
                 result[ranked[i].EntityId] = tasks;
+                quarry = ranked[i].Quarry;
                 lcsUsed.Add(taker.Bid.EntityId);
                 carried += TripVolume(ranked[i]);
                 if (total > 0) oreLeft = Math.Max(1, oreLeft - (int)Math.Min(int.MaxValue / 2, TripVolume(ranked[i]) / total * OreKg(a.ComponentsInventory)));
@@ -1657,6 +1674,15 @@ namespace Automata.Orchestrator
                         int until;
                         if (knownJobs.TryGetValue(key, out until) && until != int.MaxValue) knownJobs[key] = now + RETRY_MEMORY_TICKS;
                     }
+                    // Dropped for a player's order (a tagged drone): auctioned again (its last drone; not a player's own job)
+                    if (r.Outcome == JobOutcome.Aborted && r.Preempted && r.AnnouncerEntityId != entityId && active != null && active.Drones <= 0 && active.Announcement != null)
+                    {
+                        knownJobs[key] = int.MaxValue;
+                        activeJobs.Remove(key);
+                        jobQueue.Add(new QueuedJob { Announcement = active.Announcement, Key = key, SenderOwner = active.SenderOwner, Received = now });
+                        AddEvent(Loc.F(MyStrings.Orchestrator_JobAuctionedAgain, r.JobType.Label(r.WeldCategory), Nicknames.Of(r.DroneEntityId)));
+                        if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: job {1} from {2}: drone {3} taken by a player's order, queued again", entityId, r.JobId, r.AnnouncerEntityId, r.DroneEntityId);
+                    }
                     if (r.AnnouncerEntityId == entityId)   // a player's order: its marker goes (recalled jobs end here too)
                         EndPlayerJob(r.JobId, string.IsNullOrEmpty(r.Reason) ? Loc.F(MyStrings.Orchestrator_DroneArg0Arg1, r.DroneEntityId, r.Outcome) : Loc.F(MyStrings.Orchestrator_DroneArg0Arg1Arg2, r.DroneEntityId, r.Outcome, r.Reason));
                     string label = r.JobType.Label(r.WeldCategory);
@@ -1681,6 +1707,7 @@ namespace Automata.Orchestrator
                 bool running = false;
                 foreach (var open in auctions.Values) if (open.JobKey.Equals(kv.Key)) { running = true; break; }
                 for (int q = 0; q < jobQueue.Count && !running; q++) running = jobQueue[q].Key.Equals(kv.Key);
+                if (!running && IsHeldPlayerJob(kv.Key)) running = true;   // a hand-held quarry preparation waiting for more orders
                 if (!running) forget.Add(kv.Key);
             }
             for (int i = 0; i < forget.Count; i++)
@@ -1988,6 +2015,12 @@ namespace Automata.Orchestrator
         private void AddEvent(string text)
         {
             log.Add(text);
+        }
+
+        /// <summary>A line for its log from outside (a hand-held designator's refused order).</summary>
+        public void Notice(string text)
+        {
+            AddEvent(text);
         }
 
         /// <summary>Terminal info panel.</summary>
@@ -2390,6 +2423,7 @@ namespace Automata.Orchestrator
                 case JobType.DesignatorScoutArea: return Drone.BehaviourProfile.IsOreScout;
                 case JobType.DesignatorEngage:
                 case JobType.DesignatorEscort: return Drone.BehaviourProfile.IsCombatDrone;
+                case JobType.DesignatorQuarry: return Drone.BehaviourProfile.IsMiningDrone;
                 case JobType.DeliverMissingInventory:
                 case JobType.CollectInventorySurplus: return Drone.BehaviourProfile.IsCargoDrone;
                 // Job profiles: a bit set, any of them ranks first (ProfileBonus tests with &; weld: WeldProfileBonus)

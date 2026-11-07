@@ -64,6 +64,7 @@ namespace Automata.Pathfinding
         private const double ASTEROID_RANGE = 400;       // m beyond an asteroid's bounding sphere
         private const double BASE_MARGIN = 60;           // m: lanes stop this far outside a base's bounding sphere
         private const double WORK_MARGIN = 40;           // m: lanes end this far before the work point
+        private const double ROCK_END_CLEARANCE = BOX_HEIGHT + BOX_GAP / 2 + 10;   // m: a lane's centre line from an asteroid's rock at its end (the boxes clear it)
         private const double MIN_LENGTH = 300;           // m of lane, at least
         private const double ENTRY_RANGE = 1000;         // m from start / goal to the lane's ends, at most
         private const double DETOUR_RATIO = 1.3;         // the way through a lane: at most this much longer than straight
@@ -74,7 +75,7 @@ namespace Automata.Pathfinding
         private const double HOTSPOT_RANGE = 400;        // m beyond a hotspot's deposits: a trip end there belongs to it
         private const double HOTSPOT_CELL = 500;         // m: a hotspot's id comes from its centre on this grid
         private const double POINT_CELL = 200;           // m: an end in open space: its id comes from this grid
-        private const int FILE_VERSION = 2;              // 2: traced boxes, order lanes (1: flown lines, still read)
+        private const int FILE_VERSION = 3;              // 3: asteroid ends beside the rock (2: could end inside it - not loaded, traced again; 1: flown lines)
         private const string FILE_NAME = "Automata_Lanes.bin";
 
         public sealed class Lane
@@ -193,8 +194,8 @@ namespace Automata.Pathfinding
         {
             // The straight line from place to place, a point every TRACE_SAMPLE m, trimmed at both ends; in gravity over the
             // heightmap
-            Vector3D a = pa.Kind == PlaceKind.Base || pa.Kind == PlaceKind.Grid ? pa.Sphere.Center : from;
-            Vector3D b = pb.Kind == PlaceKind.Base || pb.Kind == PlaceKind.Grid ? pb.Sphere.Center : to;
+            Vector3D a = pa.Kind == PlaceKind.Base || pa.Kind == PlaceKind.Grid ? pa.Sphere.Center : pa.Kind == PlaceKind.Asteroid ? AsteroidEnd(pa, from) : from;
+            Vector3D b = pb.Kind == PlaceKind.Base || pb.Kind == PlaceKind.Grid ? pb.Sphere.Center : pb.Kind == PlaceKind.Asteroid ? AsteroidEnd(pb, to) : to;
             double dist = Vector3D.Distance(a, b);
             if (dist < MIN_LENGTH) { if (Log.DebugEnabled) Log.Debug("Lanes: no lane {0} - {1}: {2:F0} m apart", pa.Name, pb.Name, dist); return 0; }
             int n = Math.Max(2, (int)Math.Ceiling(dist / TRACE_SAMPLE) + 1);
@@ -202,6 +203,8 @@ namespace Automata.Pathfinding
             for (int i = 0; i < n; i++) pts.Add(a + (b - a) * (i / (double)(n - 1)));
             TrimEnd(pts, pa, true);
             TrimEnd(pts, pb, false);
+            if (pa.Kind == PlaceKind.Asteroid) TrimRock(pts, pa, true);
+            if (pb.Kind == PlaceKind.Asteroid) TrimRock(pts, pb, false);
             if (pts.Count < 2) { if (Log.DebugEnabled) Log.Debug("Lanes: no lane {0} - {1}: nothing left between them", pa.Name, pb.Name); return 0; }
             pts = OverTerrain(pts);
             double len = 0;
@@ -221,6 +224,54 @@ namespace Automata.Pathfinding
             listVersion++;
             if (Log.DebugEnabled) Log.Debug("Lanes: {0} traced ({1:F0} m, {2} point(s){3})", lane.PairName, lane.Length, lane.Centre.Count, lane.Order ? ", for an order" : "");
             return lane.Number;
+        }
+
+        /// <summary>
+        /// An asteroid end: not the work (in the rock, where a lane ending there left the drones no way on: "unable to reach"
+        /// the deposit, 2026-11-07) but a point beside the rock over it: out from the asteroid's centre through the work,
+        /// ROCK_END_CLEARANCE past the rock's outer radius that way.
+        /// </summary>
+        private Vector3D AsteroidEnd(Place place, Vector3D work)
+        {
+            var v = VoxelOf(place.Id);
+            var pm = PathfindingManager.Instance;
+            Vector3D c = place.Sphere.Center;
+            Vector3D dir = work - c;
+            double d = dir.Length();
+            if (d < 1) return work;
+            dir /= d;
+            double rock = v != null && pm != null ? pm.AsteroidRockRadius(v, c, dir, place.Sphere.Radius + 10) : 0;
+            if (rock <= 0) rock = d;
+            return c + dir * (Math.Max(rock, d) + ROCK_END_CLEARANCE);
+        }
+
+        /// <summary>
+        /// The line near an asteroid end: cut before the first point (walked in from the other end) with the asteroid's rock
+        /// within ROCK_END_CLEARANCE (the boxes clear the rock; a line from the far side ends before it gets there).
+        /// </summary>
+        private void TrimRock(List<Vector3D> pts, Place place, bool start)
+        {
+            var v = VoxelOf(place.Id);
+            var pm = PathfindingManager.Instance;
+            if (v == null || pm == null || pts.Count == 0) return;
+            double reach = place.Sphere.Radius + ROCK_END_CLEARANCE;
+            int n = pts.Count;
+            for (int k = 0; k < n; k++)
+            {
+                int i = start ? n - 1 - k : k;
+                if (Vector3D.DistanceSquared(pts[i], place.Sphere.Center) > reach * reach) continue;
+                if (!pm.RockNear(v, pts[i], ROCK_END_CLEARANCE)) continue;
+                int cut = start ? i + 1 : n - i;
+                if (start) pts.RemoveRange(0, i + 1); else pts.RemoveRange(i, n - i);
+                if (Log.DebugEnabled) Log.Debug("Lanes: line to {0} cut {1} point(s) short: rock within {2:F0} m", place.Name, cut, ROCK_END_CLEARANCE);
+                return;
+            }
+        }
+
+        private static MyVoxelBase VoxelOf(long id)
+        {
+            VRage.ModAPI.IMyEntity e;
+            return MyAPIGateway.Entities.TryGetEntityById(id, out e) ? e as MyVoxelBase : null;
         }
 
         // Trim an end of the line: short of a base (outside its sphere plus a margin), or above a work point (back from it by

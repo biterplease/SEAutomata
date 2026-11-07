@@ -50,6 +50,9 @@ namespace Automata.Drone
         private Vector3D siteWatchCenter;    // the current work site (DispatchToolTo)
         private Vector3D siteWatchEnd;       // ...to here: a bore's end (DispatchBore); else the site itself
         private bool siteWatchCenterSet;
+        private long routeWaitFor;           // a route leg's start found this drone in the way near the site: held for it
+        private int routeWaitStart, routeWaitCheck;
+        private const int ROUTE_WAIT_RECHECK_TICKS = 60;
         private uint wayAroundJob;           // the work site (job, nav task) chosen again once for a drone holding in the way
         private int wayAroundTask = -1;
 
@@ -91,7 +94,7 @@ namespace Automata.Drone
         {
             get
             {
-                return currentJob != null && (jobSharedSite || currentJob.JobType == Orchestrator.JobType.MineOre)
+                return currentJob != null && (jobSharedSite || currentJob.JobType == Orchestrator.JobType.MineOre || currentJob.JobType == Orchestrator.JobType.DesignatorQuarry)
                     && cPhase == ConstructionPhase.Running && jobSource == JobSource.Orchestrator
                     && settings != null && settings.OperationMode == OperationMode.ManagedByOrchestrator
                     && IsSiteJob(currentJob.JobType)
@@ -115,10 +118,11 @@ namespace Automata.Drone
             return null;
         }
 
-        // Jobs worked at a site several drones may share: weld, grind, mine (one deposit)
+        // Jobs worked at a site several drones may share: weld, grind, mine (one deposit), quarry preparation (one shaft)
         private static bool IsSiteJob(Orchestrator.JobType t)
         {
-            return t == Orchestrator.JobType.Weld || t == Orchestrator.JobType.Grind || t == Orchestrator.JobType.MineOre;
+            return t == Orchestrator.JobType.Weld || t == Orchestrator.JobType.Grind || t == Orchestrator.JobType.MineOre
+                || t == Orchestrator.JobType.DesignatorQuarry;
         }
 
         private double HullRadius
@@ -200,6 +204,17 @@ namespace Automata.Drone
         private void UpdateSharedSite10()
         {
             if (!jobSharedSite) LearnSharedSite();
+            if (routeWaitFor != 0)
+            {
+                // Held for a drone in the way of a route leg (RouteWaitForDrone): the progress clocks wait, the leg is
+                // checked again every ROUTE_WAIT_RECHECK_TICKS (CheckLegStart: clear, the hold ends)
+                if (currentJob == null || activeFlightOrder == null) { EndYield("no flight"); return; }
+                int t = MyAPIGateway.Session.GameplayFrameCounter;
+                taskProgressFrame = t;
+                siteProgressFrame = t;
+                if (t - routeWaitCheck >= ROUTE_WAIT_RECHECK_TICKS) { routeWaitCheck = t; legChecked = null; }
+                return;
+            }
             if (!WatchingSharedSite)
             {
                 if (siteYielding) EndYield("left the site");
@@ -217,6 +232,7 @@ namespace Automata.Drone
                 if (droneGrids.Contains(other.block.CubeGrid)) continue;
                 Vector3D oc = other.HullCentreWorld;
                 if (Vector3D.DistanceSquared(oc, myFrom) > SITE_NEIGHBOUR_RADIUS * SITE_NEIGHBOUR_RADIUS) continue;
+                if (QuarryLaneMate(other) && (!moving || InQuarryLane(myTo))) continue;   // side by side in their own quarry lanes
                 double clear = myR + other.HullRadius + SiteMargin;
                 bool mineHitsIt = moving && SegmentDistance(myFrom, myTo, oc) < clear;
                 Vector3D ov = other.flightState.LinearVelocity;
@@ -268,10 +284,47 @@ namespace Automata.Drone
 
         private void EndYield(string why)
         {
+            routeWaitFor = 0;
             if (!siteYielding) return;
             siteYielding = false;
             if (Log.DebugEnabled) Log.Debug("Drone {0}: shared site: going on after {1:F0} s ({2})", _entityId, (MyAPIGateway.Session.GameplayFrameCounter - siteYieldStart) / 60.0, why);
             siteYieldFor = 0;
+        }
+
+        /// <summary>
+        /// A route leg's start (CheckLegStart) found drone 'hitEntity' in the way, on the way to a work site within
+        /// SITE_NEIGHBOUR_RADIUS (2026-11-07: a quarry lane's neighbour hovering over its own lane: the replan failed,
+        /// the site was chosen again with it still there, the job dropped as unreachable). Held as at a shared site
+        /// (siteYielding: flight control keeps it in place, the progress clocks wait) until the leg checks clear, at most
+        /// SITE_YIELD_MAX_TICKS; then planned round it as before. True: holding.
+        /// </summary>
+        private bool RouteWaitForDrone(VRage.ModAPI.IMyEntity hitEntity)
+        {
+            var grid = hitEntity as VRage.Game.ModAPI.IMyCubeGrid;
+            if (grid == null && hitEntity is VRage.Game.ModAPI.IMyCubeBlock) grid = ((VRage.Game.ModAPI.IMyCubeBlock)hitEntity).CubeGrid;
+            var other = grid != null ? DroneOf(grid) : null;
+            if (other == null || other == this || currentJob == null || cPhase != ConstructionPhase.Running || !siteWatchCenterSet
+                || taskIndex < 0 || taskIndex >= currentJob.Tasks.Count || currentJob.Tasks[taskIndex].Type != Orchestrator.TaskType.NavigateToolTo
+                || Vector3D.Distance(flightState.Position, siteWatchCenter) > SITE_NEIGHBOUR_RADIUS)
+                return false;
+            int now = MyAPIGateway.Session.GameplayFrameCounter;
+            if (routeWaitFor != other._entityId)
+            {
+                routeWaitFor = other._entityId;
+                routeWaitStart = routeWaitCheck = now;
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: drone {1} in the way near the work site: holding until it clears (at most {2} s)", _entityId, other._entityId, SITE_YIELD_MAX_TICKS / 60);
+            }
+            else if (now - routeWaitStart > SITE_YIELD_MAX_TICKS)
+            {
+                EndYield("drone " + other._entityId + " still in the way after " + SITE_YIELD_MAX_TICKS / 60 + " s: a way round it");
+                return false;
+            }
+            siteYielding = true;
+            siteYieldFor = other._entityId;
+            siteYieldStart = routeWaitStart;
+            taskProgressFrame = now;
+            siteProgressFrame = now;
+            return true;
         }
 
         // The other drone stays in the way: another face on the way to a site; docking: the way in planned again (the

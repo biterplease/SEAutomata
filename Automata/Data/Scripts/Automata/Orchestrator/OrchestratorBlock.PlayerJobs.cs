@@ -41,6 +41,9 @@ namespace Automata.Orchestrator
             public bool Assigned;
             public long RequiredDrone;     // a tagged drone's order: only it may take the job (0: any of the profile)
             public long Drone;             // the drone that won it (designator LCDs)
+            public bool Held;              // a hand-held quarry preparation: not queued until HeldUntil (more benches may come)
+            public DateTime HeldUntil;
+            public long SenderOwner;
         }
 
         private sealed class PlayerOrder
@@ -76,6 +79,7 @@ namespace Automata.Orchestrator
                 case JobType.DesignatorScoutArea: return Drone.BehaviourProfile.IsOreScout;
                 case JobType.DesignatorEngage:
                 case JobType.DesignatorEscort:    return Drone.BehaviourProfile.IsCombatDrone;
+                case JobType.DesignatorQuarry:    return Drone.BehaviourProfile.IsMiningDrone;
                 default:                          return Drone.BehaviourProfile.None;
             }
         }
@@ -103,6 +107,14 @@ namespace Automata.Orchestrator
         {
             PlayerJob pj;
             return key.Key == entityId && playerJobs.TryGetValue(key.Value, out pj) ? pj.RequiredDrone : 0;
+        }
+
+        // A hand-held quarry preparation still held for more orders (not queued yet): not a job that vanished. Before this
+        // ForgetJobs ended every one the moment it was ordered ("no report from the drone": the GPS marker only flashed)
+        private bool IsHeldPlayerJob(KeyValuePair<long, uint> key)
+        {
+            PlayerJob pj;
+            return key.Key == entityId && playerJobs.TryGetValue(key.Value, out pj) && pj.Held;
         }
 
         private bool IsPlayerJob(KeyValuePair<long, uint> key)
@@ -156,9 +168,10 @@ namespace Automata.Orchestrator
         {
             if (playerJobs.Count == 0) return;
             DateTime utc = DateTime.UtcNow;
+            ReleaseHeldPlayerJobs(now, utc);
             playerJobsEnded.Clear();
             foreach (var pj in playerJobs.Values)
-                if (!pj.Assigned && utc >= pj.ExpiresAt) playerJobsEnded.Add(pj.JobId);
+                if (!pj.Assigned && !pj.Held && utc >= pj.ExpiresAt) playerJobsEnded.Add(pj.JobId);
             if (playerJobsEnded.Count == 0) return;
             playerOrdersTouched.Clear();
             for (int i = 0; i < playerJobsEnded.Count; i++)
@@ -197,6 +210,21 @@ namespace Automata.Orchestrator
             playerOrdersTouched.Clear();
         }
 
+        // Hand-held quarry preparations held QUARRY_HOLD_SECONDS after their last order (debounce): queued now, the
+        // confirmation time from here
+        private void ReleaseHeldPlayerJobs(int now, DateTime utc)
+        {
+            foreach (var pj in playerJobs.Values)
+            {
+                if (!pj.Held || utc < pj.HeldUntil) continue;
+                pj.Held = false;
+                pj.ExpiresAt = utc.AddSeconds(PointerConfig().ConfirmTimeoutSeconds);
+                var key = new KeyValuePair<long, uint>(entityId, pj.JobId);
+                jobQueue.Add(new QueuedJob { Announcement = pj.Announcement, Key = key, SenderOwner = pj.SenderOwner, Received = now });
+                if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: quarry preparation {1} queued ({2} bench(es))", entityId, pj.JobId, QuarryBenches(pj.Announcement));
+            }
+        }
+
         // All the order's (remaining) jobs have a drone: confirmed, the marker turns green, the player told
         private void CheckOrder(PlayerOrder order)
         {
@@ -204,20 +232,21 @@ namespace Automata.Orchestrator
             order.Confirmed = true;
             SetGpsColor(order, PointerConfig().ConfirmedGpsColor);
             // Spot check / engage: green; area sweep / escort: blue
-            ScoutPointer.Feedback(order.Identity, order.Type == JobType.DesignatorScoutArea || order.Type == JobType.DesignatorEscort
+            ScoutPointer.Feedback(order.Identity, order.Type == JobType.DesignatorScoutArea || order.Type == JobType.DesignatorEscort || order.Type == JobType.DesignatorQuarry
                                                   ? DesignatorSignal.ConfirmedBlue : DesignatorSignal.ConfirmedGreen);
             SendOrderUpdate(order, 0, DesignatorOrderState.Confirmed, DesignatorOrderLine(order));
             if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: player order {1} confirmed ({2} job(s), {3} cancelled)", entityId, order.OrderId, order.Assigned, order.Cancelled);
         }
 
         private readonly List<uint> recallJobIds = new List<uint>();
+        private const double RECALL_NEAR_SKIP = 15;   // m from where a recall was aimed from: markers there aren't what it aims at
 
         /// <summary>
         /// Recall aimed at a marker: the order whose GPS marker (a confirmed, non-combat order) is nearest to 'hit' within
         /// 'radius'. Its jobs end: the ones not yet taken are cancelled (queue / auction), the drones working the others
         /// are recalled (their "recalled" report ends the job and, with the last one, the marker). False: no marker there.
         /// </summary>
-        public bool RecallOrderAt(Vector3D hit, double radius, string by, out int drones, out int cancelled)
+        public bool RecallOrderAt(Vector3D from, Vector3D hit, double radius, string by, out int drones, out int cancelled)
         {
             drones = cancelled = 0;
             PlayerOrder best = null;
@@ -227,6 +256,23 @@ namespace Automata.Orchestrator
                 if (!o.Confirmed || o.Kind == PointerKind.Combat) continue;
                 double d = Vector3D.DistanceSquared(o.Position, hit);
                 if (d <= bestD) { bestD = d; best = o; }
+            }
+            // None at the hit: a marker the aim passes within 'radius' of (2026-11-07: a quarry's marker stays where the
+            // ground was; aimed at, the ray goes through it down the shaft dug since and hits its bottom). Not one within
+            // RECALL_NEAR_SKIP of where it was aimed from (standing by a marker, aiming elsewhere)
+            Vector3D ray = hit - from;
+            double len = ray.Length();
+            if (best == null && len > 1)
+            {
+                ray /= len;
+                foreach (var o in playerOrders.Values)
+                {
+                    if (!o.Confirmed || o.Kind == PointerKind.Combat) continue;
+                    double t = Vector3D.Dot(o.Position - from, ray);
+                    if (t < RECALL_NEAR_SKIP || t > len) continue;
+                    double d = Vector3D.DistanceSquared(from + ray * t, o.Position);
+                    if (d <= bestD) { bestD = d; best = o; }
+                }
             }
             if (best == null) return false;
             recallJobIds.Clear();
