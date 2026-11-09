@@ -577,8 +577,9 @@ namespace Automata.Drone
                     list.Add(new MyTerminalControlComboBoxItem { Key = (long)BehaviourProfile.IsGrinderDrone, Value = MyStrings.Drone_GrinderDrone });
                     list.Add(new MyTerminalControlComboBoxItem { Key = (long)BehaviourProfile.IsWelderGrinderDrone, Value = MyStrings.Drone_WelderGrinderDrone });
                     list.Add(new MyTerminalControlComboBoxItem { Key = (long)BehaviourProfile.IsMiningDrone, Value = MyStrings.Drone_MiningDrone });
-                    list.Add(new MyTerminalControlComboBoxItem { Key = (long)BehaviourProfile.IsFarmingDrone, Value = MyStrings.Drone_FarmingDroneNotImplemented });
-                    list.Add(new MyTerminalControlComboBoxItem { Key = (long)BehaviourProfile.IsRover, Value = MyStrings.Drone_Rover });
+                    list.Add(new MyTerminalControlComboBoxItem { Key = (long)BehaviourProfile.IsJanitorDrone, Value = MyStrings.Drone_JanitorDrone });
+                    list.Add(new MyTerminalControlComboBoxItem { Key = (long)BehaviourProfile.IsHarvesterDrone, Value = MyStrings.Drone_HarvesterDrone });
+                    // list.Add(new MyTerminalControlComboBoxItem { Key = (long)BehaviourProfile.IsRover, Value = MyStrings.Drone_Rover });
                 };
                 c.Getter = (b) => GetBlock(b)?.Terminal_BehaviourProfileValue ?? 0;
                 c.Setter = (b, v) => { var l = GetBlock(b); if (l != null) l.Terminal_BehaviourProfileValue = v; };
@@ -830,7 +831,7 @@ namespace Automata.Drone
 
             AddIgnoreLists(false);
 
-            // --- Farming (not implemented yet): crops this drone won't farm ---
+            // --- Harvester: crops this drone won't harvest (FarmCrops jobs with them: no bid) ---
             AddSection("Farming", MyStrings.Drone_Farming);
             AddIgnoreLists(true);
 

@@ -64,6 +64,11 @@ namespace Automata.Util.Strings
         public static readonly MyStringId Drone_BlockUnreachable = MyStringId.GetOrCompute("{LOC:Drone_BlockUnreachable}"); // "{0} ({1} block(s) unreachable)"
         public static readonly MyStringId Drone_BuildProjections = MyStringId.GetOrCompute("{LOC:Drone_BuildProjections}"); // "Build projections"
         public static readonly MyStringId Drone_ClearDockSkipped = MyStringId.GetOrCompute("{LOC:Drone_ClearDockSkipped}"); // "Cargo: can't dock at {0} to clear it ({1}): going on with it aboard, that connector left alone for {2} min"
+        public static readonly MyStringId Drone_Collect = MyStringId.GetOrCompute("{LOC:Drone_Collect}"); // "Collect"
+        public static readonly MyStringId Drone_CollectorProfileMissing = MyStringId.GetOrCompute("{LOC:Drone_CollectorProfileMissing}"); // "Janitor / harvester profile: missing collector"
+        public static readonly MyStringId Drone_HarvesterDrone = MyStringId.GetOrCompute("{LOC:Drone_HarvesterDrone}"); // "Harvester"
+        public static readonly MyStringId Drone_JanitorDrone = MyStringId.GetOrCompute("{LOC:Drone_JanitorDrone}"); // "Janitor"
+        public static readonly MyStringId Drone_NoCollectorCanHarvest = MyStringId.GetOrCompute("{LOC:Drone_NoCollectorCanHarvest}"); // "Harvester: no collector can reach a farm plot"
         public static readonly MyStringId Drone_PlayerOrderTakesOver = MyStringId.GetOrCompute("{LOC:Drone_PlayerOrderTakesOver}"); // "Player's order ({0}): job {1} ({2}) dropped"
         public static readonly MyStringId Drone_PreemptedByPlayerOrder = MyStringId.GetOrCompute("{LOC:Drone_PreemptedByPlayerOrder}"); // "taken by a player's order"
         public static readonly MyStringId Drone_Busy = MyStringId.GetOrCompute("{LOC:Drone_Busy}"); // "busy"
@@ -174,8 +179,7 @@ namespace Automata.Util.Strings
         public static readonly MyStringId Drone_Excluded = MyStringId.GetOrCompute("{LOC:Drone_Excluded}"); // "Excluded"
         public static readonly MyStringId Drone_ExcludedCapabilities = MyStringId.GetOrCompute("{LOC:Drone_ExcludedCapabilities}"); // "Excluded capabilities"
         public static readonly MyStringId Drone_ExcludeSelected = MyStringId.GetOrCompute("{LOC:Drone_ExcludeSelected}"); // "Exclude selected"
-        public static readonly MyStringId Drone_Farming = MyStringId.GetOrCompute("{LOC:Drone_Farming}"); // "Farming"
-        public static readonly MyStringId Drone_FarmingDroneNotImplemented = MyStringId.GetOrCompute("{LOC:Drone_FarmingDroneNotImplemented}"); // "Farming drone (not implemented)"
+        public static readonly MyStringId Drone_Farming = MyStringId.GetOrCompute("{LOC:Drone_Farming}"); // "Harvester"
         public static readonly MyStringId Drone_FieldDepth = MyStringId.GetOrCompute("{LOC:Drone_FieldDepth}"); // "Field depth"
         public static readonly MyStringId Drone_FieldHeight = MyStringId.GetOrCompute("{LOC:Drone_FieldHeight}"); // "Field height"
         public static readonly MyStringId Drone_FieldOffsetForward = MyStringId.GetOrCompute("{LOC:Drone_FieldOffsetForward}"); // "Field offset forward"
@@ -550,4 +554,4 @@ namespace Automata.Util.Strings
         public static readonly MyStringId Drone_Wheels = MyStringId.GetOrCompute("{LOC:Drone_Wheels}"); // "Wheels"
         public static readonly MyStringId Drone_WhenBiddingExcludeTheseCapabilitiesTooltip = MyStringId.GetOrCompute("{LOC:Drone_WhenBiddingExcludeTheseCapabilitiesTooltip}"); // "When bidding, exclude these capabilities."
     }
-}
+}

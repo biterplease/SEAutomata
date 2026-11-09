@@ -35,7 +35,7 @@ namespace Automata.Construction
     /// through a world save. Server only; the area can be drawn (magenta) on the client.
     /// </summary>
     [MyEntityComponentDescriptor(typeof(MyObjectBuilder_MyProgrammableBlock), false, "AutomataLargeConstructionComputer")]
-    public class ConstructionComputerBlock : SettingsBlockLogic, IDebugDrawable, INicknamed
+    public partial class ConstructionComputerBlock : SettingsBlockLogic, IDebugDrawable, INicknamed
     {
 
         #region Timing
@@ -507,6 +507,7 @@ namespace Automata.Construction
             for (int j = jobs.Count - 1; j >= 0 && complete; j--)
             {
                 var job = jobs[j];
+                if (job.Type == Orchestrator.JobType.TrashCollection) continue;   // (ScanTrash)
                 bool live = job.Assigned != 0;
                 if (!live) foreach (var k in job.Blocks) if (found.Contains(k)) { live = true; break; }
                 job.Blocks.RemoveWhere(k => !found.Contains(k) && !refusedGrids.Contains(k.Key)   // a drone flying off isn't repaired
@@ -551,6 +552,7 @@ namespace Automata.Construction
                 if (startsLine) lineOpen = true;
             }
             group.Clear();
+            ScanTrash(now, ref area, ref half, ref box);
             lastFound = targets.Count;
             lastWeld = weld;
             lastGrind = grind;
@@ -596,7 +598,7 @@ namespace Automata.Construction
         private void ShareSlots(int maxOpen, int now)
         {
             for (int b = 0; b < BUCKETS; b++) { openPer[b] = 0; slotsPer[b] = 0; demandPer[b] = 0; }
-            for (int j = 0; j < jobs.Count; j++) if (jobs[j].Assigned == 0) openPer[Bucket(jobs[j])]++;
+            for (int j = 0; j < jobs.Count; j++) if (jobs[j].Assigned == 0 && jobs[j].Type != Orchestrator.JobType.TrashCollection) openPer[Bucket(jobs[j])]++;
             for (int i = 0; i < targets.Count; i++)
                 if (!inJobs.Contains(Key(targets[i])) && !CoolingDown(Key(targets[i]), now)) demandPer[Bucket(targets[i])]++;   // blocks first
             int perJob = Math.Max(1, settings.BlocksPerJob);
@@ -660,7 +662,7 @@ namespace Automata.Construction
         private int OpenCount()
         {
             int n = 0;
-            for (int i = 0; i < jobs.Count; i++) if (jobs[i].Assigned == 0) n++;
+            for (int i = 0; i < jobs.Count; i++) if (jobs[i].Assigned == 0 && jobs[i].Type != Orchestrator.JobType.TrashCollection) n++;   // (trash: ScanTrash's own cap)
             return n;
         }
 

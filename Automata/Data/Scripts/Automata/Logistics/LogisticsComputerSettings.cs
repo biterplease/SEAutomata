@@ -67,5 +67,11 @@ namespace Automata.Logistics
         [ProtoMember(12)] public List<NetworkQuotaList> NetworkQuotas = new List<NetworkQuotaList>();
         /// <summary>Each conveyor network's anchor cell, by CN index (server-written; a pasted copy reads it).</summary>
         [ProtoMember(13)] public List<NetworkAnchor> NetworkAnchors = new List<NetworkAnchor>();
+        /// <summary>"Farming": shows the Farming section (the crop ignore lists) in the terminal.</summary>
+        [ProtoMember(16)] public bool Farming;
+        /// <summary>"Harvest crops" (work modes): its grids' fully grown crops harvested (FarmCrops jobs, LogisticsComputerBlock.Farming).</summary>
+        [ProtoMember(18)] public bool HarvestCrops;
+        /// <summary>Seeds ("SeedItem/Fruit") whose crops are left to the player (dead plants are still cleared).</summary>
+        [ProtoMember(17)] public List<string> IgnoredCrops = new List<string>();
     }
 }

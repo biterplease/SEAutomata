@@ -120,6 +120,8 @@ namespace Automata.Drone
         [ProtoEnum] LiftLt100t = 524288,
         /// <summary>Payload of 100 t or more (the top class).</summary>
         [ProtoEnum] LiftLt1000t = 1048576,
+        /// <summary>A working collector (trash collection, farming).</summary>
+        [ProtoEnum] CanCollect = 2097152,
 
     }
     /// <summary>How a mining drone gets to the ore (terminal, Mining): a tunnel straight to it, or a stepped pit first.</summary>
@@ -179,9 +181,10 @@ namespace Automata.Drone
         /// <summary>Mining drone: preferred for mining jobs.</summary>
         [ProtoEnum]
         IsMiningDrone = 1024,
-        /// <summary>Farming drone (farming not implemented yet).</summary>
+        /// <summary>Harvester: ranks first for FarmCrops jobs, also takes TrashCollection (needs a collector). Was the
+        /// "Farming drone" placeholder: same value, so drones set to it are harvesters now.</summary>
         [ProtoEnum]
-        IsFarmingDrone = 2048,
+        IsHarvesterDrone = 2048,
         /// <summary>Welder:Repair: a welder that ranks first for repair jobs (damaged blocks); still takes any weld job.</summary>
         [ProtoEnum]
         IsWelderRepair = 4096,
@@ -191,6 +194,10 @@ namespace Automata.Drone
         /// <summary>Welder:Unbuilt: a welder that ranks first for unbuilt jobs (placed, not welded up); still takes any weld job.</summary>
         [ProtoEnum]
         IsWelderUnbuilt = 16384,
+        /// <summary>Janitor: ranks first for TrashCollection jobs, also takes FarmCrops (needs a collector). The last free
+        /// bit of the ushort: the next profile needs the enum widened.</summary>
+        [ProtoEnum]
+        IsJanitorDrone = 32768,
 }
     [ProtoContract, Flags]
     public enum UpdateFlags : ushort

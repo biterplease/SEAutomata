@@ -394,6 +394,12 @@
   <data name="Common_X" xml:space="preserve">
     <value>{0} x{1}</value>
   </data>
+  <data name="Construction_CollectTrash" xml:space="preserve">
+    <value>Collect trash</value>
+  </data>
+  <data name="Construction_CollectTrashTooltip" xml:space="preserve">
+    <value>Order collection of floating items</value>
+  </data>
   <data name="DisplayName_Automata_ConstructionComputer" xml:space="preserve">
     <value>Automata Construction Computer</value>
   </data>
@@ -915,6 +921,21 @@
   <data name="Drone_ClearDockSkipped" xml:space="preserve">
     <value>Cargo: can't dock at {0} to clear it ({1}): going on with it aboard, that connector left alone for {2} min</value>
   </data>
+  <data name="Drone_Collect" xml:space="preserve">
+    <value>Collect</value>
+  </data>
+  <data name="Drone_CollectorProfileMissing" xml:space="preserve">
+    <value>Janitor / harvester profile: missing collector</value>
+  </data>
+  <data name="Drone_HarvesterDrone" xml:space="preserve">
+    <value>Harvester</value>
+  </data>
+  <data name="Drone_JanitorDrone" xml:space="preserve">
+    <value>Janitor</value>
+  </data>
+  <data name="Drone_NoCollectorCanHarvest" xml:space="preserve">
+    <value>Harvester: no collector can reach a farm plot</value>
+  </data>
   <data name="Drone_PlayerOrderTakesOver" xml:space="preserve">
     <value>Player's order ({0}): job {1} ({2}) dropped</value>
   </data>
@@ -1248,10 +1269,7 @@ Space: burn, cruise, flip-and-burn.</value>
     <value>Exclude selected</value>
   </data>
   <data name="Drone_Farming" xml:space="preserve">
-    <value>Farming</value>
-  </data>
-  <data name="Drone_FarmingDroneNotImplemented" xml:space="preserve">
-    <value>Farming drone (not implemented)</value>
+    <value>Harvester</value>
   </data>
   <data name="Drone_FieldDepth" xml:space="preserve">
     <value>Field depth</value>
@@ -2395,6 +2413,27 @@ NOTE: AI must be disabled to change.</value>
   <data name="Logistics_AcceptIceTooltip" xml:space="preserve">
     <value>Bid volume for ice without O2/H2 Generators or Irrigation Systems</value>
   </data>
+  <data name="Logistics_Crops" xml:space="preserve">
+    <value>Crops</value>
+  </data>
+  <data name="Logistics_HarvestCrops" xml:space="preserve">
+    <value>Harvest crops</value>
+  </data>
+  <data name="Logistics_HarvestCropsTooltip" xml:space="preserve">
+    <value>Harvest crops on farm plots that are ready.</value>
+  </data>
+  <data name="Logistics_FarmingDue" xml:space="preserve">
+    <value>Farming: {0} plot(s) to harvest</value>
+  </data>
+  <data name="Logistics_Farming" xml:space="preserve">
+    <value>Farming</value>
+  </data>
+  <data name="Logistics_IgnoredCrops" xml:space="preserve">
+    <value>Ignored crops</value>
+  </data>
+  <data name="Logistics_IgnoreSelected" xml:space="preserve">
+    <value>Ignore selected</value>
+  </data>
   <data name="Logistics_OreRequestsMine" xml:space="preserve">
     <value>Ore/Ice requests mine</value>
   </data>
@@ -2650,6 +2689,9 @@ NOTE: AI must be disabled to change.</value>
   <data name="Logistics_PushLower" xml:space="preserve">
     <value>push</value>
   </data>
+  <data name="Logistics_RemoveSelected" xml:space="preserve">
+    <value>Remove selected</value>
+  </data>
   <data name="Logistics_Request" xml:space="preserve">
     <value>Request</value>
   </data>
@@ -2694,6 +2736,9 @@ NOTE: AI must be disabled to change.</value>
   </data>
   <data name="Logistics_WaitingForTheMod" xml:space="preserve">
     <value>Waiting for the mod</value>
+  </data>
+  <data name="Logistics_ShowIgnoredCrops" xml:space="preserve">
+    <value>Show/hide ignored crops</value>
   </data>
   <data name="Logistics_Warning" xml:space="preserve">
     <value>Warning: {0}</value>
@@ -3038,6 +3083,9 @@ NOTE: AI must be disabled to change.</value>
   <data name="Orchestrator_ClearAllLanes" xml:space="preserve">
     <value>Clear all lanes</value>
   </data>
+  <data name="Orchestrator_CollectAssigned" xml:space="preserve">
+    <value>{0} target(s), drone {1}</value>
+  </data>
   <data name="Orchestrator_CombatDroneLower" xml:space="preserve">
     <value>combat drone</value>
   </data>
@@ -3079,6 +3127,9 @@ NOTE: AI must be disabled to change.</value>
   </data>
   <data name="Orchestrator_EscortingArg0" xml:space="preserve">
     <value>Escorting {0}</value>
+  </data>
+  <data name="Orchestrator_FarmHarvested" xml:space="preserve">
+    <value>{0}: Farm plot(s) at {1} harvested, time to replant!</value>
   </data>
   <data name="Orchestrator_JobAuction" xml:space="preserve">
     <value>Job Auction: {0}</value>

@@ -195,6 +195,7 @@ namespace Automata.Construction
             Mode("Repair", MyStrings.Construction_RepairDamagedBlocks, MyStrings.BLANK, WorkModes.RepairDamagedBlocks);
             Mode("WeldProjected", MyStrings.Construction_BuildProjections, MyStrings.BLANK, WorkModes.WeldProjectedBlocks);
             Mode("Grind", MyStrings.Construction_Grind, MyStrings.BLANK, WorkModes.Grind);
+            Mode("CollectTrash", MyStrings.Construction_CollectTrash, MyStrings.Construction_CollectTrashTooltip, WorkModes.CollectTrash);
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlCombobox, IMyProgrammableBlock>(IdPrefix + "WorkPriority");
                 c.Title = MyStrings.Construction_WeldPriority;

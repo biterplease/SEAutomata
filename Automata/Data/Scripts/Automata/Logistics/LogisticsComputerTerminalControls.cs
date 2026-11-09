@@ -127,6 +127,61 @@ namespace Automata.Logistics
             Add(c);
         }
 
+        static bool FarmingVisible(IMyTerminalBlock b)
+        {
+            var l = GetBlock(b);
+            return l != null && l.Terminal_Farming;
+        }
+
+        // A visibility change shows on the open terminal only after it redraws
+        static void RefreshTerminal(LogisticsComputerBlock l)
+        {
+            var b = l != null ? l.Entity as IMyTerminalBlock : null;
+            if (b == null || MyAPIGateway.Utilities.IsDedicated) return;
+            bool v = b.ShowInToolbarConfig;
+            b.ShowInToolbarConfig = !v;
+            b.ShowInToolbarConfig = v;
+        }
+
+        static readonly List<IMyTerminalControlListbox> cropLists = new List<IMyTerminalControlListbox>();
+
+        static void CropList(string id, MyStringId title, bool ignored)
+        {
+            var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlListbox, IMyProgrammableBlock>(IdPrefix + id);
+            c.Title = title;
+            c.Tooltip = MyStrings.BLANK;
+            c.SupportsMultipleBlocks = false;
+            c.Visible = FarmingVisible;
+            c.Multiselect = true;
+            c.VisibleRowsCount = ignored ? 4 : 6;
+            c.ListContent = (b, items, selected) =>
+            {
+                var l = GetBlock(b);
+                if (l == null) return;
+                if (ignored) l.Terminal_CropIgnoredContent(items, selected); else l.Terminal_CropKnownContent(items, selected);
+            };
+            c.ItemSelected = (b, selected) => LogisticsComputerBlock.Terminal_CropSelect(ignored, selected);
+            cropLists.Add(c);
+            Add(c);
+        }
+
+        static void CropButton(string id, MyStringId title, bool add)
+        {
+            var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlButton, IMyProgrammableBlock>(IdPrefix + id);
+            c.Title = title;
+            c.Tooltip = MyStrings.BLANK;
+            c.SupportsMultipleBlocks = false;
+            c.Visible = FarmingVisible;
+            c.Action = b =>
+            {
+                var l = GetBlock(b);
+                if (l == null) return;
+                l.Terminal_CropIgnore(add);
+                for (int i = 0; i < cropLists.Count; i++) cropLists[i].UpdateVisual();
+            };
+            Add(c);
+        }
+
         static void Button(string id, MyStringId title, MyStringId tooltip, Func<LogisticsComputerBlock, bool> act)
         {
             var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlButton, IMyProgrammableBlock>(IdPrefix + id);
@@ -191,6 +246,9 @@ namespace Automata.Logistics
                      b => CustomVisibleCondition(b) && BlockConfig.AllowLogistics && BlockConfig.AllowNetworkRequests,
                      b => BlockConfig.AllowLogistics && BlockConfig.AllowNetworkRequests,
                      l => l.Terminal_OreRequestsMine, (l, v) => l.Terminal_OreRequestsMine = v);
+            Checkbox("CheckboxLCHarvestCrops", MyStrings.Logistics_HarvestCrops, MyStrings.Logistics_HarvestCropsTooltip,
+                     b => CustomVisibleCondition(b) && BlockConfig.AllowLogistics, b => BlockConfig.AllowLogistics,
+                     l => l.Terminal_HarvestCrops, (l, v) => l.Terminal_HarvestCrops = v);
             Separator();
             Label(IdPrefix + "LabelItems", MyStrings.Logistics_ItemsItemMinMax);
             {
@@ -283,6 +341,15 @@ namespace Automata.Logistics
             Button("QuotaRemove", MyStrings.Keen_Remove, MyStrings.BLANK, l => l.Terminal_RemoveQuota());
             Button("QuotaAddManually", MyStrings.Logistics_AddManually, MyStrings.BLANK, l => l.Terminal_AddManually());
             Button("QuotaClear", MyStrings.Logistics_ClearAll, MyStrings.BLANK, l => { l.Terminal_ClearQuotas(); return true; });
+            // --- Farming: the checkbox shows the crop ignore lists ---
+            Separator();
+            Checkbox("CheckboxLCFarming", MyStrings.Logistics_ShowIgnoredCrops, MyStrings.BLANK,
+                     b => CustomVisibleCondition(b) && BlockConfig.AllowLogistics, b => BlockConfig.AllowLogistics,
+                     l => l.Terminal_Farming, (l, v) => { l.Terminal_Farming = v; RefreshTerminal(l); });
+            CropList("CropKnown", MyStrings.Logistics_Crops, false);
+            CropButton("CropIgnore", MyStrings.Logistics_IgnoreSelected, true);
+            CropList("CropIgnored", MyStrings.Logistics_IgnoredCrops, true);
+            CropButton("CropUnignore", MyStrings.Logistics_RemoveSelected, false);
             Separator();
             Button("RetryHeld", MyStrings.Logistics_RetryHeldJobs, MyStrings.BLANK,
                    l => { l.Terminal_RetryHeld(); return false; });

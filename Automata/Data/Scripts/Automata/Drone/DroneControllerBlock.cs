@@ -533,6 +533,7 @@ namespace Automata.Drone
                     ReportThrustGains();
                     CheckLoad();
                     UpdateConstruction100();
+                    GuardCollectors();
                     UpdateOrchestratorJobs();
                     ClearWhenIdle();
                     ReturnWhenIdle();
@@ -735,7 +736,7 @@ namespace Automata.Drone
 
         // Older settings: the "Combat handover" operation mode became the Combat drone profile managed by an orchestrator;
         // ranges clamped to the current limits
-        private string lastMineNote;
+        private string lastMineNote, lastCollectorNote;
 
         private void MigrateSettings()
         {
@@ -870,6 +871,10 @@ namespace Automata.Drone
             grinder = null;
             drill = null;
             drills.Clear();
+            collectors.Clear();
+            collectorMounts.Clear();
+            collectorDepth.Clear();
+            collectorProfiles.Clear();
             primaryAntenna = null;
             oreDetector = null;
             IMyDefensiveCombatBlock foundDefensive = null;
@@ -940,6 +945,8 @@ namespace Automata.Drone
                             drillMount = BuildMount(fatBlock, ref flightState.WorldMatrixToLocal, ref flightState.Position);
                         }
                     }
+                    else if (fatBlock is IMyCollector)
+                        AddCollector((IMyCollector)fatBlock);
                     else if (fatBlock is IMyLandingGear)
                         landingGears.Add((IMyLandingGear)fatBlock);
                     else if (fatBlock is IMyGyro)
@@ -1035,8 +1042,10 @@ namespace Automata.Drone
             // (checked at home only, like the combat blocks: a detector lost out there must not strand the drone)
             if (combatMissing == null && settings.BehaviourProfile == BehaviourProfile.IsOreScout && oreDetectors == 0 && (!initialized || isParked))
                 combatMissing = "";   // reported below as the ore scout's missing detector
+            // Janitors / harvesters need a collector (checked at home only, as above)
+            bool collectorMissing = combatMissing == null && IsCollectorProfile(settings.BehaviourProfile) && collectors.Count == 0 && (!initialized || isParked);
 
-            bool hasMinimum = overloadSource == null && !onStatic && crippled == null && combatMissing == null && gyroscopes.Count > 0 &&
+            bool hasMinimum = overloadSource == null && !onStatic && crippled == null && combatMissing == null && !collectorMissing && gyroscopes.Count > 0 &&
                 (
                     HasAnyDirectionalComponent(hydrogenThrusters) ||
                     HasAnyDirectionalComponent(ionThrusters) ||
@@ -1058,6 +1067,7 @@ namespace Automata.Drone
                 if (overloadSource != null) sb.Append(Loc.F(MyStrings.Drone_SystemOverloadFoundOnGrid, overloadSource));
                 else if (onStatic) sb.Append(Loc.T(MyStrings.Drone_PartOfAStaticGrid));
                 else if (crippled != null) sb.Append(crippled);
+                else if (collectorMissing) sb.Append(Loc.T(MyStrings.Drone_CollectorProfileMissing));
                 else if (combatMissing == "") sb.Append(Loc.T(MyStrings.Drone_OreScoutProfileMissingOre));
                 else if (combatMissing != null) sb.Append(Loc.T(MyStrings.Drone_CombatDroneProfileMissing)).Append(combatMissing);
                 else if (smallConnector != null && connectors.Count == 0)
@@ -1121,6 +1131,7 @@ namespace Automata.Drone
             if (welder != null) capabilities |= Capabilities.CanWeld;
             if (grinder != null) capabilities |= Capabilities.CanGrind;
             if (drill != null) capabilities |= Capabilities.CanDrill;
+            if (collectors.Count > 0) capabilities |= Capabilities.CanCollect;
             if (oreDetectors > 0) capabilities |= Capabilities.CanScoutOre;
             if (aiDefensive != null && aiOffensive != null && aiFlight != null) capabilities |= Capabilities.HasDefenseSystems;   // combat handover
             if (sensors.Count > 0) capabilities |= Capabilities.HasSensors;
@@ -1145,6 +1156,11 @@ namespace Automata.Drone
                 : null;
             if (mineNote != null && mineNote != lastMineNote && IsServer) Report(MyStrings.Drone_Warning, mineNote);
             lastMineNote = mineNote;
+            // Collectors: how each one can harvest on this drone (its kind, where its beam points); a harvester none of
+            // whose beams can reach a plot is told so
+            string collectNote = collectors.Count > 0 && IsServer ? ProfileCollectors() : null;
+            if (collectNote != null && collectNote != lastCollectorNote) Report(MyStrings.Drone_Warning, collectNote);
+            lastCollectorNote = collectNote;
             // Combat drones: AI block settings that hold the drone back in a fight (LCD alert + terminal)
             string aiNote = CombatAiSettingsNote();
             if (aiNote != null && aiNote != combatAiNote && IsServer) Report(MyStrings.Drone_Warning, aiNote);

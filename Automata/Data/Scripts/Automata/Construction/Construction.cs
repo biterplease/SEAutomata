@@ -47,6 +47,8 @@ namespace Automata.Construction
         RepairDamagedBlocks = 4,
         WeldProjectedBlocks = 8,
         Grind = 16,
+        /// <summary>"Collect trash": floating objects in the area become TrashCollection jobs.</summary>
+        CollectTrash = 32,
     }
 
     /// <summary>What kind of weld a block needs (weld priority). Grinding is not part of the priority.</summary>
