@@ -1,0 +1,127 @@
+[h1]Ochestrator[/h1]
+
+The Orchestrator works behind the scenes to ensure that blocks communicate effectively, and optimizes job plans for efficiency.
+
+As the player, you will interact little with the Orchestrator, but it performs several key tasks that keep your system working effectively.
+
+The following is more about how the Automata Mod does things, rather than critical information for you to know. Feel free to skip to another section, or read on!
+
+[h2]Jobs and Tasks[/h2]
+
+[b]Jobs[/b] are the type of things that, as a player, you would do in order to, well, get other things done, like:
+
+[list]
+[*]Mining ore
+[*]Get the ore to the refineries
+[*]Take the ingots from the to the assembler
+[*]Make components out of ingots
+[*]Make spaceships out of components
+[*]Destroy enemies with your spaceships
+[/list]
+
+While simple for an engineer to do, its awfully complicated for a drone to perform these jobs.
+
+The orchestrator breaks down [b]jobs[/b] into simpler, single-goal [b]tasks[/b], that the drones CAN perform.
+
+Tasks are usually very focused events that can be sequenced, to achieve jobs like a human can. For example, when given a job to mine Silicon, the orchestratror gives the drone a task list that looks like the following:
+
+[list]
+[*]Check inventory
+[*]Empty inventory if not empty
+[*]Undock
+[*]Navigate to ore hotspot
+[*]Use ore detector
+[*]Approach desired ore
+[*]Point drills towards ore
+[*]Set dig mode
+[*]Navigate to location (within 7.5m of detected ore)
+[*]Switch to drill mode
+[*]Drill
+[/list]
+
+After the drone starts drilling, several completion triggers tell the drone to stop. These usually come with task lists of their own:
+
+[list]
+[*]Completion trigger: cargo full -> Go to delivery point(s), and drop ore
+[*]Completion trigger: no more ore (ore voxels no longer detected) -> return home, let Mining Surveyor deposit is depleted
+[*]Abort trigger: low battery -> battery below threshold, go recharge
+[/list]
+
+The task lists a drone takes off with often range in the order of 100s, which encompass several trips of actions.
+
+This job->task breakdown happens thanks to the Orchestrator.
+
+[h2]Auctions[/h2]
+
+[b]Auctions[/b] are how jobs are assigned.
+
+The [b]Orchestrator[/b] uses an auction system to distribute tasks. Every job managed by an Orchestrator goes through the same four steps:
+
+[olist]
+[*][b]Announcement[/b]: a computer (Construction, Logistics, Mining Surveyor, or Target Designator) finds work and announces it. Some examples
+[list]
+[*]"These 10 blocks need welding"
+[*]"This grid needs 500 steel plates"
+[*]"The player placed an order for 10,000 kg of iron here"
+[*]"This grid is requesting ice."
+[/list]
+[*][b]Auction[/b]: the Orchestrator opens an auction for the job and broadcasts it to every drone and Logistics Computer in range.
+[*][b]Bidding[/b]:
+[list]
+[*]Drones that can do the job bid with their position, cargo room and tools.
+[*]Logistics Computers that can supply the items (or take them) bid too.
+[*]Most jobs need both: a drone to do the work, and a Logistics Computer to load from or unload to.
+[/list]
+[*][b]Winner selection[/b]: after a few seconds the Orchestrator picks the best bids.
+[list]
+[*]Drones whose behaviour profile matches the job always rank first, then the closest and best equipped.
+[*]Big jobs are split over several drones and trips.
+[*]The winners get their task lists, the Logistics Computers reserve the items or room, and the announcer stops repeating the job.
+[*]Some jobs involve more than 1 winning drone or logistic computer:
+[list]
+[*]Example 1: large block weld. Welding a refinery, is 1 job that gets distributed to several drones, because of the large amount of components required
+[*]Example 2: Mining byproducts: a grid with refineries would take unwanted stone, while a grid with O2/H2 gens would take unwanted ice
+[/list]
+[/list]
+[/olist]
+
+If nobody bids, the job is put on hold for a few minutes and announced again later. Every computer has a [b]Retry jobs[/b] button to skip the wait.
+
+[h2]Flight lanes[/h2]
+
+[b]Flight lanes[/b] are like an air (or space) highway, to keep your drones following certain rules, for their own safety.
+
+The orchestrator plans, and maintains, [b]Flight lanes[/b] to/from important locations:
+
+[list]
+[*]Between static bases: the Orchestrator automatically prepares flight lanes between all your static grids, ensuring Drones don't encounter each other head-on in transit.
+[*]Between a base and an ore hotspot: The path that Mining Drones follow to/from a hotspot is always a flight lane
+[list]
+[*]A hotspot is when 2 or more ore deposits are within 500m
+[*]Asteroids are always considered a hotspot
+[/list]
+[/list]
+
+Flight lanes come in pairs, one for each direction. Each lane also includes sub-lanes, allowing slow drones to pass faster drones.
+
+If a drone cannot fit the 40x40 flight lane, it will fly alongside of it.
+
+[h2]Work areas[/h2]
+
+The orchestrator assigns areas where several drones are operating as temporary work areas. In these areas, drones will act with extra care, and follow certain safety protocols.
+
+Usually, drones are aware of their environment (provided they have a sensor and camera), but in work areas, they understand that other drones will be around.
+
+In a work area, you'll notice a drone take pause, let another drone move or finish what its doing, and then resume once its path is clear
+
+[h2]Parking protocol[/h2]
+
+Drones with landing gears will park, according to the Orchestrator's setting
+
+[list]
+[*]Park on grid: anywhere this orchestrator's grid.
+[*]Parking area: in the area set below, configure a space to do so..
+[*]Voxel: on rock near this orchestrator.
+[/list]
+
+If [b]Parking protocol[/b] is unset, drones will figure it out themselves, usually preferring grid to voxel.

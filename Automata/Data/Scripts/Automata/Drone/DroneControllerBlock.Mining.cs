@@ -173,6 +173,12 @@ namespace Automata.Drone
                 if (!fixedSite && !boreLane) boreDeposit = live;
                 quarryDug = false;
                 if (QuarryWanted(ref task)) return StartQuarry(ref task, now);
+                if (quarryPlanned)
+                {
+                    // A quarry planned on the way, bored instead: its section isn't held for nothing
+                    quarryPlanned = false;
+                    Automata.Pointer.QuarrySites.Release(_entityId);
+                }
                 return BeginBore(ToolPointWorld(), now, task.ApproachFrom.ToVector3D(), false);
             }
             if (!IsConstructionOrderActive()) { FinishMine(); return TaskStatus.Interrupted; }

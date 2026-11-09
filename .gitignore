@@ -363,3 +363,6 @@ MigrationBackup/
 FodyWeavers.xsd
 # Reference mods cloned for analysis
 docs
+
+# Steam / mod.io deploy staging (deploy_steam.ps1, deploy_modio.ps1)
+.deploy/

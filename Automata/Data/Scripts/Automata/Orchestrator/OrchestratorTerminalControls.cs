@@ -47,7 +47,7 @@ namespace Automata.Orchestrator
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlListbox, IMyProgrammableBlock>(IdPrefix + "LaneList");
                 c.Title = MyStrings.Orchestrator_ActiveLanes;
-                c.Tooltip = MyStrings.Orchestrator_ActiveLanesTooltip;
+                c.Tooltip = MyStrings.BLANK;
                 c.SupportsMultipleBlocks = false;
                 c.Visible = Visible;
                 c.Multiselect = false;

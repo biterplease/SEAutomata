@@ -379,6 +379,9 @@ namespace Automata.Orchestrator
         [ProtoMember(1)] public TaskType Type;
         [ProtoMember(8)] public ToolTaskCompletionTrigger Completion;
         [ProtoMember(11)] public bool IsProjected;
+        /// <summary>UnloadInventory of a mining job: only the Inventory's items (the job's ore), the rest stays aboard for
+        /// the next unload or, when none, for a later clear (the taker can't use it).</summary>
+        [ProtoMember(12)] public bool OnlyListed;
 
         public TaskKind Kind { get { return KindOf(Type); } }
 

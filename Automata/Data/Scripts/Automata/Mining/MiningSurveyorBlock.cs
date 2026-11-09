@@ -95,6 +95,13 @@ namespace Automata.Mining
             public long VoxelId;
             public int Voxels;
             public DateTime Seen;   // last seen (deposits) / found depleted (depleted list)
+            public int DistanceM = -1;   // its distance from the surveyor when learnt, to the 100 m (-1: not yet; never recalculated)
+        }
+
+        // A deposit's distance bin: from this surveyor, rounded to the 100 m
+        private int DistanceBin(Vector3D p)
+        {
+            return (int)(Math.Round(Vector3D.Distance(p, block.GetPosition()) / 100.0) * 100);
         }
         private readonly List<Deposit> deposits = new List<Deposit>();
         private readonly List<Deposit> depleted = new List<Deposit>();
@@ -119,6 +126,7 @@ namespace Automata.Mining
             public bool Pending;   // an announcement is in the network: told whether it was taken once its life is up
             public string LastResult;
             public long ForLc;           // mined for this logistics computer's ore request (0: the surveyor's own order)
+            public int ForLcNetwork;     // ...for this network of it (CN index)
         }
         private readonly List<MiningJob> jobs = new List<MiningJob>();
         private int jobCounter, messageCounter, deliveredCount, failedCount;
@@ -271,7 +279,59 @@ namespace Automata.Mining
             gpsDirty = true;
             CheckRetryRequest();
             CheckDeleteDepositsRequest();
+            CheckDeleteSelectedRequest();
         }
+
+        #region Delete deposits (terminal button, the selected ore / distance bin)
+        private int lastDeleteSelected;
+        private bool deleteSelectedSeen;
+
+        private void CheckDeleteSelectedRequest()
+        {
+            if (deleteSelectedSeen && settings.DeleteSelectedRequest != lastDeleteSelected && IsServer) DeleteSelectedDeposits();
+            lastDeleteSelected = settings.DeleteSelectedRequest;
+            deleteSelectedSeen = true;
+        }
+
+        /// <summary>Terminal list view: deposits grouped by distance bin (this player's view only, not saved).</summary>
+        public bool Terminal_ByDistance;
+        /// <summary>The distance bin selected in the "by distance" view (-1: none).</summary>
+        public int Terminal_SelectedBin { get; private set; } = -1;
+
+        public void Terminal_SelectBin(MyStringHash ore, int bin)
+        {
+            Terminal_SelectOre(ore);
+            Terminal_SelectedBin = bin;
+        }
+
+        // The selected ore's deposits (by distance: those in the selected bin) deleted by the server
+        public bool Terminal_DeleteSelectedDeposits()
+        {
+            if (Terminal_SelectedOre == MyStringHash.NullOrEmpty) return false;
+            if (Terminal_ByDistance && Terminal_SelectedBin < 0) return false;
+            settings.DeleteSelectedOre = Terminal_SelectedOre.String;
+            settings.DeleteSelectedBin = Terminal_ByDistance ? Terminal_SelectedBin : -1;
+            settings.DeleteSelectedRequest++;
+            SettingsEdited();
+            Terminal_SelectedOre = MyStringHash.NullOrEmpty;
+            Terminal_SelectedBin = -1;
+            return true;
+        }
+
+        // The jobs no drone has taken for them go with the next pass (their deposit is no longer known)
+        private void DeleteSelectedDeposits()
+        {
+            var ore = MyStringHash.GetOrCompute(settings.DeleteSelectedOre ?? "");
+            int bin = settings.DeleteSelectedBin;
+            int n = deposits.RemoveAll(d => d.Ore == ore && (bin < 0 || d.DistanceM == bin));
+            if (n == 0) return;
+            lastKnownOres = int.MinValue / 2;
+            gpsDirty = true;
+            ordersDirty = true;
+            AddEvent(Loc.F(MyStrings.Mining_DeletedKnownDeposit, n));
+            if (Log.DebugEnabled) Log.Debug("MS {0}: {1} deposit(s) of {2} deleted on request (bin {3})", entityId, n, ore, bin);
+        }
+        #endregion
 
         #region Retry jobs (terminal button)
         private int lastDeleteRequest;
@@ -344,6 +404,7 @@ namespace Automata.Mining
         {
             if (settings.Orders == null) settings.Orders = new List<string>();
             if (settings.KnownOres == null) settings.KnownOres = new List<string>();
+            if (settings.KnownOreBins == null) settings.KnownOreBins = new List<string>();
             settings.JobSizeKg = MathHelper.Clamp(settings.JobSizeKg, JOB_SIZE_MIN, JOB_SIZE_MAX);
         }
         #endregion
@@ -456,9 +517,10 @@ namespace Automata.Mining
         private readonly List<OreHit> sweepHits = new List<OreHit>();
         private readonly Dictionary<MyStringHash, int> depositsBefore = new Dictionary<MyStringHash, int>(MyStringHash.Comparer);
 
-        private bool HasJobFor(MyStringHash ore)
+        // A job out for the ore ('ownOnly': for the player's orders, not a logistics computer's request)
+        private bool HasJobFor(MyStringHash ore, bool ownOnly = false)
         {
-            for (int i = 0; i < jobs.Count; i++) if (jobs[i].Ore == ore) return true;
+            for (int i = 0; i < jobs.Count; i++) if (jobs[i].Ore == ore && (!ownOnly || jobs[i].ForLc == 0)) return true;
             return false;
         }
 
@@ -568,7 +630,8 @@ namespace Automata.Mining
                     if (scanned > known.Seen) known.Seen = scanned;
                     continue;   // already known: the incoming data is dropped
                 }
-                deposits.Add(new Deposit { Ore = hit.Ore, Position = hit.Position, VoxelId = hit.VoxelId, Voxels = hit.Voxels, Seen = scanned });
+                deposits.Add(new Deposit { Ore = hit.Ore, Position = hit.Position, VoxelId = hit.VoxelId, Voxels = hit.Voxels, Seen = scanned,
+                                           DistanceM = DistanceBin(hit.Position) });
                 changed = true;
                 if (Log.DebugEnabled) Log.Debug("MS {0}: new deposit {1} at {2} ({3})", entityId, hit.Ore, hit.Position, source);
             }
@@ -745,6 +808,34 @@ namespace Automata.Mining
             if (Log.DebugEnabled) Log.Debug("MS {0}: job {1} ({2}) withdrawn ({3}): {4}", entityId, job.JobId, job.Ore, why, error);
         }
 
+        /// <summary>
+        /// A player's order whose kg are all delivered (nothing left to publish, no job of it out): taken off the Orders list
+        /// (2026-11-08: it stayed there, and in the header's count, after it was filled). "Keep orders constant": never.
+        /// </summary>
+        private void RemoveFulfilledOrders()
+        {
+            if (settings.KeepOrdersConstant) return;
+            bool removed = false;
+            for (int i = orders.Count - 1; i >= 0; i--)
+            {
+                var o = orders[i];
+                OrderProgress p;
+                if (!progress.TryGetValue(o.Ore, out p) || p.RemainingKg >= 1 || HasJobFor(o.Ore, true)) continue;
+                for (int s = settings.Orders.Count - 1; s >= 0; s--)
+                {
+                    OreOrder so;
+                    if (OreOrder.TryParse(settings.Orders[s], out so) && so.Ore == o.Ore) settings.Orders.RemoveAt(s);
+                }
+                AddEvent(Loc.F(MyStrings.Mining_OrderFulfilled, ShortOre(o.Ore), p.DeliveredKg, o.Kg));
+                if (Log.DebugEnabled) Log.Debug("MS {0}: order {1} ({2} kg) fulfilled: {3:F0} kg delivered, taken off the list", entityId, o.Ore, o.Kg, p.DeliveredKg);
+                removed = true;
+            }
+            if (!removed) return;
+            ordersDirty = true;
+            SettingsEdited();
+            ParseOrders();
+        }
+
         // Back to its order: a job that won't be done (or was done short / over)
         private void Settle(MiningJob job, double deliveredKg, string why)
         {
@@ -758,6 +849,7 @@ namespace Automata.Mining
         #region Jobs
         private void PlanJobs(int now)
         {
+            RemoveFulfilledOrders();
             var config = MiningConfig;
             int published = 0;
             for (int i = 0; i < jobs.Count; i++) if (jobs[i].Assigned == 0) published++;
@@ -789,7 +881,7 @@ namespace Automata.Mining
         /// on the job, one site each, in this order: other deposits of the ore no job is on (nearest the first, at most
         /// SITE_DEPOSITS_MAX), then other ways in to them (space: WaysIn), at most SITES_MAX sites.
         /// </summary>
-        private MiningJob CreateJob(Deposit deposit, double kg, int now, long deliverTo = 0)
+        private MiningJob CreateJob(Deposit deposit, double kg, int now, long deliverTo = 0, int deliverToNetwork = 0)
         {
             IMyEntity e;
             var voxel = MyAPIGateway.Entities.TryGetEntityById(deposit.VoxelId, out e) ? e as IMyVoxelBase : null;
@@ -899,16 +991,30 @@ namespace Automata.Mining
                 BlockCount = 1,
                 RequesterEntityId = entityId,
                 DeliverTo = deliverTo,
+                DeliverToNetwork = deliverTo != 0 ? deliverToNetwork : 0,
             };
             AddEvent(Loc.F(MyStrings.Mining_JobKgAtMBore, jobId, kg, ShortOre(deposit.Ore),
                                    Vector3D.Distance(deposit.Position, block.GetPosition()), Vector3D.Distance(surface, deposit.Position)));
             if (Log.DebugEnabled) Log.Debug("MS {0}: job {1}: {2:F0} kg {3} at {4}, bore from {5} ({6:F0} m); {7} site(s): {8} deposit(s), ways in {9}", entityId, jobId, kg, deposit.Ore, deposit.Position, surface, Vector3D.Distance(surface, deposit.Position), tasks.Count / 3, chosen.Count, WaysText(chosenWays));
-            return new MiningJob { JobId = jobId, Ore = deposit.Ore, Deposit = deposit.Position, Kg = kg, Message = AnnouncementMessage(ja), ForLc = deliverTo };
+            return new MiningJob { JobId = jobId, Ore = deposit.Ore, Deposit = deposit.Position, Kg = kg, Message = AnnouncementMessage(ja), ForLc = deliverTo, ForLcNetwork = deliverTo != 0 ? deliverToNetwork : 0 };
         }
 
         #region Logistics computers' ore requests
         private const double LC_JOB_MIN_KG = 100;   // a shortfall less than this past the jobs already out for it: no job
-        private readonly List<KeyValuePair<MyStringHash, int>> lcShort = new List<KeyValuePair<MyStringHash, int>>();
+        private readonly List<Logistics.LogisticsComputerBlock.OreRequest> lcShort = new List<Logistics.LogisticsComputerBlock.OreRequest>();
+
+        // Each logistics computer network's request for an ore, as shown in the header ("LC: Ice 300/1000"): what its jobs
+        // delivered since it began, and what it was still short of when last read (runtime; gone when not read for a while)
+        // An LC's request in the header: Total fixed when first seen (raised only if the request grows past it); delivered:
+        // what drones reported, or what the request shrank by, whichever is more
+        private sealed class LcOrder { public MyStringHash Ore; public double Delivered; public int Short; public int Total; public int Seen; }
+        private readonly Dictionary<string, LcOrder> lcOrders = new Dictionary<string, LcOrder>();
+        private const int LC_ORDER_GONE_TICKS = 60 * 60;
+
+        private static string LcOrderKey(long lc, int network, MyStringHash ore)
+        {
+            return lc.ToString() + ":" + network.ToString() + ":" + ore.String;
+        }
 
         // A logistics computer with "Ore requests mine" on that this surveyor reaches through the network (same grid group,
         // antennas: the requirement), of an owner it works for
@@ -933,12 +1039,19 @@ namespace Automata.Mining
             {
                 var lc = Logistics.LogisticsComputerBlock.All[i];
                 if (!LcInReach(lc)) continue;
-                lc.OreShortfall(lcShort);
+                lc.OreRequests(lcShort);
                 for (int k = 0; k < lcShort.Count; k++)
                 {
-                    var ore = lcShort[k].Key;
-                    int kg = lcShort[k].Value;
+                    var ore = lcShort[k].Ore;
+                    int kg = lcShort[k].Kg, net = lcShort[k].Network;
                     if (kg <= 0 || IsIgnoredOre(ore.String)) continue;   // stone: never mined (nor hauled: the box is absolute)
+                    // Its own order (one per network and ore, whichever computer): shown in the header
+                    LcOrder view;
+                    string key = LcOrderKey(lc.EntityId, net, ore);
+                    if (!lcOrders.TryGetValue(key, out view)) { view = new LcOrder { Ore = ore, Total = kg }; lcOrders[key] = view; }
+                    view.Short = kg;
+                    if (kg > view.Total) view.Total = kg;
+                    view.Seen = now;
                     var deposit = NearestDeposit(ore);
                     if (deposit == null) continue;   // none known: nothing for it until one is
                     double open = 0;
@@ -946,12 +1059,12 @@ namespace Automata.Mining
                     for (int j = 0; j < jobs.Count; j++)
                     {
                         if (jobs[j].Ore != ore) continue;
-                        if (jobs[j].ForLc == lc.EntityId) open += Math.Max(0, jobs[j].Kg - jobs[j].DeliveredKg);
+                        if (jobs[j].ForLc == lc.EntityId && jobs[j].ForLcNetwork == net) open += Math.Max(0, jobs[j].Kg - jobs[j].DeliveredKg);
                         if (jobs[j].Assigned == 0) waiting = true;
                     }
                     double left = kg - open;
                     if (waiting || left < LC_JOB_MIN_KG || published >= config.MaxPublishedJobs) continue;
-                    var job = CreateJob(deposit, Math.Min(left, settings.JobSizeKg), now, lc.EntityId);
+                    var job = CreateJob(deposit, Math.Min(left, settings.JobSizeKg), now, lc.EntityId, net);
                     if (job == null) continue;
                     jobs.Add(job);
                     published++;
@@ -963,23 +1076,28 @@ namespace Automata.Mining
             for (int j = jobs.Count - 1; j >= 0; j--)
             {
                 var job = jobs[j];
-                if (job.ForLc == 0 || job.Assigned != 0 || LcStillShort(job.ForLc, job.Ore)) continue;
+                if (job.ForLc == 0 || job.Assigned != 0 || LcStillShort(job.ForLc, job.ForLcNetwork, job.Ore)) continue;
                 if (job.Announced || job.Pending) Withdraw(job, Loc.T(MyStrings.Mining_LcRequestGone));
                 if (Log.DebugEnabled) Log.Debug("MS {0}: job {1} ({2}) dropped: LC {3}'s request filled or gone", entityId, job.JobId, job.Ore, job.ForLc);
                 jobs.RemoveAt(j);
             }
+            // Requests not read for a while (filled, gone): out of the header
+            var stale = new List<string>();
+            foreach (var kv in lcOrders) if (now - kv.Value.Seen > LC_ORDER_GONE_TICKS) stale.Add(kv.Key);
+            for (int i = 0; i < stale.Count; i++) lcOrders.Remove(stale[i]);
         }
 
-        private bool LcStillShort(long lcId, MyStringHash ore)
+        private bool LcStillShort(long lcId, int net, MyStringHash ore)
         {
             for (int i = 0; i < Logistics.LogisticsComputerBlock.All.Count; i++)
             {
                 var lc = Logistics.LogisticsComputerBlock.All[i];
                 if (lc.EntityId != lcId) continue;
                 if (!LcInReach(lc)) return false;
-                lc.OreShortfall(lcShort);
+                lc.OreRequests(lcShort);
                 bool shortOf = false;
-                for (int k = 0; k < lcShort.Count && !shortOf; k++) shortOf = lcShort[k].Key == ore && lcShort[k].Value > 0;
+                for (int k = 0; k < lcShort.Count && !shortOf; k++)
+                    shortOf = lcShort[k].Ore == ore && lcShort[k].Kg > 0 && (net == 0 || lcShort[k].Network == net);
                 lcShort.Clear();
                 return shortOf;
             }
@@ -1128,6 +1246,8 @@ namespace Automata.Mining
                     if (r.OreKg > 0) deliveredCount += (int)r.OreKg;
                     OrderProgress op;
                     if (r.OreKg > 0 && job.ForLc == 0 && progress.TryGetValue(job.Ore, out op)) op.DeliveredKg += r.OreKg;   // the header's requests
+                    LcOrder lco;
+                    if (r.OreKg > 0 && job.ForLc != 0 && lcOrders.TryGetValue(LcOrderKey(job.ForLc, job.ForLcNetwork, job.Ore), out lco)) lco.Delivered += r.OreKg;
                     AddEvent(r.OreKg > 0 ? Loc.F(MyStrings.Mining_DeliveredDroneOreKg, Nicknames.Of(r.DroneEntityId), ShortOre(job.Ore), r.OreKg)
                                          : Loc.F(MyStrings.Mining_MiningDroneOre, Nicknames.Of(r.DroneEntityId), r.Outcome, ShortOre(job.Ore))
                                            + (string.IsNullOrEmpty(r.Reason) ? "" : "\n  " + r.Reason));
@@ -1216,11 +1336,32 @@ namespace Automata.Mining
             }
             var list = new List<string>();
             foreach (var kv in counts) list.Add(kv.Key + ":" + kv.Value);
-            bool same = list.Count == settings.KnownOres.Count;
-            for (int i = 0; i < list.Count && same; i++) same = list[i] == settings.KnownOres[i];
-            if (same) return;
+            // By distance bin ("Ore/Iron:1200:3"), from the bin each deposit got when learnt
+            var bins = new SortedDictionary<string, SortedDictionary<int, int>>(StringComparer.Ordinal);
+            for (int i = 0; i < deposits.Count; i++)
+            {
+                var d = deposits[i];
+                if (IsIgnoredOre(d.Ore.String)) continue;
+                if (d.DistanceM < 0) d.DistanceM = DistanceBin(d.Position);   // (an old save's)
+                SortedDictionary<int, int> of;
+                if (!bins.TryGetValue(d.Ore.String, out of)) bins[d.Ore.String] = of = new SortedDictionary<int, int>();
+                int n;
+                of.TryGetValue(d.DistanceM, out n);
+                of[d.DistanceM] = n + 1;
+            }
+            var binList = new List<string>();
+            foreach (var kv in bins) foreach (var b in kv.Value) binList.Add(kv.Key + ":" + b.Key + ":" + b.Value);
+            if (SameLines(list, settings.KnownOres) && SameLines(binList, settings.KnownOreBins)) return;
             settings.KnownOres = list;
+            settings.KnownOreBins = binList;
             SettingsEdited();   // saved and sent to the players
+        }
+
+        private static bool SameLines(List<string> a, List<string> b)
+        {
+            if (a.Count != b.Count) return false;
+            for (int i = 0; i < a.Count; i++) if (a[i] != b[i]) return false;
+            return true;
         }
 
         // GPS markers are added silently: created hidden, then shown (the game plays its GPS sound only for a marker that is on
@@ -1390,7 +1531,7 @@ namespace Automata.Mining
                 {
                     Announcement = job.Message.Payload, Ore = job.Ore.String, Deposit = Vector3DData.FromVector3D(job.Deposit), Kg = job.Kg,
                     AssignedAgeTicks = job.Assigned != 0 ? BlockSave.Age(job.Assigned) : -1, HoldTicksLeft = job.HeldUntil > now ? job.HeldUntil - now : 0,
-                    DronesOut = job.DronesOut, Announced = job.Announced, ForLc = job.ForLc,
+                    DronesOut = job.DronesOut, Announced = job.Announced, ForLc = job.ForLc, ForLcNetwork = job.ForLcNetwork,
                 });
             }
             if (Log.DebugEnabled) Log.Debug("MS {0}: state saved: {1} deposit(s), {2} depleted, {3} order(s), {4} job(s)", entityId, s.Deposits.Count, s.Depleted.Count, s.Orders.Count, s.Jobs.Count);
@@ -1400,13 +1541,13 @@ namespace Automata.Mining
         private static DepositState SaveDeposit(Deposit d, DateTime utc)
         {
             return new DepositState { Ore = d.Ore.String, Position = Vector3DData.FromVector3D(d.Position), VoxelId = d.VoxelId, Voxels = d.Voxels,
-                                      AgeSeconds = Math.Max(0, (utc - d.Seen).TotalSeconds) };
+                                      AgeSeconds = Math.Max(0, (utc - d.Seen).TotalSeconds), DistanceM = d.DistanceM };
         }
 
         private static Deposit LoadDeposit(DepositState d, DateTime utc)
         {
             return new Deposit { Ore = MyStringHash.GetOrCompute(d.Ore), Position = d.Position.ToVector3D(), VoxelId = d.VoxelId, Voxels = d.Voxels,
-                                 Seen = utc.AddSeconds(-Math.Max(0, d.AgeSeconds)) };
+                                 Seen = utc.AddSeconds(-Math.Max(0, d.AgeSeconds)), DistanceM = d.DistanceM > 0 ? d.DistanceM : -1 };   // (0 isn't saved: binned again)
         }
 
         private void RestoreState(MiningSurveyorState s)
@@ -1433,7 +1574,7 @@ namespace Automata.Mining
                         JobId = js.Announcement.JobId, Ore = MyStringHash.GetOrCompute(js.Ore), Deposit = js.Deposit.ToVector3D(), Kg = js.Kg,
                         Message = AnnouncementMessage(js.Announcement),
                         Assigned = js.AssignedAgeTicks >= 0 ? Math.Max(1, BlockSave.FrameFromAge(js.AssignedAgeTicks)) : 0,
-                        HeldUntil = js.HoldTicksLeft > 0 ? now + js.HoldTicksLeft : 0, DronesOut = js.DronesOut, ForLc = js.ForLc,
+                        HeldUntil = js.HoldTicksLeft > 0 ? now + js.HoldTicksLeft : 0, DronesOut = js.DronesOut, ForLc = js.ForLc, ForLcNetwork = js.ForLcNetwork,
                         Announced = false,   // once more soon (orchestrators de-duplicate)
                     });
                 }
@@ -1509,6 +1650,7 @@ namespace Automata.Mining
         }
 
         public List<string> Terminal_KnownOres { get { return settings.KnownOres; } }
+        public List<string> Terminal_KnownOreBins { get { return settings.KnownOreBins; } }
         public List<string> Terminal_Orders { get { return settings.Orders; } }
         public MyStringHash Terminal_SelectedOre { get; private set; }
         public int Terminal_SelectedOrder { get; private set; } = -1;
@@ -1528,6 +1670,7 @@ namespace Automata.Mining
         public void Terminal_SelectOre(MyStringHash ore)
         {
             Terminal_SelectedOre = ore;
+            Terminal_SelectedBin = -1;
             Terminal_SelectedOrder = -1;
             Terminal_EditText.Clear().Append(OreOrder.Format(ore, settings.JobSizeKg));
         }
@@ -1616,15 +1759,21 @@ namespace Automata.Mining
                 int c = k.LastIndexOf(':');
                 lcdDeposits.Add(c > 0 ? k.Substring(0, c) + "=" + k.Substring(c + 1) : k);
             }
+            // The player's orders ("P:", pooled per ore), then every logistics computer network's request on its own ("LC:")
             lcdRequests.Clear();
             for (int i = 0; i < orders.Count; i++)
             {
                 OrderProgress p;
                 progress.TryGetValue(orders[i].Ore, out p);
-                if (!settings.KeepOrdersConstant && p != null && p.RemainingKg < 1 && !HasJobFor(orders[i].Ore)) continue;   // done: not active
-                string ore = ShortOre(orders[i].Ore);
+                if (!settings.KeepOrdersConstant && p != null && p.RemainingKg < 1 && !HasJobFor(orders[i].Ore, true)) continue;   // done: not active
                 double delivered = p != null ? p.DeliveredKg : 0;
-                lcdRequests.Add(ore + "=" + delivered.ToString("F0") + "/" + (settings.KeepOrdersConstant ? Loc.T(MyStrings.Mining_ConstantLower) : orders[i].Kg.ToString()));
+                lcdRequests.Add(Loc.F(MyStrings.Mining_RequestPlayer, ShortOre(orders[i].Ore), delivered.ToString("F0"),
+                                      settings.KeepOrdersConstant ? Loc.T(MyStrings.Mining_ConstantLower) : orders[i].Kg.ToString()));
+            }
+            foreach (var o in lcOrders.Values)
+            {
+                double got = Math.Min(o.Total, Math.Max(o.Delivered, o.Total - o.Short));
+                lcdRequests.Add(Loc.F(MyStrings.Mining_RequestLc, ShortOre(o.Ore), got.ToString("F0"), o.Total.ToString("F0")));
             }
             int first;
             int pages = BlockLcd.Paginate(settings.Lcd, Math.Max(lcdDeposits.Count, lcdRequests.Count), HEADER_ROWS, out first);

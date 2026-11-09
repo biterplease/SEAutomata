@@ -184,6 +184,8 @@ namespace Automata.Mining
             }
             Separator();
             Label(IdPrefix + "LabelOres", MyStrings.Mining_KnownOresOreDeposits);
+            Checkbox("CheckboxByDistance", MyStrings.Mining_ShowByDistance, MyStringId.NullOrEmpty,
+                     l => l.Terminal_ByDistance, (l, v) => { l.Terminal_ByDistance = v; Refresh(); });
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlListbox, IMyProgrammableBlock>(IdPrefix + "OreList");
                 c.Title = MyStrings.Mining_KnownOres;
@@ -196,13 +198,17 @@ namespace Automata.Mining
                 c.ItemSelected = (b, selected) =>
                 {
                     var l = GetBlock(b);
-                    if (l == null || selected.Count == 0 || !(selected[0].UserData is MyStringHash)) return;
-                    l.Terminal_SelectOre((MyStringHash)selected[0].UserData);
+                    if (l == null || selected.Count == 0) return;
+                    var bin = selected[0].UserData as OreBin;
+                    if (bin != null) l.Terminal_SelectBin(bin.Ore, bin.DistanceM);
+                    else if (selected[0].UserData is MyStringHash) l.Terminal_SelectOre((MyStringHash)selected[0].UserData);
+                    else return;
                     Refresh();
                 };
                 oreList = c;
                 Add(c);
             }
+            Button("DeleteSelectedDeposits", MyStrings.Mining_DeleteDeposits, MyStringId.NullOrEmpty, l => l.Terminal_DeleteSelectedDeposits());
             Label(IdPrefix + "LabelOrders", MyStrings.Mining_OrdersOreKg);
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlListbox, IMyProgrammableBlock>(IdPrefix + "OrderList");
@@ -243,11 +249,51 @@ namespace Automata.Mining
             LcdControls.Add(IdPrefix, GetBlock, l => l.Terminal_LcdStyle, l => l.Terminal_LcdEdited(), true);
         }
 
+        sealed class OreBin { public MyStringHash Ore; public int DistanceM; public string Count; }
+
+        static string DistanceText(int m)
+        {
+            if (m < 1000) return m + "m";
+            return m % 1000 == 0 ? (m / 1000) + "km" : (m / 1000.0).ToString("F1", CultureInfo.InvariantCulture) + "km";
+        }
+
+        // Shown without the "Ore/" prefix (the keys keep it)
+        static string OreLabel(string key)
+        {
+            return key.StartsWith("Ore/", StringComparison.Ordinal) ? key.Substring(4) : key;
+        }
+
         static void OreListContent(IMyTerminalBlock b, List<MyTerminalControlListBoxItem> items, List<MyTerminalControlListBoxItem> selected)
         {
             var l = GetBlock(b);
             if (l == null) return;
             var ordered = l.Terminal_OrderKeys();
+            if (l.Terminal_ByDistance)
+            {
+                // "Iron: 3 (500m)": the bins the server published (each deposit binned when learnt), nearest first
+                var bins = l.Terminal_KnownOreBins;
+                var rows = new List<OreBin>();
+                var counts = new List<string>();
+                for (int i = 0; i < bins.Count; i++)
+                {
+                    int c2 = bins[i].LastIndexOf(':');
+                    int c1 = c2 > 0 ? bins[i].LastIndexOf(':', c2 - 1) : -1;
+                    int m;
+                    if (c1 <= 0 || !int.TryParse(bins[i].Substring(c1 + 1, c2 - c1 - 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out m)) continue;
+                    var key = MyStringHash.GetOrCompute(bins[i].Substring(0, c1));
+                    if (ordered.Contains(key)) continue;
+                    rows.Add(new OreBin { Ore = key, DistanceM = m, Count = bins[i].Substring(c2 + 1) });
+                }
+                rows.Sort((x, y) => x.DistanceM != y.DistanceM ? x.DistanceM.CompareTo(y.DistanceM) : string.CompareOrdinal(x.Ore.String, y.Ore.String));
+                for (int i = 0; i < rows.Count; i++)
+                {
+                    var text = MyStringId.GetOrCompute(OreLabel(rows[i].Ore.String) + ": " + rows[i].Count + " (" + DistanceText(rows[i].DistanceM) + ")");
+                    var item = new MyTerminalControlListBoxItem(text, text, rows[i]);
+                    items.Add(item);
+                    if (rows[i].Ore == l.Terminal_SelectedOre && rows[i].DistanceM == l.Terminal_SelectedBin) selected.Add(item);
+                }
+                return;
+            }
             var known = l.Terminal_KnownOres;
             for (int i = 0; i < known.Count; i++)
             {
@@ -255,10 +301,8 @@ namespace Automata.Mining
                 if (c <= 0) continue;
                 var key = MyStringHash.GetOrCompute(known[i].Substring(0, c));
                 if (ordered.Contains(key)) continue;
-                ComponentData data;
-                string name = AutomataSession.componentLookup.TryGetValue(key, out data) ? data.DisplayName : key.String;
-                var item = new MyTerminalControlListBoxItem(MyStringId.GetOrCompute(known[i]),
-                                                            MyStringId.GetOrCompute(name + ": " + known[i].Substring(c + 1) + " deposit(s)"), key);
+                var text = MyStringId.GetOrCompute(OreLabel(known[i]));   // "Ice:5"
+                var item = new MyTerminalControlListBoxItem(text, text, key);
                 items.Add(item);
                 if (key == l.Terminal_SelectedOre) selected.Add(item);
             }

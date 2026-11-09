@@ -30,6 +30,13 @@ namespace Automata.Mining
         // (ProtoMember 11 was ShowDepositsRequest: the "Show known deposits" button is gone)
         /// <summary>"Delete known deposits" (terminal): bumped by the button, the server acts on a change.</summary>
         [ProtoMember(14)] public int DeleteDepositsRequest;
+        /// <summary>"Delete deposits" (terminal): bumped by the button, the server deletes DeleteSelectedOre's deposits
+        /// (DeleteSelectedBin >= 0: only those in that distance bin).</summary>
+        [ProtoMember(15)] public int DeleteSelectedRequest;
+        [ProtoMember(16)] public string DeleteSelectedOre;
+        [ProtoMember(17)] public int DeleteSelectedBin = -1;
+        /// <summary>Written by the server only: known deposits by ore and distance bin ("Ore/Iron:1200:3", to the 100 m).</summary>
+        [ProtoMember(18)] public List<string> KnownOreBins = new List<string>();
         /// <summary>The name its logs (and other blocks' logs) show; empty: the block's name.</summary>
         [ProtoMember(12)] public string Nickname = "";
         [ProtoMember(13)] public Util.LcdStyle Lcd = new Util.LcdStyle();

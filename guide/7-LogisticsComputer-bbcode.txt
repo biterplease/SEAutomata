@@ -1,0 +1,105 @@
+[h1]Logistics Computer[/h1]
+
+The Logistics Computer is in charge of watching for inventory changes, and maintaining a stock of items at the grid its mounted on.
+
+When configured, the Logistics Computers on your grid will talk to the rest of the network, and have drones deliver missing items (below min), or pick up any surplus (above max).
+
+The Logistics Computer itself bids with its available items, and available volume, to interact with the rest of the logistics network, if configured to do so.
+
+It has notably, 5 settings that are core to its functioning:
+
+[list]
+[*][b]Provide for logistics[/b]: The logistics computer ill offer items or volume to fulfill other Logistics Computers requests.
+[*][b]Provide for construction[/b]: The Logistics Computer will offer items for weld jobs, or cargo space for grind jobs.
+[*][b]Request[/b]: It will automatically request items that go below their configured minimum.
+[*][b]Push[/b]: It will automatically push  items that go above their configured max, out to the logistics network,
+[*][b]Accept mined ore[/b]: Normally, Logistics Computers will only offer its cargo space for Ore mining jobs if it has blocks that consume the ores: Basic or Full Refinery. When its checked, it will accept ores regardless if it has a block to consume it.
+[*][b]Accept mined icd[/b]: Normally, Logistics Computers will only offer its cargo space for Ice mining jobs if it has blocks that consume the ice: O2/H2 generators, or Irrigation Systems. When its checked, it will accept ice regardless if it has a block to consume it.
+[*][b]Ore requests mine[/b]: Normally, ore/ice is treated like any other item. When this box is checked, the Logistics Computer will start a Mining Job to fulfill its need for ore/ice.
+[/list]
+
+Logistics computers never watch inventories outside of its own mechanical construct. This means:
+
+[list]
+[*]Grids connected via connector are not watched
+[*]Grids connected via an advanced rotor, piston, hinge, or merge block, ARE watched
+[/list]
+
+[h2]Conveyor networks[/h2]
+
+The Logistics Computer sees its grid as one or more [b]conveyor networks[/b], and it identifies conveyor networks separately within a grid.
+
+Each conveyor network is mapped with its own:
+
+[list]
+[*]Storage Capacity: cargo containers
+[*]Inputs: Connectors and collectors
+[*]Outputs: Connectors
+[/list]
+
+It maps refineries, reactors, O2/H2 generators, etc. Everything that holds an inventory is accounted for.
+
+When bidding for jobs, it only uses the items or volume in cargo containers, refinery OUTPUT, or assembler OUTPUT, it never offers up:
+
+[list]
+[*]Uranium inside a reactor
+[*]Ice inside an O2/H2 generator
+[*]Anything in the input of an assembler
+[*]Anything in the input of a refinery
+[*]Bottles inside a gas tank.
+[/list]
+
+When a Logistics Computer interacts with the rest of the logistics network, it knows which specific connector and cargo to send it to, drones are directed to specific connectors.
+
+Conveyor networks that are missing connectors, or cargo containers, are ignored, and cannot be interacted with.
+
+[h2]How to configure it[/h2]
+
+[olist]
+[*]Setup: Place the Logistics Computer on the grid, with either an antenna that can reach a grid with an orchestrator, or an orchestrator on the same grid. Remember that for a conveyor network to be valid, it needs at least 1 cargo container and at least 1 connector.
+[*]Enable/disable the work modes you want.
+[*](Optional) Select the Conveyor Network you want to place the order on. The CN tagged with [M] is the main one.
+[*](Optional) Use the filter to search for an item
+[*]Set the item's you want MIN:MAX using the forms.
+[/olist]
+
+And you're done!
+
+[h2]Behavior with the min/max setting[/h2]
+
+[h3]Example 1: You want a 1000 steel plates in this grid[/h3]
+
+[list]
+[*]You setup with [i]SteelPlate:1000:0[/i]
+[*]When the count of steel plates goes below 1000, it will wait 10 seconds,and then an order is placed to reach 1000 Steel Plates
+[*]If available in the network, it will be delivered
+[*]No excess plates are pushed away as surplus, because the maximum is 0.
+[/list]
+
+[h3]Example 2: You want a minimum, and a maximum[/h3]
+
+[list]
+[*]Setup with [i]SteelPlate:1000:2000[/i]
+[*]The [b]midpoint[/b] of this setting is [i]1500[/i] i.e. [i]MIN + [(MAX - MIN) / 2][/i]
+[*]When the count of steel plates goes below 1000. After 10s, an order is placed of [i]1500 - current_count[/i], in order to bring it to the [b]midpoint[/b].
+[*]If the setting was [i]SteelPlates:1000:5000[/i], the midpoint would have been [i]1000 + [(5000-1000)/2] = 3000[/i]
+[*]If the count goes above [i]2000[/i], after 10s, a push request is made to the network to pick up the surplus , attempting to bring the count to 1500 ([i]current_count - 1500[/i])
+[/list]
+
+[h3]Example 3: You want a maximum[/h3]
+
+[list]
+[*]Setup with [i]SteelPlate:0:2000[/i]
+[*]When the count of steel plates goes above [i]2000[/i], after 10 seconds a push request is made, of [i]current_count - 2000[/i], to bring the count back to [i]2000[/i]plates, and remain 
+[*]No plates are ever ordered, because the minimum is 0.
+[/list]
+
+[h2]Practical example:[/h2]
+
+Typically, you would want to separate the irrigation systems from the O2/H2 generation system.
+
+One way to do it, is to keep entirely separate networks, and keep separate Ice requests on each.
+
+The image above shows 2 Conveyor Networks in a single grid, completely separate from each other. Each has a request for Ore/Ice:20000:0, and each has checked "Ore/Ice requests mine".
+
+This triggers mining jobs for Ice, to be delivered to it. Since it does not have any refineries, any stone generated from the mining gets delivered elsewhere.

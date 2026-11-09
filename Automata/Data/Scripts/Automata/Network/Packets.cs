@@ -31,6 +31,8 @@ namespace Digi.NetworkLib
     [ProtoInclude(27, typeof(Automata.Network.BuildVersionPacket))]
     [ProtoInclude(28, typeof(Automata.Network.LaneDrawRequestPacket))]
     [ProtoInclude(29, typeof(Automata.Network.LaneDrawPacket))]
+    [ProtoInclude(30, typeof(Automata.Network.LcNetworksRequestPacket))]
+    [ProtoInclude(31, typeof(Automata.Network.LcNetworksPacket))]
     public abstract partial class PacketBase
     {
     }
@@ -238,6 +240,46 @@ namespace Automata.Network
         {
             if (MyAPIGateway.Multiplayer.IsServer) return;
             Pathfinding.LaneOverlay.Show(Lanes, Range, TimeoutSeconds);
+        }
+    }
+
+    /// <summary>Client -> server: a logistics computer's conveyor networks (its terminal dropdown, its outlines).</summary>
+    [ProtoContract]
+    public class LcNetworksRequestPacket : PacketBase
+    {
+        public LcNetworksRequestPacket() { }
+
+        [ProtoMember(1)] public long LcId;
+
+        public override void Received(ref PacketInfo packetInfo, ulong senderSteamId)
+        {
+            if (!MyAPIGateway.Multiplayer.IsServer) return;
+            VRage.ModAPI.IMyEntity e;
+            var tb = MyAPIGateway.Entities.TryGetEntityById(LcId, out e) ? e as VRage.Game.ModAPI.IMyCubeBlock : null;
+            var lc = tb != null && tb.GameLogic != null ? tb.GameLogic.GetAs<Logistics.LogisticsComputerBlock>() : null;
+            if (lc == null) return;
+            long identity = MyAPIGateway.Players.TryGetIdentityId(senderSteamId);
+            if (!AnchorDirectory.IsAllowed(tb.OwnerId, identity)) return;
+            AutomataSession.Instance?.Net?.SendToPlayer(new LcNetworksPacket { LcId = LcId, Networks = lc.BuildNetworkInfo() }, senderSteamId);
+        }
+    }
+
+    /// <summary>Server -> the client that asked: the computer's conveyor networks.</summary>
+    [ProtoContract]
+    public class LcNetworksPacket : PacketBase
+    {
+        public LcNetworksPacket() { }
+
+        [ProtoMember(1)] public long LcId;
+        [ProtoMember(2)] public List<Logistics.ConveyorNetworkInfo> Networks = new List<Logistics.ConveyorNetworkInfo>();
+
+        public override void Received(ref PacketInfo packetInfo, ulong senderSteamId)
+        {
+            if (MyAPIGateway.Multiplayer.IsServer) return;
+            VRage.ModAPI.IMyEntity e;
+            var tb = MyAPIGateway.Entities.TryGetEntityById(LcId, out e) ? e as VRage.Game.ModAPI.IMyCubeBlock : null;
+            var lc = tb != null && tb.GameLogic != null ? tb.GameLogic.GetAs<Logistics.LogisticsComputerBlock>() : null;
+            if (lc != null) lc.ReceiveNetworkInfo(Networks);
         }
     }
 

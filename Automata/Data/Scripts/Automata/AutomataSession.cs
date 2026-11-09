@@ -468,6 +468,7 @@ namespace Automata
                 itemsIndexed = false;   // statics outlive the session (next world in the same game process)
                 Pathfinding.PathfindingManager.Unload();
                 Pointer.QuarrySites.Clear();
+                Logistics.LogisticsComputerTerminalControls.Unload();
                 Construction.BuildPlanner.ClearFrames();
                 // Reset message queue singleton
                 if (_messageQueue != null) _messageQueue.Reset();

@@ -31,6 +31,18 @@ namespace Automata.Logistics
         [ProtoMember(5)] public LogisticsJobState Push;
         [ProtoMember(6)] public List<CommitmentState> Commitments = new List<CommitmentState>();
         // ProtoMember 7 was the messages in flight (saved by the message queue now)
+        /// <summary>Conveyor network indexes: index - 1 -> the network's key (its smallest block id). Server-owned (not in the settings: a client's copy would overwrite it).</summary>
+        [ProtoMember(8)] public List<long> NetworkKeys = new List<long>();
+        /// <summary>Open jobs of networks with a Min / Max list of their own.</summary>
+        [ProtoMember(9)] public List<NetworkJobsState> NetworkJobs = new List<NetworkJobsState>();
+    }
+
+    [ProtoContract]
+    public class NetworkJobsState
+    {
+        [ProtoMember(1)] public int Index;
+        [ProtoMember(2)] public LogisticsJobState Request;
+        [ProtoMember(3)] public LogisticsJobState Push;
     }
 
     [ProtoContract]
@@ -48,6 +60,8 @@ namespace Automata.Logistics
         [ProtoMember(8)] public int HoldTicksLeft;
         [ProtoMember(9)] public int DronesOut;
         [ProtoMember(10)] public bool Finished;
+        /// <summary>The CN index it is for (0: the main network).</summary>
+        [ProtoMember(11)] public int Network;
     }
 
     [ProtoContract]

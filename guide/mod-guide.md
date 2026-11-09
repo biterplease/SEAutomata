@@ -1,80 +1,3 @@
-# Automata: Player Guide
-
-## Current status, what's implemented, what's planned
-
-This mod is still very early in development. While some of its features work, a lot of it still needs polishing, namely:
-- Welding and grinding: works 80% of the time, there are times where drones get stuck and need manual rescue, or simply burn all their battery/fuel trying to navigate to a block that they should be able to without issue
-- Mining is inefficient: because stone gets in the way, drones mine A LOT of stone before they can actually bring some useful ores
-- Timing issues: in order to reduce effect on simulation speed, actions are often throttled and deferred, this leads to getting feeling that things are not happening at all.
-
-The above said, welding, grinding, mining, logistic deliveries, ore scouting, combat, as well as the docking, takeoff, navigation, and healthcheck of the drone, work at acceptable levels, but I'm still working to make them better and more reliable.
-
-### Still untested:
-- Server stuff: multiplayer infrastructure is there, and used everywhere in the mod, but it's only ever been tested locally
-- Moving grids: while the drones are expected to work with reference beacons on moving grids, has not been tested yet
-
-### Planned features:
-
-- Quarry mining: mining drones HAVE to be borers, i.e. their hull needs to fit the hole that their drills make. With Quarry mining, a drone with a single drill to be able to clear its own area to maneuver and mine successfully.
-- Farm harvesting jobs: drone with a collector harvests farmed ores.
-- Rovers: for the really massive cargo move jobs, rovers should be available.
-- Mod config menu: live update server settings
-- Models: LG drone controller, all computer, still using vanilla models, custom models with custom actions are underway.
-
-## Introduction
-
-Automata lets you create drones that work for you. Put a **Drone Controller** on a grid that has thrusters, a connector and whatever tools you want it to use (welder, grinder, drill, ore detector, cargo), and the drone figures out by itself what it is able to do. A single drone can already weld, repair and grind around its home on its own.
-
-The mod introduces 4 blocks that lets you scale your activities, 3 of them specify on checking for a specific type of job, and the **Orchestrator** collects those jobs and hands them to the drones best suited for them. Everything talks over your antennas, so every Automata block needs a broadcasting antenna on its grid, and the blocks only hear each other within antenna range.
-
-The mod adds five blocks and two hand-held tools:
-
-- **Drone Controller**: The workhorse, that allows a drone to check its own capabilities, and sign up to do the work distributed by the Orchestrator. It's the only block that actually does work: weld, grind, deliveries, mining.
-- **Orchestrator**: the dispatcher. It turns job announcements into auctions, picks the winning drones and gives them their orders. Usually one per base network is enough.
-- **Logistics Computer**: Analyzes inventory on its grid, keeps player-configured item min/max in its memory, and dispatches jobs to keep those amounts healthy. A grid needs one to take part in logistics.
-- **Construction Computer**: Scans a large area for blocks to grind, weld, or repair, and announces them as jobs.
-- **Mining Surveyor**: It collects ore deposit data and turns ore orders into mining jobs.
-- **Industrial Target Designator** and **Hostile Target Designator**: hand-held tools to send drones somewhere by pointing: ore scouting with the industrial one, combat with the hostile one.
-
-## How jobs get assigned
-
-Every job managed by an Orchestrator goes through the same four steps:
-
-1. **Announcement**: a computer (Construction, Logistics or Mining Surveyor) finds work and announces it: "these 10 blocks need welding", "this grid needs 500 steel plates", "mine 10,000 kg of iron here".
-2. **Auction**: the Orchestrator opens an auction for the job and broadcasts it to every drone and Logistics Computer in range.
-3. **Bidding**: drones that can do the job bid with their position, cargo room and tools. Logistics Computers that can supply the items (or take them) bid too. Most jobs need both: a drone to do the work, and a Logistics Computer to load from or unload to.
-4. **Winner selection**: after a few seconds the Orchestrator picks the best bids. Drones whose behaviour profile matches the job always rank first, then the closest and best equipped. Big jobs are split over several drones and trips. The winners get their task lists, the Logistics Computers reserve the items or room, and the announcer stops repeating the job.
-
-If nobody bids, the job is put on hold for a few minutes and announced again later. Every computer has a **Retry jobs** button to skip the wait.
-
-## General settings
-
-These apply to all blocks, and provide quality of life to the mod's usage.
-
-### Nicknames
-
-All blocks have a "Nickname" field, that allows you to set a friendly-name to your drone or computer. This name will be shown in logs, and broadcasted messages.
-
-
-### Use broadcast controller
-
-If this is toggled, and there's a broadcast controller in their grid, Automata blocks will use the broadcast controller to message you about important updates.
-
-### LCD output
-
-All blocks log output to an LCD on their grid. An app called "Automata log" is added to the apps section of the LCD.
-
-In order to see the logs, you need to both:
-- Select the "Automata log" app
-- Tag the LCD screen name according to the block you want to see, the defaults are
-    - [AutomataDrone]
-    - [LogisticsComputer]
-    - [ConstructionComputer]
-    - [MiningSurveyor]
-    - [Orchestrator]
-
-The logs will show relevant data to the automata block, such as jobs taken, reasons for failure, retry timers, etc.
-
 ## Drone Controller
 
 ### Behavior profiles
@@ -113,13 +36,13 @@ A drone without a home connector clears leftover cargo (grinder salvage, a welde
 
 ### Stand-alone mode
 
-A stand-alone drone works by itself, without any computers or Orchestrator. It watches a small **observation area** around its home connector (up to 10 x 10 x 10 blocks, which you can move with the offset sliders or centre on a GPS point instead) and:
+A stand-alone drone works by itself, without any computers or Orchestrator. It watches a small **construction field** around its home connector (up to 10 x 10 x 10 blocks, which you can move with the offset sliders or centre on a GPS point instead) and:
 
 - welds unfinished blocks, repairs damaged ones, and builds projections,
 - grinds down blocks painted with the **grind color**,
 - never touches blocks painted with the **weld ignore color**.
 
-It loads the components it needs from the conveyor network of its home connector, does as much as it can carry, comes back, and repeats. You can choose the order it works in (repair, projections, unbuilt). Turn on **Show observation area** to see the box.
+It loads the components it needs from the conveyor network of its home connector, does as much as it can carry, comes back, and repeats. You can choose the order it works in (repair, projections, unbuilt). Turn on **Show construction field** to see the box.
 
 Stand-alone drones are lack the capabilities to coordinate large jobs, so two stand-alone drones observing the same area may go for the same block, bump into each other, or crash. For several drones on one project, use the Orchestrator.
 
@@ -127,17 +50,19 @@ Stand-alone drones are lack the capabilities to coordinate large jobs, so two st
 
 In this mode the drone waits at home and bids on jobs from Orchestrators in antenna range. This is the mode for logistics, mining, large construction projects, and designator jobs. The drone flies out, does its task list, reports back and returns home. It still watches its battery and hydrogen levels and goes home to recharge when needed.
 
+**Low power** (Monitor battery / hydrogen levels, on by default): under the refuel threshold every drone drops its job at once, whatever it was doing (an orchestrator's job is reported aborted and auctioned again), backs out of a block or bore first, then docks to charge: at home, else at the nearest free connector. Cargo of the dropped job (ore, a haul) stays aboard and goes where that job meant to unload it, once the levels are back over the operational thresholds and before the drone takes new work.
+
 Combat drones in this mode also launch on their own when their AI Defensive block spots an enemy within the **auto-launch radius**.
 
 The operation mode can only be changed while the drone's AI is off.
 
 ### Economy Flight
 
-A checkbox in the drone's **Flight** section, off by default. In space, legs of 1 km or more are flown to save fuel: the drone turns its strongest thruster group along the way, burns up to a cruise speed, coasts with every thruster off, turns around and burns to brake. Only that one group ever fires: burns and the brake tilt it a little to steer, and a drift of more than 50 m off the line (or on course to miss it by that much) makes the drone work out a new course to the leg's end and correct it with a short burn of the same group. The last 150 m of each leg are flown normally. Short legs, work, docking and anything that changes the route mid-leg fall back to normal flight. In natural gravity, legs of 500 m or more are flown like a quad-copter: only the lift group (Up or Down) fires, and the drone tilts it, within the Align to P-Gravity limits, to move, and keeps heading for a point on the line ahead of it, so a drone pushed off course turns back towards the leg's end. It needs a lift group that carries 1.3 times the drone's weight. The last 100 m of each leg are flown normally. Coasting, the drone turns its camera along the way; its cruise speed is capped so the brake fits inside what it sees ahead, and the rest of the route is checked again before it turns round.
+A checkbox in the drone's **Flight** section, off by default. In space, legs of 1 km or more are flown to save fuel: the drone turns its strongest thruster group along the way, burns up to a cruise speed, coasts, turns around and burns to brake. That group does the pushing; the other thrusters only correct drift off the line (while burning, coasting and braking), and a drift of more than 50 m (or a course that would miss the end by that much) makes the drone work out a new course to the leg's end. The last 150 m of each leg are flown normally. Short legs, work, docking and anything that changes the route mid-leg fall back to normal flight. In natural gravity, legs of 500 m or more are flown like a quad-copter: the lift group (Up or Down) carries and moves the drone, the other thrusters only correct drift, and the drone tilts it, within the Align to P-Gravity limits, to move, and keeps heading for a point on the line ahead of it, so a drone pushed off course turns back towards the leg's end. It needs a lift group that carries 1.3 times the drone's weight. Otherwise a drone in natural gravity travels level, its down thrust along gravity; the Align to P-Gravity limits are only for its work, for tight corridors and for this tilt. The last 100 m of each leg are flown normally. Coasting, the drone turns its camera along the way; its cruise speed is capped so the brake fits inside what it sees ahead, and the rest of the route is checked again before it turns round.
 
 ### Flight lanes
 
-Drones managed by an Orchestrator fly busy routes in lanes, like air corridors. After the first flight between two bases that each have a Logistics Computer, or between a base and an asteroid or a planet ore hotspot (known deposits within 500 m of each other), the server makes a lane pair along the flown way. Other routes get lanes once they are busy: 6 trips between the same two ends within 30 minutes (the nearest static grid, or the spot itself): one lane each way, each offset to the right of its direction, so drones going opposite ways never meet head-on. A lane is only used once its tubes have been checked where the first drone's sensors saw them; lanes end short of bases and above work areas, and are lifted where they would cross another one. In a lane a drone keeps a gap it can stop in behind the drone ahead, even if that one brakes as hard as it can. A crash or loss in a lane, two drones too close, a drone holding in it or a check failing twice suspends the lane; a drone with a broadcast controller says "NAME: crashed in lane L7 Home Base → Asteroid 4821". The Orchestrator's terminal lists the lanes (**Active lanes**) to show, delete, resume or clear them all. Unused lanes are dropped after FlightLaneExpirationMinutes.
+Drones managed by an Orchestrator fly in lanes, like air corridors. The Orchestrator traces a lane as soon as it puts a job up for auction (from its base to the job: another base, an asteroid, a planet ore hotspot - known deposits within 500 m of each other - or the spot itself), when an area sweep or spot check is ordered, and between your bases on its antenna network that have an Automata computer block. A lane is a pair of boxes 40 m wide and 40 m high, one above the other: one for each way, so drones going opposite ways never meet head-on. Lanes end short of bases and above work areas (at an asteroid, beside the rock over the work, never inside it), run straight over the terrain on planets (from ridge to ridge, in as few legs as they can, climbing straight up where an end starts low), and are lifted where they would cross another one. Each drone flies in a slot of its own across the box (one and a half times its width, with four times its length clear before and after it), so a drone can pass one that stops; when no slot is free at the entrance, it waits outside for a short while. Drones wider than 25 m fly beside the lane instead. In its slot a drone keeps a gap it can stop in behind the drone ahead, even if that one brakes as hard as it can. When a drone finds rock, a tree or a station in a lane, it flies round it and tells the Orchestrator (as soon as its antenna reaches it): the lane is moved up to 50 m to a clear straight line, or else redrawn along the drone's way round. A crash in a lane or two drones too close suspends it for 2 minutes; a drone with a broadcast controller says "NAME: crashed in lane L7 Home Base → Asteroid 4821". A lane made for a sweep or spot check is dropped if the scouts find nothing. The Orchestrator's terminal lists the lanes (**Active lanes**) to show, delete, resume or clear them all; `/automata debugdraw lanes` shows the ones near you. Unused lanes are dropped after FlightLaneExpirationMinutes.
 
 ### When a drone finds no route
 
@@ -156,46 +81,6 @@ When a straight line (with a few detours) finds no way, the planner tries the wa
 
 On top of that, the drone must be able to fly where the job is (atmosphere or space), have power, and not be busy. Its **Max load** settings decide how much it agrees to carry.
 
-## Logistics Computer
-
-### Conveyor networks
-
-The Logistics Computer sees its grid as one or more **conveyor networks**: groups of containers, connectors, refineries, assemblers and tanks that can move items between each other. Drones dock at a free **large connector** of a network to load or unload; small connectors are ignored, with some exceptions: drones designated as ore haulers, scouts, and combat drones can still use small. lconnectors.
-
-Your Min / Max settings apply to the **main network**: the one with the most cargo room and a free standard connector. That is where deliveries arrive and surplus leaves.
-
-### The four work modes
-
-The modes are checkboxes, so you can combine them.
-
-- **Provide for logistics**: offers this grid's items to other Logistics Computers' requests (never going below its own Min for that item), and its free room for their surplus (never going above its own Max). Also needed to receive mined ore.
-- **Provide for construction**: offers components for weld jobs (drones dock here to load them) and room for what grind jobs bring back.
-- **Request (below Min)**: when an item drops below its Min, the computer asks for the difference. A drone brings it from another Logistics Computer.
-- **Push (above Max)**: when an item goes above its Max, the excess is announced as surplus, and a drone takes it away to another Logistics Computer.
-
-By default a new computer has both Provide modes on.
-
-### How to configure it
-
-1. Place the Logistics Computer on the grid, with a broadcasting antenna and at least one free standard connector on the network you want drones to use.
-2. Tick the work modes you want.
-3. Set item limits in the **Min / Max** lists: select an item in the top list, edit the entry as `item:min:max` (for example `SteelPlate:100:5000` or `Ingot/Iron:0:20000`, where 0 means "not set"), then press **Edit and add**. You can also type an entry and press **Add manually**.
-4. Mins only do something with **Request** on, Maxes only with **Push** on (the computer warns you otherwise).
-5. For mining: by default it only accepts ore its working refineries can process. Tick **Accept ores/ice** to use it as plain ore storage. Ice goes to grids with an O2/H2 generator.
-
-A typical setup: the main base on **Provide for logistics + Provide for construction**, and an outpost on **Request** with Mins for the components it needs, or a mining outpost on **Push** with Maxes on its ore.
-
-### Which jobs it bids on
-
-| Job | What it offers | Needs mode |
-| --- | --- | --- |
-| Weld / repair / build | The components | Provide for construction |
-| Grind | Room for the salvaged parts | Provide for construction |
-| Item delivery (another computer's request) | The items, above its own Min | Provide for logistics |
-| Item pickup (another computer's surplus) | Room, below its own Max | Provide for logistics |
-| Mining | Room for the ore, with a refinery that takes it (or the "without a refinery" option); ore and its ingot below Max | Provide for logistics |
-
-A computer never bids on its own requests.
 
 ## Construction Computer
 
@@ -209,7 +94,7 @@ It sees every grid in the box that you, your faction, or nobody owns, including 
 
 **Many drones at once.** This is where the Construction Computer shines. Instead of one block at a time, it groups the work into jobs of several blocks (10 by default) and keeps several jobs open at the same time. Each job can be split over several drones, and different jobs go to different drones, so a whole swarm can build one projection together. Projections are built centre-first and bottom-up so the structure grows sensibly, and drones working close to each other watch out for one another and wait or pick another side instead of colliding.
 
-Useful settings: **Weld priority**, **Blocks per job**, scan interval, and **Show observation area** to see the box.
+Useful settings: **Weld priority**, **Blocks per job**, scan interval, and **Show construction field** to see the box.
 
 **Weld priority.** Weld jobs come in three kinds: **Repair** (damaged blocks), **Projected** (projections) and **Unbuilt** (placed blocks not welded up yet). The Construction Computer publishes jobs of every kind that has work at the same time, so drones set to Welder:Repair, Welder:Projected or Welder:Unbuilt always find their own kind of job. The order you pick sets each kind's share of the open jobs (MaxPublishedJobs): 3 : 2 : 1, first to last, with grinding getting the same share as the first kind. With 10 slots and all three kinds waiting that is 5 / 3 / 2. A kind with less work than its share leaves the rest to the others. The logs name the kind of every weld job (Weld:Repair, Weld:Projected, Weld:Unbuilt).
 
@@ -224,83 +109,6 @@ A stand-alone drone's own Weld priority is a strict order: it finishes one kind 
 
 Drones whose welder or grinder can easily reach the blocks (for example, a downward-facing welder for the top of a structure) also rank higher. A weld job is never given out without a Logistics Computer that has the components.
 
-## Mining, and the Mining Surveyor
-
-In order to mine, you will need:
-- A drone with the **Mining Drone** behaviour profile. The drone must be a "boring" drone, meaning that the hole that its drills make must be large enough for the drone's hull to follow through it.
-- A Mining Surveyor
-- Orchestrator, within antenna network range or via laser antenna
-
-Mining may take a long time, its because the drone's mine stone around the target ore, and don't dispose of it. Because a) Stone gets consumed very quiclky by refineries, and b) there are mods, plugins, other solutions to stone, and Automata does not attempt to fix "the stone problem".
-
-Expect drones to mine stone alongside other ores. For this reason, starting a mine shaft will be slow at first, but the order for ores will start filling up really quickly once the stone layer gets consumed.
-
-### Collecting ore surveys
-
-The Mining Surveyor keeps a list of known ore deposits. They come from two sources:
-
-- **Its own ore detector**: an ore detector on the surveyor's grid is scanned regularly.
-- **Survey drones**: any drone with a working ore detector and **Survey for ores** ticked records the ore it sees while flying, and hands the data to a Mining Surveyor once it is back in antenna range. Ore scouts sent out with the industrial designator are the quickest way to explore.
-
-Deposits that a later scan no longer finds are marked as depleted. Stone is never listed. Press **Show known deposits** to put them on your GPS for a few minutes.
-
-### Configuring mining jobs
-
-1. The Mining Surveyor's **Known ores** list shows the ores of the deposits found so far.
-2. Select an ore, enter an order as `ore:kg` (for example `Ore/Iron:100000` or `Iron:50000`) and press **Add / update**.
-3. **Job size** sets how many kg each mining job asks for (one drone trip; default 10,000 kg).
-4. Each finished job is counted off the order; at 0 the jobs stop. Tick **Keep orders constant** to keep mining as long as deposits are known.
-5. Removing an order stops new jobs for it; drones already out finish their trip.
-
-The surveyor always sends drones to the nearest known deposit. Large jobs are shared by several miners boring side by side.
-
-### Which bids its jobs need
-
-| Bidder | Requirement |
-| --- | --- |
-| Drone | A drill, an ore detector and free cargo; the ore not on its ignore list. Mining drones rank first. |
-| Logistics Computer | **Provide for logistics** on, room for the ore, a refinery that processes it (or "accept ore without a refinery"), and the ore / its ingot below Max. Ice prefers grids with an O2/H2 generator. |
-
-Without a Logistics Computer to take the ore, no mining job is given out: your drones never mine ore with nowhere to put it.
-
-## Manual jobs with the target designators
-
-The two designators are hand-held tools. Press **Reload** to cycle modes, **Fire** to point. You must be within antenna range of one of your Orchestrators, and the drones you want to use must be **Managed by Orchestrator**. The designator's lights and sounds tell you whether the order was sent (yellow), accepted by a drone (green / blue), or refused (red). If no suitable drone takes the order within about 10 seconds, it is cancelled. Their reach is 5 km. The Industrial Target Designator is made at the survival kit and any assembler; the Hostile Target Designator only at the full Assembler.
-
-Both designators share two extra modes:
-
-- **Tag**: point at your own drones to tag them (up to 32). The next order goes to every tagged drone, one job each. Without tags, one suitable drone is picked for you.
-- **Recall**: point at one of your drones to call it home. It drops its current job. Point at the GPS marker of an order instead (within about 8 m) and every drone working that order comes home, and its jobs nobody has taken yet are cancelled.
-
-### Scouting (Industrial Target Designator)
-
-Spot checks go to any drone with an ore detector (Ore scouts first). Area sweeps go only to drones with the **Ore scout** profile and an ore detector. Tag mode accepts any of your drones with an ore detector; a sweep uses only the tagged Ore scouts.
-
-- **Spot check**: point at the ground or an asteroid. A scout flies there, scans for ore and comes back. With several tagged scouts, they spread around the spot.
-- **Area sweep**: point at an area. A scout sweeps it (low passes over a planet; on an asteroid, 8 low orbits over the spot in random directions, close to the surface, with height and spacing set by the scout's ore detector range). With several tagged scouts, the area is split between them. A waypoint the scout can't reach is skipped (up to 3 in a row), and in space scouts wait longer before giving up on a stalled leg.
-
-A GPS marker shows the order: yellow while waiting for a drone, green once taken. Everything the scouts find goes to your Mining Surveyors, ready to be ordered.
-
-### Combat (Hostile Target Designator)
-
-Only drones with the **Combat drone** profile and AI Defensive, AI Flight and AI Offensive blocks take combat jobs.
-
-- **Engage**: point at an enemy or neutral grid or character, or at a spot on the ground. The drone flies there, and once within its **handover distance** switches on its AI Flight and AI Offensive blocks to fight. It returns home when the target is destroyed or disabled, or when it has had no target for a while. Pull the trigger again to send another drone.
-- **Escort**: point at one of your own moving grids or characters. The drone follows above it at the **follow distance**, fights any enemy that comes close, then resumes following. Point at the ground right next to yourself to have it escort you.
-
-Combat drones come home on their own when power or hydrogen runs low, when their AI Defensive block decides to flee, or when an AI block is lost. You can tune all of this in the drone's **Combat** section.
-
-### From a camera (Orchestrator toolbar)
-
-An Orchestrator can give the same orders without a hand-held designator, pointed with a camera:
-
-1. Place a camera (large or small grid) on the Orchestrator's grid, or on a part connected to it by a rotor, hinge or piston (a turret, for example with a Custom Turret Controller). Grids joined only by a connector or a magnetic plate don't count.
-2. In the Orchestrator's terminal, pick it as **Designator camera**.
-3. Put the Orchestrator's **Designator: TAG / SPOT / AREA / ENGAGE / ESCORT / RECALL / CLEAR** actions on a toolbar, aim the camera, and press one.
-
-The camera's reach is 15 km, and nobody needs to look through it. The orders work as with the hand-held designators, except escorting yourself: on a moving grid the drones are already with you. Refused orders show in the Orchestrator's log.
-
-**Designator LCD tag** (default `[Designator]`): put it in an LCD's name and select the **Automata Log** app to see the tag counts, the last tagged target and each order with its drones. CLEAR forgets all tags; tags also expire 10 minutes after the last one.
 
 ## Server settings
 
@@ -323,6 +131,11 @@ How drones plan their routes and see obstacles. These are the main CPU settings 
 | ThetaSearchRadius | 300 | Metres the search covers around the stretch that failed (50 to 2000). Further goals are searched for part of the way. |
 | ThetaMaxExpansions | 3000 | Most cells one search looks at (100 to 100000). |
 | ThetaMaxMs | 15 | Most milliseconds one search may take (1 to 500). |
+| PathSearchWorkers | 2 | Lazy Theta* searches run on this many worker threads (0 to 8; 0 = on the main thread, as before). |
+| PathSearchMaxMs | 50 | Most milliseconds one worker search may take (1 to 1000). |
+| PathWarmUp | true | Prepare the obstacle data of busy areas (bases with Automata blocks, projector surroundings, construction fields) ahead of the first route there. |
+| StraightMaxMs | 10 | Most milliseconds the straight-line stage (detours) may take before the later stages take over (0 to 1000; 0 = no limit). |
+| MemoryMaxMs | 10 | Most milliseconds the route-memory stage may take (0 to 1000; 0 = no limit). |
 | UsePathMemory | true | Route planner stage 2: the server remembers where drones have flown (shared by all drones, saved with the world) and plans through those known-free ways when the straight line fails. |
 | PathMemoryMaxNodes | 4000 | Most remembered points (100 to 100000); the least recently used are forgotten first. |
 | PathMemoryMaxAgeHours | 24 | Hours a remembered way may go unused before it is forgotten (1 to 8760). |
@@ -354,7 +167,7 @@ How drones plan their routes and see obstacles. These are the main CPU settings 
 | Setting | Default | What it does |
 | --- | --- | --- |
 | TaskTimeoutSeconds | 30 | The highest **Task timeout** a player can set on a drone (10 to 600). A task that stops making progress for that long fails. |
-| DebugDrawTimeoutSeconds | 3600 | The debug overlays (drone observation area and navigation targets, construction computer area, orchestrator parking area and lanes, `/automata debugdraw`) switch themselves off after this many seconds (10 to 3600). |
+| DebugDrawTimeoutSeconds | 3600 | The debug overlays (drone construction field and navigation targets, construction computer field, orchestrator parking area and lanes, `/automata debugdraw`) switch themselves off after this many seconds (10 to 3600). |
 | DefaultMonitorHydrogen, DefaultMonitorBattery, DefaultHydrogenRefuelThreshold, DefaultHydrogenOperationalThreshold, DefaultBatteryRefuelThreshold, DefaultBatteryOperationalThreshold, MinPowerThreshold, MaxPowerThreshold | | *Not used yet.* Each drone uses its own terminal settings. |
 | ComponentCheckIntervalSeconds | 600 | How often a drone re-checks all of its own blocks (60 to 86400). Adding or removing blocks triggers a check anyway. |
 | ConnectorScanIntervalSeconds | 60 | How often a drone's home connector / beacon lists may refresh on their own. |
@@ -372,7 +185,7 @@ How drones plan their routes and see obstacles. These are the main CPU settings 
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| DroneMaxJobsPerScan | 125 | Stand-alone drones: most blocks taken from one scan of the observation area (1 to 1000). |
+| DroneMaxJobsPerScan | 125 | Stand-alone drones: most blocks taken from one scan of the construction field (1 to 1000). |
 | DroneScanIntervalSeconds | 30 | Stand-alone drones: seconds between scans while idle, and the pause after a failed trip (5 to 3600). |
 | MaxPublishedJobs | 10 | Construction Computers: jobs open at once that no drone has taken yet (1 to 100). Higher lets more drones start at the same time, at the cost of more auctions. |
 
@@ -420,20 +233,18 @@ The **[SchedulerBounds.StateUpdateIntervalTicks]** section (Initializing, Error,
 
 ### [MessageQueue]
 
-The virtual radio network the Automata blocks talk over. The shipped file calls this section **[DroneNetwork]**, but the server reads these settings from **[MessageQueue]**.
+The virtual radio network the Automata blocks talk over.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| MessageRetentionTicks | 1800 | How long a message waits on the network for its readers before it expires (at least 600). |
+| MessageRetentionTicks | 600 | How long a message lives on the network: readers in range that look within this time get it (at least 600). |
 | MessageCleanupIntervalTicks | 600 | How often expired messages are cleaned up (at least 60). |
-| MessageSerializationMode | ProtoBuf | Message format. `XML` is only for debugging; keep `ProtoBuf`. |
-| AllowNetworkBroadcasting, DefaultAntennaRange, NetworkUpdateRate, SchedulerAntennaCacheUpdateIntervalTicks, SchedulerMessageReadLimit | | *Not used yet.* Antenna ranges always come from the actual antennas. |
 
 ### [Logging]
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| LogLevel | Info, Verbose, Debug, Error, Warning | What goes into the mod's log file: any combination of `Verbose`, `Info`, `Debug`, `Warning`, `Error`, or `Quiet` for nothing. `Debug` logs every auction, bid and drone decision: useful to find out why a drone doesn't take a job, but the file grows fast. |
+| LogLevel | Error, Warning | What goes into the mod's log file: any combination of `Verbose`, `Info`, `Debug`, `Warning`, `Error`, or `Quiet` for nothing. `Debug` logs every auction, bid and drone decision: useful to find out why a drone doesn't take a job, but the file grows fast. |
 | LogPathfinding, LogDroneNetwork, LogDroneOrders | | *Not used yet.* |
 
 The log is **Automata.log**, in `%AppData%\SpaceEngineers\Storage\<mod id>.sbm_Automata\` (on a dedicated server, the same `Storage` folder of the server's instance).

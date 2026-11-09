@@ -669,6 +669,34 @@ namespace Automata.Drone
         // stay: the drone may need them)
         // Returns false when something that should have gone stayed in the drone (no room on the other side)
         // allOre: every ore aboard too (mining: other ores and stone the drill picked up)
+        // What UnloadCargo moves: the listed items ('only'; an ore also by its subtype), else components; 'allOre': and every ore
+        private static bool UnloadTakes(VRage.Game.ModAPI.Ingame.MyItemType type, DiscreteInventory only, bool filtered, bool allOre)
+        {
+            string typeId = type.TypeId;
+            if (allOre && typeId == ORE_TYPE) return true;
+            if (!filtered) return typeId == COMPONENT_TYPE;
+            return only.GetItemCount(ItemKeys.Of(type)) > 0 || (typeId == ORE_TYPE && only.GetItemCount(type.SubtypeId) > 0);
+        }
+
+        // Anything aboard (cargo, the tools' stores) UnloadCargo(only, allOre) would move
+        private bool HasCargoFor(DiscreteInventory only, bool allOre)
+        {
+            bool filtered = only != null && !only.IsEmpty();
+            RefreshToolStores();
+            bool any = false;
+            for (int c = 0; c < ClearSourceCount && !any; c++)
+            {
+                var src = ClearSource(c);
+                if (src == null) continue;
+                itemBuffer.Clear();
+                src.GetItems(itemBuffer);
+                for (int i = 0; i < itemBuffer.Count && !any; i++)
+                    any = itemBuffer[i].Amount > 0 && UnloadTakes(itemBuffer[i].Type, only, filtered, allOre);
+            }
+            itemBuffer.Clear();
+            return any;
+        }
+
         private bool UnloadCargo(DiscreteInventory only, bool allOre = false)
         {
             if (homeNetwork.cargoContainers.Count == 0) return false;   // built by the caller for the connector docked at
@@ -685,10 +713,7 @@ namespace Automata.Drone
                 src.GetItems(itemBuffer);
                 for (int i = itemBuffer.Count - 1; i >= 0; i--)
                 {
-                    string typeId = itemBuffer[i].Type.TypeId;
-                    if (!(allOre && typeId == ORE_TYPE) && (filtered ? only.GetItemCount(ItemKeys.Of(itemBuffer[i].Type)) <= 0
-                                   && (typeId != ORE_TYPE || only.GetItemCount(itemBuffer[i].Type.SubtypeId) <= 0)
-                                 : typeId != COMPONENT_TYPE)) continue;
+                    if (!UnloadTakes(itemBuffer[i].Type, only, filtered, allOre)) continue;
                     var type = itemBuffer[i].Type;
                     // Container after container until the whole stack is gone (a transfer can be partial)
                     for (int d = 0; d < homeNetwork.cargoContainers.Count && AmountAt(src, i, type) > 0; d++)
