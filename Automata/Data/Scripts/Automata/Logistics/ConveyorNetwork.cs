@@ -77,6 +77,8 @@ namespace Automata.Logistics
         public List<IMyReactor> reactors;
         /// <summary>O2/H2 generators (they take Ice from the network's cargo).</summary>
         public List<IMyGasGenerator> gasGenerators;
+        /// <summary>Irrigation systems (they take Ice too, for water: IsIrrigation).</summary>
+        public List<IMyGasGenerator> irrigationSystems;
         /// <summary>Oxygen and hydrogen tanks (their inventories hold bottles).</summary>
         public List<IMyGasTank> gasTanks;
         public DiscreteInventory Inventory;
@@ -107,6 +109,7 @@ namespace Automata.Logistics
             refineries = new List<IMyRefinery>();
             reactors = new List<IMyReactor>();
             gasGenerators = new List<IMyGasGenerator>();
+            irrigationSystems = new List<IMyGasGenerator>();
             gasTanks = new List<IMyGasTank>();
             _sessionDelegate = sessionDelegate ?? new MySessionDelegate();
         }
@@ -119,6 +122,7 @@ namespace Automata.Logistics
             refineries.Clear();
             reactors.Clear();
             gasGenerators.Clear();
+            irrigationSystems.Clear();
             gasTanks.Clear();
         }
 
@@ -185,6 +189,12 @@ namespace Automata.Logistics
             attached = false;
         }
 
+        /// <summary>Every block mapped into the network (its inventory blocks: what "Identify CN" outlines).</summary>
+        public void Blocks(List<IMyCubeBlock> into)
+        {
+            CollectContainers(into, false);
+        }
+
         // The network's item-holding blocks (cargo: functional only when 'functionalCargo')
         private void CollectContainers(List<IMyCubeBlock> containers, bool functionalCargo)
         {
@@ -196,6 +206,7 @@ namespace Automata.Logistics
             foreach (IMyRefinery b in refineries) if (b != null) containers.Add(b);
             foreach (IMyReactor b in reactors) if (b != null) containers.Add(b);
             foreach (IMyGasGenerator b in gasGenerators) if (b != null) containers.Add(b);
+            foreach (IMyGasGenerator b in irrigationSystems) if (b != null) containers.Add(b);
             foreach (IMyGasTank b in gasTanks) if (b != null) containers.Add(b);
         }
 
@@ -328,15 +339,43 @@ namespace Automata.Logistics
             return ioLocationData;
         }
 
-        /// <summary>A (working) O2/H2 generator on the network: where Ice is worth delivering.</summary>
-        public bool HasGasGenerators(bool working = true)
+        /// <summary>A (working) O2/H2 generator or irrigation system on the network: where Ice is worth delivering.</summary>
+        public bool HasIceConsumers(bool working = true)
         {
             for (int i = 0; i < gasGenerators.Count; i++)
             {
                 var g = gasGenerators[i];
                 if (g != null && !g.Closed && (!working || g.IsWorking)) return true;
             }
+            for (int i = 0; i < irrigationSystems.Count; i++)
+            {
+                var g = irrigationSystems[i];
+                if (g != null && !g.Closed && (!working || g.IsWorking)) return true;
+            }
             return false;
+        }
+
+        private static readonly Dictionary<string, bool> irrigationSubtypes = new Dictionary<string, bool>();
+
+        /// <summary>
+        /// An irrigation system (2025, after this mod began): the game has no type of its own for it - it is an
+        /// OxygenGenerator block (IMyGasGenerator, vanilla subtype "IrrigationSystem") whose definition
+        /// (MyOxygenGeneratorDefinition.ProducedGases) makes Water (GasProperties/Water) from Ice instead of O2 / H2.
+        /// Read once per subtype.
+        /// </summary>
+        public static bool IsIrrigation(IMyGasGenerator generator)
+        {
+            if (generator == null) return false;
+            string sub = generator.BlockDefinition.SubtypeName ?? "";
+            bool water;
+            if (irrigationSubtypes.TryGetValue(sub, out water)) return water;
+            water = false;
+            var def = Sandbox.Definitions.MyDefinitionManager.Static.GetCubeBlockDefinition(generator.BlockDefinition) as Sandbox.Definitions.MyOxygenGeneratorDefinition;
+            if (def != null && def.ProducedGases != null)
+                for (int i = 0; i < def.ProducedGases.Count && !water; i++)
+                    water = def.ProducedGases[i].Id.SubtypeName == "Water";
+            irrigationSubtypes[sub] = water;
+            return water;
         }
 
         /// <summary>Oxygen tanks (true) or hydrogen tanks (false) on the network.</summary>
@@ -532,7 +571,8 @@ namespace Automata.Logistics
             var generator = block as IMyGasGenerator;
             if (generator != null)
             {
-                network.gasGenerators.Add(generator);
+                if (IsIrrigation(generator)) network.irrigationSystems.Add(generator);
+                else network.gasGenerators.Add(generator);
                 return;
             }
 

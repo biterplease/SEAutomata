@@ -32,14 +32,44 @@ namespace Automata.Logistics
         // Redrawn after a button / selection changes them
         static IMyTerminalControlListbox itemList, quotaList;
         static IMyTerminalControlTextbox editBox;
+        static IMyTerminalControlCombobox networkCombo;
+        static LogisticsComputerBlock shown;   // the combobox content callback gets no block: the one last shown
+
+        // The item list's filter (this player's, any computer): never saved, cleared when the terminal closes
+        static readonly StringBuilder itemFilter = new StringBuilder();
+        static bool guiHooked;
 
         public static void DoOnce(IMyModContext context)
         {
+            // (each session: Unload unhooks it, while the controls outlive it with the statics)
+            if (!guiHooked && MyAPIGateway.Gui != null) { MyAPIGateway.Gui.GuiControlRemoved += GuiControlRemoved; guiHooked = true; }
             if (Done) return;
             Done = true;
             AutomataProgrammableBlocks.HideVanillaOnce();
             CreateControls();
             if (Log.DebugEnabled) Log.Debug("Created LC terminal controls");
+        }
+
+        /// <summary>The server's map of a computer's networks arrived (multiplayer client): the dropdown and the lists again.</summary>
+        public static void RefreshNetworks()
+        {
+            Refresh();
+        }
+
+        /// <summary>Session unload: the terminal-closed hook off.</summary>
+        public static void Unload()
+        {
+            if (guiHooked && MyAPIGateway.Gui != null) MyAPIGateway.Gui.GuiControlRemoved -= GuiControlRemoved;
+            guiHooked = false;
+            itemFilter.Clear();
+            shown = null;
+        }
+
+        // A screen closed: the terminal (MyGuiScreenTerminal) - the item filter is forgotten
+        static void GuiControlRemoved(object screen)
+        {
+            if (screen == null || itemFilter.Length == 0) return;
+            if (screen.ToString().EndsWith("ScreenTerminal", StringComparison.Ordinal)) itemFilter.Clear();
         }
 
         private static LogisticsComputerBlock GetBlock(IMyTerminalBlock block)
@@ -58,6 +88,7 @@ namespace Automata.Logistics
             if (itemList != null) itemList.UpdateVisual();
             if (quotaList != null) quotaList.UpdateVisual();
             if (editBox != null) editBox.UpdateVisual();
+            if (networkCombo != null) networkCombo.UpdateVisual();
         }
 
         static void Add(IMyTerminalControl c)
@@ -147,10 +178,14 @@ namespace Automata.Logistics
                      b => CustomVisibleCondition(b) && BlockConfig.AllowLogistics && BlockConfig.AllowNetworkRequests,
                      b => BlockConfig.AllowLogistics && BlockConfig.AllowNetworkRequests,
                      l => l.Terminal_WorkModeRequest, (l, v) => l.Terminal_WorkModeRequest = v);
-            Checkbox("CheckboxLCAcceptOreWithoutRefinery", MyStrings.Logistics_AcceptOresIce,
-                     MyStrings.Logistics_AcceptOresIceTooltip,
+            Checkbox("CheckboxLCAcceptOreWithoutRefinery", MyStrings.Logistics_AcceptOres,
+                     MyStrings.Logistics_AcceptOresTooltip,
                      CustomVisibleCondition, b => BlockConfig.AllowLogistics,
-                     l => l.Terminal_AcceptOreWithoutRefinery, (l, v) => l.Terminal_AcceptOreWithoutRefinery = v);
+                     l => l.Terminal_AcceptMinedOre, (l, v) => l.Terminal_AcceptMinedOre = v);
+            Checkbox("CheckboxLCAcceptIce", MyStrings.Logistics_AcceptIce,
+                     MyStrings.Logistics_AcceptIceTooltip,
+                     CustomVisibleCondition, b => BlockConfig.AllowLogistics,
+                     l => l.Terminal_AcceptMinedIce, (l, v) => l.Terminal_AcceptMinedIce = v);
             Checkbox("CheckboxLCOreRequestsMine", MyStrings.Logistics_OreRequestsMine,
                      MyStrings.Logistics_OreRequestsMineTooltip,
                      b => CustomVisibleCondition(b) && BlockConfig.AllowLogistics && BlockConfig.AllowNetworkRequests,
@@ -158,6 +193,41 @@ namespace Automata.Logistics
                      l => l.Terminal_OreRequestsMine, (l, v) => l.Terminal_OreRequestsMine = v);
             Separator();
             Label(IdPrefix + "LabelItems", MyStrings.Logistics_ItemsItemMinMax);
+            {
+                // Which network's Min / Max the lists below show and edit ("Any": the main network's, as before); not saved
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlCombobox, IMyProgrammableBlock>(IdPrefix + "Network");
+                c.Title = MyStrings.Logistics_ConveyorNetwork;
+                c.Tooltip = MyStrings.Logistics_ConveyorNetworkTooltip;
+                c.SupportsMultipleBlocks = false;
+                c.Visible = b => { var l = GetBlock(b); if (l != null) shown = l; return l != null; };
+                c.ComboBoxContent = list => { if (shown != null) shown.Terminal_NetworkItems(list); };
+                c.Getter = b => { var l = GetBlock(b); if (l != null) shown = l; return l != null ? l.Terminal_SelectedNetwork : 0; };
+                c.Setter = (b, v) =>
+                {
+                    var l = GetBlock(b);
+                    if (l == null) return;
+                    l.Terminal_SelectNetwork(v);
+                    Refresh();
+                };
+                networkCombo = c;
+                Add(c);
+            }
+            Button("IdentifyCn", MyStrings.Logistics_IdentifyCn, MyStrings.Logistics_IdentifyCnTooltip, l => { l.Terminal_IdentifyNetwork(); return false; });
+            {
+                // Filters the item list below (name, key or category containing the text); nothing else reads it
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlTextbox, IMyProgrammableBlock>(IdPrefix + "ItemFilter");
+                c.Title = MyStrings.Logistics_Filter;
+                c.Tooltip = MyStrings.Logistics_FilterTooltip;
+                c.SupportsMultipleBlocks = false;
+                c.Visible = CustomVisibleCondition;
+                c.Getter = b => itemFilter;
+                c.Setter = (b, v) =>
+                {
+                    if (!ReferenceEquals(v, itemFilter)) itemFilter.Clear().Append(v);
+                    if (itemList != null) itemList.UpdateVisual();
+                };
+                Add(c);
+            }
             {
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlListbox, IMyProgrammableBlock>(IdPrefix + "ItemList");
                 c.Title = MyStrings.Logistics_Items;
@@ -239,17 +309,24 @@ namespace Automata.Logistics
             if (l == null) return;
             var used = l.Terminal_QuotaKeys;
             var catalog = AutomataSession.itemCatalog;
+            string filter = itemFilter.ToString().Trim();
             for (int i = 0; i < catalog.Count; i++)
             {
                 var data = catalog[i];
                 if (used.Contains(data.Key)) continue;
                 MyStringId nameId;
                 string name = CategoryNames.TryGetValue(data.Category, out nameId) ? Loc.T(nameId) : null;
+                if (filter.Length > 0 && !Matches(data.DisplayName, filter) && !Matches(data.Key.String, filter) && !Matches(name, filter)) continue;
                 var item = new MyTerminalControlListBoxItem(MyStringId.GetOrCompute(QuotaEntry.Format(data.Key, 0, 0)),
                                                             MyStringId.GetOrCompute(data.DisplayName + " (" + name + ")"), data.Key);
                 items.Add(item);
                 if (data.Key == l.Terminal_SelectedItem) selected.Add(item);
             }
+        }
+
+        static bool Matches(string text, string filter)
+        {
+            return text != null && text.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         static void QuotaListContent(IMyTerminalBlock b, List<MyTerminalControlListBoxItem> items, List<MyTerminalControlListBoxItem> selected)

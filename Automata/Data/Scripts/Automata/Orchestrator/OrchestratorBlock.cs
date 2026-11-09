@@ -657,6 +657,8 @@ namespace Automata.Orchestrator
                 NoBidGridId = PlayerJobOriginGrid(key),
                 WeldCategory = ja.Type == JobType.Weld ? ja.WeldCategory : JobTypeExtensions.WELD_ANY,
                 Sequential = ja.Sequential,
+                DeliverTo = ja.Type == JobType.MineOre ? ja.DeliverTo : 0,
+                DeliverToNetwork = ja.Type == JobType.MineOre ? ja.DeliverToNetwork : 0,
             };
             var open = new OpenAuction
             {
@@ -1218,14 +1220,20 @@ namespace Automata.Orchestrator
             var a = open.Auction;
             var sites = MineSites(open.Job.Tasks);
             if (sites.Count == 0) { why = Loc.T(MyStrings.Orchestrator_TheJobHasNoSite); return false; }
-            var takers = Takers(lcs, a.ComponentsInventory, a.PositionData.ToVector3D());
+            var takers = Takers(lcs.FindAll(b => !b.RestOnly), a.ComponentsInventory, a.PositionData.ToVector3D());
             if (takers.Count == 0) { why = Loc.T(MyStrings.Orchestrator_NoLogisticsComputerTakes); return false; }
-            // A logistics computer's ore request (its "Ore requests mine"): unloaded there when it bid room, else as any
-            long deliverTo = open.Announcement != null ? open.Announcement.DeliverTo : 0;
+            // Where the other ores can go (stone with ice...): computers that bid a place for them only, or whose bid's
+            // network takes them (a refinery, "Accept ores")
+            var restTakers = new List<TakerRoom>();
+            for (int i = 0; i < lcs.Count; i++)
+                if (lcs[i].IOLocationData != null && (lcs[i].RestOnly || lcs[i].TakesRest))
+                    restTakers.Add(new TakerRoom { Bid = lcs[i], Room = Math.Max(0, (double)lcs[i].MaxCargoVolume) });
+            // A logistics computer's ore request (its "Ore requests mine"): a targeted delivery, that computer the only taker
+            long deliverTo = a.DeliverTo != 0 ? a.DeliverTo : open.Announcement != null ? open.Announcement.DeliverTo : 0;
             if (deliverTo != 0)
             {
-                var only = takers.FindAll(t => t.Bid != null && t.Bid.EntityId == deliverTo);
-                if (only.Count > 0) takers = only;
+                takers = takers.FindAll(t => t.Bid != null && t.Bid.EntityId == deliverTo);
+                if (takers.Count == 0) { why = Loc.T(MyStrings.Orchestrator_NoLogisticsComputerTakes); return false; }
             }
             bool ice = IsIceJob(a);
             double total = (double)a.TotalVolume;
@@ -1245,12 +1253,16 @@ namespace Automata.Orchestrator
                 IOLocationData port, orePort = null;
                 var taker = ice ? IceTakerFor(takers, ranked[i], out port) : TakerFor(takers, ranked[i], out port);
                 if (taker == null) continue;
-                var oreTaker = ice ? RefineryTakerFor(takers, ranked[i], taker, out orePort) : null;
+                var oreTaker = RestTakerFor(restTakers, ranked[i], taker, ice, out orePort);
+                // Nobody takes the rest and this taker can't use it: it stays aboard (never dumped where it can't be used)
+                bool keepRest = oreTaker == null && !taker.Bid.TakesRest;
                 var tasks = new List<Task>();   // the site goes in front (MineLanes, below)
                 slotDrones.Add(ranked[i]);
                 slotKg.Add(oreLeft);
                 tasks.Add(DockTask(port));
-                tasks.Add(Task.Unload(a.ComponentsInventory));   // every ore aboard, or (another unload follows) the ice only
+                var unload = Task.Unload(a.ComponentsInventory);   // every ore aboard, or (another unload follows / none takes the rest) the job's ore only
+                unload.OnlyListed = oreTaker != null || keepRest;
+                tasks.Add(unload);
                 if (oreTaker != null)
                 {
                     tasks.Add(DockTask(orePort));
@@ -1316,14 +1328,14 @@ namespace Automata.Orchestrator
             return any;
         }
 
-        // Ice: a taker with a working O2/H2 generator the drone can dock at (most room); any taker when none has one
+        // Ice: a taker with a working O2/H2 generator or irrigation system the drone can dock at (most room); any taker when none has one
         private static TakerRoom IceTakerFor(List<TakerRoom> takers, Bid drone, out IOLocationData port)
         {
             port = null;
             TakerRoom best = null;
             for (int i = 0; i < takers.Count; i++)
             {
-                if (!takers[i].Bid.GasGenerators) continue;
+                if (!takers[i].Bid.IceConsumers) continue;
                 var p = PortFor(takers[i].Bid.DockSite, takers[i].Bid.IOLocationData, drone);
                 if (p == null) continue;
                 if (best == null || takers[i].Room > best.Room) { best = takers[i]; port = p; }
@@ -1331,22 +1343,28 @@ namespace Automata.Orchestrator
             return best ?? TakerFor(takers, drone, out port);
         }
 
-        // Ice: where the rest goes - the best refinery tier among the takers the drone can dock at (most room on a tie);
-        // null when the ice taker's own refinery is as good (one stop) or nobody has a refinery
-        private static TakerRoom RefineryTakerFor(List<TakerRoom> takers, Bid drone, TakerRoom iceTaker, out IOLocationData port)
+        /// <summary>
+        /// Where a mining drone's other ores go (stone with ice, what comes with a computer's ore request): a second stop at
+        /// the best refinery among the computers that take them (most room on a tie; else one with "Accept ores").
+        /// Null (one stop): the ore's taker takes them itself (other ores: always; ice: unless a better refinery bid), or
+        /// nobody does (then they stay aboard: 2026-11-08, they were unloaded at an ice-only computer).
+        /// </summary>
+        private static TakerRoom RestTakerFor(List<TakerRoom> rest, Bid drone, TakerRoom taker, bool ice, out IOLocationData port)
         {
             port = null;
             TakerRoom best = null;
-            for (int i = 0; i < takers.Count; i++)
+            for (int i = 0; i < rest.Count; i++)
             {
-                var t = takers[i];
-                if (t == iceTaker || t.Bid.RefineryTier == 0 || t.Bid.RefineryTier <= iceTaker.Bid.RefineryTier) continue;
+                var t = rest[i];
+                if (t.Bid.EntityId == taker.Bid.EntityId) continue;
                 if (best != null && (t.Bid.RefineryTier < best.Bid.RefineryTier || (t.Bid.RefineryTier == best.Bid.RefineryTier && t.Room <= best.Room))) continue;
                 var p = PortFor(t.Bid.DockSite, t.Bid.IOLocationData, drone);
                 if (p == null) continue;
                 best = t;
                 port = p;
             }
+            if (taker.Bid.TakesRest && (!ice || best == null || best.Bid.RefineryTier <= taker.Bid.RefineryTier)) { port = null; return null; }
+            if (best == null) port = null;
             return best;
         }
 

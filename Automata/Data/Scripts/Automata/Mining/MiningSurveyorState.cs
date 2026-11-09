@@ -46,6 +46,8 @@ namespace Automata.Mining
         [ProtoMember(4)] public int Voxels;
         /// <summary>Seconds since it was last seen (deposits) / found depleted (Depleted).</summary>
         [ProtoMember(5)] public double AgeSeconds;
+        /// <summary>Its distance from the surveyor when learnt, to the 100 m.</summary>
+        [ProtoMember(6)] public int DistanceM;
     }
 
     [ProtoContract]
@@ -73,5 +75,7 @@ namespace Automata.Mining
         [ProtoMember(8)] public bool Announced;
         /// <summary>Mined for this logistics computer's ore request (0: the surveyor's own order).</summary>
         [ProtoMember(9)] public long ForLc;
+        /// <summary>With ForLc: the CN index of its network that asked.</summary>
+        [ProtoMember(10)] public int ForLcNetwork;
     }
 }

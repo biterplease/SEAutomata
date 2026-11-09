@@ -182,7 +182,7 @@
     <value>Debug draw: {0} lane(s) of your orchestrators within {1} m.</value>
   </data>
   <data name="Common_DebugDrawOnWithinM" xml:space="preserve">
-    <value>Debug draw on within {0} m: {1} drone route(s), {2} drone field(s), {3} construction field(s), {4} parking area(s).</value>
+    <value>Debug draw on within {0} m: {1} drone route(s), {2} drone field(s), {3} construction field(s), {4} parking area(s), {5} logistics computer(s) with their conveyor networks.</value>
   </data>
   <data name="Common_DroneControllersMaxPerFaction" xml:space="preserve">
     <value>Drone Controllers - Max per Faction: {0}</value>
@@ -380,7 +380,7 @@
     <value>Update error: {0}</value>
   </data>
   <data name="Common_UsageAutomataDebugdrawDronenavDroneobs" xml:space="preserve">
-    <value>Usage: /automata debugdraw [dronenav] [droneobs] [ccobs] [park] [lanes] [range m: 300 default, 2000 max] [off] (no kind: all; off: everything you draw, anywhere)</value>
+    <value>Usage: /automata debugdraw [dronenav] [droneobs] [ccobs] [park] [lanes] [cn] [range m: 300 default, 2000 max] [off] (no kind: all; off: everything you draw, anywhere)</value>
   </data>
   <data name="Common_UseBroadcastController" xml:space="preserve">
     <value>Use broadcast controller</value>
@@ -2383,17 +2383,23 @@ NOTE: AI must be disabled to change.</value>
   <data name="Description_Automata_LogisticsComputer" xml:space="preserve">
     <value>Allows a grid to become part of the logistics, construction and mining network.</value>
   </data>
-  <data name="Logistics_AcceptOresIce" xml:space="preserve">
-    <value>Accept ores/ice</value>
+  <data name="Logistics_AcceptOres" xml:space="preserve">
+    <value>Accept ores</value>
   </data>
-  <data name="Logistics_AcceptOresIceTooltip" xml:space="preserve">
-    <value>Bid volume for ore/ice without refineries or O2/H2 generators</value>
+  <data name="Logistics_AcceptOresTooltip" xml:space="preserve">
+    <value>Bid volume for ores without refineries</value>
+  </data>
+  <data name="Logistics_AcceptIce" xml:space="preserve">
+    <value>Accept ice</value>
+  </data>
+  <data name="Logistics_AcceptIceTooltip" xml:space="preserve">
+    <value>Bid volume for ice without O2/H2 Generators or Irrigation Systems</value>
   </data>
   <data name="Logistics_OreRequestsMine" xml:space="preserve">
-    <value>Ore requests mine</value>
+    <value>Ore/Ice requests mine</value>
   </data>
   <data name="Logistics_OreRequestsMineTooltip" xml:space="preserve">
-    <value>Ore requests will issue a mining job</value>
+    <value>Ore or Ice requests will issue a mining job.</value>
   </data>
   <data name="Logistics_Active" xml:space="preserve">
     <value>Active</value>
@@ -2429,7 +2435,7 @@ NOTE: AI must be disabled to change.</value>
     <value>Construction</value>
   </data>
   <data name="Logistics_ContainersPortAssemblerRefineryIes" xml:space="preserve">
-    <value>{0}: {1} containers, {2} port(s), {3} assembler(s), {4} refinery(ies), {5} O2/H2 generator(s), {6} O2 / {7} H2 tank(s), {8:F1} / {9:F1} m3{10}</value>
+    <value>{0}: {1} containers, {2} port(s), {3} assembler(s), {4} refinery(ies), {5} O2/H2 generator(s), {11} irrigation system(s), {6} O2 / {7} H2 tank(s), {8:F1} / {9:F1} m3{10}</value>
   </data>
   <data name="Logistics_ConveyorNetworks" xml:space="preserve">
     <value>Conveyor Networks: {0}</value>
@@ -2450,7 +2456,7 @@ NOTE: AI must be disabled to change.</value>
     <value>Entry</value>
   </data>
   <data name="Logistics_EntryTooltip" xml:space="preserve">
-    <value>item:min:max, e.g. SteelPlate:100:5000 or Ingot/Iron:0:20000</value>
+    <value>item:min:max, e.g. SteelPlate:1000:2000</value>
   </data>
   <data name="Logistics_Error" xml:space="preserve">
     <value>Error: {0}</value>
@@ -2463,6 +2469,45 @@ NOTE: AI must be disabled to change.</value>
   </data>
   <data name="Logistics_Items" xml:space="preserve">
     <value>Items</value>
+  </data>
+  <data name="Logistics_ConveyorNetwork" xml:space="preserve">
+    <value>Conveyor network</value>
+  </data>
+  <data name="Logistics_ConveyorNetworkTooltip" xml:space="preserve">
+    <value>Which network to set orders on. Any is the largest network.</value>
+  </data>
+  <data name="Logistics_Any" xml:space="preserve">
+    <value>Any</value>
+  </data>
+  <data name="Logistics_IdentifyCn" xml:space="preserve">
+    <value>Identify CN</value>
+  </data>
+  <data name="Logistics_IdentifyCnTooltip" xml:space="preserve">
+    <value>Draws conveyor network.</value>
+  </data>
+  <data name="Logistics_NetworkOwnList" xml:space="preserve">
+    <value>{0}: own Min / Max ({1} item(s))</value>
+  </data>
+  <data name="Logistics_CnJoined" xml:space="preserve">
+    <value>{0} joined into {1}: one Min / Max list ({2} line(s), the larger Min winning)</value>
+  </data>
+  <data name="Logistics_CnSplit" xml:space="preserve">
+    <value>{0} split: {1} keeps a copy of its Min / Max list ({2} line(s))</value>
+  </data>
+  <data name="Logistics_CnListCleared" xml:space="preserve">
+    <value>{0}: no connector or no cargo container: its Min / Max list cleared</value>
+  </data>
+  <data name="Logistics_CnNoConnectors" xml:space="preserve">
+    <value>{0}: no connectors: nothing can be delivered or collected there</value>
+  </data>
+  <data name="Logistics_CnNoCargo" xml:space="preserve">
+    <value>{0}: no cargo containers: no room for requests</value>
+  </data>
+  <data name="Logistics_Filter" xml:space="preserve">
+    <value>Filter</value>
+  </data>
+  <data name="Logistics_FilterTooltip" xml:space="preserve">
+    <value>Filter by item name.</value>
   </data>
   <data name="Logistics_ItemsItemMinMax" xml:space="preserve">
     <value>Items (item:min:max)</value>
@@ -2491,6 +2536,12 @@ NOTE: AI must be disabled to change.</value>
   <data name="Logistics_MinHas" xml:space="preserve">
     <value>Min {0}: {1} (has {2})</value>
   </data>
+  <data name="Logistics_Refilling" xml:space="preserve">
+    <value>Refilling {0} to {1} (has {2})</value>
+  </data>
+  <data name="Logistics_Draining" xml:space="preserve">
+    <value>Draining {0} to {1} (has {2})</value>
+  </data>
   <data name="Logistics_MinMax" xml:space="preserve">
     <value>Min / Max</value>
   </data>
@@ -2507,7 +2558,7 @@ NOTE: AI must be disabled to change.</value>
     <value>Modes:</value>
   </data>
   <data name="Logistics_Network" xml:space="preserve">
-    <value>Network {0}</value>
+    <value>CN {0}</value>
   </data>
   <data name="Logistics_NoAntennaFunctionalOnBroadcasting" xml:space="preserve">
     <value>No antenna (functional, on, broadcasting)</value>
@@ -2663,7 +2714,7 @@ NOTE: AI must be disabled to change.</value>
     <value>Add / update</value>
   </data>
   <data name="Mining_AddUpdateTooltip" xml:space="preserve">
-    <value>The order goes into the list (replacing the same ore's order).</value>
+    <value>The order goes into the list.</value>
   </data>
   <data name="Mining_Announced" xml:space="preserve">
     <value>announced</value>
@@ -2693,11 +2744,17 @@ NOTE: AI must be disabled to change.</value>
   <data name="Mining_DeletedKnownDeposit" xml:space="preserve">
     <value>Deleted {0} known deposit(s)</value>
   </data>
+  <data name="Mining_DeleteDeposits" xml:space="preserve">
+    <value>Delete deposits</value>
+  </data>
+  <data name="Mining_ShowByDistance" xml:space="preserve">
+    <value>Show by distance</value>
+  </data>
   <data name="Mining_DeleteKnownDeposits" xml:space="preserve">
     <value>Delete known deposits</value>
   </data>
   <data name="Mining_DeleteKnownDepositsTooltip" xml:space="preserve">
-    <value>Forgets every known deposit (and those found depleted). Jobs no drone has taken for them are dropped. New scans and drone surveys find deposits again.</value>
+    <value>Forgets every known deposit. Jobs no drone has taken for them are dropped. New scans and drone surveys find deposits again.</value>
   </data>
   <data name="Mining_DeliveredDroneOreKg" xml:space="preserve">
     <value>Delivered: Drone {0}, Ore: {1}, {2:F0} kg</value>
@@ -2752,7 +2809,7 @@ NOTE: AI must be disabled to change.</value>
     <value>Known deposits:</value>
   </data>
   <data name="Mining_KnownOres" xml:space="preserve">
-    <value>Known ores</value>
+    <value>Known ore deposits</value>
   </data>
   <data name="Mining_KnownOresOreDeposits" xml:space="preserve">
     <value>Known ores (ore:deposits)</value>
@@ -2773,7 +2830,7 @@ NOTE: AI must be disabled to change.</value>
     <value>Mining: Drone {0} {1}, Ore: {2}</value>
   </data>
   <data name="Mining_MiningJobsNoDroneHasTooltip" xml:space="preserve">
-    <value>Mining jobs no drone has taken are announced again now, holds after failed auctions lifted.</value>
+    <value>Reannounce Mining jobs no drone has taken, ignoring failed auction holds.</value>
   </data>
   <data name="Mining_NoAntennaFunctionalOnBroadcastingDeposits" xml:space="preserve">
     <value>No antenna (functional, on, broadcasting): deposits only</value>
@@ -2802,6 +2859,15 @@ NOTE: AI must be disabled to change.</value>
   <data name="Mining_OrderRemoved" xml:space="preserve">
     <value>order removed</value>
   </data>
+  <data name="Mining_OrderFulfilled" xml:space="preserve">
+    <value>Order fulfilled: {0} {1:F0}/{2} kg, taken off the list</value>
+  </data>
+  <data name="Mining_RequestPlayer" xml:space="preserve">
+    <value>P:  {0} {1}/{2}</value>
+  </data>
+  <data name="Mining_RequestLc" xml:space="preserve">
+    <value>LC: {0} {1}/{2}</value>
+  </data>
   <data name="Mining_LcRequestGone" xml:space="preserve">
     <value>the logistics computer's request is filled or gone</value>
   </data>
@@ -2815,7 +2881,7 @@ NOTE: AI must be disabled to change.</value>
     <value>Orders (ore:kg)</value>
   </data>
   <data name="Mining_OrdersTooltip" xml:space="preserve">
-    <value>Ore to mine, kg. Each mining job is counted off its order; at 0 no more jobs go out (unless kept constant).</value>
+    <value>Ore to mine, in kg.</value>
   </data>
   <data name="Mining_OrderTooltip" xml:space="preserve">
     <value>ore:kg, e.g. Ore/Iron:100000 or Iron:50000 (whole kg above 0)</value>
@@ -2842,7 +2908,7 @@ NOTE: AI must be disabled to change.</value>
     <value>Show deposits as GPS</value>
   </data>
   <data name="Mining_ShowDepositsAsGPSTooltip" xml:space="preserve">
-    <value>Temporary GPS markers for the known deposits (nearest first), for the block's owner only.</value>
+    <value>Temporary GPS markers for the known deposits, for the block's owner only.</value>
   </data>
   <data name="Mining_ShowOff" xml:space="preserve">
     <value>Show:Off</value>

@@ -26,14 +26,14 @@ The above said, welding, grinding, mining, logistic deliveries, ore scouting, co
 [*]Farm harvesting jobs: drone with a collector harvests farmed ores.
 [*]Rovers: for the really massive cargo move jobs, rovers should be available.
 [*]Mod config menu: live update server settings
-[*]Models: LG drone controller, all computer, still using vanilla models, custom models with custom actions are underway.
+[*]Models: LG drone controller, all computers, still using vanilla models, custom models with custom actions are underway.
 [/list]
 
 [h2]Introduction[/h2]
 
 Automata lets you create drones that work for you. Put a [b]Drone Controller[/b] on a grid that has thrusters, a connector and whatever tools you want it to use (welder, grinder, drill, ore detector, cargo), and the drone figures out by itself what it is able to do. A single drone can already weld, repair and grind around its home on its own.
 
-The mod introduces 4 blocks that lets you scale your activities, 3 of them specify on checking for a specific type of job, and the [b]Orchestrator[/b] collects those jobs and hands them to the drones best suited for them. Blocks on the same grid (or rotor / piston / hinge connected grids) talk without an antenna. Between grids, everything talks over your antennas: a broadcasting radio antenna on each grid (the one with the largest range counts) within range of the other, or laser antennas linked to each other. A docked drone also talks to the grid it is connected to by connector.
+The mod introduces 5 blocks that lets you scale your activities, 3 of them specify on checking for a specific type of job, and the [b]Orchestrator[/b] collects those jobs and hands them to the drones best suited for them. Blocks on the same grid (or rotor / piston / hinge connected grids) talk without an antenna. Between grids, everything talks over your antennas: a broadcasting radio antenna on each grid (the one with the largest range counts) within range of the other, or laser antennas linked to each other. A docked drone also talks to the grid it is connected to by connector.
 
 The mod adds six blocks and two hand-held tools:
 
@@ -149,6 +149,8 @@ Stand-alone drones are lack the capabilities to coordinate large jobs, so two st
 
 In this mode the drone waits at home and bids on jobs from Orchestrators in antenna range. This is the mode for logistics, mining, large construction projects, and designator jobs. The drone flies out, does its task list, reports back and returns home. It still watches its battery and hydrogen levels and goes home to recharge when needed.
 
+[b]Low power[/b] (Monitor battery / hydrogen levels, on by default): under the refuel threshold every drone drops its job at once, whatever it was doing (an orchestrator's job is reported aborted and auctioned again), backs out of a block or bore first, then docks to charge: at home, else at the nearest free connector. Cargo of the dropped job (ore, a haul) stays aboard and goes where that job meant to unload it, once the levels are back over the operational thresholds and before the drone takes new work.
+
 Combat drones in this mode also launch on their own when their AI Defensive block spots an enemy within the [b]auto-launch radius[/b].
 
 The operation mode can only be changed while the drone's AI is off.
@@ -159,7 +161,7 @@ A checkbox in the drone's [b]Flight[/b] section, off by default. In space, legs 
 
 [h3]Flight lanes[/h3]
 
-Drones managed by an Orchestrator fly in lanes, like air corridors. The Orchestrator traces a lane as soon as it puts a job up for auction (from its base to the job: another base, an asteroid, a planet ore hotspot - known deposits within 500 m of each other - or the spot itself), when an area sweep or spot check is ordered, and between your bases on its antenna network that have an Automata computer block. A lane is a pair of boxes 40 m wide and 40 m high, one above the other: one for each way, so drones going opposite ways never meet head-on. Lanes end short of bases and above work areas, run straight over the terrain on planets (from ridge to ridge, in as few legs as they can, climbing straight up where an end starts low), and are lifted where they would cross another one. Each drone flies in a slot of its own across the box (one and a half times its width, with four times its length clear before and after it), so a drone can pass one that stops; when no slot is free at the entrance, it waits outside for a short while. Drones wider than 25 m fly beside the lane instead. In its slot a drone keeps a gap it can stop in behind the drone ahead, even if that one brakes as hard as it can. When a drone finds rock, a tree or a station in a lane, it flies round it and tells the Orchestrator (as soon as its antenna reaches it): the lane is moved up to 50 m to a clear straight line, or else redrawn along the drone's way round. A crash in a lane or two drones too close suspends it for 2 minutes; a drone with a broadcast controller says "NAME: crashed in lane L7 Home Base → Asteroid 4821". A lane made for a sweep or spot check is dropped if the scouts find nothing. The Orchestrator's terminal lists the lanes ([b]Active lanes[/b]) to show, delete, resume or clear them all; [i]/automata debugdraw lanes[/i] shows the ones near you. Unused lanes are dropped after FlightLaneExpirationMinutes.
+Drones managed by an Orchestrator fly in lanes, like air corridors. The Orchestrator traces a lane as soon as it puts a job up for auction (from its base to the job: another base, an asteroid, a planet ore hotspot - known deposits within 500 m of each other - or the spot itself), when an area sweep or spot check is ordered, and between your bases on its antenna network that have an Automata computer block. A lane is a pair of boxes 40 m wide and 40 m high, one above the other: one for each way, so drones going opposite ways never meet head-on. Lanes end short of bases and above work areas (at an asteroid, beside the rock over the work, never inside it), run straight over the terrain on planets (from ridge to ridge, in as few legs as they can, climbing straight up where an end starts low), and are lifted where they would cross another one. Each drone flies in a slot of its own across the box (one and a half times its width, with four times its length clear before and after it), so a drone can pass one that stops; when no slot is free at the entrance, it waits outside for a short while. Drones wider than 25 m fly beside the lane instead. In its slot a drone keeps a gap it can stop in behind the drone ahead, even if that one brakes as hard as it can. When a drone finds rock, a tree or a station in a lane, it flies round it and tells the Orchestrator (as soon as its antenna reaches it): the lane is moved up to 50 m to a clear straight line, or else redrawn along the drone's way round. A crash in a lane or two drones too close suspends it for 2 minutes; a drone with a broadcast controller says "NAME: crashed in lane L7 Home Base → Asteroid 4821". A lane made for a sweep or spot check is dropped if the scouts find nothing. The Orchestrator's terminal lists the lanes ([b]Active lanes[/b]) to show, delete, resume or clear them all; [i]/automata debugdraw lanes[/i] shows the ones near you. Unused lanes are dropped after FlightLaneExpirationMinutes.
 
 [h3]When a drone finds no route[/h3]
 
@@ -260,7 +262,7 @@ Drones whose welder or grinder can easily reach the blocks (for example, a downw
 In order to mine, you will need:
 
 [list]
-[*]A drone with the [b]Mining Drone[/b] behaviour profile. The drone must be a "boring" drone, meaning that the hole that its drills make must be large enough for the drone's hull to follow through it.
+[*]A drone with the [b]Mining Drone[/b] behaviour profile. With the [b]Bore[/b] mining method the drone must be a "boring" drone, meaning that the hole that its drills make must be large enough for the drone's hull to follow through it. With [b]Quarry[/b] any shape works (see below).
 [*]A Mining Surveyor
 [*]Orchestrator, within antenna network range or via laser antenna
 [/list]
@@ -268,6 +270,18 @@ In order to mine, you will need:
 Mining may take a long time, its because the drone's mine stone around the target ore, and don't dispose of it. Because a) Stone gets consumed very quiclky by refineries, and b) there are mods, plugins, other solutions to stone, and Automata does not attempt to fix "the stone problem".
 
 Expect drones to mine stone alongside other ores. For this reason, starting a mine shaft will be slow at first, but the order for ores will start filling up really quickly once the stone layer gets consumed.
+
+[h3]Mining method: Bore or Quarry[/h3]
+
+The drone's [b]Mining[/b] section has a [b]Mining method[/b] and a [b]Quarry dimension[/b]:
+
+[list]
+[*][b]Bore[/b] (default): the drone digs a tunnel straight to the ore.
+[*][b]Quarry[/b]: the drone first digs a straight shaft, Q by Q, down to the ore, then mines at its bottom. It starts from the highest ground over the shaft, cuts in thin layers from the centre out, so its hull always has open space around it, and never needs to bore. Wide, tall or sideways-drilling drones can mine this way.
+[*][b]Quarry dimension[/b]: Q, from 5 to 100 m. Unset (the default), Q is 1.5 times the drone's longest dimension, which is also the smallest Q a drone accepts whatever the slider says.
+[*]Ores are protected: digging stops when any other ore comes within 10 m of the drill ("Quarry blocked by Gold at 35 m" in chat, through a broadcast controller on the drone, or the Orchestrator's once its antenna reaches one). Before digging, the drone checks the shaft for other ores, and moves it one Q aside if that column is clear.
+[*]A quarry drone mines a job alone; it is not pooled with other miners. Shafts dug at the same time near each other line up on one grid and never overlap: a drone whose shaft would overlap another moves it to the next free spot beside it.
+[/list]
 
 [h3]Collecting ore surveys[/h3]
 
@@ -309,17 +323,21 @@ The two designators are hand-held tools. Press [b]Reload[/b] to cycle modes, [b]
 Both designators share two extra modes:
 
 [list]
-[*][b]Tag[/b]: point at your own drones to tag them (up to 32). The next order goes to every tagged drone, one job each. Without tags, one suitable drone is picked for you.
-[*][b]Recall[/b]: point at one of your drones to call it home. It drops its current job. Point at the GPS marker of an order instead (within about 8 m) and every drone working that order comes home, and its jobs nobody has taken yet are cancelled.
+[*][b]Tag[/b]: point at your own drones to tag them (up to 32). The next order goes to every tagged drone, one job each. Without tags, one suitable drone is picked for you. A tagged Ore scout or Mining drone drops what it is doing for your spot check, area sweep or quarry preparation (not while out of power): a mining drone in a bore or quarry backs out first, and one that has mined anything clears its cargo first; the job it dropped is auctioned again.
+[*][b]Recall[/b]: point at one of your drones to call it home. It drops its current job. Point at the GPS marker of an order instead (within about 8 m, or aiming through it: a quarry's marker floats over the shaft dug under it) and every drone working that order comes home, and its jobs nobody has taken yet are cancelled. A drone in a bore or a quarry shaft backs out first.
 [/list]
 
 [h3]Scouting (Industrial Target Designator)[/h3]
 
-Spot checks go to any drone with an ore detector (Ore scouts first). Area sweeps go only to drones with the [b]Ore scout[/b] profile and an ore detector. Tag mode accepts any of your drones with an ore detector; a sweep uses only the tagged Ore scouts.
+Spot checks go to any drone with an ore detector (Ore scouts first). Area sweeps go only to drones with the [b]Ore scout[/b] profile and an ore detector. Tag mode accepts any of your drones with an ore detector; a sweep uses only the tagged Ore scouts. An area sweep with a tagged [b]Mining drone[/b] prepares a quarry instead (below); tagging scouts and mining drones together is refused.
 
 [list]
 [*][b]Spot check[/b]: point at the ground or an asteroid. A scout flies there, scans for ore and comes back. With several tagged scouts, they spread around the spot.
 [*][b]Area sweep[/b]: point at an area. A scout sweeps it (a spiral over a planet; on an asteroid, low orbits round the rock through the spot - 4, or one per scout up to 8 - close to the surface, with spacing set by the scout's ore detector range). With several tagged scouts, the area is split between them; they set off a second apart and join their orbits at different points. A waypoint the scout can't reach is skipped (up to 3 in a row), and in space scouts wait longer before giving up on a stalled leg.
+[/list]
+
+[list]
+[*][b]Quarry preparation[/b]: tag one or more mining drones, then area sweep a spot. They dig a straight shaft there (see Mining method above), centred on the spot, Q deep per order; the GPS marker shows the expected depth, "Quarry preparation (40m)". With several tagged drones, Q is the largest of theirs and the shaft is split into equal sections, one per drone (lanes or a grid, as square as fits); a section only needs to hold the drone's hull across the shaft (tall drones dig narrow lanes, turned to fit, and keep pace with each other layer by layer); the drones that don't fit are left out (they keep their jobs). With the hand-held designator, more area sweeps within 50 m in the next 5 seconds add Q of depth each. The Target Designator block sends at once. Once the drones have it, more orders there are refused until you recall them. Ores are kept: the shaft goes down to about 10 m above any other ore it finds and stops there ("Quarry stopped above Gold at 35 m (the ore kept)").
 [/list]
 
 A GPS marker shows the order: yellow while waiting for a drone, green once taken. Everything the scouts find goes to your Mining Surveyors, ready to be ordered.

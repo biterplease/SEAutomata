@@ -109,6 +109,7 @@ namespace Automata.Drone
             routeWaitFor = 0;
             mineAngled = false;
             mineSiteFixed = false;
+            jobQuarry = -1;   // (the next job reads the Mining method again)
             lastKeepaliveFrame = int.MinValue / 2;   // the first keepalive at once: its announcer starts watching
             mineRebores = 0;
             boreLineStarts.Clear();
@@ -542,13 +543,14 @@ namespace Automata.Drone
 
                 case Orchestrator.TaskType.UnloadInventory:
                 {
+                    if (!HasCargoFor(task.Inventory, UnloadAllOre(taskIndex))) return TaskStatus.Done;   // nothing aboard it takes (its dock skipped)
                     var target = DockedConnector();
                     if (target == null) return Fail(Orchestrator.TaskFailure.TargetNotFound, TaskStatus.Failed);
                     BuildHomeNetwork(target);
                     lastCargoPortId = target.EntityId;
                     // Mining: every ore aboard (stone, other ores: refineries take them), unless another unload follows
                     // (ice jobs: the ice at the O2/H2 generators' computer first, the rest at the refinery's)
-                    bool allOre = currentJob.JobType == Orchestrator.JobType.MineOre && currentJob.IndexOf(Orchestrator.TaskType.UnloadInventory, taskIndex + 1) < 0;
+                    bool allOre = UnloadAllOre(taskIndex);
                     // Mining: the job's ore counts for the surveyor's order when it comes off here (not what was aboard: a
                     // full base kept it all aboard and the order counted it delivered)
                     var jobOre = currentJob.JobType == Orchestrator.JobType.MineOre ? JobOreKey() : MyStringHash.NullOrEmpty;
@@ -778,6 +780,13 @@ namespace Automata.Drone
                     {
                         dockWaitTarget = 0;
                         dockRetries = 0;
+                        // A dock only to unload what isn't aboard (a mining trip that found only stone): no trip
+                        if (taskIndex + 1 < currentJob.Tasks.Count && currentJob.Tasks[taskIndex + 1].Type == Orchestrator.TaskType.UnloadInventory
+                            && !HasCargoFor(currentJob.Tasks[taskIndex + 1].Inventory, UnloadAllOre(taskIndex + 1)))
+                        {
+                            if (Log.DebugEnabled) Log.Debug("Drone {0}: dock at {1} skipped: nothing aboard to unload there", Entity.EntityId, task.TargetEntityId);
+                            return TaskStatus.Done;
+                        }
                         var target = task.TargetEntityId != 0 ? AnchorDirectory.Resolve(block, task.TargetEntityId) as IMyShipConnector : null;
                         if (target == null) return Fail(Orchestrator.TaskFailure.TargetNotFound, TaskStatus.ToReturnHome);
                         if (IsDockedAt(target.EntityId)) return TaskStatus.Done;
@@ -3128,6 +3137,13 @@ namespace Automata.Drone
         }
 
         private double minedOreKg;   // MineOre: ore unloaded at the job's logistics computer so far (UnloadInventory)
+
+        // The unload at 'index' takes every ore aboard: a mining job's last unload that isn't limited to its listed items
+        private bool UnloadAllOre(int index)
+        {
+            return currentJob.JobType == Orchestrator.JobType.MineOre && !currentJob.Tasks[index].OnlyListed
+                   && currentJob.IndexOf(Orchestrator.TaskType.UnloadInventory, index + 1) < 0;
+        }
 
         private MyStringHash JobOreKey()
         {

@@ -233,8 +233,10 @@ namespace Automata.VirtualNetwork
         /// <summary>The designator block that sent it (0: a hand-held one): answered on DESIGNATOR_ORDER_UPDATE; a Drone Controller
         /// on its construct never takes the job.</summary>
         [ProtoMember(27)] public long OriginBlockId;
-        /// <summary>MineOre for a logistics computer's ore request (its entity id): unloaded there when it bids room; 0: anywhere.</summary>
+        /// <summary>MineOre for a logistics computer's ore request (its entity id): unloaded there only, a targeted delivery; 0: anywhere.</summary>
         [ProtoMember(28)] public long DeliverTo;
+        /// <summary>With DeliverTo: the CN index of that computer's network that asked for it (0: any short of it).</summary>
+        [ProtoMember(29)] public int DeliverToNetwork;
 
         /// <summary>Summary fields from the job's first work site and total inventory.</summary>
         public static JobAnnouncement FromJob(Orchestrator.Job job, AutomataEntityType entityType, bool isStaticGrid)
@@ -317,6 +319,10 @@ namespace Automata.VirtualNetwork
         [ProtoMember(24)] public bool Sequential;
         /// <summary>A designator order sent by a target designator block: a drone on that grid's construct (mechanical group) never bids.</summary>
         [ProtoMember(25)] public long NoBidGridId;
+        /// <summary>MineOre for one logistics computer's ore request (JobAnnouncement.DeliverTo): only that one bids room.</summary>
+        [ProtoMember(26)] public long DeliverTo;
+        /// <summary>See JobAnnouncement.DeliverToNetwork.</summary>
+        [ProtoMember(27)] public int DeliverToNetwork;
     }
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class Bid : IMessagePayload
@@ -372,14 +378,20 @@ namespace Automata.VirtualNetwork
         /// <summary>Logistics computers, MineOre auctions: the best working refinery on the bid's network: 0 none, 1 basic,
         /// 2 refinery / industrial, 3 prototech (ores a basic one can't take go to the better ones).</summary>
         [ProtoMember(23)] public byte RefineryTier;
-        /// <summary>Logistics computers, MineOre auctions: a working O2/H2 generator on the bid's network (ice).</summary>
-        [ProtoMember(24)] public bool GasGenerators;
+        /// <summary>Logistics computers, MineOre auctions: a working O2/H2 generator or irrigation system on the bid's network (ice).</summary>
+        [ProtoMember(24)] public bool IceConsumers;
         /// <summary>The connector the drone is docked at right now (0: none). The orchestrator keeps it as the dock of a
         /// job that starts at that station: no undock / dock again to load.</summary>
         [ProtoMember(25)] public long DockedConnectorId;
 
         /// <summary>Mining: the drone's hull radius across its drill axis (m): how far apart pooled miners bore (0: unknown).</summary>
         [ProtoMember(26)] public float BoreRadius;
+        /// <summary>Logistics computers, MineOre auctions: a place for the other ores only (stone with ice, another
+        /// computer's request), not for the job's ore (BidInventory empty).</summary>
+        [ProtoMember(29)] public bool RestOnly;   // (27 is Quarry, below)
+        /// <summary>Logistics computers, MineOre auctions: the bid's network takes the other ores too (a working refinery,
+        /// or "Accept ores" on).</summary>
+        [ProtoMember(28)] public bool TakesRest;
 
         /// <summary>Mining: the drone digs a quarry (Mining method Quarry): it mines a job alone (no pooled miners with it).</summary>
         [ProtoMember(27)] public bool Quarry;

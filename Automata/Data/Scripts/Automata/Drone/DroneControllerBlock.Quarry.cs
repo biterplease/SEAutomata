@@ -132,8 +132,11 @@ namespace Automata.Drone
         {
             if (mine.Type != Orchestrator.TaskType.Mine) return false;
             if (IsQuarryPrepare(ref mine)) return true;
-            return settings != null && settings.MiningMethod == MiningMethod.Quarry && mine.TargetBlock.X != 1 && !mineSiteFixed;
+            // The method is read once per job, when it first sets off for the site: a change after that waits for the next job
+            if (jobQuarry < 0) jobQuarry = (sbyte)(settings != null && settings.MiningMethod == MiningMethod.Quarry ? 1 : 0);
+            return jobQuarry == 1 && mine.TargetBlock.X != 1 && !mineSiteFixed;
         }
+        private sbyte jobQuarry = -1;   // this job's mining method: -1 not read yet, 1 quarry, 0 bore
 
         // A preparation's section (Orchestrator.Task.QuarryPrepare); none set: the whole shaft, the drone's own Q
         private static void QuarrySection(ref Orchestrator.Task mine, out int index, out int cols, out int rows, out long group, out double side)

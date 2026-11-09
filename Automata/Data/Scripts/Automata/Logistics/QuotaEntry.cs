@@ -9,6 +9,8 @@ namespace Automata.Logistics
     /// One Min / Max line of a logistics computer: "item:min:max", e.g. "SteelPlate:100:5000", "Ingot/Iron:0:20000".
     /// The item is anything <see cref="AutomataSession.TryResolveItem"/> finds (key, subtype, display name); the
     /// numbers are whole and >= 0, 0 meaning "not set". Parsing fails (and nothing is changed) otherwise.
+    /// Both set (2026-11-07, hysteresis): under Min the computer requests up to the middle of Min..Max, over Max it pushes
+    /// down to it ("SteelPlate:1000:2000": 1500 either way). One set: back to it, once past it for 10 s (LogisticsComputerBlock).
     /// </summary>
     public struct QuotaEntry
     {

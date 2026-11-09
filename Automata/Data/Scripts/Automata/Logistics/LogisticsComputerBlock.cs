@@ -75,17 +75,41 @@ namespace Automata.Logistics
         private int lastScan = int.MinValue / 2, lastInventory = int.MinValue / 2, lastQuotaCheck = int.MinValue / 2;
         private int networkCounter;
 
-        // Min / Max (settings.Quotas, parsed)
+        // Min / Max: settings.Quotas, the main network's ("Any"); settings.NetworkQuotas, other networks' own lists by CN
+        // index (LogisticsComputerBlock.Networks). Parsed into QuotaSets
         private bool quotasDirty = true;
-        private readonly Dictionary<MyStringHash, int> minimums = new Dictionary<MyStringHash, int>(MyStringHash.Comparer);
-        private readonly Dictionary<MyStringHash, int> maximums = new Dictionary<MyStringHash, int>(MyStringHash.Comparer);
-        private readonly HashSet<MyStringHash> quotaKeys = new HashSet<MyStringHash>(MyStringHash.Comparer);
+        private const int QUOTA_SETTLE_TICKS = 10 * 60;   // Min or Max alone: past it this long before it is requested / pushed
         private readonly List<string> quotaWarnings = new List<string>();
+
+        /// <summary>
+        /// One Min / Max list, parsed, with its hysteresis state and its open jobs. Hysteresis (RequestLevel / PushLevel):
+        /// items with Min and Max under their Min being refilled to the middle, over their Max being drained to it; items
+        /// with one of them past it since (frame), waiting QUOTA_SETTLE_TICKS (runtime: a game load starts over).
+        /// </summary>
+        private sealed class QuotaSet
+        {
+            public int Index;   // 0: the main network's ("Any", settings.Quotas); else a CN index (settings.NetworkQuotas)
+            public readonly Dictionary<MyStringHash, int> Min = new Dictionary<MyStringHash, int>(MyStringHash.Comparer);
+            public readonly Dictionary<MyStringHash, int> Max = new Dictionary<MyStringHash, int>(MyStringHash.Comparer);
+            public readonly HashSet<MyStringHash> Keys = new HashSet<MyStringHash>(MyStringHash.Comparer);
+            public readonly HashSet<MyStringHash> Refilling = new HashSet<MyStringHash>(MyStringHash.Comparer);
+            public readonly HashSet<MyStringHash> Draining = new HashSet<MyStringHash>(MyStringHash.Comparer);
+            public readonly Dictionary<MyStringHash, int> LowSince = new Dictionary<MyStringHash, int>(MyStringHash.Comparer);
+            public readonly Dictionary<MyStringHash, int> HighSince = new Dictionary<MyStringHash, int>(MyStringHash.Comparer);
+            public readonly Dictionary<MyStringHash, int> OreShort = new Dictionary<MyStringHash, int>(MyStringHash.Comparer);   // "Ore requests mine"
+            public OpenJob Request, Push;
+        }
+        private readonly QuotaSet mainSet = new QuotaSet();
+        private readonly Dictionary<int, QuotaSet> netSets = new Dictionary<int, QuotaSet>();
+        private Dictionary<MyStringHash, int> minimums { get { return mainSet.Min; } }
+        private Dictionary<MyStringHash, int> maximums { get { return mainSet.Max; } }
+        private HashSet<MyStringHash> quotaKeys { get { return mainSet.Keys; } }
 
         // Jobs this computer announced (one request and one push open at a time)
         private sealed class OpenJob
         {
             public uint JobId;
+            public int Network;      // the CN index it is for (0: the main network)
             public Orchestrator.JobType Type;
             public DiscreteInventory Items;
             public int Opened, LastAnnounced, LastChange, LastTotal;
@@ -100,7 +124,8 @@ namespace Automata.Logistics
             public VRageMath.Vector3D CachedAt;
             public string LastResult;
         }
-        private OpenJob requestJob, pushJob;
+        private OpenJob requestJob { get { return mainSet.Request; } set { mainSet.Request = value; } }
+        private OpenJob pushJob { get { return mainSet.Push; } set { mainSet.Push = value; } }
         private int jobCounter, messageCounter, bidCounter;
 
         // Bids: what was promised to which auction, from which network (so two auctions don't get the same plates)
@@ -209,6 +234,12 @@ namespace Automata.Logistics
             var loaded = MyAPIGateway.Utilities.SerializeFromBinary<LogisticsComputerSettings>(data);
             if (loaded == null) return false;
             if (loaded.Quotas == null) loaded.Quotas = new List<string>();
+            if (!loaded.AcceptSplit)
+            {
+                // Saved before "Accept mined ores/ice" was split: ice as the ores were
+                loaded.AcceptMinedIce = loaded.AcceptMinedOre;
+                loaded.AcceptSplit = true;
+            }
             settings = loaded;
             return true;
         }
@@ -271,18 +302,19 @@ namespace Automata.Logistics
             if (primary == null) { status = Loc.T(MyStrings.Logistics_NoConveyorNetwork); return; }
             status = Loc.T(MyStrings.Logistics_Active);
             ExpireCommitments(now);
-            if (quotaKeys.Count > 0 && now - lastQuotaCheck >= QUOTA_CHECK_TICKS)
+            if (HasQuotas && now - lastQuotaCheck >= QUOTA_CHECK_TICKS)
             {
                 lastQuotaCheck = now;
                 CheckQuotas(now);
             }
-            else if (quotaKeys.Count == 0) { requestJob = null; pushJob = null; oreShortfall.Clear(); }
+            else if (!HasQuotas) DropQuotaJobs();
             ReadFailures(now);
             ReadJobReports(now);
             ReadKeepalives(now);
             droneWatch.Check(now, block, false, "LC {0}", entityId, null);
-            RepeatAnnouncement(requestJob, now);
-            RepeatAnnouncement(pushJob, now);
+            RepeatAnnouncement(mainSet.Request, now);
+            RepeatAnnouncement(mainSet.Push, now);
+            foreach (var s in netSets.Values) { RepeatAnnouncement(s.Request, now); RepeatAnnouncement(s.Push, now); }
             ReadAuctions(now);
             ReadAwards(now);
         }
@@ -352,6 +384,7 @@ namespace Automata.Logistics
         // calls instead of ~N^2.
         private void MapNetworks()
         {
+            cnMainBefore = IndexOfNetwork(primary);   // (whose list was the "Any" one: CarryNetworkLists)
             for (int i = 0; i < networks.Count; i++) networks[i].Detach();
             networks.Clear();
             networkKeys.Clear();
@@ -387,6 +420,7 @@ namespace Automata.Logistics
                 if (blk.EntityId < networkKeys[found]) networkKeys[found] = blk.EntityId;
             }
             for (int i = 0; i < networks.Count; i++) networks[i].Attach();
+            AssignNetworkIndexes();
             if (Log.DebugEnabled)
             {
                 Log.Debug("LC {0}: {1} inventory blocks mapped with {2} connectivity checks", entityId, ordered.Count, calls);
@@ -446,71 +480,224 @@ namespace Automata.Logistics
         {
             if (AutomataSession.componentLookup.Count == 0) return;   // item definitions not loaded yet
             quotasDirty = false;
-            minimums.Clear();
-            maximums.Clear();
-            quotaKeys.Clear();
             quotaWarnings.Clear();
-            for (int i = 0; i < settings.Quotas.Count; i++)
+            ParseInto(mainSet, settings.Quotas, "");
+            // Other networks' own lists: their sets kept (open jobs) while the list stays
+            var seen = new HashSet<int>();
+            if (settings.NetworkQuotas != null)
+                for (int i = 0; i < settings.NetworkQuotas.Count; i++)
+                {
+                    var nq = settings.NetworkQuotas[i];
+                    if (nq == null || nq.Index <= 0 || nq.Quotas == null || nq.Quotas.Count == 0 || !seen.Add(nq.Index)) continue;
+                    QuotaSet s;
+                    if (!netSets.TryGetValue(nq.Index, out s))
+                    {
+                        s = new QuotaSet { Index = nq.Index };
+                        netSets[nq.Index] = s;
+                        RestorePendingJobs(s);
+                    }
+                    ParseInto(s, nq.Quotas, Loc.F(MyStrings.Logistics_Network, nq.Index) + ": ");
+                }
+            var gone = new List<int>();
+            foreach (var k in netSets.Keys) if (!seen.Contains(k)) gone.Add(k);
+            for (int i = 0; i < gone.Count; i++) netSets.Remove(gone[i]);
+            int mins = mainSet.Min.Count, maxs = mainSet.Max.Count;
+            foreach (var s in netSets.Values) { mins += s.Min.Count; maxs += s.Max.Count; }
+            if (mins > 0 && !Has(OperationMode.Request)) quotaWarnings.Add(Loc.T(MyStrings.Logistics_MinSetButRequestMode));
+            if (maxs > 0 && !Has(OperationMode.Push)) quotaWarnings.Add(Loc.T(MyStrings.Logistics_MaxSetButPushMode));
+            if (Log.DebugEnabled) Log.Debug("LC {0}: Min/Max: {1} min, {2} max ({3} network list(s) of their own), {4} warning(s)", entityId, mins, maxs, netSets.Count, quotaWarnings.Count);
+            for (int i = 0; i < quotaWarnings.Count; i++) if (Log.DebugEnabled) Log.Debug("LC {0}: Min/Max warning: {1}", entityId, quotaWarnings[i]);
+        }
+
+        // One list into its set ('prefix': its warnings' "CN 2: ")
+        private void ParseInto(QuotaSet s, List<string> list, string prefix)
+        {
+            s.Min.Clear();
+            s.Max.Clear();
+            s.Keys.Clear();
+            s.Refilling.Clear();
+            s.Draining.Clear();
+            s.LowSince.Clear();
+            s.HighSince.Clear();
+            for (int i = 0; i < list.Count; i++)
             {
                 QuotaEntry e;
-                if (!QuotaEntry.TryParse(settings.Quotas[i], out e))
+                if (!QuotaEntry.TryParse(list[i], out e))
                 {
-                    quotaWarnings.Add(Loc.F(MyStrings.Logistics_UnknownItemOrNotWhole, settings.Quotas[i]));
+                    quotaWarnings.Add(prefix + Loc.F(MyStrings.Logistics_UnknownItemOrNotWhole, list[i]));
                     continue;
                 }
-                quotaKeys.Add(e.Key);
+                s.Keys.Add(e.Key);
                 // Min above Max: it would be requested and pushed away in a loop
                 if (e.Min > 0 && e.Max > 0 && e.Min > e.Max)
                 {
-                    quotaWarnings.Add(Loc.F(MyStrings.Logistics_MinMaxWouldLoopRequested, e.Key.String, e.Min, e.Max));
+                    quotaWarnings.Add(prefix + Loc.F(MyStrings.Logistics_MinMaxWouldLoopRequested, e.Key.String, e.Min, e.Max));
                     continue;
                 }
-                if (e.Min > 0) minimums[e.Key] = e.Min;
-                if (e.Max > 0) maximums[e.Key] = e.Max;
+                if (e.Min > 0) s.Min[e.Key] = e.Min;
+                if (e.Max > 0) s.Max[e.Key] = e.Max;
             }
-            if (minimums.Count > 0 && !Has(OperationMode.Request)) quotaWarnings.Add(Loc.T(MyStrings.Logistics_MinSetButRequestMode));
-            if (maximums.Count > 0 && !Has(OperationMode.Push)) quotaWarnings.Add(Loc.T(MyStrings.Logistics_MaxSetButPushMode));
-            if (Log.DebugEnabled) Log.Debug("LC {0}: Min/Max: {1} min, {2} max, {3} warning(s)", entityId, minimums.Count, maximums.Count, quotaWarnings.Count);
-            for (int i = 0; i < quotaWarnings.Count; i++) if (Log.DebugEnabled) Log.Debug("LC {0}: Min/Max warning: {1}", entityId, quotaWarnings[i]);
+        }
+
+        private bool HasQuotas
+        {
+            get { return mainSet.Keys.Count > 0 || netSets.Count > 0; }
+        }
+
+        // No Min / Max left anywhere: every open request / push dropped
+        private void DropQuotaJobs()
+        {
+            mainSet.Request = mainSet.Push = null;
+            mainSet.OreShort.Clear();
+            foreach (var s in netSets.Values) { s.Request = s.Push = null; s.OreShort.Clear(); }
+        }
+
+        // An open job of this computer's by id (main network's or another network's list), or null
+        private OpenJob OwnJob(uint jobId)
+        {
+            if (mainSet.Request != null && mainSet.Request.JobId == jobId) return mainSet.Request;
+            if (mainSet.Push != null && mainSet.Push.JobId == jobId) return mainSet.Push;
+            foreach (var s in netSets.Values)
+            {
+                if (s.Request != null && s.Request.JobId == jobId) return s.Request;
+                if (s.Push != null && s.Push.JobId == jobId) return s.Push;
+            }
+            return null;
+        }
+
+        // The set whose Min / Max a network keeps: the main network's for the main one, a network's own (in use) else, or null
+        private QuotaSet SetFor(ConveyorNetwork network)
+        {
+            if (network == null) return null;
+            if (network == primary) return mainSet;
+            int idx = IndexOfNetwork(network);
+            QuotaSet s;
+            return idx > 0 && netSets.TryGetValue(idx, out s) ? s : null;
         }
         #endregion
 
         #region Request / Push
+        // The main network against the "Any" list; every other network with a list of its own against that one (a network
+        // that is the main one now: the "Any" list applies to it, its own waits)
         private void CheckQuotas(int now)
+        {
+            CheckSet(mainSet, primary, now);
+            foreach (var s in netSets.Values)
+            {
+                var n = NetworkByIndex(s.Index);
+                if (n == null || n == primary) { s.Request = s.Push = null; s.OreShort.Clear(); continue; }
+                CheckSet(s, n, now);
+            }
+        }
+
+        private void CheckSet(QuotaSet s, ConveyorNetwork network, int now)
         {
             // Quotas count everything the network holds (ice in its generators, uranium in its reactors too); supply
             // bids only what a drone may take (GetCurrentInventory)
-            var have = primary.GetHeldInventory();
-            if (Has(OperationMode.Request) && minimums.Count > 0)
+            var have = network.GetHeldInventory();
+            if (Has(OperationMode.Request) && s.Min.Count > 0)
             {
                 var missing = new DiscreteInventory();
-                oreShortfall.Clear();
+                s.OreShort.Clear();
                 bool mine = settings.OreRequestsMine;
-                foreach (var m in minimums)
+                foreach (var m in s.Min)
                 {
                     int count = have.GetItemCount(m.Key);
-                    if (count >= m.Value) continue;
+                    int want = RequestLevel(s, m.Key, m.Value, count, now);
+                    if (count >= want) continue;
                     if (mine && IsOreKey(m.Key))
                     {
-                        oreShortfall[m.Key] = m.Value - count;   // mined for it, never hauled (OreRequests)
+                        s.OreShort[m.Key] = want - count;   // mined for it, never hauled (OreRequests)
                         continue;
                     }
-                    missing.AddItem(m.Key, m.Value - count);
+                    missing.AddItem(m.Key, want - count);
                 }
-                requestJob = UpdateJob(requestJob, missing, have, Orchestrator.JobType.DeliverMissingInventory, now);
+                s.Request = UpdateJob(s.Request, missing, have, Orchestrator.JobType.DeliverMissingInventory, now);
+                if (s.Request != null) s.Request.Network = s.Index;
             }
-            else { requestJob = null; oreShortfall.Clear(); }
-            if (Has(OperationMode.Push) && maximums.Count > 0)
+            else { s.Request = null; s.OreShort.Clear(); }
+            if (Has(OperationMode.Push) && s.Max.Count > 0)
             {
                 var excess = new DiscreteInventory();
-                foreach (var m in maximums)
+                foreach (var m in s.Max)
                 {
                     int count = have.GetItemCount(m.Key);
-                    if (count > m.Value) excess.AddItem(m.Key, count - m.Value);
+                    int keepAt = PushLevel(s, m.Key, m.Value, count, now);
+                    if (count > keepAt) excess.AddItem(m.Key, count - keepAt);
                 }
-                pushJob = UpdateJob(pushJob, excess, have, Orchestrator.JobType.CollectInventorySurplus, now);
+                s.Push = UpdateJob(s.Push, excess, have, Orchestrator.JobType.CollectInventorySurplus, now);
+                if (s.Push != null) s.Push.Network = s.Index;
             }
-            else pushJob = null;
+            else s.Push = null;
+        }
+
+        // The middle of an item's Min..Max (both set, Min < Max), else -1
+        private static int MidLevel(QuotaSet s, MyStringHash key)
+        {
+            int min, max;
+            if (!s.Min.TryGetValue(key, out min) || !s.Max.TryGetValue(key, out max) || max <= min) return -1;
+            return min + (max - min) / 2;
+        }
+
+        /// <summary>
+        /// The level an item is requested up to (count or more: nothing to request). Min and Max set: under Min, up to the
+        /// middle of Min..Max, and on until it gets there (hysteresis: "SteelPlate:1000:2000" under 1000 asks for 1500).
+        /// Min alone: back to Min, once it has been under it QUOTA_SETTLE_TICKS (a passing dip settles first).
+        /// </summary>
+        private static int RequestLevel(QuotaSet s, MyStringHash key, int min, int count, int now)
+        {
+            int mid = MidLevel(s, key);
+            if (mid >= 0)
+            {
+                s.LowSince.Remove(key);
+                if (count < min) s.Refilling.Add(key);
+                else if (count >= mid) s.Refilling.Remove(key);
+                return s.Refilling.Contains(key) ? mid : min;
+            }
+            s.Refilling.Remove(key);
+            if (count >= min) { s.LowSince.Remove(key); return min; }
+            int since;
+            if (!s.LowSince.TryGetValue(key, out since)) { s.LowSince[key] = now; return count; }
+            return now - since >= QUOTA_SETTLE_TICKS ? min : count;
+        }
+
+        /// <summary>
+        /// The level an item is pushed down to (count or less: nothing to push). Min and Max set: over Max, down to the
+        /// middle, and on until it gets there. Max alone: back to Max, once it has been over it QUOTA_SETTLE_TICKS.
+        /// </summary>
+        private static int PushLevel(QuotaSet s, MyStringHash key, int max, int count, int now)
+        {
+            int mid = MidLevel(s, key);
+            if (mid >= 0)
+            {
+                s.HighSince.Remove(key);
+                if (count > max) s.Draining.Add(key);
+                else if (count <= mid) s.Draining.Remove(key);
+                return s.Draining.Contains(key) ? mid : max;
+            }
+            s.Draining.Remove(key);
+            if (count <= max) { s.HighSince.Remove(key); return max; }
+            int since;
+            if (!s.HighSince.TryGetValue(key, out since)) { s.HighSince[key] = now; return count; }
+            return now - since >= QUOTA_SETTLE_TICKS ? max : count;
+        }
+
+        // What a network keeps when supplying others: its list's Min, the middle while refilling to it
+        private static int KeepFloor(QuotaSet s, MyStringHash key)
+        {
+            int min;
+            s.Min.TryGetValue(key, out min);
+            int mid = s.Refilling.Contains(key) ? MidLevel(s, key) : -1;
+            return Math.Max(min, mid);
+        }
+
+        // How high a network takes an item in: its list's Max, the middle while draining to it (int.MaxValue: no cap)
+        private static int TakeCeiling(QuotaSet s, MyStringHash key)
+        {
+            int max;
+            if (!s.Max.TryGetValue(key, out max)) return int.MaxValue;
+            int mid = s.Draining.Contains(key) ? MidLevel(s, key) : -1;
+            return mid >= 0 ? Math.Min(max, mid) : max;
         }
 
         // One open job per kind: kept while it isn't done; done when nothing is needed any more, when items moved for
@@ -584,7 +771,8 @@ namespace Automata.Logistics
             }
             if (now - job.LastAnnounced < (job.Announced ? RESPONSE_TIMEOUT_TICKS : RETRY_TICKS)) return;
             job.LastAnnounced = now;
-            var dock = FreeDock(primary);
+            var forNet = job.Network == 0 ? primary : NetworkByIndex(job.Network);   // a network's own list: delivered / collected there
+            var dock = forNet != null ? FreeDock(forNet) : null;
             if (dock == null) { job.LastResult = Loc.T(MyStrings.Logistics_NoFreeConnector); if (Log.DebugEnabled) Log.Debug("LC {0}: job {1}: no free connector to announce", entityId, job.JobId); return; }
             Vector3D at = dock.PositionData.ToVector3D();
             Message<JobAnnouncement> msg = job.Cached;
@@ -684,7 +872,12 @@ namespace Automata.Logistics
                         if (Has(OperationMode.ProvideForLogistics)) BidRoom(a, items, now);
                         break;
                     case Orchestrator.JobType.MineOre:
-                        if (Has(OperationMode.ProvideForLogistics)) BidRoom(a, items, now, true);
+                        // A delivery for this computer's own ore request (OreRequests): its ore taken here, whatever its settings
+                        if (a.DeliverTo == entityId) { BidRoom(a, items, now, true, true); break; }
+                        if (!Has(OperationMode.ProvideForLogistics)) break;
+                        // Another computer's request: at most a place for what else gets mined; any other job: the ore,
+                        // else (no refinery / O2/H2 generator / irrigation for it, the box off) a place for the rest
+                        if (a.DeliverTo != 0 || !BidRoom(a, items, now, true)) BidRest(a);
                         break;
                 }
             }
@@ -728,8 +921,8 @@ namespace Automata.Logistics
             wanted.GetAllItems(kv);
             for (int i = 0; i < kv.Count; i++)
             {
-                int keep = 0;
-                if (network == primary) minimums.TryGetValue(kv[i].Key, out keep);
+                var qs = SetFor(network);
+                int keep = qs != null ? KeepFloor(qs, kv[i].Key) : 0;
                 // Above the minimum (counted on everything held) and within what may be taken
                 int spare = Math.Min(have.GetItemCount(kv[i].Key), held.GetItemCount(kv[i].Key) - keep) - Promised(kv[i].Key, networkKeys[n]);
                 int give = Math.Min(kv[i].Value, Math.Max(0, spare));
@@ -740,17 +933,21 @@ namespace Automata.Logistics
             return supply;
         }
 
-        // To the network taking the most: free cargo room (less room other bids promised), the main one never above its Max
-        private void BidRoom(Auction a, DiscreteInventory incoming, int now, bool ore = false)
+        // To the network taking the most: free cargo room (less room other bids promised), the main one never above its Max.
+        // Mining jobs ('ore'): "Accept ores" ("Accept ice" for ice) off - only networks with a working refinery that takes
+        // the ore / an O2/H2 generator or irrigation system for the ice, and not while it (or what it refines into) is at
+        // its Max; on - any network with room, whatever Min / Max. 'requested': a delivery for this computer's own ore request - taken in
+        // like that, whatever the box says
+        private bool BidRoom(Auction a, DiscreteInventory incoming, int now, bool ore = false, bool requested = false)
         {
-            // Ore: only networks with a working refinery that takes it, and not while what it refines into is at its Max
-            if (ore && !WantsOre(incoming)) return;
-            bool needRefinery = ore && !settings.AcceptOreWithoutRefinery;
-            // Ice: to a network with a working O2/H2 generator when there is one, else anywhere with room
+            // Ice: to a network with a working O2/H2 generator or irrigation system when there is one, else ("Accept ice") anywhere with room
             bool ice = ore && IsIceOnly(incoming);
+            bool anyway = ore && ((ice ? settings.AcceptMinedIce : settings.AcceptMinedOre) || requested);
+            if (ore && !anyway && !WantsOre(incoming)) return false;
+            bool needRefinery = ore && !anyway;
             bool genSomewhere = false;
             if (ice)
-                for (int n = 0; n < networks.Count && !genSomewhere; n++) genSomewhere = networks[n].HasGasGenerators() && FreeDock(networks[n]) != null;
+                for (int n = 0; n < networks.Count && !genSomewhere; n++) genSomewhere = networks[n].HasIceConsumers() && FreeDock(networks[n]) != null;
             int best = -1;
             double bestVolume = 0;
             DiscreteInventory bestAccept = null;
@@ -761,9 +958,14 @@ namespace Automata.Logistics
             {
                 var dock = FreeDock(networks[n]);
                 if (dock == null) continue;
-                if (ice && genSomewhere && !networks[n].HasGasGenerators())
+                if (ice && genSomewhere && !networks[n].HasIceConsumers())
                 {
                     if (Log.DebugEnabled) Log.Debug("LC {0}: auction {1}: network {2} has no O2/H2 generator (another one has)", entityId, a.AuctionId, n + 1);
+                    continue;
+                }
+                if (requested && !ShortOf(networks[n], incoming, a.DeliverToNetwork))
+                {
+                    if (Log.DebugEnabled) Log.Debug("LC {0}: auction {1}: network {2} didn't ask for {3}", entityId, a.AuctionId, n + 1, DescribeItems(incoming));
                     continue;
                 }
                 if (needRefinery && !CanRefine(networks[n], incoming))
@@ -772,7 +974,7 @@ namespace Automata.Logistics
                     continue;
                 }
                 bool all;
-                var accept = RoomIn(n, incoming, out all);
+                var accept = RoomIn(n, incoming, out all, !anyway);
                 double volume = accept != null ? (double)accept.TotalInventoryVolume() : 0;
                 if (Log.DebugEnabled) Log.Debug("LC {0}: auction {1}: network {2} can take {3}", entityId, a.AuctionId, n + 1, accept != null ? DescribeItems(accept) : "nothing");
                 if (accept == null || volume <= 0) continue;
@@ -782,9 +984,37 @@ namespace Automata.Logistics
                 if (best >= 0 && (tier < bestTier || (tier == bestTier && volume <= bestVolume))) continue;
                 best = n; bestVolume = volume; bestAccept = accept; bestDock = dock; bestAll = all; bestTier = tier;
             }
-            if (best < 0) return;
+            if (best < 0) return false;
             commitments[a.AuctionId] = new Commitment { Items = bestAccept, Volume = bestVolume, Frame = now, Network = networkKeys[best], JobId = a.JobId };
             SendBid(a, bestAccept, bestAll ? InventoryFulfillment.AcceptAll : InventoryFulfillment.AcceptPartial, bestVolume, networks[best], bestDock);
+            return true;
+        }
+
+        /// <summary>
+        /// A mining job's other ores (the stone that comes with ice, what comes with another computer's ore request): a
+        /// place for them, not for the job's ore (2026-11-08: a computer with only an O2/H2 generator / irrigation system
+        /// took the ice and the stone with it). "Accept ores" on: any network with room; off: a network with a
+        /// working refinery. The best refinery first, then the most room. No promise kept (it isn't the job's amount).
+        /// </summary>
+        private bool BidRest(Auction a)
+        {
+            int best = -1, bestTier = -1;
+            double bestRoom = 0;
+            IOLocationData bestDock = null;
+            for (int n = 0; n < networks.Count; n++)
+            {
+                var dock = FreeDock(networks[n]);
+                if (dock == null) continue;
+                int tier = RefineryTierOf(networks[n]);
+                if (tier == 0 && !settings.AcceptMinedOre) continue;
+                double room = (double)networks[n].GetRemainingCargoVolume() - PromisedVolume(networkKeys[n]);
+                if (room <= 0) continue;
+                if (best >= 0 && (tier < bestTier || (tier == bestTier && room <= bestRoom))) continue;
+                best = n; bestTier = tier; bestRoom = room; bestDock = dock;
+            }
+            if (best < 0) return false;
+            SendBid(a, new DiscreteInventory(), InventoryFulfillment.AcceptPartial, bestRoom, networks[best], bestDock, true);
+            return true;
         }
 
         /// <summary>
@@ -828,8 +1058,8 @@ namespace Automata.Logistics
             bool ok = kv.Count > 0;
             for (int i = 0; i < kv.Count && ok; i++)
             {
-                // Ice is not refined: O2/H2 generators take it from cargo, so any network with room is fine
-                bool any = kv[i].Key.String == ICE_KEY;
+                // Ice is not refined: O2/H2 generators and irrigation systems take it from cargo
+                bool any = kv[i].Key.String == ICE_KEY && network.HasIceConsumers();
                 for (int r = 0; r < network.refineries.Count && !any; r++)
                 {
                     var refinery = network.refineries[r];
@@ -876,7 +1106,8 @@ namespace Automata.Logistics
             return wants;
         }
 
-        private DiscreteInventory RoomIn(int n, DiscreteInventory incoming, out bool all)
+        // 'capped': the main network takes an item up to its Max (TakeCeiling); false: room only
+        private DiscreteInventory RoomIn(int n, DiscreteInventory incoming, out bool all, bool capped = true)
         {
             var network = networks[n];
             all = true;
@@ -890,8 +1121,9 @@ namespace Automata.Logistics
             for (int i = 0; i < kv.Count; i++)
             {
                 int take = kv[i].Value;
-                int max;
-                if (network == primary && maximums.TryGetValue(kv[i].Key, out max)) take = Math.Min(take, Math.Max(0, max - have.GetItemCount(kv[i].Key)));
+                var qs = capped ? SetFor(network) : null;
+                int max = qs != null ? TakeCeiling(qs, kv[i].Key) : int.MaxValue;
+                if (max != int.MaxValue) take = Math.Min(take, Math.Max(0, max - have.GetItemCount(kv[i].Key)));
                 ComponentData data;
                 double unit = lookup.TryGetValue(kv[i].Key, out data) ? data.Volume : 0;
                 if (unit > 0) take = (int)Math.Min(take, Math.Floor(room / unit));
@@ -904,7 +1136,7 @@ namespace Automata.Logistics
             return accept.IsEmpty() ? null : accept;
         }
 
-        private void SendBid(Auction a, DiscreteInventory items, InventoryFulfillment fulfillment, double volume, ConveyorNetwork network, IOLocationData dock)
+        private void SendBid(Auction a, DiscreteInventory items, InventoryFulfillment fulfillment, double volume, ConveyorNetwork network, IOLocationData dock, bool restOnly = false)
         {
             var msg = new Message<Bid>
             {
@@ -922,7 +1154,9 @@ namespace Automata.Logistics
                     IOLocationData = dock,
                     DockSite = DockFit.SiteOf(network, dock.PositionData.ToVector3D()),
                     RefineryTier = a.JobType == Orchestrator.JobType.MineOre ? RefineryTierOf(network) : (byte)0,
-                    GasGenerators = a.JobType == Orchestrator.JobType.MineOre && network.HasGasGenerators(),
+                    IceConsumers = a.JobType == Orchestrator.JobType.MineOre && network.HasIceConsumers(),
+                    RestOnly = restOnly,
+                    TakesRest = a.JobType == Orchestrator.JobType.MineOre && (settings.AcceptMinedOre || RefineryTierOf(network) > 0),
                 },
                 MessageId = IdGenerator.GenerateId(ref messageCounter, entityId),
                 CreatedAt = TimeUtil.DateTimeToTimestamp(DateTime.UtcNow),
@@ -953,7 +1187,7 @@ namespace Automata.Logistics
                 LogAward(award);
                 if (award.AnnouncerEntityId == entityId)
                 {
-                    var own = requestJob != null && requestJob.JobId == award.JobId ? requestJob : pushJob != null && pushJob.JobId == award.JobId ? pushJob : null;
+                    var own = OwnJob(award.JobId);
                     if (own != null && own.Assigned == 0)
                     {
                         own.Assigned = now;
@@ -1020,7 +1254,7 @@ namespace Automata.Logistics
                         }
                     }
                     if (r.AnnouncerEntityId != entityId) continue;
-                    var job = requestJob != null && requestJob.JobId == r.JobId ? requestJob : pushJob != null && pushJob.JobId == r.JobId ? pushJob : null;
+                    var job = OwnJob(r.JobId);
                     if (job == null) continue;
                     if (job.Assigned == 0) { job.Assigned = now; job.DronesOut = Math.Max(job.DronesOut, 1); }   // an award never heard here
                     job.DronesOut--;
@@ -1048,7 +1282,7 @@ namespace Automata.Logistics
                 if (r == null || r.AnnouncerEntityId != entityId || r.DroneEntityId != reportInbox[i].SenderId
                     || !AnchorDirectory.IsAllowed(block.OwnerId, reportInbox[i].SenderOwnerId)) continue;
                 droneWatch.Heard(r.DroneEntityId, r.JobId, now);
-                var job = requestJob != null && requestJob.JobId == r.JobId ? requestJob : pushJob != null && pushJob.JobId == r.JobId ? pushJob : null;
+                var job = OwnJob(r.JobId);
                 if (job == null) continue;
                 if (job.Assigned == 0) job.DronesOut = Math.Max(job.DronesOut, 1);
                 job.Assigned = now;
@@ -1072,7 +1306,7 @@ namespace Automata.Logistics
                     if (Log.DebugEnabled) Log.Debug("LC {0}: auction {1} dropped ({2}): promise released", entityId, f.AuctionId, f.Reason);
                 }
                 if (f.AnnouncerEntityId != entityId) continue;
-                var job = requestJob != null && requestJob.JobId == f.JobId ? requestJob : pushJob != null && pushJob.JobId == f.JobId ? pushJob : null;
+                var job = OwnJob(f.JobId);
                 if (job == null || job.Assigned != 0 || (job.HeldUntil != 0 && job.HeldUntil > now)) continue;
                 job.HeldUntil = now + Math.Max(10, f.HoldSeconds) * 60;
                 job.LastResult = Loc.F(MyStrings.Logistics_OnHold, f.Reason);
@@ -1129,7 +1363,7 @@ namespace Automata.Logistics
             for (int c = 0; c < n.connectors.Count; c++) if (n.connectors[c] != null && n.connectors[c].IsWorking) ports++;
             return Loc.F(MyStrings.Logistics_ContainersPortAssemblerRefineryIes, n.Nickname,
                                  n.cargoContainers.Count, ports, n.assemblers.Count, n.refineries.Count, n.gasGenerators.Count, n.GasTankCount(true), n.GasTankCount(false),
-                                 (double)n.CurrentVolume, (double)n.MaxVolume, n == primary ? Loc.T(MyStrings.Logistics_Main) : "");
+                                 (double)n.CurrentVolume, (double)n.MaxVolume, n == primary ? Loc.T(MyStrings.Logistics_Main) : "", n.irrigationSystems.Count);
         }
 
         /// <summary>Terminal info panel.</summary>
@@ -1151,13 +1385,29 @@ namespace Automata.Logistics
                 info.AppendLoc(MyStrings.Logistics_MinHas, Nicknames.Item(m.Key), m.Value, have != null ? have.GetItemCount(m.Key) : 0).Append('\n');
             foreach (var m in maximums)
                 info.AppendLoc(MyStrings.Logistics_MaxHas, Nicknames.Item(m.Key), m.Value, have != null ? have.GetItemCount(m.Key) : 0).Append('\n');
+            foreach (var k in mainSet.Refilling)
+                info.AppendLoc(MyStrings.Logistics_Refilling, Nicknames.Item(k), MidLevel(mainSet, k), have != null ? have.GetItemCount(k) : 0).Append('\n');
+            foreach (var k in mainSet.Draining)
+                info.AppendLoc(MyStrings.Logistics_Draining, Nicknames.Item(k), MidLevel(mainSet, k), have != null ? have.GetItemCount(k) : 0).Append('\n');
             AppendJob(info, MyStrings.Logistics_Request, requestJob);
             AppendJob(info, MyStrings.Logistics_Push, pushJob);
+            foreach (var s in netSets.Values)
+            {
+                info.AppendLoc(MyStrings.Logistics_NetworkOwnList, Loc.F(MyStrings.Logistics_Network, s.Index), s.Keys.Count).Append('\n');
+                AppendJob(info, MyStrings.Logistics_Request, s.Request);
+                AppendJob(info, MyStrings.Logistics_Push, s.Push);
+            }
             if (commitments.Count > 0) info.AppendLoc(MyStrings.Logistics_PromisedInBids, commitments.Count).Append('\n');
             if (lastBid != null) info.AppendLoc(MyStrings.Logistics_LastBid, lastBid).Append('\n');
             if (reportedSmallConnectors != null)
                 info.AppendLoc(MyStrings.Logistics_SmallConnectorOnlyCombatDronesOre, reportedSmallConnectors).Append('\n');
             for (int i = 0; i < quotaWarnings.Count; i++) info.AppendLoc(MyStrings.Logistics_Warning, quotaWarnings[i]).Append('\n');
+            // Networks that can't take a request: no connector to deliver / collect at, no cargo container to hold it
+            for (int i = 0; i < networks.Count; i++)
+            {
+                if (networks[i].connectors.Count == 0) info.AppendLoc(MyStrings.Logistics_Warning, Loc.F(MyStrings.Logistics_CnNoConnectors, networks[i].Nickname)).Append('\n');
+                if (networks[i].cargoContainers.Count == 0) info.AppendLoc(MyStrings.Logistics_Warning, Loc.F(MyStrings.Logistics_CnNoCargo, networks[i].Nickname)).Append('\n');
+            }
             BuildHeader();
             info.Append('\n');
             for (int i = 0; i < header.Count; i++) info.Append(header[i]).Append('\n');
@@ -1183,7 +1433,11 @@ namespace Automata.Logistics
                 BidCounter = bidCounter,
                 Request = CaptureJob(requestJob),
                 Push = CaptureJob(pushJob),
+                NetworkKeys = new List<long>(cnKeys),
             };
+            foreach (var ns in netSets.Values)
+                if (ns.Request != null || ns.Push != null)
+                    s.NetworkJobs.Add(new NetworkJobsState { Index = ns.Index, Request = CaptureJob(ns.Request), Push = CaptureJob(ns.Push) });
             foreach (var c in commitments)
                 s.Commitments.Add(new CommitmentState { AuctionId = c.Key, Items = c.Value.Items, Volume = c.Value.Volume, AgeTicks = BlockSave.Age(c.Value.Frame),
                                                          Supply = c.Value.Supply, Network = c.Value.Network, Won = c.Value.Won, JobId = c.Value.JobId });
@@ -1207,6 +1461,7 @@ namespace Automata.Logistics
                 HoldTicksLeft = job.HeldUntil > now ? job.HeldUntil - now : 0,
                 DronesOut = job.DronesOut,
                 Finished = job.Finished,
+                Network = job.Network,
             };
         }
 
@@ -1226,6 +1481,7 @@ namespace Automata.Logistics
                 HeldUntil = js.HoldTicksLeft > 0 ? now + js.HoldTicksLeft : 0,
                 DronesOut = js.DronesOut,
                 Finished = js.Finished,
+                Network = js.Network,
                 LastAnnounced = int.MinValue / 2,
                 LastResult = Loc.T(MyStrings.Logistics_Restored),
             };
@@ -1238,6 +1494,7 @@ namespace Automata.Logistics
             bidCounter = s.BidCounter;
             requestJob = RestoreJob(s.Request);
             pushJob = RestoreJob(s.Push);
+            RestoreNetworks(s);
             if (s.Commitments != null)
                 for (int i = 0; i < s.Commitments.Count; i++)
                 {
@@ -1269,10 +1526,15 @@ namespace Automata.Logistics
         public bool Terminal_WorkModeProvideForConstruction { get { return GetMode(OperationMode.ProvideForConstruction); } set { SetMode(OperationMode.ProvideForConstruction, value); } }
         public bool Terminal_WorkModePush { get { return GetMode(OperationMode.Push); } set { SetMode(OperationMode.Push, value); } }
         public bool Terminal_WorkModeRequest { get { return GetMode(OperationMode.Request); } set { SetMode(OperationMode.Request, value); } }
-        public bool Terminal_AcceptOreWithoutRefinery
+        public bool Terminal_AcceptMinedOre
         {
-            get { return settings.AcceptOreWithoutRefinery; }
-            set { if (settings.AcceptOreWithoutRefinery == value) return; settings.AcceptOreWithoutRefinery = value; SettingsEdited(); }
+            get { return settings.AcceptMinedOre; }
+            set { if (settings.AcceptMinedOre == value) return; settings.AcceptMinedOre = value; SettingsEdited(); }
+        }
+        public bool Terminal_AcceptMinedIce
+        {
+            get { return settings.AcceptMinedIce; }
+            set { if (settings.AcceptMinedIce == value) return; settings.AcceptMinedIce = value; SettingsEdited(); }
         }
 
         // Min / Max lists (UI state is this player's own: selections and the edit box)
@@ -1283,15 +1545,20 @@ namespace Automata.Logistics
         /// <summary>The edit box: "item:min:max".</summary>
         public readonly StringBuilder Terminal_EditText = new StringBuilder();
 
-        public List<string> Terminal_Quotas { get { return settings.Quotas; } }
+        /// <summary>The Min / Max list shown: the selected network's (the "Any" list for Any and the main network).</summary>
+        public List<string> Terminal_Quotas { get { return ScopeList(false); } }
 
-        /// <summary>Items the Min / Max list has an entry for.</summary>
+        /// <summary>Items the shown Min / Max list has an entry for.</summary>
         public HashSet<MyStringHash> Terminal_QuotaKeys
         {
             get
             {
                 if (quotasDirty) ParseQuotas();
-                return quotaKeys;
+                if (ScopeIsMain) return quotaKeys;
+                var keys = new HashSet<MyStringHash>(MyStringHash.Comparer);
+                var list = ScopeList(false);
+                for (int i = 0; i < list.Count; i++) { QuotaEntry e; if (QuotaEntry.TryParse(list[i], out e)) keys.Add(e.Key); }
+                return keys;
             }
         }
 
@@ -1304,10 +1571,11 @@ namespace Automata.Logistics
 
         public void Terminal_SelectQuota(int index)
         {
-            if (index < 0 || index >= settings.Quotas.Count) return;
+            var list = ScopeList(false);
+            if (index < 0 || index >= list.Count) return;
             Terminal_SelectedQuota = index;
             Terminal_SelectedItem = MyStringHash.NullOrEmpty;
-            Terminal_EditText.Clear().Append(settings.Quotas[index]);
+            Terminal_EditText.Clear().Append(list[index]);
         }
 
         /// <summary>The edit box (for the item selected at the top) goes into the Min / Max list.</summary>
@@ -1324,7 +1592,7 @@ namespace Automata.Logistics
         /// <summary>The edit box replaces the entry selected in the Min / Max list.</summary>
         public bool Terminal_EditQuota()
         {
-            if (Terminal_SelectedQuota < 0 || Terminal_SelectedQuota >= settings.Quotas.Count) return false;
+            if (Terminal_SelectedQuota < 0 || Terminal_SelectedQuota >= ScopeList(false).Count) return false;
             QuotaEntry e;
             if (!QuotaEntry.TryParse(Terminal_EditText.ToString(), out e)) return false;
             Upsert(e, Terminal_SelectedQuota);
@@ -1333,9 +1601,11 @@ namespace Automata.Logistics
 
         public bool Terminal_RemoveQuota()
         {
-            if (Terminal_SelectedQuota < 0 || Terminal_SelectedQuota >= settings.Quotas.Count) return false;
-            if (Log.DebugEnabled) Log.Debug("LC {0}: Min/Max '{1}' removed", entityId, settings.Quotas[Terminal_SelectedQuota]);
-            settings.Quotas.RemoveAt(Terminal_SelectedQuota);
+            var list = ScopeList(false);
+            if (Terminal_SelectedQuota < 0 || Terminal_SelectedQuota >= list.Count) return false;
+            if (Log.DebugEnabled) Log.Debug("LC {0}: Min/Max '{1}' removed", entityId, list[Terminal_SelectedQuota]);
+            list.RemoveAt(Terminal_SelectedQuota);
+            DropEmptyNetworkLists();
             Terminal_SelectedQuota = -1;
             Terminal_EditText.Clear();
             SettingsEdited();
@@ -1353,7 +1623,8 @@ namespace Automata.Logistics
 
         public void Terminal_ClearQuotas()
         {
-            settings.Quotas.Clear();
+            ScopeList(false).Clear();
+            DropEmptyNetworkLists();
             Terminal_SelectedQuota = -1;
             SettingsEdited();
         }
@@ -1362,19 +1633,20 @@ namespace Automata.Logistics
         private void Upsert(QuotaEntry e, int at)
         {
             string text = e.ToString();
+            var list = ScopeList(true);
             int existing = IndexOfQuota(e.Key, at);
             if (at >= 0)
             {
-                settings.Quotas[at] = text;
+                list[at] = text;
                 if (existing >= 0)
                 {
-                    settings.Quotas.RemoveAt(existing);
+                    list.RemoveAt(existing);
                     if (existing < at) at--;
                 }
                 Terminal_SelectedQuota = at;
             }
-            else if (existing >= 0) { settings.Quotas[existing] = text; Terminal_SelectedQuota = existing; }
-            else { settings.Quotas.Add(text); Terminal_SelectedQuota = settings.Quotas.Count - 1; }
+            else if (existing >= 0) { list[existing] = text; Terminal_SelectedQuota = existing; }
+            else { list.Add(text); Terminal_SelectedQuota = list.Count - 1; }
             Terminal_EditText.Clear().Append(text);
             if (Log.DebugEnabled) Log.Debug("LC {0}: Min/Max '{1}' set", entityId, text);
             SettingsEdited();
@@ -1382,11 +1654,12 @@ namespace Automata.Logistics
 
         private int IndexOfQuota(MyStringHash key, int skip)
         {
-            for (int i = 0; i < settings.Quotas.Count; i++)
+            var list = ScopeList(false);
+            for (int i = 0; i < list.Count; i++)
             {
                 if (i == skip) continue;
                 QuotaEntry e;
-                if (QuotaEntry.TryParse(settings.Quotas[i], out e) && e.Key == key) return i;
+                if (QuotaEntry.TryParse(list[i], out e) && e.Key == key) return i;
             }
             return -1;
         }
@@ -1405,7 +1678,9 @@ namespace Automata.Logistics
         private void RetryHeld()
         {
             int n = 0;
-            foreach (var job in new[] { requestJob, pushJob })
+            var all = new List<OpenJob> { mainSet.Request, mainSet.Push };
+            foreach (var s in netSets.Values) { all.Add(s.Request); all.Add(s.Push); }
+            foreach (var job in all)
             {
                 if (job == null || job.Assigned != 0) continue;
                 job.HeldUntil = 0;
