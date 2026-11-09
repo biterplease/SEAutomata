@@ -14,6 +14,7 @@ It has notably, 5 settings that are core to its functioning:
 - **Accept mined ore**: Normally, Logistics Computers will only offer its cargo space for Ore mining jobs if it has blocks that consume the ores: Basic or Full Refinery. When its checked, it will accept ores regardless if it has a block to consume it.
 - **Accept mined icd**: Normally, Logistics Computers will only offer its cargo space for Ice mining jobs if it has blocks that consume the ice: O2/H2 generators, or Irrigation Systems. When its checked, it will accept ice regardless if it has a block to consume it.
 - **Ore requests mine**: Normally, ore/ice is treated like any other item. When this box is checked, the Logistics Computer will start a Mining Job to fulfill its need for ore/ice.
+- **Harvest crops**: Harvest crops from farm blocks that are 100% ready. Only observes the grid that the Logistics Computer is mounted on.
 
 Logistics computers never watch inventories outside of its own mechanical construct. This means:
 - Grids connected via connector are not watched

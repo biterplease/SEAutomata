@@ -1,0 +1,171 @@
+[h2]Server settings[/h2]
+
+Server admins can tune the mod in [b]Automata.ini[/b], in the mod's own folder (for a Workshop install, the mod's folder under [i]steamapps\workshop\content\244850\[/i], or the dedicated server's [i]content[/i] folder). Keep a copy of your edited file: a Workshop update replaces it.
+
+[list]
+[*]Only the server reads the file, once, when the world loads. Restart the world after editing it.
+[*]Times in [b]ticks[/b] are game frames: 60 ticks = 1 second.
+[*]Values outside the allowed range are clamped to it. Missing or unreadable values use the default.
+[*]When the world loads, the chat says "Server configuration loaded successfully", or "No config file found, using defaults".
+[*]Settings marked [i]Not used yet[/i] are read (or reserved) but don't change anything in this version.
+[/list]
+
+[h3][Pathfinding][/h3]
+
+How drones plan their routes and see obstacles. These are the main CPU settings for flying.
+
+[table]
+[tr][th]Setting[/th][th]Default[/th][th]What it does[/th][/tr]
+[tr][td]AllowDirectPathfinding[/td][td]true[/td][td]The drones' route planner. Off: drones fly straight lines to their targets without checking for obstacles. Leave it on.[/td][/tr]
+[tr][td]AllowLazyTheta[/td][td]true[/td][td]Route planner stage 3: when the straight line (with a few detours) and the route memory find no way, a Lazy Theta* search looks for one around the obstacle (out of asteroid pockets and caves, through cluttered bases). Off: those routes fail and the drone repositions. (Replaces AllowAStar, which is no longer read.)[/td][/tr]
+[tr][td]ThetaSearchRadius[/td][td]300[/td][td]Metres the search covers around the stretch that failed (50 to 2000). Further goals are searched for part of the way.[/td][/tr]
+[tr][td]ThetaMaxExpansions[/td][td]3000[/td][td]Most cells one search looks at (100 to 100000).[/td][/tr]
+[tr][td]ThetaMaxMs[/td][td]15[/td][td]Most milliseconds one search may take (1 to 500).[/td][/tr]
+[tr][td]PathSearchWorkers[/td][td]2[/td][td]Lazy Theta* searches run on this many worker threads (0 to 8; 0 = on the main thread, as before).[/td][/tr]
+[tr][td]PathSearchMaxMs[/td][td]50[/td][td]Most milliseconds one worker search may take (1 to 1000).[/td][/tr]
+[tr][td]PathWarmUp[/td][td]true[/td][td]Prepare the obstacle data of busy areas (bases with Automata blocks, projector surroundings, construction fields) ahead of the first route there.[/td][/tr]
+[tr][td]StraightMaxMs[/td][td]10[/td][td]Most milliseconds the straight-line stage (detours) may take before the later stages take over (0 to 1000; 0 = no limit).[/td][/tr]
+[tr][td]MemoryMaxMs[/td][td]10[/td][td]Most milliseconds the route-memory stage may take (0 to 1000; 0 = no limit).[/td][/tr]
+[tr][td]UsePathMemory[/td][td]true[/td][td]Route planner stage 2: the server remembers where drones have flown (shared by all drones, saved with the world) and plans through those known-free ways when the straight line fails.[/td][/tr]
+[tr][td]PathMemoryMaxNodes[/td][td]4000[/td][td]Most remembered points (100 to 100000); the least recently used are forgotten first.[/td][/tr]
+[tr][td]PathMemoryMaxAgeHours[/td][td]24[/td][td]Hours a remembered way may go unused before it is forgotten (1 to 8760).[/td][/tr]
+[tr][td]FlightLaneExpirationMinutes[/td][td]240[/td][td]Minutes a flight lane may go unused before it is dropped (5 to 525600). Lanes are always on.[/td][/tr]
+[tr][td]AllowSensors, AllowObstacleAvoidance, AllowSimpleRepositioning, AllowDStarLite, UseGravityAwarePathing, RepositionStep[/td][td][/td][td][i]Not used yet.[/i][/td][/tr]
+[tr][td]UsePlanetAwarePathfinding[/td][td]true[/td][td]On planets, long routes follow the planet's curve and climb over terrain. Off: straight lines, which can run into hills and mountains.[/td][/tr]
+[tr][td]MinWaypointDistance, MaxWaypointDistance[/td][td]5, 15[/td][td][i]Not used yet.[/i][/td][/tr]
+[tr][td]MaxRepositionAttempts[/td][td]10[/td][td]How many detours one route may take around obstacles, and how many times a drone re-plans a blocked route before the task fails.[/td][/tr]
+[tr][td]MinAltitudeBuffer[/td][td]20[/td][td]Metres kept above the highest terrain when a route climbs over a hill (the drone's own [b]Min altitude[/b] is used when higher). 0 to 1000.[/td][/tr]
+[tr][td]MaxPathNodes[/td][td]1000[/td][td]Most points in one route (at least 100). Very long planet routes use wider steps to stay within it.[/td][/tr]
+[tr][td]MaxPathfindingTimeMs[/td][td]50[/td][td][i]Not used yet.[/i][/td][/tr]
+[tr][td]RequireCamerasForPathfinding[/td][td]true[/td][td]On: drones only see far-off obstacles through working, switched-on cameras, each looking along its facing from where it is mounted (six cameras cover every direction). Off: every drone sees as if it had one camera on the front of its hull, looking forward.[/td][/tr]
+[tr][td]RequireSensorsForPathfinding[/td][td]true[/td][td]On: drones only see close obstacles within range of a working, switched-on sensor block, around where that sensor is mounted (the sensor's own range settings don't matter): a long ship with one sensor at an end only senses around that end. Drones without one get a warning in their header. Off: every drone senses that range all around its hull.[/td][/tr]
+[tr][td]CameraRange[/td][td]1500[/td][td]How far a camera sees, in metres (10 to 5000).[/td][/tr]
+[tr][td]SimulatedSensorRange[/td][td]100[/td][td]How far a sensor sees, in metres (1 to 500).[/td][/tr]
+[tr][td]RaysPerTick[/td][td]60[/td][td]Obstacle checks per tick, shared by all drones on the server (5 to 1000). Lower uses less CPU, but drones notice obstacles later when many are flying.[/td][/tr]
+[tr][td]AllowRepathing[/td][td]true[/td][td]Something blocks the route: the drone plans a way around it. Off: the drone stops and the task fails.[/td][/tr]
+[tr][td]ObstacleClearance[/td][td]3[/td][td]Metres kept between the hull and obstacles when routes are checked (0 to 20). Higher is safer, but tight spaces may become unreachable.[/td][/tr]
+[tr][td]CruiseAltitude[/td][td]40[/td][td](Not in the shipped file; add it to change it.) On planets, long flights cruise at least this many metres above the terrain: straight up after take-off, straight down to land. 0 to 1000.[/td][/tr]
+[tr][td]ArcMinDistance[/td][td]300[/td][td]On planets, routes longer than this (metres) follow the planet's curve (50 to 100000).[/td][/tr]
+[tr][td]ArcStep[/td][td]200[/td][td]Shortest straight piece of such a curved route, in metres (25 to 10000).[/td][/tr]
+[tr][td]ArcSag[/td][td]25[/td][td]How far a straight piece may dip below its ends, in metres (1 to 500). Bigger means fewer, longer straight pieces.[/td][/tr]
+[tr][td]DockClearance[/td][td]0.25[/td][td]Metres kept around the hull when flying in and out of hangars and docking bays (0.1 to 3).[/td][/tr]
+[tr][td]DockClearanceMin[/td][td]0.1[/td][td]Tried when no way in fits with DockClearance (tight doors). The drone then flies in at half speed (0.05 to 3).[/td][/tr]
+[tr][td]DockCorridorMaxLength[/td][td]40[/td][td]How far from a connector, in metres, the drone looks for a straight way in with room to turn (10 to 200).[/td][/tr]
+[/table]
+
+[h3][Drone][/h3]
+
+[table]
+[tr][th]Setting[/th][th]Default[/th][th]What it does[/th][/tr]
+[tr][td]TaskTimeoutSeconds[/td][td]30[/td][td]The highest [b]Task timeout[/b] a player can set on a drone (10 to 600). A task that stops making progress for that long fails.[/td][/tr]
+[tr][td]DebugDrawTimeoutSeconds[/td][td]3600[/td][td]The debug overlays (drone construction field and navigation targets, construction computer field, orchestrator parking area and lanes, [i]/automata debugdraw[/i]) switch themselves off after this many seconds (10 to 3600).[/td][/tr]
+[tr][td]DefaultMonitorHydrogen, DefaultMonitorBattery, DefaultHydrogenRefuelThreshold, DefaultHydrogenOperationalThreshold, DefaultBatteryRefuelThreshold, DefaultBatteryOperationalThreshold, MinPowerThreshold, MaxPowerThreshold[/td][td][/td][td][i]Not used yet.[/i] Each drone uses its own terminal settings.[/td][/tr]
+[tr][td]ComponentCheckIntervalSeconds[/td][td]600[/td][td]How often a drone re-checks all of its own blocks (60 to 86400). Adding or removing blocks triggers a check anyway.[/td][/tr]
+[tr][td]ConnectorScanIntervalSeconds[/td][td]60[/td][td]How often a drone's home connector / beacon lists may refresh on their own.[/td][/tr]
+[tr][td]ConnectorScanMinMoveMeters[/td][td]250[/td][td]...but only if the drone moved at least this far since the last refresh...[/td][/tr]
+[tr][td]ConnectorScanMaxAgeSeconds[/td][td]600[/td][td]...or the list is older than this.[/td][/tr]
+[tr][td]ConnectorManualScanIntervalSeconds[/td][td]60[/td][td]Shortest time between two presses of [b]Scan[/b] on one drone (5 to 3600).[/td][/tr]
+[tr][td]ConnectorScanRadius[/td][td]1000[/td][td]Radius of the automatic connector / beacon lists, in metres (100 to 5000).[/td][/tr]
+[tr][td]ConnectorNameSearchRadius[/td][td]15000[/td][td]Radius of [b]Add to list[/b] (search by name), and the farthest a home connector or beacon may be from the drone, in metres.[/td][/tr]
+[tr][td]ConnectorNameSearchIntervalSeconds[/td][td]10[/td][td]Shortest time between two name searches on one drone.[/td][/tr]
+[tr][td]WeldUseDroneShape[/td][td]true[/td][td]Weld jobs: where the drone's bounding box doesn't fit the way in to a block, its real shape is checked (its blocks merged into a few boxes), so a welder snout can reach between built neighbours.[/td][/tr]
+[tr][td]WeldUseNeighbourShapes[/td][td]true[/td][td]Weld jobs: built blocks next to the target that are in the way are checked against their real shape (slopes, panels), not as full cubes.[/td][/tr]
+[tr][td]CombatMaxDetectionRange[/td][td]2000[/td][td]Enemies the AI Defensive block reports farther away than this (metres) are ignored (100 to 50000). The vanilla block sees 2000 m; raise it only for modded AI blocks.[/td][/tr]
+[/table]
+
+[h3][ConstructionComputer][/h3]
+
+[table]
+[tr][th]Setting[/th][th]Default[/th][th]What it does[/th][/tr]
+[tr][td]DroneMaxJobsPerScan[/td][td]125[/td][td]Stand-alone drones: most blocks taken from one scan of the construction field (1 to 1000).[/td][/tr]
+[tr][td]DroneScanIntervalSeconds[/td][td]30[/td][td]Stand-alone drones: seconds between scans while idle, and the pause after a failed trip (5 to 3600).[/td][/tr]
+[tr][td]MaxPublishedJobs[/td][td]10[/td][td]Construction Computers: jobs open at once that no drone has taken yet (1 to 100). Higher lets more drones start at the same time, at the cost of more auctions.[/td][/tr]
+[/table]
+
+[h3][Orchestrator][/h3]
+
+[table]
+[tr][th]Setting[/th][th]Default[/th][th]What it does[/th][/tr]
+[tr][td]MaxConcurrentAuctions[/td][td]10[/td][td]Auctions one Orchestrator runs at once (1 to 100). Further jobs wait in its queue.[/td][/tr]
+[tr][td]NoBidTimeoutSeconds[/td][td]60[/td][td]An auction with no drone bid for this long is dropped, and the computer that announced it is told (10 to 600).[/td][/tr]
+[tr][td]FailedJobHoldSeconds[/td][td]60[/td][td]How long that computer then waits before announcing the job again (10 to 7200). The [b]Retry jobs[/b] buttons skip the wait.[/td][/tr]
+[/table]
+
+[h3][ScoutPointer][/h3]
+
+The target designators.
+
+[table]
+[tr][th]Setting[/th][th]Default[/th][th]What it does[/th][/tr]
+[tr][td]PendingGpsColor[/td][td]255,210,0[/td][td]Colour of an industrial designator order's GPS marker while it waits for a drone. [i]R,G,B[/i] or [i]#RRGGBB[/i].[/td][/tr]
+[tr][td]ConfirmedGpsColor[/td][td]40,220,60[/td][td]Colour of the marker once every job of the order has a drone.[/td][/tr]
+[tr][td]CombatGpsColor[/td][td]139,0,0[/td][td][i]Not used yet.[/i] Combat orders have no marker, since the target moves.[/td][/tr]
+[tr][td]ConfirmTimeoutSeconds[/td][td]10[/td][td]A designator order that no suitable drone takes within this many seconds is cancelled (3 to 300).[/td][/tr]
+[/table]
+
+[h3][Mining][/h3]
+
+[table]
+[tr][th]Setting[/th][th]Default[/th][th]What it does[/th][/tr]
+[tr][td]ScanCellsPerUpdate[/td][td]8[/td][td]How much of the voxel world one ore scan reads at a time (32 m cells, every 10 ticks; 1 to 128). The CPU cap of ore scanning: higher finishes scans faster but costs more.[/td][/tr]
+[tr][td]MaxScanRadius[/td][td]300[/td][td]Ore scans reach at most this far, in metres, whatever the ore detector's range (50 to 2000).[/td][/tr]
+[tr][td]DepositMergeMeters[/td][td]50[/td][td]The same ore found within this distance of a known deposit counts as that deposit (10 to 500).[/td][/tr]
+[tr][td]MaxDepositsPerSurveyor[/td][td]500[/td][td]Deposits one Mining Surveyor remembers; the farthest are forgotten first (10 to 5000).[/td][/tr]
+[tr][td]MaxPublishedJobs[/td][td]5[/td][td]Mining jobs one surveyor has open at once that no drone has taken yet (1 to 50).[/td][/tr]
+[tr][td]SurveyorScanIntervalSeconds[/td][td]120[/td][td]Seconds between a Mining Surveyor's scans with the ore detector on its own grid (10 to 3600).[/td][/tr]
+[tr][td]DroneSurveyIntervalSeconds[/td][td]10[/td][td]Seconds between a surveying drone's scans; it must also have moved half a scan radius (2 to 600).[/td][/tr]
+[tr][td]MaxGpsMarkers[/td][td]30[/td][td]Most deposit markers [b]Show known deposits[/b] puts on the GPS, nearest first (1 to 200).[/td][/tr]
+[/table]
+
+[h3][SchedulerBounds][/h3]
+
+[table]
+[tr][th]Setting[/th][th]Default[/th][th]What it does[/th][/tr]
+[tr][td]BidCollectionWindowTicks[/td][td]300[/td][td]How long an Orchestrator collects bids before picking the winners (at least 60). Longer gives better picks but slower starts. Big jobs wait a bit longer for more drones.[/td][/tr]
+[tr][td]BidBlacklistCooldownTicks[/td][td]3600[/td][td]How long a Construction Computer holds a block back after a drone gave it up (at least 60). Blocks a drone couldn't reach are always held 5 minutes.[/td][/tr]
+[tr][td]MaxTargetLimit, PerScanLimit, MaxTaskAssignmentPerBatch, ScanDelayTicks, ErrorRecoveryIntervalTicks, MaxConsecutiveErrors, MaintenanceIntervalTicks[/td][td][/td][td][i]Not used yet.[/i][/td][/tr]
+[/table]
+
+The [b][SchedulerBounds.StateUpdateIntervalTicks][/b] section (Initializing, Error, Standby, Scanning, Assigning) is [i]not used yet[/i].
+
+[h3][MessageQueue][/h3]
+
+The virtual radio network the Automata blocks talk over.
+
+[table]
+[tr][th]Setting[/th][th]Default[/th][th]What it does[/th][/tr]
+[tr][td]MessageRetentionTicks[/td][td]600[/td][td]How long a message lives on the network: readers in range that look within this time get it (at least 600).[/td][/tr]
+[tr][td]MessageCleanupIntervalTicks[/td][td]600[/td][td]How often expired messages are cleaned up (at least 60).[/td][/tr]
+[/table]
+
+[h3][Logging][/h3]
+
+[table]
+[tr][th]Setting[/th][th]Default[/th][th]What it does[/th][/tr]
+[tr][td]LogLevel[/td][td]Error, Warning[/td][td]What goes into the mod's log file: any combination of [i]Verbose[/i], [i]Info[/i], [i]Debug[/i], [i]Warning[/i], [i]Error[/i], or [i]Quiet[/i] for nothing. [i]Debug[/i] logs every auction, bid and drone decision: useful to find out why a drone doesn't take a job, but the file grows fast.[/td][/tr]
+[tr][td]LogPathfinding, LogDroneNetwork, LogDroneOrders[/td][td][/td][td][i]Not used yet.[/i][/td][/tr]
+[/table]
+
+The log is [b]Automata.log[/b], in [i]%AppData%\SpaceEngineers\Storage\<mod id>.sbm_Automata\[/i] (on a dedicated server, the same [i]Storage[/i] folder of the server's instance).
+
+[h3][LogisticsComputer][/h3]
+
+Not in the shipped file; add the section to use it.
+
+[table]
+[tr][th]Setting[/th][th]Default[/th][th]What it does[/th][/tr]
+[tr][td]AllowLogistics[/td][td]true[/td][td]Off: Logistics Computers lose their [b]Provide for logistics[/b], [b]Push[/b] and [b]Request[/b] options, and the other work mode options are locked.[/td][/tr]
+[tr][td]AllowNetworkPush[/td][td]true[/td][td]Off: the [b]Push[/b] option is hidden.[/td][/tr]
+[tr][td]AllowNetworkRequests[/td][td]true[/td][td]Off: the [b]Request[/b] option is hidden.[/td][/tr]
+[tr][td]MinPushFrequencyTicks, MaxPushFrequencyTicks[/td][td][/td][td][i]Not used yet.[/i][/td][/tr]
+[/table]
+
+These settings only change the terminal: computers already set to a mode keep it.
+
+[h3]Sections not used yet[/h3]
+
+[list]
+[*][b][Session][/b]: UpdateInterval (and the unlisted EnableLogistics, EnableWeldTasks, EnableGrindTasks) don't change anything yet.
+[*][b][BlockLimits][/b]: block limits per player and faction are not enforced yet.
+[*][b][Performance][/b] and [b][Safety][/b]: old settings, no longer read.
+[/list]
