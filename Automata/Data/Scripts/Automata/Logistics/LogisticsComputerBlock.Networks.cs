@@ -474,63 +474,7 @@ namespace Automata.Logistics
         private int cnDrawIndex = -1;   // -1 off; 0 every network; -2 the main one; else that CN index
         private int cnDrawStart;
         private static readonly MyStringId CnDrawMaterial = MyStringId.GetOrCompute("Square");
-        private static readonly MyStringId CnDotMaterial = MyStringId.GetOrCompute("WhiteDot");
         private static readonly Color CnColor = Color.Lime;
-        // A block's conveyor ports (model space), by definition: its "conveyor" dummies, as BuildInfo finds them
-        private static readonly Dictionary<MyDefinitionId, List<Vector3D>> cnPorts = new Dictionary<MyDefinitionId, List<Vector3D>>();
-        private static readonly Dictionary<string, IMyModelDummy> cnDummies = new Dictionary<string, IMyModelDummy>();
-
-        private static readonly List<Vector3D> cnCentres = new List<Vector3D>();
-        private static readonly List<double> cnBest = new List<double>();
-        private static readonly List<int> cnFrom = new List<int>();
-
-        // Prim's tree over the points (a few hundred at most): each joined to the nearest already in the tree
-        private static void DrawTree(List<Vector3D> pts, ref Vector4 c, float thick)
-        {
-            int n = pts.Count;
-            if (n < 2) return;
-            cnBest.Clear();
-            cnFrom.Clear();
-            for (int i = 0; i < n; i++) { cnBest.Add(double.MaxValue); cnFrom.Add(-1); }
-            var inTree = new bool[n];
-            int cur = 0;
-            inTree[0] = true;
-            for (int added = 1; added < n; added++)
-            {
-                int next = -1;
-                for (int i = 0; i < n; i++)
-                {
-                    if (inTree[i]) continue;
-                    double d = Vector3D.DistanceSquared(pts[i], pts[cur]);
-                    if (d < cnBest[i]) { cnBest[i] = d; cnFrom[i] = cur; }
-                    if (next < 0 || cnBest[i] < cnBest[next]) next = i;
-                }
-                if (next < 0) break;
-                inTree[next] = true;
-                MySimpleObjectDraw.DrawLine(pts[cnFrom[next]], pts[next], CnDrawMaterial, ref c, thick, VRageRender.MyBillboard.BlendTypeEnum.PostPP);
-                cur = next;
-            }
-        }
-
-        private static List<Vector3D> PortsOf(IMyCubeBlock b)
-        {
-            List<Vector3D> ports;
-            if (cnPorts.TryGetValue(b.BlockDefinition, out ports)) return ports;
-            ports = new List<Vector3D>();
-            if (b.Model != null)
-            {
-                cnDummies.Clear();
-                b.Model.GetDummies(cnDummies);
-                foreach (var kv in cnDummies)
-                {
-                    string name = kv.Key.ToLowerInvariant();
-                    if (name.Contains("conveyor") && !name.Contains("section")) ports.Add((Vector3D)kv.Value.Matrix.Translation);
-                }
-                cnDummies.Clear();
-            }
-            if (b.IsFunctional) cnPorts[b.BlockDefinition] = ports;   // (a block under construction has another model)
-            return ports;
-        }
 
         /// <summary>Terminal "Identify CN": the picked network outlined ("Any": the main one).</summary>
         public void Terminal_IdentifyNetwork()
@@ -565,28 +509,17 @@ namespace Automata.Logistics
             {
                 var n = list[i];
                 if (cnDrawIndex != 0 && !(cnDrawIndex == -2 ? n.Main : n.Index == cnDrawIndex)) continue;
-                // The network's item-holding blocks (cargo, connectors, refineries...; not the conveyors between them): each a
-                // dot with stubs to its conveyor ports, the blocks joined by the shortest tree through their centres - how the
-                // network hangs together, not each tube. Drawn after post-processing: through the blocks in front.
-                Vector4 c = CnColor.ToVector4();
-                cnCentres.Clear();
-                float thick = 0.05f;
                 for (int b = 0; b < n.Blocks.Count; b++)
                 {
                     IMyEntity e;
                     if (!MyAPIGateway.Entities.TryGetEntityById(n.Blocks[b], out e) || e == null || e.MarkedForClose) continue;
-                    var cube = e as IMyCubeBlock;
-                    if (cube == null || cube.CubeGrid == null) continue;
-                    thick = cube.CubeGrid.GridSize * 0.04f;
                     MatrixD m = e.WorldMatrix;
-                    Vector3D centre = e.WorldAABB.Center;
-                    cnCentres.Add(centre);
-                    var ports = PortsOf(cube);
-                    for (int p = 0; p < ports.Count; p++)
-                        MySimpleObjectDraw.DrawLine(centre, Vector3D.Transform(ports[p], m), CnDrawMaterial, ref c, thick * 0.6f, VRageRender.MyBillboard.BlendTypeEnum.PostPP);
-                    MyTransparentGeometry.AddPointBillboard(CnDotMaterial, c, centre, thick * 4, 0, -1, VRageRender.MyBillboard.BlendTypeEnum.PostPP);
+                    BoundingBoxD box = e.LocalAABB;
+                    box.Inflate(0.05);
+                    Color c = CnColor;
+                    MySimpleObjectDraw.DrawTransparentBox(ref m, ref box, ref c, ref c, MySimpleObjectRasterizer.Wireframe, Vector3I.One, 0.03f,
+                        null, CnDrawMaterial, false, -1, VRageRender.MyBillboard.BlendTypeEnum.SDR);
                 }
-                DrawTree(cnCentres, ref c, thick);
             }
             return true;
         }
