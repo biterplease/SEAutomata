@@ -78,4 +78,7 @@ Typically, you would want to separate the irrigation systems from the O2/H2 gene
 
 One way to do it, is to keep entirely separate networks, and keep separate Ice requests on each.
 
+The image above shows 2 Conveyor Networks in a single grid, completely separate from each other. Each has a request for Ore/Ice:20000:0, and each has checked "Ore/Ice requests mine".
+
+This triggers mining jobs for Ice, to be delivered to it. Since it does not have any refineries, any stone generated from the mining gets delivered elsewhere.
 
