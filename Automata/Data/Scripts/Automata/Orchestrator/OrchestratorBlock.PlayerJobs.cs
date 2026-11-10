@@ -80,6 +80,9 @@ namespace Automata.Orchestrator
                 case JobType.DesignatorEngage:
                 case JobType.DesignatorEscort:    return Drone.BehaviourProfile.IsCombatDrone;
                 case JobType.DesignatorQuarry:    return Drone.BehaviourProfile.IsMiningDrone;
+                // Not designator jobs, but only these two profiles take them (either one, PreferredProfile first)
+                case JobType.TrashCollection:
+                case JobType.FarmCrops:           return Drone.BehaviourProfile.IsJanitorDrone | Drone.BehaviourProfile.IsHarvesterDrone;
                 default:                          return Drone.BehaviourProfile.None;
             }
         }

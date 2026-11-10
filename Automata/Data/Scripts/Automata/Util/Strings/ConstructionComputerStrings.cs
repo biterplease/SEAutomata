@@ -4,6 +4,8 @@ namespace Automata.Util.Strings
 {
     public static partial class MyStrings
     {
+        public static readonly MyStringId Construction_CollectTrash = MyStringId.GetOrCompute("{LOC:Construction_CollectTrash}"); // "Collect trash"
+        public static readonly MyStringId Construction_CollectTrashTooltip = MyStringId.GetOrCompute("{LOC:Construction_CollectTrashTooltip}"); // "Order collection of floating items"
         public static readonly MyStringId DisplayName_Automata_ConstructionComputer = MyStringId.GetOrCompute("{LOC:DisplayName_Automata_ConstructionComputer}"); // "Automata Construction Computer"
         public static readonly MyStringId Description_Automata_ConstructionComputer = MyStringId.GetOrCompute("{LOC:Description_Automata_ConstructionComputer}"); // "Plans welding and grinding work. Allows drones to collaborate efficiently in a single construction field."
 
@@ -99,4 +101,4 @@ namespace Automata.Util.Strings
         public static readonly MyStringId Construction_WeldPriorityColonArg0 = MyStringId.GetOrCompute("{LOC:Construction_WeldPriorityColonArg0}"); // "Weld priority: {0}"
         public static readonly MyStringId Construction_WeldUnfinishedBlocks = MyStringId.GetOrCompute("{LOC:Construction_WeldUnfinishedBlocks}"); // "Weld unfinished blocks"
     }
-}
+}

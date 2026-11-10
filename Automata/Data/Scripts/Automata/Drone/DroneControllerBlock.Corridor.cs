@@ -96,7 +96,22 @@ namespace Automata.Drone
         /// ground), 45° up or straight up. Clear: the route's own clearance and terrain. Shorter when blocked (the
         /// longest clear one); none (turnAt) under DOCK_STAGING_MIN.
         /// </summary>
-        private Vector3D DockStagingPoint(Vector3D turnAt, Vector3D outDir)
+        // For the logs: each waypoint's height over the start (gravity) / its distance, "+3.2 m, +50.1 m, ..."
+        private string RouteHeights(Vector3D start, List<Vector3D> points, Vector3D end)
+        {
+            if (points == null) return "";
+            var sb = new System.Text.StringBuilder(" (height over the start:");
+            bool g = flightState.InGravity;
+            for (int i = 0; i <= points.Count; i++)
+            {
+                Vector3D p = i < points.Count ? points[i] : end;
+                double h = g ? Vector3D.Dot(p - start, flightState.GravityUp) : Vector3D.Distance(p, start);
+                sb.Append(i == 0 ? " " : ", ").Append(h.ToString("+0.0;-0.0")).Append(" m");
+            }
+            return sb.Append(g ? ")" : " away)").ToString();
+        }
+
+        private Vector3D DockStagingPoint(Vector3D turnAt, Vector3D outDir, double maxLen = DOCK_STAGING_DISTANCE)
         {
             var pm = PathfindingManager.Instance;
             var cfg = AutomataSession.GetConfig();
@@ -111,12 +126,13 @@ namespace Automata.Drone
             int count = gravity ? 3 : 1;
             double bestLen = 0;
             Vector3D best = turnAt;
-            double clearance = cfg.Pathfinding.ObstacleClearance;
+            double clearance = CompactFlight ? COMPACT_CLEARANCE : cfg.Pathfinding.ObstacleClearance;
+            double stageMin = CompactFlight ? 1.5 : DOCK_STAGING_MIN;
             for (int i = 0; i < count; i++)
             {
                 Vector3D dir = i == 0 ? outDir : i == 1 ? Vector3D.Normalize(outDir + q.GravityUp) : q.GravityUp;
                 if (i > 0 && Vector3D.Dot(dir, outDir) > 0.99) continue;
-                double len = DOCK_STAGING_DISTANCE;
+                double len = maxLen;
                 Vector3D hit;
                 IMyEntity e;
                 if (pm.SegmentBlocked(ref q, ref q.Controller, turnAt, turnAt + dir * len, 0.5, out hit, out e))
@@ -128,10 +144,10 @@ namespace Automata.Drone
                     if (PathfindingManager.TerrainTooClose(turnAt + dir * 10, turnAt + dir * len, need, out th))
                         len = Vector3D.Dot(th - turnAt, dir) - 5;
                 }
-                if (len >= DOCK_STAGING_DISTANCE - 0.1) return turnAt + dir * DOCK_STAGING_DISTANCE;
+                if (len >= maxLen - 0.1) return turnAt + dir * maxLen;
                 if (len > bestLen) { bestLen = len; best = turnAt + dir * len; }
             }
-            return bestLen >= DOCK_STAGING_MIN ? best : turnAt;
+            return bestLen >= stageMin ? best : turnAt;
         }
         #endregion
 

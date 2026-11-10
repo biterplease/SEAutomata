@@ -123,6 +123,10 @@ namespace Automata.Logistics
             public long CachedDock;
             public VRageMath.Vector3D CachedAt;
             public string LastResult;
+            // FarmCrops (LogisticsComputerBlock.Farming): the harvest tasks, the farm's grid name, its centre
+            public List<Orchestrator.Task> Tasks;
+            public string Place;
+            public VRageMath.Vector3D Position;
         }
         private OpenJob requestJob { get { return mainSet.Request; } set { mainSet.Request = value; } }
         private OpenJob pushJob { get { return mainSet.Push; } set { mainSet.Push = value; } }
@@ -315,6 +319,7 @@ namespace Automata.Logistics
             RepeatAnnouncement(mainSet.Request, now);
             RepeatAnnouncement(mainSet.Push, now);
             foreach (var s in netSets.Values) { RepeatAnnouncement(s.Request, now); RepeatAnnouncement(s.Push, now); }
+            CheckFarm(now);
             ReadAuctions(now);
             ReadAwards(now);
         }
@@ -555,6 +560,7 @@ namespace Automata.Logistics
         // An open job of this computer's by id (main network's or another network's list), or null
         private OpenJob OwnJob(uint jobId)
         {
+            if (farmJob != null && farmJob.JobId == jobId) return farmJob;
             if (mainSet.Request != null && mainSet.Request.JobId == jobId) return mainSet.Request;
             if (mainSet.Push != null && mainSet.Push.JobId == jobId) return mainSet.Push;
             foreach (var s in netSets.Values)
@@ -871,6 +877,15 @@ namespace Automata.Logistics
                     case Orchestrator.JobType.CollectInventorySurplus:
                         if (Has(OperationMode.ProvideForLogistics)) BidRoom(a, items, now);
                         break;
+                    case Orchestrator.JobType.TrashCollection:   // a computer on the construction computer's grids ranks first
+                        if (!Has(OperationMode.ProvideForLogistics)) break;
+                        bidSameConstruct = OnOwnGrids(a.AnnouncerEntityId);
+                        BidRoom(a, items, now);
+                        bidSameConstruct = false;
+                        break;
+                    case Orchestrator.JobType.FarmCrops:         // (the farm's own computer is the unload first: its dock is in the job)
+                        if (Has(OperationMode.ProvideForLogistics)) BidRoom(a, items, now);
+                        break;
                     case Orchestrator.JobType.MineOre:
                         // A delivery for this computer's own ore request (OreRequests): its ore taken here, whatever its settings
                         if (a.DeliverTo == entityId) { BidRoom(a, items, now, true, true); break; }
@@ -1136,6 +1151,8 @@ namespace Automata.Logistics
             return accept.IsEmpty() ? null : accept;
         }
 
+        private bool bidSameConstruct;   // the bid being sent: on the announcer's grids (Bid.SameConstruct)
+
         private void SendBid(Auction a, DiscreteInventory items, InventoryFulfillment fulfillment, double volume, ConveyorNetwork network, IOLocationData dock, bool restOnly = false)
         {
             var msg = new Message<Bid>
@@ -1156,6 +1173,7 @@ namespace Automata.Logistics
                     RefineryTier = a.JobType == Orchestrator.JobType.MineOre ? RefineryTierOf(network) : (byte)0,
                     IceConsumers = a.JobType == Orchestrator.JobType.MineOre && network.HasIceConsumers(),
                     RestOnly = restOnly,
+                    SameConstruct = bidSameConstruct,
                     TakesRest = a.JobType == Orchestrator.JobType.MineOre && (settings.AcceptMinedOre || RefineryTierOf(network) > 0),
                 },
                 MessageId = IdGenerator.GenerateId(ref messageCounter, entityId),
@@ -1396,6 +1414,11 @@ namespace Automata.Logistics
                 info.AppendLoc(MyStrings.Logistics_NetworkOwnList, Loc.F(MyStrings.Logistics_Network, s.Index), s.Keys.Count).Append('\n');
                 AppendJob(info, MyStrings.Logistics_Request, s.Request);
                 AppendJob(info, MyStrings.Logistics_Push, s.Push);
+            }
+            if (settings.HarvestCrops)
+            {
+                info.AppendLoc(MyStrings.Logistics_FarmingDue, farmDue).Append('\n');
+                AppendJob(info, MyStrings.Logistics_Farming, farmJob);
             }
             if (commitments.Count > 0) info.AppendLoc(MyStrings.Logistics_PromisedInBids, commitments.Count).Append('\n');
             if (lastBid != null) info.AppendLoc(MyStrings.Logistics_LastBid, lastBid).Append('\n');

@@ -416,7 +416,7 @@ namespace Automata.Drone
                 case BehaviourProfile.None:
                 case BehaviourProfile.IsCargoDrone:
                 case BehaviourProfile.IsOreScout:
-                case BehaviourProfile.IsRover:
+                // case BehaviourProfile.IsRover:
                 case BehaviourProfile.IsCombatDrone:
                 case BehaviourProfile.IsOreHauler:
                 case BehaviourProfile.IsWelderDrone:
@@ -426,11 +426,18 @@ namespace Automata.Drone
                 case BehaviourProfile.IsGrinderDrone:
                 case BehaviourProfile.IsWelderGrinderDrone:
                 case BehaviourProfile.IsMiningDrone:
-                case BehaviourProfile.IsFarmingDrone:
+                case BehaviourProfile.IsHarvesterDrone:
+                case BehaviourProfile.IsJanitorDrone:
                     return true;
                 default:
                     return false;
             }
+        }
+
+        /// <summary>Janitor / harvester: trash collection and farming (a collector needed).</summary>
+        public static bool IsCollectorProfile(BehaviourProfile p)
+        {
+            return p == BehaviourProfile.IsJanitorDrone || p == BehaviourProfile.IsHarvesterDrone;
         }
 
         #region Behavior profile (orchestrators prefer matching drones; rover navigation not implemented yet)
@@ -579,6 +586,7 @@ namespace Automata.Drone
             Capabilities.CargoVolumeNil, Capabilities.CargoVolumeLt10m3, Capabilities.CargoVolumeLt100m3,
             Capabilities.CargoVolumeLt1000m3, Capabilities.CargoVolumeLt10000m3,
             Capabilities.LiftNil, Capabilities.LiftLt1t, Capabilities.LiftLt10t, Capabilities.LiftLt100t, Capabilities.LiftLt1000t,
+            Capabilities.CanCollect,
         };
 
         // Listbox selections: local to this player's terminal, never synced
@@ -612,6 +620,7 @@ namespace Automata.Drone
                 case Capabilities.CanWeld:              return Loc.T(MyStrings.Drone_Weld);
                 case Capabilities.CanGrind:             return Loc.T(MyStrings.Drone_Grind);
                 case Capabilities.CanDrill:             return Loc.T(MyStrings.Drone_Drill);
+                case Capabilities.CanCollect:           return Loc.T(MyStrings.Drone_Collect);
                 case Capabilities.CanScoutOre:          return Loc.T(MyStrings.Drone_ScoutOre);
                 case Capabilities.HasWheels:            return Loc.T(MyStrings.Drone_Wheels);
                 case Capabilities.CanFlyAtmosphere:     return Loc.T(MyStrings.Drone_FlyInAtmosphere);

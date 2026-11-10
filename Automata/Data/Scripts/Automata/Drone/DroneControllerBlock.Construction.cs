@@ -670,8 +670,9 @@ namespace Automata.Drone
         // Returns false when something that should have gone stayed in the drone (no room on the other side)
         // allOre: every ore aboard too (mining: other ores and stone the drill picked up)
         // What UnloadCargo moves: the listed items ('only'; an ore also by its subtype), else components; 'allOre': and every ore
-        private static bool UnloadTakes(VRage.Game.ModAPI.Ingame.MyItemType type, DiscreteInventory only, bool filtered, bool allOre)
+        private static bool UnloadTakes(VRage.Game.ModAPI.Ingame.MyItemType type, DiscreteInventory only, bool filtered, bool allOre, bool all = false)
         {
+            if (all) return true;   // trash collection / farming: whatever was picked up
             string typeId = type.TypeId;
             if (allOre && typeId == ORE_TYPE) return true;
             if (!filtered) return typeId == COMPONENT_TYPE;
@@ -679,7 +680,7 @@ namespace Automata.Drone
         }
 
         // Anything aboard (cargo, the tools' stores) UnloadCargo(only, allOre) would move
-        private bool HasCargoFor(DiscreteInventory only, bool allOre)
+        private bool HasCargoFor(DiscreteInventory only, bool allOre, bool all = false)
         {
             bool filtered = only != null && !only.IsEmpty();
             RefreshToolStores();
@@ -691,13 +692,13 @@ namespace Automata.Drone
                 itemBuffer.Clear();
                 src.GetItems(itemBuffer);
                 for (int i = 0; i < itemBuffer.Count && !any; i++)
-                    any = itemBuffer[i].Amount > 0 && UnloadTakes(itemBuffer[i].Type, only, filtered, allOre);
+                    any = itemBuffer[i].Amount > 0 && UnloadTakes(itemBuffer[i].Type, only, filtered, allOre, all);
             }
             itemBuffer.Clear();
             return any;
         }
 
-        private bool UnloadCargo(DiscreteInventory only, bool allOre = false)
+        private bool UnloadCargo(DiscreteInventory only, bool allOre = false, bool all = false)
         {
             if (homeNetwork.cargoContainers.Count == 0) return false;   // built by the caller for the connector docked at
             bool filtered = only != null && !only.IsEmpty();
@@ -713,7 +714,7 @@ namespace Automata.Drone
                 src.GetItems(itemBuffer);
                 for (int i = itemBuffer.Count - 1; i >= 0; i--)
                 {
-                    if (!UnloadTakes(itemBuffer[i].Type, only, filtered, allOre)) continue;
+                    if (!UnloadTakes(itemBuffer[i].Type, only, filtered, allOre, all)) continue;
                     var type = itemBuffer[i].Type;
                     // Container after container until the whole stack is gone (a transfer can be partial)
                     for (int d = 0; d < homeNetwork.cargoContainers.Count && AmountAt(src, i, type) > 0; d++)

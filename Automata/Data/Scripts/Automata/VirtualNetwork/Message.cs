@@ -237,6 +237,8 @@ namespace Automata.VirtualNetwork
         [ProtoMember(28)] public long DeliverTo;
         /// <summary>With DeliverTo: the CN index of that computer's network that asked for it (0: any short of it).</summary>
         [ProtoMember(29)] public int DeliverToNetwork;
+        /// <summary>FarmCrops: the farm's grid name (the orchestrator's "harvested" chat line).</summary>
+        [ProtoMember(30)] public string Place;
 
         /// <summary>Summary fields from the job's first work site and total inventory.</summary>
         public static JobAnnouncement FromJob(Orchestrator.Job job, AutomataEntityType entityType, bool isStaticGrid)
@@ -392,6 +394,12 @@ namespace Automata.VirtualNetwork
         /// <summary>Logistics computers, MineOre auctions: the bid's network takes the other ores too (a working refinery,
         /// or "Accept ores" on).</summary>
         [ProtoMember(28)] public bool TakesRest;
+        /// <summary>Logistics computers: on the announcer's construct (TrashCollection: ranks first).</summary>
+        [ProtoMember(30)] public bool SameConstruct;
+        /// <summary>Drones: their base (home connector, else where they last left from) and local-job radius (0: unknown,
+        /// an older drone). The orchestrator sends them to no connector outside it, and ranks them first for jobs within it.</summary>
+        [ProtoMember(31)] public Vector3DData HomePosition;
+        [ProtoMember(32)] public float LocalRadius;
 
         /// <summary>Mining: the drone digs a quarry (Mining method Quarry): it mines a job alone (no pooled miners with it).</summary>
         [ProtoMember(27)] public bool Quarry;

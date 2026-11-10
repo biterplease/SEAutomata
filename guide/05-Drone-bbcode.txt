@@ -1,0 +1,80 @@
+[h1]Drone Controller[/h1]
+
+[h2]Behavior profiles[/h2]
+
+The behaviuor profile tells Orchestrators what this drone [i]prefers[/i] to do. A drone still bids on any job its equipment allows, but drones with a matching profile always win over the others.
+
+[table]
+[tr][th]Profile[/th][th]Preferred jobs[/th][th]Notes[/th][/tr]
+[tr][td]Cargo drone[/td][td]Item deliveries and pickups between Logistics Computers[/td][td][/td][/tr]
+[tr][td]Ore hauler[/td][td]Ore and ice deliveries[/td][td]Takes [b]only[/b] ore / ice deliveries (and mining, if it has a drill). Can dock with small connectors.[/td][/tr]
+[tr][td]Welder:All[/td][td]Weld jobs of every kind[/td][td][/td][/tr]
+[tr][td]Welder:Repair[/td][td]Weld jobs, repair first[/td][td]Ranks first for repair jobs (damaged blocks), and bids on them first when several auctions are open. Still takes the other weld jobs, ranked below Welder:All.[/td][/tr]
+[tr][td]Welder:Projected[/td][td]Weld jobs, projections first[/td][td]The same, for projected build jobs.[/td][/tr]
+[tr][td]Welder:Unbuilt[/td][td]Weld jobs, unbuilt blocks first[/td][td]The same, for unbuilt jobs (placed blocks not welded up yet).[/td][/tr]
+[tr][td]Grinder drone[/td][td]Grind jobs[/td][td][/td][/tr]
+[tr][td]Welder + grinder drone[/td][td]Weld and grind jobs[/td][td][/td][/tr]
+[tr][td]Mining drone[/td][td]Mining jobs[/td][td]Needs a drill and an ore detector.[/td][/tr]
+[tr][td]Ore scout[/td][td]Industrial designator scouting[/td][td]The [b]only[/b] drones that take area sweeps, and the first choice for spot checks (any drone with an ore detector can take those). Needs an ore detector. Can dock with small connectors.[/td][/tr]
+[tr][td]Combat drone[/td][td]Hostile designator engage / escort[/td][td]The [b]only[/b] drones that take combat jobs. Needs AI Defensive, AI Flight and AI Offensive blocks. Can dock with small connectors.[/td][/tr]
+[tr][td]Harvester[/td][td]Crop farming[/td][td]Drone with collector that prefers harvesting crops, but can pickup trash if needed.[/td][/tr]
+[tr][td]Janitor[/td][td]Trash collection[/td][td]Trash collection, but can farm crops if needed.[/td][/tr]
+[/table]
+
+You can also stop a drone from bidding with some of its abilities in the [b]Jobs[/b] section (for example, "no jobs in space" even though it can fly there), and tell mining drones to ignore specific ores.
+
+[h2]Home connector and home beacon[/h2]
+
+Drones can be configured with a [b]home connector[/b]. When set, this drone will always return there to dock, recharge, refuel, and drop off leftover cargo.
+
+[list]
+[*]Pick one of your (or your faction's) connectors from the [b]Home connector[/b] list. Use [b]Scan[/b] to refresh the list, or type a connector's name to find one farther away.
+[*]Best results: dock the drone by hand, then press [b]Set current as home[/b]. The drone remembers that exact docking position and orientation.
+[*]Give each drone its own home connector. Two drones sharing one will fight over it.
+[*]If the home connector is on something that moves (a carrier, a mining ship), tick [b]Home connector is not station[/b] and select a [b]home beacon[/b] on the same ship. The drone uses the beacon to find its way back to the moving home.
+[/list]
+
+Drones with landing gear and no home connector can still park on nearby grids or the ground, and combat drones and ore scouts return to where they took off.
+
+A drone without a home connector clears leftover cargo (grinder salvage, a welder's unused components) at the last connector it loaded or unloaded at, or, if it knows none, at the nearest free connector within 2 km whose conveyor network has cargo room.
+
+[h2]Stand-alone mode[/h2]
+
+A stand-alone drone works by itself, without any computers or Orchestrator. It watches a small [b]construction field[/b] around its home connector (up to 10 x 10 x 10 blocks), or centered around a GPS marker instead and:
+
+[list]
+[*]welds unfinished blocks, repairs damaged ones, and builds projections,
+[*]grinds down blocks painted with the [b]grind color[/b],
+[*]never touches blocks painted with the [b]weld ignore color[/b].
+[/list]
+
+It loads the components it needs from the conveyor network of its home connector, does as much as it can carry, comes back, and repeats. You can choose the order it works in (repair, projections, unbuilt). Turn on [b]Show construction field[/b] to see the box.
+
+Stand-alone drones are lack the capabilities to coordinate large jobs, so two stand-alone drones observing the same area may go for the same block, bump into each other, or crash. For several drones on one project, use the Orchestrator.
+
+In stand-alone mode, the Drone's Weld priority is a strict order: it finishes one kind before starting the next.
+
+[h2]Managed by Orchestrator mode[/h2]
+
+In this mode the drone waits at home and bids on jobs from Orchestrators in antenna range. This is the mode for logistics, mining, large construction projects, and designator jobs. The drone flies out, does its task list, reports back and returns home. It still watches its battery and hydrogen levels and goes home to recharge when needed.
+
+[b]Low power[/b] (Monitor battery / hydrogen levels: under the refuel threshold every drone drops its job at once, whatever it was doing (an orchestrator's job is reported as aborted and auctioned again), then docks to charge: at home, if the home connector is set, otherwise at the nearest free connector. Cargo of the dropped job (ore, a haul) stays aboard and goes where that job was originally meant to be unloaded, once the levels are back over the operational thresholds and before the drone takes new work.
+
+Combat drones in this mode also launch on their own when their AI Defensive block spots an enemy within the [b]auto-launch radius[/b].
+
+The operation mode can only be changed while the drone's AI is off.
+
+[h2]Economy Flight[/h2]
+
+[b]Economy flight[/b] is meant to save fuel on long trips (longer than 1 km), it works as follows:
+
+[list]
+[*]In Planetary Gravity: drones fly like a quadcopter drone, by using only the downward thrust and its gyros to adjust its heading. It still uses other thrusters to course-correct if its vectors misalign.
+[*]In Space: The drone will choose the face with highest thrust, accelerate to max speed, then glide. It will turn to face the same highest-thrust group in the direction of travel (to decelerate), and burn down to a full stop when at the destination. It would use its other thruster groups to adjust evctor misalignments.
+[/list]
+
+[h2]Flight lanes[/h2]
+
+Drones managed by an Orchestrator fly in lanes, like air corridors.
+
+See the [url=./6-Orchestrator.md#flight-lanes]Orchestrator: Flight Lanes[/url] for more details.

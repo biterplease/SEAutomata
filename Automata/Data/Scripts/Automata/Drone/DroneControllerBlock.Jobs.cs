@@ -543,7 +543,7 @@ namespace Automata.Drone
 
                 case Orchestrator.TaskType.UnloadInventory:
                 {
-                    if (!HasCargoFor(task.Inventory, UnloadAllOre(taskIndex))) return TaskStatus.Done;   // nothing aboard it takes (its dock skipped)
+                    if (!HasCargoFor(task.Inventory, UnloadAllOre(taskIndex), CollectJob())) return TaskStatus.Done;   // nothing aboard it takes (its dock skipped)
                     var target = DockedConnector();
                     if (target == null) return Fail(Orchestrator.TaskFailure.TargetNotFound, TaskStatus.Failed);
                     BuildHomeNetwork(target);
@@ -555,7 +555,7 @@ namespace Automata.Drone
                     // full base kept it all aboard and the order counted it delivered)
                     var jobOre = currentJob.JobType == Orchestrator.JobType.MineOre ? JobOreKey() : MyStringHash.NullOrEmpty;
                     double oreBefore = jobOre != MyStringHash.NullOrEmpty ? OreAboardKg(jobOre) : 0;
-                    bool unloaded = UnloadCargo(task.Inventory, allOre);
+                    bool unloaded = UnloadCargo(task.Inventory, allOre, CollectJob());
                     if (jobOre != MyStringHash.NullOrEmpty)
                     {
                         double off = Math.Max(0, oreBefore - OreAboardKg(jobOre));
@@ -692,6 +692,12 @@ namespace Automata.Drone
                 case Orchestrator.TaskType.Mine:
                     return RunMine(ref task, starting, elapsed);
 
+                case Orchestrator.TaskType.Collect:
+                    return RunCollect(ref task, starting);
+
+                case Orchestrator.TaskType.Harvest:
+                    return RunHarvest(ref task, starting);
+
                 case Orchestrator.TaskType.Survey:
                     return RunSurvey(starting);
 
@@ -782,7 +788,7 @@ namespace Automata.Drone
                         dockRetries = 0;
                         // A dock only to unload what isn't aboard (a mining trip that found only stone): no trip
                         if (taskIndex + 1 < currentJob.Tasks.Count && currentJob.Tasks[taskIndex + 1].Type == Orchestrator.TaskType.UnloadInventory
-                            && !HasCargoFor(currentJob.Tasks[taskIndex + 1].Inventory, UnloadAllOre(taskIndex + 1)))
+                            && !HasCargoFor(currentJob.Tasks[taskIndex + 1].Inventory, UnloadAllOre(taskIndex + 1), CollectJob()))
                         {
                             if (Log.DebugEnabled) Log.Debug("Drone {0}: dock at {1} skipped: nothing aboard to unload there", Entity.EntityId, task.TargetEntityId);
                             return TaskStatus.Done;
@@ -1823,6 +1829,8 @@ namespace Automata.Drone
             var toolType = taskIndex > 0 ? currentJob.Tasks[taskIndex - 1].Type : Orchestrator.TaskType.WeldBlock;
             ToolMount mount = toolType == Orchestrator.TaskType.GrindBlock ? grinderMount
                             : toolType == Orchestrator.TaskType.Mine ? drillMount : welderMount;
+            if ((toolType == Orchestrator.TaskType.Harvest || toolType == Orchestrator.TaskType.Collect) && collectorIndex >= 0 && collectorIndex < collectorMounts.Count)
+                mount = collectorMounts[collectorIndex];
             CaptureFlightState();
             ToolsOff();
             bool world = anchor == null;
@@ -1837,7 +1845,15 @@ namespace Automata.Drone
                 double len = dir.Length();
                 dir /= len;
                 string blocker;
-                double run = FreeRun(HullCentreWorld, dir, len, out blocker);
+                double run;
+                if (CompactFlight)
+                {
+                    // Harvesters: the real shape against the real physics (out of a plot's cell, the nose over its soil: the
+                    // cell box had it blocked at once and the drone stayed there)
+                    MatrixD att = flightState.WorldMatrix;
+                    if (!SweepClear(ref att, HullCentreWorld, HullCentreWorld + dir * len, HARVEST_LINE_BERTH, true, out blocker, out run)) run = Math.Max(0, run - 0.1);
+                }
+                else run = FreeRun(HullCentreWorld, dir, len, out blocker);
                 if (blocker != null)
                 {
                     if (run < BACK_OUT_MIN)
@@ -1945,7 +1961,11 @@ namespace Automata.Drone
             // only where the work is, not across what has been built there. Every stretch: the pathfinder.
             int backOutLegs = routePoints.Count;
             undockLegs = docked != null ? backOutLegs : 2;
-            if (!PlanPath(start, hullAtApproach, routePoints, jobSource == JobSource.StandAlone))
+            // Collect / harvest: the goal is right next to the target (centimetres off the plot, on the object): no berth there
+            bool looseGoal = currentJob != null && taskIndex < currentJob.Tasks.Count
+                             && Orchestrator.Task.KindOf(currentJob.Tasks[taskIndex].Type) == Orchestrator.TaskKind.Collect;
+            if (!(CompactFlight && TryDirectLegs(start, hullAtApproach, routePoints, looseGoal))
+                && !PlanPath(start, hullAtApproach, routePoints, jobSource == JobSource.StandAlone, true, flightState.WorldMatrix.Forward, flightState.WorldMatrix.Up, looseGoal))
                 return Orchestrator.TaskFailure.Unreachable;
             if (checkApproachLine)
             {
@@ -2354,6 +2374,7 @@ namespace Automata.Drone
             if (welder != null && welder.Enabled) welder.Enabled = false;
             if (grinder != null && grinder.Enabled) grinder.Enabled = false;
             for (int i = 0; i < drills.Count; i++) if (drills[i] != null && !drills[i].Closed && drills[i].Enabled) drills[i].Enabled = false;
+            CollectorsOff();
         }
 
         // Same problem again (every scan) is reported once
@@ -2756,6 +2777,7 @@ namespace Automata.Drone
                 };
                 for (int k = 0; k < tasks.Count; k++)
                 {
+                    if (tasks[k].Kind == Orchestrator.TaskKind.Collect) { job.BlockCount++; continue; }   // (targets: a job with some left undone isn't complete)
                     if (tasks[k].Kind != Orchestrator.TaskKind.Tool) continue;
                     job.BlockCount++;
                     if (job.JobType == Orchestrator.JobType.None)
@@ -2771,6 +2793,8 @@ namespace Automata.Drone
                     else if (tasks[k].Type == Orchestrator.TaskType.Sweep) job.JobType = Orchestrator.JobType.DesignatorScoutArea;
                     else if (tasks[k].Type == Orchestrator.TaskType.Engage) job.JobType = Orchestrator.JobType.DesignatorEngage;
                     else if (tasks[k].Type == Orchestrator.TaskType.Escort) job.JobType = Orchestrator.JobType.DesignatorEscort;
+                    else if (tasks[k].Type == Orchestrator.TaskType.Collect) job.JobType = Orchestrator.JobType.TrashCollection;
+                    else if (tasks[k].Type == Orchestrator.TaskType.Harvest) job.JobType = Orchestrator.JobType.FarmCrops;
                 }
                 job.CalculateTotalInventory();
                 List<Orchestrator.Task> takeOverFirst = null;
@@ -2981,6 +3005,17 @@ namespace Automata.Drone
                     if (settings.BehaviourProfile != BehaviourProfile.IsMiningDrone) return "not a mining drone (behaviour profile; quarries need one)";
                     if ((caps & Capabilities.CanDrill) == 0) return "needs a drill";
                     break;
+                case Orchestrator.JobType.TrashCollection:
+                case Orchestrator.JobType.FarmCrops:
+                    if (!IsCollectorProfile(settings.BehaviourProfile)) return "not a janitor / harvester (behaviour profile)";
+                    if ((caps & Capabilities.CanCollect) == 0) return "needs a collector";
+                    if (auction.JobType == Orchestrator.JobType.FarmCrops && !CanHarvestPlots()) return "no collector whose beam can reach a farm plot (pointing up, or into the drone)";
+                    if ((caps & Capabilities.CargoVolumeNil) != 0) return "no cargo";
+                    if (DockFaces().Count == 0 && (!SmallConnectorsAllowed || DockFaces(true).Count == 0)) return "no usable connector";
+                    if (auction.JobType == Orchestrator.JobType.FarmCrops && auction.ComponentsInventory != null)
+                        foreach (var crop in auction.ComponentsInventory.GetAllItems())
+                            if (IsCropIgnored(crop.Key.String)) return "crop ignored (" + crop.Key.String + ")";
+                    break;
                 case Orchestrator.JobType.DesignatorEngage:
                 case Orchestrator.JobType.DesignatorEscort:
                     if (settings.BehaviourProfile != BehaviourProfile.IsCombatDrone) return "not a combat drone (behaviour profile)";
@@ -3014,6 +3049,8 @@ namespace Automata.Drone
                 case Orchestrator.JobType.DesignatorScoutPoint:
                 case Orchestrator.JobType.DesignatorScoutArea: if ((caps & Capabilities.CanScoutOre) == 0) return false; break;
                 case Orchestrator.JobType.DesignatorQuarry: if ((caps & Capabilities.CanDrill) == 0) return false; break;
+                case Orchestrator.JobType.TrashCollection:
+                case Orchestrator.JobType.FarmCrops: if ((caps & Capabilities.CanCollect) == 0 || (caps & Capabilities.CargoVolumeNil) != 0) return false; break;
                 case Orchestrator.JobType.DesignatorEngage:
                 case Orchestrator.JobType.DesignatorEscort: if ((caps & Capabilities.HasDefenseSystems) == 0) return false; break;
                 default:                           if ((caps & Capabilities.CargoVolumeNil) != 0) return false; break;
@@ -3056,6 +3093,8 @@ namespace Automata.Drone
                     WorkRollDegrees = WorkTiltLimit(false),
                     CanFlyInverted = CanWorkInverted(),
                     DroneBehaviours = settings.BehaviourProfile,
+                    HomePosition = Vector3DData.FromVector3D(BasePoint()),
+                    LocalRadius = MathHelper.Clamp(settings.LocalJobRadius, LOCAL_JOB_RADIUS_MIN, LOCAL_JOB_RADIUS_MAX),
                     IOLocationData = new IOLocationData
                     {
                         PositionData = Vector3DData.FromVector3D(flightState.Position),
@@ -3143,6 +3182,12 @@ namespace Automata.Drone
         {
             return currentJob.JobType == Orchestrator.JobType.MineOre && !currentJob.Tasks[index].OnlyListed
                    && currentJob.IndexOf(Orchestrator.TaskType.UnloadInventory, index + 1) < 0;
+        }
+
+        // Trash collection / farming: the unload takes whatever the collector picked up
+        private bool CollectJob()
+        {
+            return currentJob != null && (currentJob.JobType == Orchestrator.JobType.TrashCollection || currentJob.JobType == Orchestrator.JobType.FarmCrops);
         }
 
         private MyStringHash JobOreKey()

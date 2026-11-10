@@ -132,7 +132,8 @@ namespace Automata.Drone
                 Cameras = cameraBlocks,
                 Sensors = sensors,
                 GravityUp = flightState.InGravity ? flightState.GravityUp : Vector3D.Zero,
-                Clearance = Math.Max(CONSTRUCTION_CLEARANCE, AutomataSession.GetConfig().Pathfinding.ObstacleClearance),
+                Clearance = CompactFlight ? COMPACT_CLEARANCE : Math.Max(CONSTRUCTION_CLEARANCE, AutomataSession.GetConfig().Pathfinding.ObstacleClearance),
+                Berth = CompactFlight ? COMPACT_CLEARANCE : 0,   // (0: the server's ObstacleClearance)
                 HullCentred = true,
                 SleepingIds = settings != null ? settings.SleepingBlockIds : null,
                 AlignToRoute = true,
@@ -143,7 +144,7 @@ namespace Automata.Drone
                     ? MathHelperD.ToRadians(settings.PGravityAlignMaxPitchDegrees) : -1,
                 // Every flight; the planner drops it for hops shorter than the altitude (work at ground level) and the
                 // route takes off / lands straight up / down at the ends, so connectors and blocks on the ground are reached
-                MinAltitude = settings != null && !SweepIgnoresMinAltitude ? settings.MinAltitude : 0,   // (a scout sweep in gravity: low)
+                MinAltitude = settings != null && !SweepIgnoresMinAltitude && !CompactFlight ? settings.MinAltitude : 0,   // (a scout sweep in gravity: low; harvesters: indoors)
             };
         }
 
@@ -1024,6 +1025,23 @@ namespace Automata.Drone
             // Checked in the leg's own attitude (the one the planner checked it with: a held attitude turned to at the
             // start of the route isn't the drone's yet when the leg starts)
             MatrixD legAtt = LegAttitude(o, ref q);
+            // Harvesters, indoors: the leg against the real physics with the drone's real shape, as its direct legs and the
+            // harvest's line were planned (cell boxes with the berth: a farm room is one grid, its floor, plots and windows
+            // within the berth of every leg; each leg start was "blocked 0.5 m ahead" until the replans ran out). The work
+            // order (in along the beam's line, onto the object): to its end, no berth past it.
+            if (CompactFlight)
+            {
+                bool cWork = o == constructionOrder;
+                string cBy;
+                double cAlong;
+                if (SweepClear(ref legAtt, from, to, cWork ? HARVEST_LINE_BERTH : DIRECT_BERTH, !looseEnd && !cWork, out cBy, out cAlong))
+                {
+                    if (routeWaitFor != 0) EndYield("the leg is clear");
+                    return;
+                }
+                RealShapeBlocked(string.Format("leg start ({0:F0} m, real shape): {1}", len, cBy), cAlong);
+                return;
+            }
             // The final order of a work route ends at the work point itself - a mining bore's entry is the rock: nothing
             // past its end counts and its end zone (the hull's front half plus the berth) isn't checked. It counted the
             // rock being mined as "in the way": 10 replans at the approach point, route error, the deposit skipped
@@ -1187,6 +1205,16 @@ namespace Automata.Drone
             BuildPathQuery(out q);
             // The leg's attitude (as the planner checked it); a work route's final order: not its end zone (CheckLegStart)
             MatrixD legAtt = LegAttitude(o, ref q);
+            if (CompactFlight)
+            {
+                // Harvesters: the real physics, as CheckLegStart (the work order: to its end, no berth past it)
+                bool wWork = o == constructionOrder;
+                string wBy;
+                double wLook = wWork ? remaining : look, wAlong;
+                if (SweepClear(ref legAtt, from, from + along / remaining * wLook, wWork ? HARVEST_LINE_BERTH : DIRECT_BERTH, false, out wBy, out wAlong)) return;
+                RealShapeBlocked("real shape: " + wBy + " ahead", wAlong);
+                return;
+            }
             double rayLook = look;
             if (o == constructionOrder) rayLook = Math.Min(look, remaining - pm.EndZoneLength(ref q, ref legAtt, along / remaining));
             Vector3D hit = Vector3D.Zero;
@@ -1205,6 +1233,17 @@ namespace Automata.Drone
             if (Log.DebugEnabled) Log.Debug("Drone {0}: obstacle {1:F1} m ahead, {2}", Entity.EntityId, Vector3D.Distance(from, hit), ok ? "new route" : "giving up");
             if (ok && Replan()) return;
             RouteStopped(Loc.F(MyStrings.Drone_RouteBlockedMAheadStopped, Vector3D.Distance(from, hit)));
+        }
+
+        // Harvesters: a leg the real-shape check found blocked 'ahead' m on ('what', for the log): a new route from here, or stopped
+        private void RealShapeBlocked(string what, double ahead)
+        {
+            var pf = AutomataSession.GetConfig().Pathfinding;
+            lastReplanFrame = MyAPIGateway.Session.GameplayFrameCounter;
+            bool ok = pf.AllowRepathing() && ++routeReplans <= pf.MaxRepositionAttempts();
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: {1}, {2}", Entity.EntityId, what, ok ? "new route" : "giving up");
+            if (ok && Replan()) return;
+            RouteStopped(Loc.F(MyStrings.Drone_RouteBlockedMAheadStopped, ahead));
         }
 
         // The attitude the planner checked a leg with: its explicit one, else the drone's own

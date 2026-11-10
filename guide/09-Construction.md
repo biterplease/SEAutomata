@@ -1,0 +1,24 @@
+# Construction Computer
+
+The Construction Computer watches a large box around itself (50 x 50 x 50) and looks for:
+
+- unfinished blocks, damaged blocks and projections to weld
+- blocks painted with the grind color to grind
+- skips blocks painted with the weld ignore color
+
+It sees every grid in the box that you, your faction, or nobody owns, including floating projections that aren't attached to anything.
+
+It has 5 workmodes that dictate how it will plan its jobs:
+- Weld unfinished blocks
+- Repair damaged blocks
+- Build projections
+- Grind: only blocks painted with grind color
+- Collect trash: Janitor drones with collectors will collect loose objects.
+
+**Many drones at once.** This is where the Construction Computer shines. Instead of one block at a time, it groups the work into jobs of several blocks, and keeps several jobs open at the same time. Each job can be split over several drones, and different jobs go to different drones, so a whole swarm can build one projection together. Drones working close to each other watch out for one another and wait, or pick another side instead of aborting.
+
+Useful settings: **Weld priority**, **Blocks per job**, scan interval, and **Show construction field** to see the box.
+
+**Weld priority.** Weld jobs come in three kinds: **Repair**, **Projected** and **Unbuilt**. The Construction Computer publishes jobs of every kind that has work at the same time, so drones set to Welder:Repair, Welder:Projected or Welder:Unbuilt always find their own kind of job. Since there's a limited number of open jobs at any given time, the order picked gives a larger share to the first priority. Example: With 10 slots and all three kinds waiting that is 5 / 3 / 2. A kind with less work than its share leaves the rest to the others. The logs name the kind of every weld job (Weld:Repair, Weld:Projected, Weld:Unbuilt).
+
+A stand-alone drone's own Weld priority is a strict order: it finishes one kind before starting the next.

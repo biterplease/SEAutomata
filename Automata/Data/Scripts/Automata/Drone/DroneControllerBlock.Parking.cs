@@ -534,6 +534,23 @@ namespace Automata.Drone
         private readonly List<IMyEntity> nearEntities = new List<IMyEntity>();
         private readonly List<IMyCubeGrid> nearGrids = new List<IMyCubeGrid>();
 
+        // Grids with a farm plot (cached a few minutes: parking looks often, plots are rarely added)
+        private static readonly Dictionary<long, KeyValuePair<int, bool>> farmGridCache = new Dictionary<long, KeyValuePair<int, bool>>();
+        private const int FARM_GRID_CACHE_TICKS = 3 * 60 * 60;
+
+        private static bool HasFarmPlots(IMyCubeGrid grid)
+        {
+            int now = MyAPIGateway.Session.GameplayFrameCounter;
+            KeyValuePair<int, bool> seen;
+            if (farmGridCache.TryGetValue(grid.EntityId, out seen) && now - seen.Key < FARM_GRID_CACHE_TICKS) return seen.Value;
+            bool any = false;
+            foreach (var b in grid.GetFatBlocks<IMyTerminalBlock>())
+                if (FarmLogic(b) != null) { any = true; break; }
+            if (farmGridCache.Count > 256) farmGridCache.Clear();
+            farmGridCache[grid.EntityId] = new KeyValuePair<int, bool>(now, any);
+            return any;
+        }
+
         // The nearest friendly static grids ('onlyGrid': that one, the parking protocol's grid) - their tops (down pads),
         // sides (side pads), undersides (up pads)
         private bool FindFriendlyGridSpot(PathfindingManager pm, ref PathQuery q, IMyCubeGrid onlyGrid, out ParkSpot spot)
@@ -560,6 +577,18 @@ namespace Automata.Drone
                 nearEntities.Clear();
             }
             nearGrids.Sort((a, b) => Vector3D.DistanceSquared(a.WorldVolume.Center, here).CompareTo(Vector3D.DistanceSquared(b.WorldVolume.Center, here)));
+            // A harvester parks by the farms (its jobs are there): grids with farm plots first, nearest first among them
+            if (settings != null && settings.BehaviourProfile == BehaviourProfile.IsHarvesterDrone && nearGrids.Count > 1)
+            {
+                var farms = new List<IMyCubeGrid>();
+                for (int i = 0; i < nearGrids.Count; i++) if (HasFarmPlots(nearGrids[i])) farms.Add(nearGrids[i]);
+                if (farms.Count > 0 && farms.Count < nearGrids.Count)
+                {
+                    for (int i = 0; i < nearGrids.Count; i++) if (!farms.Contains(nearGrids[i])) farms.Add(nearGrids[i]);
+                    nearGrids.Clear();
+                    nearGrids.AddRange(farms);
+                }
+            }
             bool gravity = flightState.InGravity;
             Vector3D gUp = gravity ? flightState.GravityUp : Vector3D.Zero;
             double step = Math.Max(2.0, HullRadiusLevel() * 2);

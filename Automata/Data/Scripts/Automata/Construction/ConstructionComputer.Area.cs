@@ -1216,7 +1216,7 @@ namespace Automata.Construction
             return job.BlockCount > 0 ? job : null;
         }
 
-        private Orchestrator.Job NewJob(Orchestrator.JobType type)
+        public Orchestrator.Job NewJob(Orchestrator.JobType type)
         {
             return new Orchestrator.Job
             {

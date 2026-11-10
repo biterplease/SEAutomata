@@ -162,6 +162,14 @@ namespace Automata.Orchestrator
         /// mining drone, the tagged one (Mine task, Completion QuarryPrepared; TODO/19).</summary>
         [ProtoEnum]
         DesignatorQuarry = 10,
+        /// <summary>Construction computer ("Collect trash"): pick up the floating objects of its area (Collect tasks) and
+        /// unload them at a logistics computer (one on the computer's construct first). Janitors first, harvesters too.</summary>
+        [ProtoEnum]
+        TrashCollection = 11,
+        /// <summary>Logistics computer ("Farming"): harvest its fully grown crops / clear dead plants (Harvest tasks) and unload at
+        /// that computer. Harvesters first, janitors too.</summary>
+        [ProtoEnum]
+        FarmCrops = 12,
     }
 
     public static class JobTypeExtensions
@@ -287,6 +295,12 @@ namespace Automata.Orchestrator
         /// path at once (coarse voxels / the heightmap, not its instruments) and flies it, an ore scan every few tens of m.
         /// </summary>
         [ProtoEnum] Sweep = 16,
+        /// <summary>Pick up the floating object TargetEntityId (Position: where it was seen) with a collector: its intake
+        /// box onto it (a few cm deep), collector on, until the object is gone.</summary>
+        [ProtoEnum] Collect = 17,
+        /// <summary>Harvest the farm plot block TargetEntityId (Position: its centre, ApproachFrom: centre + its up): the
+        /// collector's beam aimed on it from close by, collector on, until it isn't harvestable any more.</summary>
+        [ProtoEnum] Harvest = 18,
     }
 
     /// <summary>Which fields a task uses; derived from its type (not sent).</summary>
@@ -298,6 +312,7 @@ namespace Automata.Orchestrator
         Tool,         // TargetEntityId, TargetBlock, IsProjected, Completion, CompletionValue
         Message,      // TargetEntityId
         Combat,       // TargetEntityId, Position (Engage / Escort)
+        Collect,      // TargetEntityId, Position (Collect / Harvest)
     }
 
     /// <summary>
@@ -404,6 +419,8 @@ namespace Automata.Orchestrator
                 case TaskType.DeliverMessage:  return TaskKind.Message;
                 case TaskType.Engage:
                 case TaskType.Escort:          return TaskKind.Combat;
+                case TaskType.Collect:
+                case TaskType.Harvest:         return TaskKind.Collect;
                 default:                       return TaskKind.None;
             }
         }
@@ -478,6 +495,17 @@ namespace Automata.Orchestrator
                 Type = TaskType.GrindBlock, TargetEntityId = gridId, TargetBlock = Vector3IData.FromVector3I(cell),
                 Completion = ToolTaskCompletionTrigger.BlockFullyDismounted,
             };
+        }
+
+        public static Task Collect(long objectId, Vector3D position, float naturalGravity = 0)
+        {
+            return new Task { Type = TaskType.Collect, TargetEntityId = objectId, Position = Vector3DData.FromVector3D(position), NaturalGravity = naturalGravity };
+        }
+
+        public static Task Harvest(long plotId, Vector3D centre, Vector3D up, float naturalGravity = 0)
+        {
+            return new Task { Type = TaskType.Harvest, TargetEntityId = plotId, Position = Vector3DData.FromVector3D(centre),
+                              ApproachFrom = Vector3DData.FromVector3D(centre + up), NaturalGravity = naturalGravity };
         }
 
         public static Task Survey()
@@ -572,7 +600,8 @@ namespace Automata.Orchestrator
             if (Tasks == null) return false;
             for (int i = 0; i < Tasks.Count; i++)
             {
-                if (Tasks[i].Type == TaskType.NavigateToolTo || Tasks[i].Type == TaskType.NavigateTo || Tasks[i].Type == TaskType.Sweep)
+                if (Tasks[i].Type == TaskType.NavigateToolTo || Tasks[i].Type == TaskType.NavigateTo || Tasks[i].Type == TaskType.Sweep
+                    || Tasks[i].Type == TaskType.Collect || Tasks[i].Type == TaskType.Harvest)
                 {
                     site = Tasks[i];
                     return true;

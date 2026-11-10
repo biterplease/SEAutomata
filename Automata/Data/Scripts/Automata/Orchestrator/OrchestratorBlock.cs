@@ -614,6 +614,8 @@ namespace Automata.Orchestrator
                 case JobType.DesignatorEngage:
                 case JobType.DesignatorEscort:
                 case JobType.DesignatorQuarry:
+                case JobType.TrashCollection:
+                case JobType.FarmCrops:
                     break;
                 default:
                     AddEvent(Loc.F(MyStrings.Orchestrator_NotHandledYet, ja.Type));
@@ -762,6 +764,8 @@ namespace Automata.Orchestrator
                     case JobType.Grind:
                     case JobType.CollectInventorySurplus:
                     case JobType.MineOre:   // room, on a network with a refinery for the ore (the computer checked)
+                    case JobType.TrashCollection:
+                    case JobType.FarmCrops:
                         return (f & (InventoryFulfillment.AcceptAll | InventoryFulfillment.AcceptPartial)) != 0;
                     default:
                         return false;
@@ -792,6 +796,8 @@ namespace Automata.Orchestrator
                 case JobType.DesignatorScoutPoint:
                 case JobType.DesignatorScoutArea: return (caps & Drone.Capabilities.CanScoutOre) != 0;
                 case JobType.DesignatorQuarry: return (caps & Drone.Capabilities.CanDrill) != 0;
+                case JobType.TrashCollection:
+                case JobType.FarmCrops: return (caps & Drone.Capabilities.CanCollect) != 0;
                 // AI Defensive + AI Flight + AI Offensive on the drone (combat handover)
                 case JobType.DesignatorEngage:
                 case JobType.DesignatorEscort: return (caps & Drone.Capabilities.HasDefenseSystems) != 0;
@@ -933,6 +939,9 @@ namespace Automata.Orchestrator
                     return AssignGrind(open, drones, lcs, out assignments, out droneId, out droneBid, out why);
                 case JobType.MineOre:
                     return AssignMine(open, drones, lcs, out assignments, out droneId, out droneBid, out why);
+                case JobType.TrashCollection:
+                case JobType.FarmCrops:
+                    return AssignCollect(open, drones, lcs, out assignments, out droneId, out droneBid, out why);
                 case JobType.DesignatorScoutPoint:
                 case JobType.DesignatorScoutArea:
                 case JobType.DesignatorEngage:
@@ -1100,6 +1109,50 @@ namespace Automata.Orchestrator
             if (best != null) { port = bestPort; return best; }
             port = fallbackPort;
             return fallback;
+        }
+
+        /// <summary>
+        /// Trash collection / farming: one drone (the best ranked: janitor / harvester first) picks up every target of the
+        /// job (Collect / Harvest tasks, in the announcer's order) and unloads it all at one logistics computer. Farming: the
+        /// announcing computer itself when the drone can dock there (the crops stay by the farm); trash: a computer on the
+        /// announcer's construct first. Then the room, then the nearest.
+        /// </summary>
+        private bool AssignCollect(OpenAuction open, List<Bid> drones, List<Bid> lcs, out Dictionary<long, List<Task>> assignments,
+                                   out long droneId, out uint droneBid, out string why)
+        {
+            assignments = null; droneId = 0; droneBid = 0;
+            var a = open.Auction;
+            var work = new List<Task>();
+            if (open.Job.Tasks != null)
+                for (int i = 0; i < open.Job.Tasks.Count; i++)
+                    if (open.Job.Tasks[i].Type == TaskType.Collect || open.Job.Tasks[i].Type == TaskType.Harvest) work.Add(open.Job.Tasks[i]);
+            if (work.Count == 0) { why = Loc.T(MyStrings.Orchestrator_TheJobHasNoBlocks); return false; }
+            var takers = Takers(lcs, a.ComponentsInventory, a.PositionData.ToVector3D());
+            var local = new List<TakerRoom>();
+            for (int i = 0; i < takers.Count; i++) if (takers[i].Bid.SameConstruct) local.Add(takers[i]);
+            for (int i = 0; i < takers.Count; i++) if (!takers[i].Bid.SameConstruct) local.Add(takers[i]);
+            takers = local;
+            bool own = a.JobType == JobType.FarmCrops && a.Dock != null;
+            if (!own && takers.Count == 0) { why = Loc.T(MyStrings.Orchestrator_NoLogisticsComputerHasRoom); return false; }
+            var ranked = SelectWinningDrones(drones, a);
+            for (int d = 0; d < ranked.Count; d++)
+            {
+                var drone = ranked[d];
+                IOLocationData port = own ? PortFor(a.DockSite, a.Dock, drone) : null;
+                for (int t = 0; t < takers.Count && port == null; t++) port = PortFor(takers[t].Bid.DockSite, takers[t].Bid.IOLocationData, drone);
+                if (port == null) continue;
+                var tasks = new List<Task>(work);
+                tasks.Add(DockTask(port));
+                tasks.Add(Task.Unload());
+                tasks.Add(Task.ReturnHome());
+                assignments = new Dictionary<long, List<Task>> { { drone.EntityId, tasks } };
+                droneId = drone.EntityId;
+                droneBid = drone.BidId;
+                why = Loc.F(MyStrings.Orchestrator_CollectAssigned, work.Count, Nicknames.Of(drone.EntityId));
+                return true;
+            }
+            why = Loc.F(MyStrings.Orchestrator_NoDroneHasAConnector, takers.Count > 0 ? DockFit.Describe(takers[0].Bid.DockSite) : DockFit.Describe(a.DockSite));
+            return false;
         }
 
         private static double TripVolume(Bid drone)
@@ -1665,6 +1718,15 @@ namespace Automata.Orchestrator
             alertInbox.Clear();
         }
 
+        // An event line, and through a broadcast controller ("use broadcast controller")
+        private void Chat(string text)
+        {
+            AddEvent(text);
+            string via = "broadcast off";
+            bool sent = settings.UseBroadcastController && BroadcastControllerSender.Send(block, text, out via);
+            if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: chat '{1}' {2}: {3}", entityId, text, sent ? "sent via" : "not sent", via);
+        }
+
         private void ReadJobReports(int now)
         {
             for (int c = 0; c < 2; c++)
@@ -1703,6 +1765,10 @@ namespace Automata.Orchestrator
                     }
                     if (r.AnnouncerEntityId == entityId)   // a player's order: its marker goes (recalled jobs end here too)
                         EndPlayerJob(r.JobId, string.IsNullOrEmpty(r.Reason) ? Loc.F(MyStrings.Orchestrator_DroneArg0Arg1, r.DroneEntityId, r.Outcome) : Loc.F(MyStrings.Orchestrator_DroneArg0Arg1Arg2, r.DroneEntityId, r.Outcome, r.Reason));
+                    // A farm harvested: the player replants (a chat line through the broadcast controller)
+                    if (active != null && active.Type == JobType.FarmCrops && r.BlocksDone > 0)
+                        Chat(Loc.F(MyStrings.Orchestrator_FarmHarvested, Nicknames.Of(r.AnnouncerEntityId),
+                                   active.Announcement != null && !string.IsNullOrEmpty(active.Announcement.Place) ? active.Announcement.Place : "?"));
                     string label = r.JobType.Label(r.WeldCategory);
                     AddEvent(string.IsNullOrEmpty(r.Reason) ? Loc.F(MyStrings.Orchestrator_Arg0ColonDroneArg1Arg2Lower, label, Nicknames.Of(r.DroneEntityId), r.Outcome)
                                                              : Loc.F(MyStrings.Orchestrator_Arg0ColonDroneArg1Arg2NewlineArg3, label, Nicknames.Of(r.DroneEntityId), r.Outcome, r.Reason));
@@ -1873,15 +1939,39 @@ namespace Automata.Orchestrator
         /// fits without natural gravity), or null. Ends without a connector list, or drones without faces (older
         /// blocks), keep the end's one connector, unchecked.
         /// </summary>
+        // (and within the drone's local-job radius: a drone kept to its base is never sent to a connector beyond it - the drone
+        // itself only checks the job's site)
         private static IOLocationData PortFor(DockSite site, IOLocationData preferred, Bid drone)
         {
             if (site == null || site.Ports == null || site.Ports.Count == 0 || drone == null || (drone.DockFaces == null && drone.SmallDockFaces == null))
-                return preferred;
+                return preferred != null && OutsideLocal(drone, preferred.PositionData.ToVector3D()) ? null : preferred;
             Vector3D near = drone.IOLocationData != null ? drone.IOLocationData.PositionData.ToVector3D()
                           : preferred != null ? preferred.PositionData.ToVector3D() : Vector3D.Zero;
             var p = DockFit.Pick(site, drone.DockFaces, drone.SmallDockFaces, near, drone.DockedConnectorId);
-            return p != null ? p.ToIO() : null;
+            if (p == null) return null;
+            var io = p.ToIO();
+            return OutsideLocal(drone, io.PositionData.ToVector3D()) ? null : io;
         }
+
+        #region Local-job radius
+        private const float LOCAL_RADIUS_DEFAULT = 15000f;   // the drones' default: not set by the player
+        private const double LOCAL_BONUS = 4;                 // above the tool facing (0-3) and the bid score (0-1), below a profile (5+)
+
+        // Beyond the drone's local-job radius from its base (an older drone without one: never)
+        private static bool OutsideLocal(Bid drone, Vector3D p)
+        {
+            if (drone == null || drone.LocalRadius <= 0 || drone.EntityType != AutomataEntityType.DroneControllerBlock) return false;
+            double r = drone.LocalRadius;
+            return Vector3D.DistanceSquared(p, drone.HomePosition.ToVector3D()) > r * r;
+        }
+
+        // A radius the player set (below the default) with the job's site in it: the drone is kept for work there, it ranks first
+        private static double LocalBonus(Bid drone, Vector3D site)
+        {
+            if (drone == null || drone.LocalRadius <= 0 || drone.LocalRadius >= LOCAL_RADIUS_DEFAULT - 1 || site.LengthSquared() < 1) return 0;
+            return OutsideLocal(drone, site) ? 0 : LOCAL_BONUS;
+        }
+        #endregion
 
         // The assignment is retried every step while an auction is open: a drone that fits no connector is logged once
         private static readonly HashSet<long> fitLogged = new HashSet<long>();
@@ -2414,7 +2504,8 @@ namespace Automata.Orchestrator
                     continue;
                 }
 
-                double score = ComputeDroneBidScore(drone, jobPosition, jobVolume, jobMass) + ProfileBonus(drone, bidRound) + ToolFaceBonus(drone, bidRound);
+                double score = ComputeDroneBidScore(drone, jobPosition, jobVolume, jobMass) + ProfileBonus(drone, bidRound) + ToolFaceBonus(drone, bidRound)
+                               + LocalBonus(drone, jobPosition);
 
                 int insertIndex = rankedScores.Count;
                 while (insertIndex > 0 && score > rankedScores[insertIndex - 1])
@@ -2448,6 +2539,8 @@ namespace Automata.Orchestrator
                 case JobType.Weld:    return JobTypeExtensions.WELDER_PROFILES;
                 case JobType.Grind:   return Drone.BehaviourProfile.IsGrinderDrone | Drone.BehaviourProfile.IsWelderGrinderDrone;
                 case JobType.MineOre: return Drone.BehaviourProfile.IsMiningDrone;
+                case JobType.TrashCollection: return Drone.BehaviourProfile.IsJanitorDrone;
+                case JobType.FarmCrops: return Drone.BehaviourProfile.IsHarvesterDrone;
                 default:                              return Drone.BehaviourProfile.None;
             }
         }

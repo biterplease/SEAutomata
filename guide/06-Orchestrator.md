@@ -4,6 +4,8 @@ The Orchestrator works behind the scenes to ensure that blocks communicate effec
 
 As the player, you will interact little with the Orchestrator, but it performs several key tasks that keep your system working effectively.
 
+A single orchestrator is usually enough for an entire network. Multiple orchestrators in 1 network always defer to the oldest orchestrator present. If you sever the network link, each Orhcestrator will manage its own network, until re-linked.
+
 The following is more about how the Automata Mod does things, rather than critical information for you to know. Feel free to skip to another section, or read on!
 
 ## Jobs and Tasks
@@ -83,6 +85,8 @@ The orchestrator plans, and maintains, **Flight lanes** to/from important locati
 Flight lanes come in pairs, one for each direction. Each lane also includes sub-lanes, allowing slow drones to pass faster drones.
 
 If a drone cannot fit the 40x40 flight lane, it will fly alongside of it.
+
+You can visualize lanes using the command `/automata debugdraw lanes`
 
 ## Work areas
 
