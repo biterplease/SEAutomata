@@ -25,7 +25,6 @@ namespace Automata.Construction
         private const double TRASH_CLUSTER = 15;       // m: objects this close to a job's first one join it
         private readonly List<IMyEntity> trashObjects = new List<IMyEntity>();
         private readonly HashSet<long> trashSeen = new HashSet<long>();
-        private int lastTrash;
 
         private void ScanTrash(int now, ref MatrixD area, ref Vector3D half, ref BoundingBoxD box)
         {
@@ -64,7 +63,6 @@ namespace Automata.Construction
                 changed = true;
             }
             if (changed) RebuildInJobs();
-            lastTrash = trashObjects.Count;
             if (!on) return;
             // New jobs: objects in no job yet, nearest the first free one together
             int open = 0;

@@ -401,7 +401,7 @@ namespace Automata.Drone
             Vector3D half;
             if (home == null || !TryGetObservationArea(out areaMatrix, out half)) return 0;
             if (constructionComputer == null)
-                constructionComputer = new ConstructionComputer(Entity, Construction.OperationMode.BuiltInToDrone);
+                constructionComputer = new ConstructionComputer(Entity);
             RefreshDroneGrids();
             var grindColor = new Color(settings.GrindColor);
             var weldIgnoreColor = new Color(settings.WeldIgnoreColor);

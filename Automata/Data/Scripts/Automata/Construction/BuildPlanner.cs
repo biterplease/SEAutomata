@@ -335,33 +335,6 @@ namespace Automata.Construction
                 frameKept ? " (frame kept from earlier scans)" : ""));
         }
 
-        /// <summary>
-        /// Several workers: splits what <see cref="Plan"/> output since <see cref="Reset"/> (its first 'count' entries) into
-        /// 'workers' fronts of neighbouring slices, as far apart as the set allows; 'frontOf' gets each entry's front.
-        /// </summary>
-        public void Fronts(int workers, int count, List<int> frontOf)
-        {
-            frontOf.Clear();
-            if (workers < 1) workers = 1;
-            count = Math.Min(count, sliceOfOrder.Count);
-            // Slices are numbered per part (grid, weld / grind: each has its own seed): split each part on its own
-            int start = 0;
-            while (start < count)
-            {
-                int end = start;
-                int lo = int.MaxValue, hi = int.MinValue;
-                while (end < count && partOfOrder[end] == partOfOrder[start])
-                {
-                    lo = Math.Min(lo, sliceOfOrder[end]);
-                    hi = Math.Max(hi, sliceOfOrder[end]);
-                    end++;
-                }
-                int width = Math.Max(1, (hi - lo + workers) / workers);
-                for (int i = start; i < end; i++) frontOf.Add(Math.Min(workers - 1, (sliceOfOrder[i] - lo) / width));
-                start = end;
-            }
-        }
-
         /// <summary>Forgets the slices recorded for <see cref="Fronts"/> (call before planning a new set).</summary>
         public void Reset()
         {

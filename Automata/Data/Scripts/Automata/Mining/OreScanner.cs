@@ -350,10 +350,5 @@ namespace Automata.Mining
             return oreOfMaterial[material];
         }
 
-        /// <summary>Material table again (definitions reloaded, e.g. a new session in the same process).</summary>
-        public static void ResetMaterials()
-        {
-            Array.Clear(materialKnown, 0, materialKnown.Length);
-        }
     }
 }

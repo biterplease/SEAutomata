@@ -13,13 +13,6 @@ namespace Automata.Inventory
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class DiscreteInventory
     {
-        [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
-        public enum InventoryType : byte
-        {
-            None = 0,
-            Components = 1,
-            Blocks = 2
-        }
 
         /// <summary>
         /// Subtype → quantity. Serialized as protobuf map; comparer is normalized on access (see <see cref="Items"/>).
@@ -123,36 +116,6 @@ namespace Automata.Inventory
                 return key.String;
             }
             return "0x" + ((int)key).ToString("X8", CultureInfo.InvariantCulture);
-        }
-
-        /// <summary>
-        /// True if both inventories list the same subtype keys with the same counts.
-        /// </summary>
-        public bool IsEqual(DiscreteInventory other)
-        {
-            if (object.ReferenceEquals(other, null))
-            {
-                return false;
-            }
-            if (object.ReferenceEquals(this, other))
-            {
-                return true;
-            }
-            Dictionary<MyStringHash, int> a = Items;
-            Dictionary<MyStringHash, int> b = other.Items;
-            if (a.Count != b.Count)
-            {
-                return false;
-            }
-            foreach (KeyValuePair<MyStringHash, int> kv in a)
-            {
-                int v;
-                if (!b.TryGetValue(kv.Key, out v) || v != kv.Value)
-                {
-                    return false;
-                }
-            }
-            return true;
         }
 
         /// <summary>
@@ -418,11 +381,6 @@ namespace Automata.Inventory
             }
         }
 
-        public bool Exists(string subtypeId)
-        {
-            return Items.ContainsKey(MyStringHash.GetOrCompute(subtypeId));
-        }
-
 
         public bool RemoveItem(MyStringHash subtypeHash, int amount)
         {
@@ -500,11 +458,6 @@ namespace Automata.Inventory
             {
                 result.Add(SubtypeKeyToString(kv.Key), kv.Value);
             }
-        }
-
-        public int GetItemTypeCount()
-        {
-            return Items.Count;
         }
 
         public int GetTotalItemCount()
@@ -592,93 +545,6 @@ namespace Automata.Inventory
                 totalMass += componentData.Volume * (MyFixedPoint)kv.Value;
             }
             return totalMass;
-        }
-
-        /// <summary>
-        /// Subtracts <paramref name="amount"/> from <paramref name="sourceDict"/> and adds it to <paramref name="destinationDict"/>
-        /// for <paramref name="key"/>. Assumes <paramref name="amount"/> &gt; 0 and the source had at least that many (caller validates).
-        /// </summary>
-        private static void TransferCounts(Dictionary<MyStringHash, int> sourceDict, Dictionary<MyStringHash, int> destinationDict, MyStringHash key, int amount)
-        {
-            int current;
-            sourceDict.TryGetValue(key, out current);
-            int afterSource = current - amount;
-            if (afterSource <= 0)
-            {
-                sourceDict.Remove(key);
-            }
-            else
-            {
-                sourceDict[key] = afterSource;
-            }
-            int destinationCurrent;
-            destinationDict.TryGetValue(key, out destinationCurrent);
-            destinationDict[key] = destinationCurrent + amount;
-        }
-
-        /// <summary>
-        /// Moves counts from <paramref name="source"/> to <paramref name="destination"/> for each subtype in
-        /// <paramref name="itemsToMove"/> (amounts &gt; 0). Fails if <paramref name="source"/> does not
-        /// contain at least those amounts. If <paramref name="itemsToMove"/> is the same instance as
-        /// <paramref name="source"/> or <paramref name="destination"/>, entries are copied before transfer so
-        /// the dictionaries are not modified during enumeration.
-        /// </summary>
-        public static bool MoveItems(DiscreteInventory source, DiscreteInventory destination, DiscreteInventory itemsToMove)
-        {
-            if (source == null || destination == null || itemsToMove == null)
-            {
-                return false;
-            }
-            Dictionary<MyStringHash, int> sourceDict = source.Items;
-            Dictionary<MyStringHash, int> destinationDict = destination.Items;
-            bool snapshotNeeded = object.ReferenceEquals(source, itemsToMove) || object.ReferenceEquals(destination, itemsToMove);
-
-            if (snapshotNeeded)
-            {
-                List<KeyValuePair<MyStringHash, int>> plan = new List<KeyValuePair<MyStringHash, int>>(itemsToMove.GetItemTypeCount());
-                foreach (KeyValuePair<MyStringHash, int> kv in itemsToMove.Items)
-                {
-                    if (kv.Value <= 0)
-                    {
-                        continue;
-                    }
-                    int available;
-                    if (!sourceDict.TryGetValue(kv.Key, out available) || available < kv.Value)
-                    {
-                        return false;
-                    }
-                    plan.Add(kv);
-                }
-                for (int i = 0; i < plan.Count; i++)
-                {
-                    KeyValuePair<MyStringHash, int> kv = plan[i];
-                    TransferCounts(sourceDict, destinationDict, kv.Key, kv.Value);
-                }
-            }
-            else
-            {
-                foreach (KeyValuePair<MyStringHash, int> kv in itemsToMove.Items)
-                {
-                    if (kv.Value <= 0)
-                    {
-                        continue;
-                    }
-                    int available;
-                    if (!sourceDict.TryGetValue(kv.Key, out available) || available < kv.Value)
-                    {
-                        return false;
-                    }
-                }
-                foreach (KeyValuePair<MyStringHash, int> kv in itemsToMove.Items)
-                {
-                    if (kv.Value <= 0)
-                    {
-                        continue;
-                    }
-                    TransferCounts(sourceDict, destinationDict, kv.Key, kv.Value);
-                }
-            }
-            return true;
         }
 
         public override string ToString()

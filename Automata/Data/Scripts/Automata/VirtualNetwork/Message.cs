@@ -33,24 +33,6 @@ namespace Automata.VirtualNetwork
         TryAgainLater = 32768,
     }
 
-    //public class MessageResponse
-    //{
-    //    public ErrorCode ErrorCode;
-    //    public MessageResponse()
-    //    {
-    //        MessageId = 0;
-    //        ErrorCode = ErrorCode.None;
-    //    }
-    //}
-    public class ReadMessagesResponse
-    {
-        public ErrorCode ErrorCode;
-        public ReadMessagesResponse()
-        {
-            ErrorCode = ErrorCode.None;
-        }
-    }
-
     public interface IMessagePayload { }
 
     [Flags]

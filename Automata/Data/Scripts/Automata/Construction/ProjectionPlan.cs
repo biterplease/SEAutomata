@@ -130,7 +130,6 @@ namespace Automata.Construction
         public int LineCount { get { return lines.Count; } }
         public int PlannedCount { get { return plannedBlocks; } }
         public int EligibleCount { get { return eligibleBlocks; } }
-        public bool Units { get { return units; } }
 
         public string StageSummary()
         {

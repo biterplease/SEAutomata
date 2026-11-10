@@ -442,7 +442,7 @@ namespace Automata.Construction
 
         private void Scan(int now)
         {
-            if (computer == null) computer = new ConstructionComputer(Entity, OperationMode.None);
+            if (computer == null) computer = new ConstructionComputer(Entity);
             MatrixD area;
             Vector3D half;
             GetArea(out area, out half);
@@ -1072,7 +1072,7 @@ namespace Automata.Construction
 
         private void RestoreState(ConstructionComputerState s)
         {
-            if (computer == null) computer = new ConstructionComputer(Entity, OperationMode.None);
+            if (computer == null) computer = new ConstructionComputer(Entity);
             computer.JobIdCounter = Math.Max(computer.JobIdCounter, s.JobCounter);
             savedJobCounter = s.JobCounter;
             messageCounter = s.MessageCounter;
