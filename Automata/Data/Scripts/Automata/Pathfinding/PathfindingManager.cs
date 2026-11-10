@@ -145,9 +145,6 @@ namespace Automata.Pathfinding
     public sealed partial class PathfindingManager
     {
 
-        /// <summary>Kept for the legacy A* / direct planners (IPathfinder), which are not wired.</summary>
-        public enum Method : byte { None, Direct, AStar }
-
         public static PathfindingManager Instance { get; private set; }
 
         /// <summary>Shared memory of flown links (stage 2); null when off (UsePathMemory) or not the server.</summary>
@@ -161,7 +158,6 @@ namespace Automata.Pathfinding
         internal volatile bool CancelSearch;
         /// <summary>Queue of searches run on worker threads (Lazy Theta*); null when off (PathSearchWorkers = 0) or not the server.</summary>
         public PathSearchQueue Searches { get; private set; }
-        private int lastPlanFrame = -1;
 
         public static void Load(PathfindingConfig config)
         {
@@ -532,14 +528,6 @@ namespace Automata.Pathfinding
             for (int i = 0; i < cAll; i++) if (InstrumentOn(q.Cameras[i], q.SleepingIds)) cOn++;
             return string.Format(" [sight {0:F0} m that way, sensors {1}/{2} on, cameras {3}/{4} on, start {5:F0} m from the controller]",
                                  range, sOn, sAll, cOn, cAll, Vector3D.Distance(start, q.Controller.Translation));
-        }
-
-        private static bool AnyOn<T>(List<T> blocks, List<long> sleeping) where T : class, IMyFunctionalBlock
-        {
-            if (blocks == null) return false;
-            for (int i = 0; i < blocks.Count; i++)
-                if (InstrumentOn(blocks[i], sleeping)) return true;
-            return false;
         }
 
         /// <summary>Functional and switched on (or switched off by the dock routine: 'sleeping', may be null).</summary>
@@ -1082,7 +1070,8 @@ namespace Automata.Pathfinding
             s2 = HalfSizeAlong(ref attitude, ref half, side2);
         }
 
-        private static double HalfSizeAlong(ref MatrixD m, ref Vector3D half, Vector3D w)
+        /// <summary>Half the size along world direction 'w' (unit) of a box with half extents 'half' at attitude 'm'.</summary>
+        public static double HalfSizeAlong(ref MatrixD m, ref Vector3D half, Vector3D w)
         {
             return Math.Abs(Vector3D.Dot(w, m.Right)) * half.X + Math.Abs(Vector3D.Dot(w, m.Up)) * half.Y
                  + Math.Abs(Vector3D.Dot(w, m.Backward)) * half.Z;
@@ -1096,6 +1085,28 @@ namespace Automata.Pathfinding
         }
 
         public static double HullRadiusOf(ref PathQuery q) { return HullRadius(ref q); }
+
+        /// <summary>
+        /// m the hull (centre 'from', held at 'attitude') can move along 'dir' (unit) before what is in the way, up to
+        /// 'max', 'margin' short of it; 'blocker': what stops it (null: nothing). What it already overlaps behind it
+        /// doesn't count.
+        /// </summary>
+        public double ClearRun(ref PathQuery q, ref MatrixD attitude, Vector3D from, Vector3D dir, double max, double margin, out string blocker)
+        {
+            blocker = null;
+            if (max <= 0) return 0;
+            Vector3D hit;
+            IMyEntity e;
+            if (!SegmentBlocked(ref q, ref attitude, from, from + dir * max, 0, out hit, out e)) return max;
+            blocker = Describe(LastHitBlock) ?? (e != null ? e.DisplayName : "?");
+            return MathHelper.Clamp(Vector3D.Dot(hit - from, dir) - HullHalfSizeAlong(ref q, ref attitude, dir) - margin, 0, max);
+        }
+
+        public double ClearRun(ref PathQuery q, ref MatrixD attitude, Vector3D from, Vector3D dir, double max, double margin)
+        {
+            string blocker;
+            return ClearRun(ref q, ref attitude, from, dir, max, margin, out blocker);
+        }
 
         /// <summary>The end zone of a leg along 'dir' (unit) at 'attitude': half the hull plus the berth (see SegmentBlocked).</summary>
         public double EndZoneLength(ref PathQuery q, ref MatrixD attitude, Vector3D dir)
@@ -1526,7 +1537,6 @@ namespace Automata.Pathfinding
         public void BeginPlan()
         {
             planRays = planChecks = blocksTested = planUnseen = budgetBase = 0;
-            lastPlanFrame = MyAPIGateway.Session.GameplayFrameCounter;
             lookups0 = liveScene.Lookups;
             trees0 = liveScene.TreesBuilt;
             indexed0 = liveScene.BlocksIndexed;

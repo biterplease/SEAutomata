@@ -6,6 +6,7 @@ using VRage.Game.ModAPI;
 using VRage.ModAPI;
 using VRageMath;
 using Automata.Util;
+using Automata.Pathfinding;
 using Automata.Util.Logging;
 using Automata.Util.Strings;
 
@@ -534,7 +535,8 @@ namespace Automata.Drone
         {
             CaptureFlightState();
             RefreshDroneGrids();
-            ownDepths.Clear();
+            var pmShape = PathfindingManager.Instance;
+            if (pmShape != null) pmShape.ResetRealShape(Entity.EntityId);   // the drone's own surface measured again
             collectPhase = 0;
             var grid = plot.CubeGrid;
             Vector3I min = plot.Min, max = plot.Max, size = max - min + Vector3I.One;
@@ -543,7 +545,6 @@ namespace Automata.Drone
             var tried = new System.Text.StringBuilder();
             var plotBox = new MyOrientedBoundingBoxD(centre, (Vector3D)size * (grid.GridSize * 0.5) + new Vector3D(HARVEST_HULL_GAP),
                                                      Quaternion.CreateFromRotationMatrix(grid.WorldMatrix));
-            HullBlockBoxes();
             // The plot's real top (its physics, not its cell: a large plot's soil sits ~1.65 m under the cell's top, the crops
             // are no obstacle): the soil at its centre, the rim round it. The beam has to hit one of them.
             Vector3D upW = Vector3D.Normalize(Vector3D.TransformNormal((Vector3D)upCell, grid.WorldMatrix));
@@ -669,37 +670,6 @@ namespace Automata.Drone
             return Orchestrator.TaskFailure.Unreachable;
         }
 
-        // The drone's blocks as boxes in the controller frame (its real outline, not the one box round it: a collector under a
-        // long nose, a beam that starts behind the bow)
-        private readonly List<BoundingBoxD> hullBlocks = new List<BoundingBoxD>();
-        private readonly List<IMySlimBlock> hullSlims = new List<IMySlimBlock>();
-
-        private void HullBlockBoxes()
-        {
-            hullBlocks.Clear();
-            for (int g = 0; g < droneGrids.Count; g++)
-            {
-                var grid = droneGrids[g];
-                hullSlims.Clear();
-                grid.GetBlocks(hullSlims);
-                double gs = grid.GridSize;
-                for (int i = 0; i < hullSlims.Count; i++)
-                {
-                    var s = hullSlims[i];
-                    var lb = new BoundingBoxD(((Vector3D)s.Min - 0.5) * gs, ((Vector3D)s.Max + 0.5) * gs);
-                    var box = BoundingBoxD.CreateInvalid();
-                    for (int k = 0; k < 8; k++)
-                    {
-                        Vector3D c = new Vector3D((k & 1) != 0 ? lb.Max.X : lb.Min.X, (k & 2) != 0 ? lb.Max.Y : lb.Min.Y, (k & 4) != 0 ? lb.Max.Z : lb.Min.Z);
-                        Vector3D w = Vector3D.Transform(c, grid.WorldMatrix);
-                        box.Include(Vector3D.TransformNormal(w - flightState.Position, flightState.WorldMatrixToLocal));
-                    }
-                    hullBlocks.Add(box);
-                }
-                hullSlims.Clear();
-            }
-        }
-
         // The plot's soil (centre) and rim (just inside its side edges) heights over its centre, along 'upW': rays down
         // against its physics. None hit: its cell's top for both (as a solid block).
         private readonly List<IHitInfo> plotHits = new List<IHitInfo>();
@@ -753,7 +723,10 @@ namespace Automata.Drone
                             out Vector3D work, out Vector3D standoff, out string why)
         {
             work = standoff = Vector3D.Zero;
-            why = "?";
+            why = "no pathfinder";
+            PathfindingManager pm;
+            PathQuery q;
+            if (!RealShapeQuery(out pm, out q)) return false;
             Vector3D off = Vector3D.TransformNormal(localPoint - HullCentreLocal, frame);
             for (int k = 0; k < HARVEST_LINE_REACH.Length; k++)
             {
@@ -763,11 +736,11 @@ namespace Automata.Drone
                 if (back > HARVEST_LINE_BACK) { why = string.Format("no stand-off on the beam's line within {0:F0} m with the drone clear over the plot", HARVEST_LINE_BACK); continue; }
                 standoff = work - beam * (back + HARVEST_LINE_RUN);
                 string blocker;
-                if (!SweepClear(ref frame, standoff - off, work - off, HARVEST_LINE_BERTH, true, out blocker)) { why = "in along the beam's line: " + blocker + " in the way"; continue; }
+                if (!pm.RealSweepClear(ref q, ref frame, standoff - off, work - off, HARVEST_LINE_BERTH, true, out blocker)) { why = "in along the beam's line: " + blocker + " in the way"; continue; }
                 // The drone gets to the stand-off level (its direct legs checked that), then turns to the work attitude
                 // there: a long drone tilting nose down swings its nose down and its tail up (a roof, the plots)
                 MatrixD level = LevelAttitude();
-                if (!TurnClear(ref level, ref frame, standoff - off, out blocker)) { why = "turning to the work attitude at the stand-off: " + blocker + " in the way"; continue; }
+                if (!pm.RealTurnClear(ref q, ref level, ref frame, standoff - off, HARVEST_LINE_BERTH, out blocker)) { why = "turning to the work attitude at the stand-off: " + blocker + " in the way"; continue; }
                 return true;
             }
             return false;
@@ -783,66 +756,53 @@ namespace Automata.Drone
         {
             outDist = 0;
             why = null;
-            if (localHullBox.Max.X < localHullBox.Min.X) return false;
-            CaptureFlightState();
-            RefreshDroneGrids();
+            PathfindingManager pm;
+            PathQuery q;
+            if (!RealShapeQuery(out pm, out q)) return false;
             string blocker;
             double run;
-            if (!SweepClear(ref dockFrame, dockedHull, dockedHull + axis * COMPACT_DOCK_OUT, DIRECT_BERTH, true, out blocker, out run))
+            if (!pm.RealSweepClear(ref q, ref dockFrame, dockedHull, dockedHull + axis * COMPACT_DOCK_OUT, DIRECT_BERTH, true, out blocker, out run))
                 run = Math.Max(0, run - 0.05);
             if (run < COMPACT_DOCK_MIN) { why = "straight out along the axis: " + blocker + " in the way"; return false; }
             MatrixD level = LevelAttitude();
             for (double d = run; d >= COMPACT_DOCK_MIN - 1e-6; d -= 0.25)
             {
-                if (TurnClear(ref level, ref dockFrame, dockedHull + axis * d, out blocker)) { outDist = d; return true; }
+                if (pm.RealTurnClear(ref q, ref level, ref dockFrame, dockedHull + axis * d, HARVEST_LINE_BERTH, out blocker)) { outDist = d; return true; }
                 why = string.Format("turning to the dock attitude {0:F1} m out: {1} in the way", d, blocker);
             }
             return false;
+        }
+
+        // The pathfinder and the drone's query for the real-shape checks (PathfindingManager.RealShape); false: none / the
+        // hull not measured yet
+        private bool RealShapeQuery(out PathfindingManager pm, out PathQuery q)
+        {
+            pm = PathfindingManager.Instance;
+            q = default(PathQuery);
+            if (pm == null || localHullBox.Max.X < localHullBox.Min.X) return false;
+            CaptureFlightState();
+            RefreshDroneGrids();
+            BuildPathQuery(out q);
+            return true;
         }
 
         // The drone's attitude on its way (direct legs): level, its heading now
         private MatrixD LevelAttitude()
         {
             Vector3D up = flightState.InGravity ? flightState.GravityUp : flightState.WorldMatrix.Up;
-            Vector3D fwd = flightState.WorldMatrix.Forward - up * Vector3D.Dot(flightState.WorldMatrix.Forward, up);
-            if (fwd.LengthSquared() < 1e-3) fwd = flightState.WorldMatrix.Down - up * Vector3D.Dot(flightState.WorldMatrix.Down, up);
-            return MatrixD.CreateWorld(Vector3D.Zero, Vector3D.Normalize(fwd), up);
+            return MatrixD.CreateWorld(Vector3D.Zero, LevelHeading(ref up), up);
         }
 
-        // Turning in place about the hull centre 'centre' from 'a' to 'b': half way and at the end, the drone's real shape
-        // clear of the real physics (the start is the arrival, checked by its route)
-        private const double POSE_SHELL = 0.3;   // m: a pose is checked as the shell this deep inside the drone's surface
-
-        private bool TurnClear(ref MatrixD a, ref MatrixD b, Vector3D centre, out string blocker)
-        {
-            blocker = null;
-            Quaternion qa = Quaternion.CreateFromRotationMatrix(a), qb = Quaternion.CreateFromRotationMatrix(b);
-            for (int s = 1; s <= 2; s++)
-            {
-                MatrixD att = MatrixD.CreateFromQuaternion(Quaternion.Slerp(qa, qb, s * 0.5f));
-                if (!PoseClear(ref att, centre, HARVEST_LINE_BERTH, out blocker)) return false;
-            }
-            return true;
-        }
-
-        // The drone's real shape at hull centre 'centre', attitude 'att', clear of the real physics: from each side, the
-        // shell just inside its surface swept onto the pose
-        private bool PoseClear(ref MatrixD att, Vector3D centre, double berth, out string blocker)
-        {
-            Vector3D[] dirs = { att.Right, att.Left, att.Up, att.Down, att.Forward, att.Backward };
-            for (int i = 0; i < 6; i++)
-                if (!SweepClear(ref att, centre - dirs[i] * POSE_SHELL, centre, berth, false, out blocker)) return false;
-            blocker = null;
-            return true;
-        }
-
-        // None of the drone's blocks in 'box' with its 'localPoint' (the beam's origin) at 'at', attitude 'frame'
+        // None of the drone's shape boxes (HullShape; else its bounding box) in 'box' with its 'localPoint' (the beam's
+        // origin) at 'at', attitude 'frame'
         private bool HullClearOf(MyOrientedBoundingBoxD box, Vector3D at, ref MatrixD frame, Vector3D localPoint)
         {
             var rot = Quaternion.CreateFromRotationMatrix(frame);
-            for (int i = 0; i < hullBlocks.Count; i++)
+            var shape = HullShape();
+            int n = shape.Count > 0 ? shape.Count : 1;
+            for (int i = 0; i < n; i++)
             {
-                var b = hullBlocks[i];
+                var b = shape.Count > 0 ? shape[i] : localHullBox;
                 var ob = new MyOrientedBoundingBoxD(at + Vector3D.TransformNormal(b.Center - localPoint, frame), b.HalfExtents, rot);
                 if (ob.Intersects(ref box)) return false;
             }
@@ -876,10 +836,10 @@ namespace Automata.Drone
         /// </summary>
         private bool TryDirectLegs(Vector3D start, Vector3D goal, List<Vector3D> points, bool looseGoal)
         {
-            if (localHullBox.Max.X < localHullBox.Min.X) return false;
-            CaptureFlightState();
-            RefreshDroneGrids();
-            ownDepths.Clear();
+            PathfindingManager pm;
+            PathQuery q;
+            if (!RealShapeQuery(out pm, out q)) return false;
+            pm.ResetRealShape(Entity.EntityId);
             MatrixD att = LevelAttitude();
             Vector3D up = att.Up, fwd = att.Forward;
             Vector3D rise = up * Vector3D.Dot(goal - start, up);
@@ -897,7 +857,7 @@ namespace Automata.Drone
                 {
                     Vector3D b = i < mids.Count ? mids[i] : goal;
                     bool last = i == mids.Count;
-                    if (!SweepClear(ref att, a, b, DIRECT_BERTH, !(last && looseGoal), out why)) clear = false;
+                    if (!pm.RealSweepClear(ref q, ref att, a, b, DIRECT_BERTH, !(last && looseGoal), out why)) clear = false;
                     a = b;
                 }
                 if (!clear)
@@ -920,9 +880,9 @@ namespace Automata.Drone
             for (double lift = DIRECT_LIFT_STEP; lift <= DIRECT_LIFT_MAX + 1e-6; lift += DIRECT_LIFT_STEP)
             {
                 Vector3D a1 = start + up * (over + lift), b1 = goal + up * (over + lift - hGoal);
-                if (!SweepClear(ref att, start, a1, DIRECT_BERTH, true, out liftWhy)) { liftWhy = "going up: " + liftWhy; break; }   // a ceiling: no higher
-                if (!SweepClear(ref att, a1, b1, DIRECT_BERTH, true, out liftWhy)) { liftWhy = "across: " + liftWhy; continue; }
-                if (!SweepClear(ref att, b1, goal, DIRECT_BERTH, !looseGoal, out liftWhy)) { liftWhy = "coming down: " + liftWhy; break; }
+                if (!pm.RealSweepClear(ref q, ref att, start, a1, DIRECT_BERTH, true, out liftWhy)) { liftWhy = "going up: " + liftWhy; break; }   // a ceiling: no higher
+                if (!pm.RealSweepClear(ref q, ref att, a1, b1, DIRECT_BERTH, true, out liftWhy)) { liftWhy = "across: " + liftWhy; continue; }
+                if (!pm.RealSweepClear(ref q, ref att, b1, goal, DIRECT_BERTH, !looseGoal, out liftWhy)) { liftWhy = "coming down: " + liftWhy; break; }
                 legOffset = points.Count;
                 legForwards.Clear();
                 legUps.Clear();
@@ -934,139 +894,6 @@ namespace Automata.Drone
             }
             if (Log.DebugEnabled) Log.Debug("Drone {0}: direct legs (up, across, down): blocked {1}", Entity.EntityId, liftWhy ?? "?");
             return false;
-        }
-        // Against the real physics, not cell boxes (a window's cell is mostly air, a farm plot's rim sits low): the drone's
-        // box held at 'att', its centre moved a -> b, swept by rays from its leading faces along the leg, a grid every
-        // SWEEP_STEP across the faces grown by the berth. 'ahead': the berth in front too (a goal right next to something:
-        // the box itself only). Hits on the drone's own grids don't count. 'blocker': what is in the way; 'along': how far
-        // the drone gets along the leg before it (the leg's length when clear).
-        private const double SWEEP_STEP = 0.4;
-        private readonly List<IHitInfo> sweepHits = new List<IHitInfo>();
-
-        // Per leading face (axis, sign): how deep behind the box's face the drone's own surface is on each line, measured
-        // where the drone is now (its physics is there; the legs keep its attitude): NaN where nothing of it is; the margin
-        // lines outside the box as the line next to them inside. Cleared for each route (TryDirectLegs).
-        private readonly Dictionary<int, double[]> ownDepths = new Dictionary<int, double[]>();
-
-        private double[] OwnDepths(int f, bool positive, int n1, int n2, double h1, double h2, double[] half)
-        {
-            int key = f * 2 + (positive ? 1 : 0) + 8 * ((int)Math.Round(h1 * 100) * 2048 + (int)Math.Round(h2 * 100));
-            double[] depths;
-            if (ownDepths.TryGetValue(key, out depths) && depths.Length == n1 * n2) return depths;
-            depths = new double[n1 * n2];
-            var wm = flightState.WorldMatrix;
-            Vector3D[] cur = { wm.Right, wm.Up, wm.Backward };
-            Vector3D n = cur[f] * (positive ? 1 : -1);
-            int f1 = (f + 1) % 3, f2 = (f + 2) % 3;
-            Vector3D face = HullCentreWorld + n * half[f];
-            // The lines through the box: from the drone's own surface (NaN: none of it there)
-            int iLo = n1, iHi = -1, jLo = n2, jHi = -1;
-            for (int i = 0; i < n1; i++) if (Math.Abs(-h1 + 2 * h1 * i / (n1 - 1)) < half[f1]) { iLo = Math.Min(iLo, i); iHi = i; }
-            for (int j = 0; j < n2; j++) if (Math.Abs(-h2 + 2 * h2 * j / (n2 - 1)) < half[f2]) { jLo = Math.Min(jLo, j); jHi = j; }
-            for (int i = iLo; i <= iHi; i++)
-                for (int j = jLo; j <= jHi; j++)
-                {
-                    double u = -h1 + 2 * h1 * i / (n1 - 1), v = -h2 + 2 * h2 * j / (n2 - 1);
-                    double depth;
-                    if (!OwnSurface(face + cur[f1] * u + cur[f2] * v, -n, 2 * half[f], out depth)) depth = double.NaN;
-                    depths[i * n2 + j] = depth;
-                }
-            // The margin lines round it (the berth): level with the drone's surface next to them, not the box's face (a
-            // camera arm sticking out up top doesn't push the margin under the belly out to it)
-            for (int i = 0; i < n1; i++)
-                for (int j = 0; j < n2; j++)
-                {
-                    if (i >= iLo && i <= iHi && j >= jLo && j <= jHi) continue;
-                    if (iHi < 0 || jHi < 0) { depths[i * n2 + j] = 0; continue; }
-                    int ii = Math.Max(iLo, Math.Min(iHi, i)), jj = Math.Max(jLo, Math.Min(jHi, j));
-                    depths[i * n2 + j] = depths[ii * n2 + jj];
-                }
-            ownDepths[key] = depths;
-            return depths;
-        }
-
-        // How far from 'from' along 'dir' (into the drone's box) its own grids start; false: none within 'max'
-        private bool OwnSurface(Vector3D from, Vector3D dir, double max, out double depth)
-        {
-            depth = 0;
-            sweepHits.Clear();
-            MyAPIGateway.Physics.CastRay(from, from + dir * max, sweepHits);
-            double best = double.MaxValue;
-            for (int k = 0; k < sweepHits.Count; k++)
-            {
-                var e = sweepHits[k].HitEntity;
-                var g = e != null ? e.GetTopMostParent() as IMyCubeGrid : null;
-                if (g == null || !droneGrids.Contains(g)) continue;
-                best = Math.Min(best, Vector3D.Dot(sweepHits[k].Position - from, dir));
-            }
-            sweepHits.Clear();
-            if (best == double.MaxValue) return false;
-            depth = Math.Max(0, best);
-            return true;
-        }
-
-        private bool SweepClear(ref MatrixD att, Vector3D a, Vector3D b, double berth, bool ahead, out string blocker)
-        {
-            double along;
-            return SweepClear(ref att, a, b, berth, ahead, out blocker, out along);
-        }
-
-        private bool SweepClear(ref MatrixD att, Vector3D a, Vector3D b, double berth, bool ahead, out string blocker, out double along)
-        {
-            blocker = null;
-            Vector3D d = b - a;
-            double len = d.Length();
-            along = len;
-            if (len < 0.05) return true;
-            d /= len;
-            Vector3D hull = localHullBox.HalfExtents;
-            Vector3D[] axes = { att.Right, att.Up, att.Backward };   // the controller frame's X / Y / Z
-            double[] half = { hull.X, hull.Y, hull.Z };
-            for (int f = 0; f < 3; f++)
-            {
-                double s = Vector3D.Dot(axes[f], d);
-                if (Math.Abs(s) < 0.02) continue;   // a face sliding along the leg: the leading faces cover the swept volume
-                Vector3D n = axes[f] * Math.Sign(s);
-                int f1 = (f + 1) % 3, f2 = (f + 2) % 3;
-                double h1 = half[f1] + berth, h2 = half[f2] + berth;
-                int n1 = Math.Max(2, (int)Math.Ceiling(2 * h1 / SWEEP_STEP) + 1), n2 = Math.Max(2, (int)Math.Ceiling(2 * h2 / SWEEP_STEP) + 1);
-                // The drone's own surface along each line: back from its box's face into it (a nose above a collector, open
-                // space under a wing: those lines start further back, or not at all); the margin lines from the face
-                double[] depths = OwnDepths(f, s > 0, n1, n2, h1, h2, half);
-                Vector3D face = a + n * half[f];
-                for (int i = 0; i < n1; i++)
-                    for (int j = 0; j < n2; j++)
-                    {
-                        double dd = depths[i * n2 + j];
-                        if (double.IsNaN(dd)) continue;   // nothing of the drone on this line
-                        double u = -h1 + 2 * h1 * i / (n1 - 1), v = -h2 + 2 * h2 * j / (n2 - 1);
-                        Vector3D o = face + axes[f1] * u + axes[f2] * v - n * dd;
-                        if (ahead) o += n * berth;
-                        sweepHits.Clear();
-                        MyAPIGateway.Physics.CastRay(o, o + d * len, sweepHits);
-                        for (int k = 0; k < sweepHits.Count; k++)
-                        {
-                            var e = sweepHits[k].HitEntity;
-                            if (e == null || e is IMyCharacter || e is IMyFloatingObject) continue;
-                            var top = e.GetTopMostParent();
-                            var g = top as IMyCubeGrid;
-                            if (g != null && droneGrids.Contains(g)) continue;
-                            if (g != null)
-                            {
-                                var slim = g.GetCubeBlock(g.WorldToGridInteger(sweepHits[k].Position + d * 0.02));
-                                blocker = slim != null && slim.FatBlock != null ? "'" + slim.FatBlock.DisplayNameText + "'"
-                                        : slim != null ? slim.BlockDefinition.Id.SubtypeName : g.DisplayName;
-                            }
-                            else blocker = top != null ? top.DisplayName ?? top.GetType().Name : "?";
-                            along = Vector3D.Dot(sweepHits[k].Position - o, d);
-                            blocker += string.Format(" ({0:F1} m along)", along);
-                            sweepHits.Clear();
-                            return false;
-                        }
-                    }
-            }
-            sweepHits.Clear();
-            return true;
         }
         #endregion
 

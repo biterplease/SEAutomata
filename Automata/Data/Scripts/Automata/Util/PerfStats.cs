@@ -17,23 +17,22 @@ namespace Automata.Util
     public static class PerfStats
     {
         public const int LcdDraw = 0;        // BlockLcd.Publish: content key + feed packet (computers, only with viewers)
-        public const int LcdRescan = 1;      // (unused)
-        public const int LcdBuild = 2;       // a computer's UpdateLcd: viewer check, header + log text, plus the Publish above
-        public const int DroneLcd = 3;       // DroneStatusDisplay.Flush: feed packet (drones, only with viewers)
-        public const int CcScan = 4;         // a whole Construction Computer scan
-        public const int CcGroup = 5;        // one grid group scanned for real (ConstructionComputer.ScanArea)
-        public const int CcGroupCached = 6;  // one grid group answered from the cache (signature check only)
-        public const int PathPlan = 7;       // main thread: one PlanRoute (stages 1-2, accepting a search's answer)
-        public const int PathPrepare = 8;    // main thread: scene captured for the queued searches (block trees built), per tick
-        public const int PathWarm = 9;       // main thread: scene warm-up of the areas expected to be busy, per tick
-        public const int PathSearch = 10;    // worker threads: one Lazy Theta* search (not main-thread time)
-        public const int PathSearchWait = 11; // a search from queued until its answer is back (not main-thread time)
-        public const int PathAccept = 12;    // main thread: a search's answer checked with rays and doors
-        private const int COUNT = 13;
+        public const int LcdBuild = 1;       // a computer's UpdateLcd: viewer check, header + log text, plus the Publish above
+        public const int DroneLcd = 2;       // DroneStatusDisplay.Flush: feed packet (drones, only with viewers)
+        public const int CcScan = 3;         // a whole Construction Computer scan
+        public const int CcGroup = 4;        // one grid group scanned for real (ConstructionComputer.ScanArea)
+        public const int CcGroupCached = 5;  // one grid group answered from the cache (signature check only)
+        public const int PathPlan = 6;       // main thread: one PlanRoute (stages 1-2, accepting a search's answer)
+        public const int PathPrepare = 7;    // main thread: scene captured for the queued searches (block trees built), per tick
+        public const int PathWarm = 8;       // main thread: scene warm-up of the areas expected to be busy, per tick
+        public const int PathSearch = 9;     // worker threads: one Lazy Theta* search (not main-thread time)
+        public const int PathSearchWait = 10; // a search from queued until its answer is back (not main-thread time)
+        public const int PathAccept = 11;    // main thread: a search's answer checked with rays and doors
+        private const int COUNT = 12;
 
         private static readonly string[] Names =
         {
-            "LCD feed packet", "(unused)", "LCD update (computers)", "LCD feed packet (drones)",
+            "LCD feed packet", "LCD update (computers)", "LCD feed packet (drones)",
             "CC scan", "CC group scanned", "CC group cached",
             "path plan (main thread)", "path search scene capture (main thread)", "path warm-up (main thread)",
             "path search (worker threads)", "path search queued to answered", "path search answer checked (main thread)",

@@ -401,11 +401,6 @@ namespace Automata.Drone
             return logic != null && logic.IsManagedByPlayer;
         }
 
-        static bool NeverCondition(IMyTerminalBlock b)
-        {
-            return false;
-        }
-
         private static void AddButton(string id, MyStringId title, MyStringId tooltip, Action<DroneControllerBlock> action,
             Func<IMyTerminalBlock, bool> enabled = null, bool multipleBlocks = false)
         {
@@ -458,14 +453,6 @@ namespace Automata.Drone
             MyAPIGateway.TerminalControls.GetControls<IMyRemoteControl>(out controls);
             foreach (var c in controls)
                 if (c.Id == IdPrefix + id) { c.Enabled = enabled; return; }
-        }
-
-        private static void SetVisible(string id, Func<IMyTerminalBlock, bool> visible)
-        {
-            List<IMyTerminalControl> controls;
-            MyAPIGateway.TerminalControls.GetControls<IMyRemoteControl>(out controls);
-            foreach (var c in controls)
-                if (c.Id == IdPrefix + id) { c.Visible = visible; return; }
         }
 
         // Sections fold: a header checkbox shows / hides the controls after it (until the next header). Local to this

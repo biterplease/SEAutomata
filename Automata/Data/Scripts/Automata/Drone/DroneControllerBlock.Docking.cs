@@ -1418,9 +1418,6 @@ namespace Automata.Drone
             legsSinceUndock = 0;   // the first two legs (backing out of the dock) aren't checked at their start
             isParked = false;
             UpdateMass();
-            h2ThrustProfile = CalculateThrustProfile(shipController, physicalMass, hydrogenThrusters);
-            atmoThrustProfile = CalculateThrustProfile(shipController, physicalMass, atmoThrusters);
-            ionThrustProfile = CalculateThrustProfile(shipController, physicalMass, ionThrusters);
             combinedThrustProfile = CalculateThrustProfile(shipController, physicalMass, allThrusters);
             commandedVelocity = flightState.LinearVelocity;
             ResetIntegralTerms();

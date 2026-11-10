@@ -199,32 +199,6 @@ namespace Automata.Drone
         [ProtoEnum]
         IsJanitorDrone = 32768,
 }
-    [ProtoContract, Flags]
-    public enum UpdateFlags : ushort
-    {
-        [ProtoEnum]
-        None = 0,
-        [ProtoEnum]
-        Error = 1,
-        [ProtoEnum]
-        Registration = 2,
-        [ProtoEnum]
-        TaskComplete = 4,
-        [ProtoEnum]
-        StateChanged = 8,
-        [ProtoEnum]
-        CapabilitiesChanged = 16,
-        [ProtoEnum]
-        BatteryUpdate = 32,
-        [ProtoEnum]
-        H2Update = 64,
-        [ProtoEnum]
-        GoingOutOfRange = 128,
-        [ProtoEnum]
-        ReturningIntoRange = 256,
-        [ProtoEnum]
-        UnderAttack = 512,
-    }
     [ProtoContract]
     public enum FlightOrientationMode : byte {
         [ProtoEnum]

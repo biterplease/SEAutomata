@@ -25,7 +25,6 @@ namespace Automata.Drone
     {
         private const int RECOVER_MAX = 3;
         private const double RECOVER_EXCLUDE_MIN = 10;   // m: no spot this close to a place already tried from (or the hull radius x 1.5)
-        private static readonly double[] RECOVER_DISTANCES = { 15, 30 };   // m (at least 2 / 4 hull radii)
 
         private bool recoverPlanning;                    // the caller lets a failed plan reposition the drone
         private int recoverAttempts;
@@ -93,9 +92,8 @@ namespace Automata.Drone
             recoverVisited.Add(start);
             double radius = DroneRadius();
             double exclude = Math.Max(RECOVER_EXCLUDE_MIN, radius * 1.5);
-            RecoverCandidates(start, ref q, radius);
-            Vector3D hit;
-            VRage.ModAPI.IMyEntity e;
+            recoverCandidates.Clear();
+            PathfindingManager.RecoverSpots(ref q, start, radius, recoverCandidates);
             for (int i = 0; i < recoverCandidates.Count; i++)
             {
                 Vector3D s = recoverCandidates[i];
@@ -103,9 +101,7 @@ namespace Automata.Drone
                 for (int v = 0; v < recoverVisited.Count && !near; v++) near = Vector3D.DistanceSquared(s, recoverVisited[v]) < exclude * exclude;
                 if (near) continue;
                 pm.BeginPlan();
-                if (!pm.HullFits(ref q, s) || pm.SegmentBlocked(ref q, start, s, 0.5, out hit, out e)) continue;
-                if (q.GravityUp.LengthSquared() > 0.5
-                    && PathfindingManager.HeightAboveTerrain(s) < PathfindingManager.HullHalfSizeAlong(ref q, ref q.Controller, q.GravityUp) + 1) continue;
+                if (!pm.HullFits(ref q, s) || !pm.SpotReachable(ref q, start, s)) continue;
                 recoverAttempts++;
                 recoverVisited.Add(s);
                 if (points.Count > count) points.RemoveRange(count, points.Count - count);
@@ -128,37 +124,6 @@ namespace Automata.Drone
             routeErrorPending = Loc.F(MyStrings.Drone_NoRouteAfterRepositions, recoverAttempts);   // nowhere left to go
             routeErrorByDrone = IsOtherDrone(pm.LastBlocker);
             return false;
-        }
-
-        // Spots around 'from': up first (in gravity: never down), then level all round, then the diagonals; near ones first
-        private void RecoverCandidates(Vector3D from, ref PathQuery q, double radius)
-        {
-            recoverCandidates.Clear();
-            bool gravity = q.GravityUp.LengthSquared() > 0.5;
-            Vector3D up = gravity ? q.GravityUp : q.Controller.Up;
-            Vector3D fwd = q.Controller.Forward - up * Vector3D.Dot(q.Controller.Forward, up);
-            if (fwd.LengthSquared() < 1e-4) fwd = Vector3D.CalculatePerpendicularVector(up);
-            fwd.Normalize();
-            Vector3D right = Vector3D.Cross(fwd, up);
-            for (int k = 0; k < RECOVER_DISTANCES.Length; k++)
-            {
-                double d = Math.Max(RECOVER_DISTANCES[k], radius * 2 * (k + 1));
-                recoverCandidates.Add(from + up * d);
-                for (int a = 0; a < 8; a++)
-                {
-                    double ang = a * Math.PI / 4;
-                    Vector3D h = fwd * Math.Cos(ang) + right * Math.Sin(ang);
-                    recoverCandidates.Add(from + h * d);
-                }
-                for (int a = 0; a < 8; a++)
-                {
-                    double ang = a * Math.PI / 4 + Math.PI / 8;
-                    Vector3D h = fwd * Math.Cos(ang) + right * Math.Sin(ang);
-                    recoverCandidates.Add(from + Vector3D.Normalize(h + up) * d);
-                    if (!gravity) recoverCandidates.Add(from + Vector3D.Normalize(h - up) * d);
-                }
-                if (!gravity) recoverCandidates.Add(from - up * d);
-            }
         }
 
         /// <summary>UpdateBeforeSimulation10, AI on: at the reposition spot, plan again; repositions used up: error.</summary>

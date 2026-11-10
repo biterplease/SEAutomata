@@ -22,17 +22,6 @@ namespace Automata.Util
             };
         }
 
-        public static QuaternionDData FromQuaternion(Quaternion q)
-        {
-            return new QuaternionDData
-            {
-                X = q.X,
-                Y = q.Y,
-                Z = q.Z,
-                W = q.W
-            };
-        }
-
         public QuaternionD ToQuaternionD()
         {
             return new QuaternionD(X, Y, Z, W);

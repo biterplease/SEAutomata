@@ -153,11 +153,6 @@ namespace Automata.Orchestrator
             b.ShowInToolbarConfig = v;
         }
 
-        static void Slider(string id, MyStringId title, MyStringId tooltip, float min, float max, Func<OrchestratorBlock, float> get, Action<OrchestratorBlock, float> set)
-        {
-            BlockSlider(id, title, tooltip, min, max, get, set, (l, sb) => sb.AppendLoc(MyStrings.Orchestrator_Metres, get(l).ToString("0")));
-        }
-
         // Blocks of the orchestrator's grid, with the metres
         static void BlockSlider(string id, MyStringId title, MyStringId tooltip, float min, float max, Func<OrchestratorBlock, float> get, Action<OrchestratorBlock, float> set)
         {

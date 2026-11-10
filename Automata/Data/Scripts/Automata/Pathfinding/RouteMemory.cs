@@ -82,9 +82,6 @@ namespace Automata.Pathfinding
         private readonly int maxNodes;
         private readonly double maxAgeMinutes;
 
-        public int NodeCount { get { return nodes.Count; } }
-        public int LinkCount { get { return links.Count; } }
-
         public RouteMemory(int maxNodes, double maxAgeHours)
         {
             this.maxNodes = Math.Max(100, maxNodes);

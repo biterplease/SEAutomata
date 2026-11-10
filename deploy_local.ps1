@@ -4,7 +4,8 @@
 
 .DESCRIPTION
   1. Deletes the deployed copy (so files removed from the repo don't linger in the game).
-  2. Copies modinfo.sbm, Automata.ini, CREDITS.txt, Data, Models, Textures and Audio.
+  2. Copies modinfo.sbm, Automata.ini, CREDITS.txt, Data, Models, Textures and Audio (under Data\Scripts only the
+     *.cs files: no CLAUDE.md or other notes).
   3. Sets LogLevel in the DEPLOYED Automata.ini (default: every level, Verbose|Info|Debug|Warning|Error); the
      repository's Automata.ini keeps the shipped default.
   Every step prints its time and how long it took.
@@ -23,6 +24,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot\deploy_common.ps1"   # Remove-NonScriptFiles
 
 # The log level to deploy: names checked, normalised to a|b|c
 $shippedLevel = ($LogLevel.Trim() -ieq 'Shipped')
@@ -99,6 +101,8 @@ foreach ($name in 'Data', 'Models', 'Textures', 'Audio')
     else { Write-Warning "Skipped $name (not in the repository)" }
     Write-Step "$name copied"
 }
+Remove-NonScriptFiles -Root $Target
+Write-Step 'Data\Scripts: only *.cs kept'
 
 # 3. The log level of the deployed ini (the repository's Automata.ini keeps the shipped default)
 $deployedIni = Join-Path $Target 'Automata.ini'

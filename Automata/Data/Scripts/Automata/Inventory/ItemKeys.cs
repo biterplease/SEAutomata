@@ -90,11 +90,6 @@ namespace Automata.Inventory
             return true;
         }
 
-        public static bool IsComponent(MyStringHash key)
-        {
-            return key.String.IndexOf('/') < 0;
-        }
-
         public static void Clear()
         {
             lock (sync) cache.Clear();

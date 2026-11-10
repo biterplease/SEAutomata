@@ -38,7 +38,6 @@ namespace Automata.Drone
         private int head;       // index of the oldest line
         private int count;
 
-        private readonly StringBuilder sb = new StringBuilder(128);
         private readonly LcdFeeder feeder = new LcdFeeder();
 
         private bool dirty = true;

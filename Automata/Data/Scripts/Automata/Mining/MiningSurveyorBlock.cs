@@ -1788,7 +1788,6 @@ namespace Automata.Mining
                 header.Add(BlockLcd.Columns(k < lcdDeposits.Count ? lcdDeposits[k] : "", k < lcdRequests.Count ? lcdRequests[k] : "", HEADER_COLUMN));
             }
         }
-        private readonly StringBuilder lcdText = new StringBuilder();
 
         // Server: the status text on the tagged LCDs
         private readonly List<string> lcdDeposits = new List<string>();

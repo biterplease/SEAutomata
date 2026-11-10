@@ -124,7 +124,7 @@ namespace Automata.Pathfinding
             public bool AB, In;
             public double Lat, W, Clear;       // its slot: across the box (+: right), width, m clear before / after
             public double S, V, BrakeA, FullA, Hull;
-            public int Frame, WaitSince;
+            public int Frame;
             public Vector3D Pos;
         }
 

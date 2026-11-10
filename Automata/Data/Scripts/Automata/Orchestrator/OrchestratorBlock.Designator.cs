@@ -100,7 +100,7 @@ namespace Automata.Orchestrator
             bool hold = ja.Type == JobType.DesignatorQuarry && origin == 0;
             DateTime heldUntil = DateTime.UtcNow.AddSeconds(hold ? QUARRY_HOLD_SECONDS : 0);
             playerJobs[jobId] = new PlayerJob { JobId = jobId, OrderId = order.OrderId, Announcement = job, RequiredDrone = ja.RequiredDrone,
-                                                ExpiresAt = heldUntil.AddSeconds(PointerConfig().ConfirmTimeoutSeconds),
+                                                ExpiresAt = heldUntil.AddSeconds(CONFIRM_TIMEOUT_SECONDS),
                                                 Held = hold, HeldUntil = heldUntil, SenderOwner = senderOwner };
             var key = new KeyValuePair<long, uint>(entityId, jobId);
             knownJobs[key] = int.MaxValue;
@@ -142,7 +142,7 @@ namespace Automata.Orchestrator
                         if (other.OrderId != pj.OrderId || !other.Held) continue;
                         orders = AddQuarryBench(other.Announcement);
                         other.HeldUntil = until;
-                        other.ExpiresAt = until.AddSeconds(PointerConfig().ConfirmTimeoutSeconds);
+                        other.ExpiresAt = until.AddSeconds(CONFIRM_TIMEOUT_SECONDS);
                     }
                     double depth = orders * QuarrySide(pj.Announcement);
                     PlayerOrder order;

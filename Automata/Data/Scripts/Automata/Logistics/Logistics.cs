@@ -7,17 +7,6 @@ using VRageMath;
 
 namespace Automata.Logistics
 {
-    public interface ILogisticsComputer
-    {
-        bool IsInitialized();
-        void Initialize();
-        bool ScanComponents();
-        bool MapConveyorNetworks();
-        void ScanCargoContainers();
-        void ReadBidRoundStartMessages();
-        void SendRoundBids();
-        void SetOperationMode(OpMode_Obsolete operationMode);
-    }
 
     // public enum ErrorCode : byte
     // {
@@ -76,13 +65,6 @@ namespace Automata.Logistics
         Active,
         [ProtoEnum]
         Error
-    }
-    public enum OpMode_Obsolete : byte
-    {
-        None = 0,
-        BuiltInToDrone = 1,
-        BuiltInToOrchestrator = 2,
-        LogisticsComputer = 4,
     }
     [Flags, ProtoContract]
     public enum OperationMode : byte

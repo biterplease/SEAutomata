@@ -18,14 +18,4 @@ namespace Automata.Inventory
         public int Value;
     }
 
-    [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
-    public struct QuotaSet
-    {
-        [ProtoMember(1)]
-        public MyStringHash Key;
-        [ProtoMember(2)]
-        public int MinimumValue;
-        [ProtoMember(3)]
-        public int MaximumValue;
-    }
 }

@@ -13,10 +13,6 @@ namespace Automata.Util
         {
             return (int)(seconds * TICKS_PER_SECOND);
         }
-        public static float TickToSeconds(uint ticks)
-        {
-            return (float)ticks / TICKS_PER_SECOND;
-        }
         /// <summary>
         /// Convert ticks to MS, rounded down
         /// </summary>

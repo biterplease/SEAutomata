@@ -139,9 +139,7 @@ namespace Automata.VirtualNetwork
 
         private readonly Dictionary<KeyValuePair<long, long>, bool> _shareCache = new Dictionary<KeyValuePair<long, long>, bool>();
         private readonly TimeSpan _messageExpiration;
-        private readonly object _cleanupLock = new object();
         private static bool _isInitialized = false;
-        private volatile bool _isShuttingDown = false;
         private readonly IMessageQueueConfig _config;
         private readonly IMyUtilitiesDelegate MyUtilitiesDelegate;
 
@@ -196,8 +194,6 @@ namespace Automata.VirtualNetwork
         public ErrorCode BroadcastMessage<T>(GridAntennaReg sender, Message<T> message, bool enforceCommsRange = false,
                                              IAIBlockType senderType = IAIBlockType.None) where T : class, IMessagePayload
         {
-            if (_isShuttingDown)
-                return ErrorCode.ShutdownInProgress;
             if (message == null)
                 return ErrorCode.MessageIsNull;
             if (message.Channel == Channel.DIRECT_MESSAGE)
@@ -238,12 +234,8 @@ namespace Automata.VirtualNetwork
         {
             if (payload == null)
                 return PayloadType.None;
-            if (payload is RelayMessage)
-                return PayloadType.RelayMessage;
             if (payload is TaskAssignment)
                 return PayloadType.TaskAssignment;
-            if (payload is TaskAborted)
-                return PayloadType.TaskAborted;
             if (payload is JobAnnouncement)
                 return PayloadType.JobAnnouncement;
             if (payload is MiningSurveyDataBroadcast)
@@ -283,8 +275,6 @@ namespace Automata.VirtualNetwork
             PayloadType messageFilters = PayloadType.None)
             where T : class, IMessagePayload
         {
-            if (_isShuttingDown)
-                return ErrorCode.ShutdownInProgress;
             if (clear)
                 outMessages.Clear();
             if (maxMessages <= 0 || reader == null || reader.GridId == 0)
@@ -530,9 +520,7 @@ namespace Automata.VirtualNetwork
             {
                 switch (type)
                 {
-                    case PayloadType.RelayMessage: return MyUtilitiesDelegate.SerializeFromBinary<RelayMessage>(data);
                     case PayloadType.TaskAssignment: return MyUtilitiesDelegate.SerializeFromBinary<TaskAssignment>(data);
-                    case PayloadType.TaskAborted: return MyUtilitiesDelegate.SerializeFromBinary<TaskAborted>(data);
                     case PayloadType.JobAnnouncement: return MyUtilitiesDelegate.SerializeFromBinary<JobAnnouncement>(data);
                     case PayloadType.MiningSurveyDataBroadcast: return MyUtilitiesDelegate.SerializeFromBinary<MiningSurveyDataBroadcast>(data);
                     case PayloadType.Auction: return MyUtilitiesDelegate.SerializeFromBinary<Auction>(data);
@@ -554,10 +542,5 @@ namespace Automata.VirtualNetwork
 
         #endregion
 
-        public void PrepareForShutdown()
-        {
-            Relays.Clear();
-            _isShuttingDown = true;
-        }
     }
 }

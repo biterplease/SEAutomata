@@ -10,6 +10,22 @@ $script:ChangelogPath = Join-Path $script:DeployDir 'changelog.txt'
 # What ships. Everything else in the mod folder (bin, obj, *.csproj, *.mdk*.ini, ...) is development only.
 $script:ShippedFiles = @('modinfo.sbmi', 'Automata.ini', 'CREDITS.txt', 'thumb.png')
 $script:ShippedFolders = @('Data', 'Models', 'Textures', 'Audio')
+# Under Data\Scripts only the *.cs files ship (no CLAUDE.md or other notes); the rest of Data (definitions, localization) ships whole.
+
+# Removes everything but *.cs from <Root>\Data\Scripts, and the folders that leaves empty. 'Root': a folder holding Data\.
+function Remove-NonScriptFiles {
+    param([Parameter(Mandatory)][string]$Root)
+
+    $scripts = Join-Path $Root 'Data\Scripts'
+    if (-not (Test-Path -LiteralPath $scripts)) { return }
+    $extra = @(Get-ChildItem -LiteralPath $scripts -Recurse -File | Where-Object { $_.Extension -ine '.cs' })
+    $extra | Remove-Item -Force
+    Get-ChildItem -LiteralPath $scripts -Recurse -Directory |
+        Sort-Object { $_.FullName.Length } -Descending |
+        Where-Object { -not (Get-ChildItem -LiteralPath $_.FullName -Force) } |
+        Remove-Item -Force
+    Write-Host ('Not shipped: {0} non-.cs file(s) under Data\Scripts' -f $extra.Count)
+}
 
 function Find-SEWorkshopTool {
     if ($env:SEWORKSHOPTOOL_PATH -and (Test-Path -LiteralPath $env:SEWORKSHOPTOOL_PATH)) {
@@ -151,6 +167,7 @@ function New-DeployStage {
         if (Test-Path -LiteralPath $path) { Copy-Item -LiteralPath $path -Destination $script:StageDir -Recurse -Force }
         else { Write-Warning "Not shipped: $name (not in the mod folder)" }
     }
+    Remove-NonScriptFiles -Root $script:StageDir
 
     $files = @(Get-ChildItem -LiteralPath $script:StageDir -Recurse -File)
     $megabytes = ($files | Measure-Object -Property Length -Sum).Sum / 1MB

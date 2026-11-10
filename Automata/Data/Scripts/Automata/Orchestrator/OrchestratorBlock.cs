@@ -67,6 +67,9 @@ namespace Automata.Orchestrator
         public State currentState { get; private set; }
         private string status = Loc.T(MyStrings.Orchestrator_Starting);
 
+        private const int BID_COLLECTION_WINDOW_TICKS = 300;
+        public const int BID_BLACKLIST_COOLDOWN_TICKS = 3600;
+
         private sealed class OpenAuction
         {
             public Auction Auction;
@@ -849,11 +852,9 @@ namespace Automata.Orchestrator
                     continue;
                 }
                 bool expired = now - open.Started >= AUCTION_LIFETIME_SECONDS * 60;   // frames, like the no-bid timeout
-                // Pooling: a job bigger than one trip of every drone that bid so far waits a little longer for more drones
-                int window = config != null ? config.OrchestratorServerSettings.BidCollectionWindowTicks : 300;
                 // (not a sequential job: one drone does every trip anyway)
-                bool pooling = now - open.Started < Math.Max(AUCTION_POOL_TICKS, window) && !open.Auction.Sequential && !BidsCoverOneTrip(open);
-                if (now - open.Started >= window && !pooling)
+                bool pooling = now - open.Started < Math.Max(AUCTION_POOL_TICKS, BID_COLLECTION_WINDOW_TICKS) && !open.Auction.Sequential && !BidsCoverOneTrip(open);
+                if (now - open.Started >= BID_COLLECTION_WINDOW_TICKS && !pooling)
                 {
                     Dictionary<long, List<Task>> assignments;
                     long droneId;
@@ -2006,24 +2007,6 @@ namespace Automata.Orchestrator
             return Task.DockAt(io.EntityId, at, at + axis * Construction.ConstructionComputer.APPROACH_DISTANCE);
         }
 
-        // The logistics bid covering the most of 'wanted' (items it offers / room it has), the nearest to 'near' on a tie
-        private static Bid BestLogisticsBid(List<Bid> lcs, DiscreteInventory wanted, Vector3D near)
-        {
-            Bid best = null;
-            double bestCover = 0, bestDistance = double.MaxValue;
-            for (int i = 0; i < lcs.Count; i++)
-            {
-                var bid = lcs[i];
-                if (bid.IOLocationData == null) continue;
-                var common = Intersect(wanted, bid.BidInventory);
-                double cover = common != null ? common.GetTotalItemCount() : 0;
-                if (cover <= 0) continue;
-                double d = Vector3D.DistanceSquared(near, bid.IOLocationData.PositionData.ToVector3D());
-                if (cover > bestCover || (cover == bestCover && d < bestDistance)) { best = bid; bestCover = cover; bestDistance = d; }
-            }
-            return best;
-        }
-
         private Bid BestDrone(List<Bid> drones, Vector3D firstStop, JobType type)
         {
             Bid best = null;
@@ -2033,25 +2016,6 @@ namespace Automata.Orchestrator
             {
                 double s = ComputeDroneBidScore(drones[i], firstStop, 0, 0) + ProfileBonus(drones[i], preferred);
                 if (s > bestScore) { bestScore = s; best = drones[i]; }
-            }
-            return best;
-        }
-
-        // BestDrone among those that can dock at one of the logistics end's connectors ('port': that connector)
-        private Bid BestDockingDrone(List<Bid> drones, Vector3D firstStop, JobType type, Bid lc, out IOLocationData port, Auction a = null)
-        {
-            port = null;
-            Bid best = null;
-            double bestScore = double.MinValue;
-            var preferred = PreferredProfile(type);
-            for (int i = 0; i < drones.Count; i++)
-            {
-                var p = PortFor(lc.DockSite, lc.IOLocationData, drones[i]);
-                if (p == null) continue;
-                if (ToolCantReach(drones[i], a)) continue;
-                double s = ComputeDroneBidScore(drones[i], firstStop, 0, 0) + (a != null ? ProfileBonus(drones[i], a) : ProfileBonus(drones[i], preferred))
-                         + ToolFaceBonus(drones[i], a);
-                if (s > bestScore) { bestScore = s; best = drones[i]; port = p; }
             }
             return best;
         }

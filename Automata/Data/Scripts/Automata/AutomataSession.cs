@@ -106,7 +106,6 @@ namespace Automata
         // Mod-wide settings and management
         private bool isInitialized = false;
         private long _lastUpdateFrame = 0;
-        private int _updateInterval; // DON'T initialize here - will be set in Init()
         private int updateCounter = 0;
         #region Timing
         private const int UPDATE_INTERVAL = 60;
@@ -255,10 +254,8 @@ namespace Automata
                 Log.Info("Log level: {0}", _serverConfig.Logging.LogLevel.ToString());
                 if (Log.DebugEnabled) Log.Debug("Build: {0}", BuildLabel(MOD_VERSION_DEBUG));
 
-                _updateInterval = _serverConfig.Session.UpdateInterval;
 
                 Log.Info("Mod loaded successfully");
-                if (Log.DebugEnabled) Log.Debug("Update interval: {0} ticks", _updateInterval);
                 LogisticsComputerTerminalControls.DoOnce(ModContext);
                 // DroneControllerTerminalControls.DoOnce(ModContext);
 
@@ -385,10 +382,6 @@ namespace Automata
                 }
                 if (_messageQueue != null && (MyAPIGateway.Multiplayer == null || MyAPIGateway.Multiplayer.IsServer))
                     _messageQueue.Relays.Update(currentFrame);   // every REBUILD_TICKS
-                if (currentFrame - _lastUpdateFrame < _updateInterval)
-                {
-                    return;
-                }
 
                 _lastUpdateFrame = currentFrame;
 

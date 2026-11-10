@@ -121,15 +121,7 @@ namespace Automata.Drone
             PathQuery q;
             BuildPathQuery(out q);
             pm.BeginPlan();
-            Vector3D hit;
-            IMyEntity e;
-            if (!pm.SegmentBlocked(ref q, hullCentre, hullCentre + dir * len, 0, out hit, out e)) return len;
-            blocker = PathfindingManager.Describe(pm.LastHitBlock) ?? (e != null ? e.DisplayName : "?");
-            // The obstacle's near side along dir; the hull's front is its half size along dir ahead of the centre
-            Vector3D dl = Vector3D.TransformNormal(dir, MatrixD.Transpose(flightState.WorldMatrix));
-            Vector3D h = localHullBox.HalfExtents;
-            double half = Math.Abs(dl.X) * h.X + Math.Abs(dl.Y) * h.Y + Math.Abs(dl.Z) * h.Z;
-            return MathHelper.Clamp(Vector3D.Dot(hit - hullCentre, dir) - half - FREE_RUN_MARGIN, 0, len);
+            return pm.ClearRun(ref q, ref q.Controller, hullCentre, dir, len, FREE_RUN_MARGIN, out blocker);
         }
 
         // Docking / undocking: no turning to another attitude for a route (held Lazy Theta* routes), no contact replans

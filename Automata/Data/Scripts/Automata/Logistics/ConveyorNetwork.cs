@@ -35,28 +35,6 @@ namespace Automata.Logistics
         public long EntityId;
     }
 
-    public class InventoryFulfillmentData
-    {
-        [ProtoMember(1)]
-        public List<IOLocationData> IOBlockPositions;
-        [ProtoMember(2)]
-        public DiscreteInventory Inventory;
-        [ProtoMember(3)]
-        public uint ConveyorNetworkId; 
-        [ProtoMember(4)]
-        public InventoryFulfillment Fulfillment;
-    }
-
-
-    public class VolumeAcceptanceData
-    {
-        [ProtoMember(1)]
-        public List<IOLocationData> IOBlockPositions;
-        [ProtoMember(2)]
-        public MyFixedPoint Volume;
-        [ProtoMember(3)]
-        public InventoryFulfillment Fulfillment;
-    }
 
     public class ConveyorNetwork : IComparable<ConveyorNetwork>
     {
@@ -94,10 +72,6 @@ namespace Automata.Logistics
         private MyFixedPoint _maxVolume = MyFixedPoint.Zero;
         public MyFixedPoint MaxVolume => _maxVolume;
 
-        private long _lastInventoryUpdateFrame = 0;
-        public long LastInventoryUpdateFrame => _lastInventoryUpdateFrame;
-        private bool _isUpdating = false;
-        public bool IsUpdating => _isUpdating;
         private IMySessionDelegate _sessionDelegate;
 
         public ConveyorNetwork(IMySessionDelegate sessionDelegate = null)
@@ -149,9 +123,6 @@ namespace Automata.Logistics
         private bool attached;
         private bool totalsDirty = true;
         private long lastFullResync = long.MinValue / 2;
-
-        /// <summary>Contents tracked by events (Attach).</summary>
-        public bool Attached { get { return attached; } }
 
         /// <summary>
         /// Subscribes to the contents of every inventory of the network (after the blocks are sorted in). The owner calls
@@ -213,7 +184,6 @@ namespace Automata.Logistics
         public void UpdateInventories()
         {
             var currentFrame = _sessionDelegate.GameplayFrameCounter;
-            _isUpdating = true;
             // Cargo volumes: property reads, every call (a damaged / repaired container raises no content event)
             MyFixedPoint cargoMaxVolume = MyFixedPoint.Zero;
             MyFixedPoint cargoCurrentVolume = MyFixedPoint.Zero;
@@ -231,8 +201,6 @@ namespace Automata.Logistics
             // take from count as stock to supply (IsPullable): never ice out of O2/H2 generators, a refinery's or an
             // assembler's input, a reactor's fuel, a tank's bottles
             if (attached) SumTracked(currentFrame); else ReadAll();
-            _isUpdating = false;
-            _lastInventoryUpdateFrame = currentFrame;
         }
 
         // Attached: only the inventories that changed are read; the totals are summed from the per-inventory caches
@@ -334,11 +302,6 @@ namespace Automata.Logistics
             return free;
         }
 
-        public List<IOLocationData> GetIOBlockPositions()
-        {
-            return ioLocationData;
-        }
-
         /// <summary>A (working) O2/H2 generator or irrigation system on the network: where Ice is worth delivering.</summary>
         public bool HasIceConsumers(bool working = true)
         {
@@ -390,35 +353,6 @@ namespace Automata.Logistics
                 if (h2 != oxygen) n++;
             }
             return n;
-        }
-
-        public bool HasRefineries(bool working = false)
-        {
-            if (!working)
-                return refineries.Count > 0;
-            foreach (IMyRefinery refinery in refineries)
-            {
-                if (refinery.IsFunctional && refinery.IsWorking)
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
-        public bool HasAssemblers(bool working = false)
-        {
-            if (!working)
-            {
-                return assemblers.Count > 0;
-            }
-            foreach (IMyAssembler assembler in assemblers)
-            {
-                if (assembler.IsFunctional && assembler.IsWorking)
-                {
-                    return true;
-                }
-            }
-            return false;
         }
 
         public void UpdateIOLocationData()
@@ -589,19 +523,6 @@ namespace Automata.Logistics
                 network.reactors.Add(reactor);
                 return;
             }
-        }
-        public static List<IOLocationData> FilterIOByType(List<IOLocationData> ioLocationData, IOBlockType blockType)
-        {
-            List<IOLocationData> result = new List<IOLocationData>();
-            for (int i = 0; i < ioLocationData.Count; i++)
-            {
-                IOLocationData io = ioLocationData[i];
-                if (io.BlockType == blockType)
-                {
-                    result.Add(io);
-                }
-            }
-            return result;
         }
     }
 }

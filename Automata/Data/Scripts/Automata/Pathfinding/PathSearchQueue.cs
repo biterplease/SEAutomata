@@ -152,8 +152,6 @@ namespace Automata.Pathfinding
         /// <summary>For the logs: searches queued / run / dropped.</summary>
         public int Queued, Run, Dropped;
 
-        public int QueueLength { get { return queue.Count; } }
-        public int ActiveCount { get { return active.Count; } }
         public int WarmPending { get { return warm.Count + (warming ? 1 : 0); } }
 
         public PathSearchQueue(PathfindingManager manager, PathfindingConfig config)

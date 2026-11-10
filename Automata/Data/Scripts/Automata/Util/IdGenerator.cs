@@ -16,7 +16,6 @@ namespace Automata.Util
         public int EntityBits { get; private set; }
         public int CounterBits { get; private set; }
         public int MaxUniqueIds { get; private set; }
-        public int CurrentCounter => _counter;
 
         public IdGenerator(long entityId, int entityBits = 16, IInterlockedDelegate interlockedDelegate = null)
         {
@@ -37,11 +36,6 @@ namespace Automata.Util
         public uint GenerateId()
         {
             return GenerateId(ref _counter, (long)EntityId, EntityBits, _interlocked);
-        }
-
-        public void ResetCounter()
-        {
-            _interlocked.Exchange(ref _counter, 0);
         }
 
         // ----------------------------------------------------------------
@@ -78,25 +72,5 @@ namespace Automata.Util
             return entityPrefix | ((uint)currentCounter & counterMask);
         }
 
-        public static uint ExtractEntityId(uint id, int entityBits = 16)
-        {
-            return id >> (32 - entityBits);
-        }
-
-        public static uint ExtractCounter(uint id, int entityBits = 16)
-        {
-            int counterBits = 32 - entityBits;
-            return id & (uint)((1 << counterBits) - 1);
-        }
-
-        public static bool SameEntity(uint id1, uint id2, int entityBits = 16)
-        {
-            return ExtractEntityId(id1, entityBits) == ExtractEntityId(id2, entityBits);
-        }
-
-        public static string FormatId(uint id, int entityBits = 16)
-        {
-            return string.Format("[Entity:{0}, Counter:{1}]", ExtractEntityId(id, entityBits), ExtractCounter(id, entityBits));
-        }
     }
 }

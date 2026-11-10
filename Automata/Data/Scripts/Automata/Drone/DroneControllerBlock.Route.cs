@@ -87,6 +87,9 @@ namespace Automata.Drone
         private int dockReplanMount;
         private Vector3DData dockReplanOffset, dockReplanForward, dockReplanUp;
 
+        private static bool WELDER_USE_DRONE_SHAPE = true;
+        private static bool WELDER_USE_NEIGHBOR_SHAPES = true;
+
         /// <summary>
         /// The header warning for missing eyes, or null: no camera / no sensor / neither, among the ones the server
         /// requires for pathfinding (an instrument that isn't required is simulated all around). Docked instruments
@@ -167,7 +170,7 @@ namespace Automata.Drone
             // No way from here (boxed in where it hovers: under / beside the build, between drones): reposition - a free
             // spot it can reach in a straight line - and plan from there; the move there becomes the route's first leg
             var pm = PathfindingManager.Instance;
-            if (pm == null || !AutomataSession.GetConfig().Pathfinding.AllowDirectPathfinding()) return false;
+            if (pm == null) return false;
             RefreshDroneGrids();
             PathQuery q;
             BuildPathQuery(out q);
@@ -179,16 +182,12 @@ namespace Automata.Drone
             if (tight && TryRetrace(start, goal, points, count, avoidObservationArea, areaOnlyFromOutside, startForward, startUp, looseGoal, pm, ref q))
                 return true;
             EscapeCandidates(start, ref q);
-            Vector3D hit;
-            VRage.ModAPI.IMyEntity e;
             int planned = 0;
             for (int i = 0; i < escapeSpots.Count && planned < ESCAPE_PLANS_MAX; i++)
             {
                 Vector3D s = escapeSpots[i];
                 pm.BeginPlan();
-                if (!EscapeSpotFits(pm, ref q, s, startForward, startUp) || pm.SegmentBlocked(ref q, start, s, 0.5, out hit, out e)) continue;
-                if (q.GravityUp.LengthSquared() > 0.5
-                    && PathfindingManager.HeightAboveTerrain(s) < PathfindingManager.HullHalfSizeAlong(ref q, ref q.Controller, q.GravityUp) + 1) continue;
+                if (!EscapeSpotFits(pm, ref q, s, startForward, startUp) || !pm.SpotReachable(ref q, start, s)) continue;
                 planned++;   // a full route from there: the expensive part, a few at most
                 if (points.Count > count) points.RemoveRange(count, points.Count - count);
                 if (!PlanPathFrom(s, goal, points, avoidObservationArea, areaOnlyFromOutside, startForward, startUp, looseGoal)) continue;
@@ -231,47 +230,27 @@ namespace Automata.Drone
 
         private readonly List<Vector3D> escapeSpots = new List<Vector3D>();
         private readonly List<string> escapeWhy = new List<string>();
-        private static readonly double[] ESCAPE_DISTANCES = { 4, 8 };
         private const int ESCAPE_PLANS_MAX = 6;   // routes planned from reposition spots per failed route
         private static readonly double[] DEPARTURE_ESCAPES = { 8, 16, 32 };
 
-        // Free spots to reposition to when boxed in, in order of preference: up (away from what it works on, in gravity
-        // the floor stays below), then level all round; never down in gravity
+        // Free spots to reposition to when boxed in: just out of a dock, on the way the departure was heading first (out of
+        // a covered bay), then up from there; then the pathfinder's escape spots
         private void EscapeCandidates(Vector3D from, ref PathQuery q)
         {
             escapeSpots.Clear();
             escapeWhy.Clear();
-            bool gravity = q.GravityUp.LengthSquared() > 0.5;
-            Vector3D up = gravity ? q.GravityUp : q.Controller.Up;
-            Vector3D fwd = q.Controller.Forward - up * Vector3D.Dot(q.Controller.Forward, up);
-            if (fwd.LengthSquared() < 1e-4) fwd = Vector3D.CalculatePerpendicularVector(up);
-            fwd.Normalize();
-            Vector3D right = Vector3D.Cross(fwd, up);
-            // Just out of a dock: on the way the departure was heading first (out of a covered bay), then up from there
             if (departureSet && Vector3D.DistanceSquared(from, departureEnd) < 4)
+            {
+                Vector3D up, fwd, right;
+                PathfindingManager.LevelFrame(ref q, out up, out fwd, out right);
                 for (int k = 0; k < DEPARTURE_ESCAPES.Length; k++)
                 {
                     double d = DEPARTURE_ESCAPES[k];
-                    AddEscape(from + departureDir * d, "on out of the dock");
-                    AddEscape(from + departureDir * d + up * (d * 0.5), "on out of the dock and up");
+                    escapeSpots.Add(from + departureDir * d); escapeWhy.Add("on out of the dock");
+                    escapeSpots.Add(from + departureDir * d + up * (d * 0.5)); escapeWhy.Add("on out of the dock and up");
                 }
-            for (int k = 0; k < ESCAPE_DISTANCES.Length; k++)
-            {
-                double d = ESCAPE_DISTANCES[k];
-                AddEscape(from + up * d, "up");
-                AddEscape(from + (up - fwd) * (d * 0.7071), "up and back");
-                AddEscape(from - fwd * d, "back");
-                AddEscape(from + right * d, "right");
-                AddEscape(from - right * d, "left");
-                AddEscape(from + fwd * d, "ahead");
-                if (!gravity) AddEscape(from - up * d, "down");
             }
-        }
-
-        private void AddEscape(Vector3D p, string why)
-        {
-            escapeSpots.Add(p);
-            escapeWhy.Add(why);
+            PathfindingManager.EscapeSpots(ref q, from, escapeSpots, escapeWhy);
         }
 
         private bool PlanPathFrom(Vector3D start, Vector3D goal, List<Vector3D> points, bool avoidObservationArea, bool areaOnlyFromOutside,
@@ -307,7 +286,7 @@ namespace Automata.Drone
                 }
                 else laneName = null;
             }
-            bool usePathfinder = pm != null && AutomataSession.GetConfig().Pathfinding.AllowDirectPathfinding();
+            bool usePathfinder = pm != null;
             PathQuery q = default(PathQuery);
             int now = MyAPIGateway.Session.GameplayFrameCounter;
             if (routePlanFrame != now)
@@ -430,14 +409,7 @@ namespace Automata.Drone
         private static readonly double RUN_THROUGH_COS = Math.Cos(MathHelperD.ToRadians(PathfindingManager.RUN_THROUGH_DEGREES));
         private static readonly double ARC_RUN_THROUGH_COS = Math.Cos(MathHelperD.ToRadians(PathfindingManager.ARC_RUN_THROUGH_DEGREES));
 
-        /// <summary>How to pass waypoint 'at' between 'from' and 'to', and at what speed.</summary>
-        private void PassWaypoint(Vector3D from, Vector3D at, Vector3D to, out WaypointBehavior pass, out float exit)
-        {
-            Vector3D none = Vector3D.Zero;
-            PassWaypoint(from, at, to, ref none, ref none, out pass, out exit);
-        }
-
-        // Same; a change of attitude there of more than RUN_THROUGH_DEGREES (25°: turning to the next leg) means a stop
+        // How to pass waypoint 'at' between 'from' and 'to', and at what speed; a change of attitude there of more than RUN_THROUGH_DEGREES (25°: turning to the next leg) means a stop
         private void PassWaypoint(Vector3D from, Vector3D at, Vector3D to, ref Vector3D fwdIn, ref Vector3D fwdOut,
                                   out WaypointBehavior pass, out float exit)
         {
@@ -556,8 +528,7 @@ namespace Automata.Drone
             {
                 Vector3D fromTool = Vector3D.TransformNormal(HullCentreLocal - mount.LocalPoint, frame);
                 Vector3D half = localHullBox.Max.X >= localHullBox.Min.X ? localHullBox.HalfExtents : new Vector3D(1);
-                double halfAlongW = Math.Abs(Vector3D.Dot(dirW, frame.Right)) * half.X + Math.Abs(Vector3D.Dot(dirW, frame.Up)) * half.Y
-                                  + Math.Abs(Vector3D.Dot(dirW, frame.Backward)) * half.Z;
+                double halfAlongW = PathfindingManager.HalfSizeAlong(ref frame, ref half, dirW);
                 reach = MathHelperD.Clamp(WORK_STANDOFF - Vector3D.Dot(fromTool, dirW) + halfAlongW, 0, mount.WorkRadius);
             }
             sphereCentre = point + dirW * reach + shift;   // shift: precise placement (PreciseShift)
@@ -570,7 +541,7 @@ namespace Automata.Drone
             // Closest first: from where the hull just clears the face plane, out until it has room to turn there (was:
             // the drone's length + 2.5 m from the start, ~10-15 m out for a big drone, before any check)
             // (Without the pathfinder nothing is checked: the old fixed distance)
-            double closest = PathfindingManager.Instance != null && AutomataSession.GetConfig().Pathfinding.AllowDirectPathfinding()
+            double closest = PathfindingManager.Instance != null
                 ? ClosestApproach(point, dirW, dirA, sphereCentre, hullFromTool, ref frame) : ManoeuvreDistance();
             approach = sphereCentre + dirA * closest;
             bool free;
@@ -581,7 +552,7 @@ namespace Automata.Drone
             if (!checkSite) return true;
             if (!free) { workSiteWhy = "no room to turn at the approach point: " + turnRoomBlocker; return false; }
             var pm = PathfindingManager.Instance;
-            if (pm == null || !AutomataSession.GetConfig().Pathfinding.AllowDirectPathfinding()) return true;
+            if (pm == null) return true;
             PathQuery q;
             BuildPathQuery(out q);
             q.SeeAll = true;
@@ -608,11 +579,11 @@ namespace Automata.Drone
             else if (frontGap < WORK_STANDOFF && (along >= 0.999 || frontGap >= 0))
                 hullWork += dirA * ((WORK_STANDOFF - frontGap) / Math.Max(0.5, along));
             // Weld sites: built neighbours of the target in the way by their cells are checked by their real shape
-            if (siteWeld && targetGrid != null && AutomataSession.GetConfig().Drone.WeldUseNeighbourShapes) q.RealShapeGrid = targetGrid;
+            if (siteWeld && targetGrid != null && WELDER_USE_NEIGHBOR_SHAPES) q.RealShapeGrid = targetGrid;
             if (pm.SegmentBlocked(ref q, ref att, approach + hullFromTool, hullWork, 0.5, out h, out e, true, false))
             {
                 // Weld sites: the bounding box doesn't fit; the drone's real shape (a welder snout between neighbours) may
-                if (!(siteWeld && AutomataSession.GetConfig().Drone.WeldUseDroneShape
+                if (!(siteWeld && WELDER_USE_DRONE_SHAPE
                       && ShapeWayInFree(pm, q, ref att, ref mount, ref frame, approach, sphereCentre, point, dirW, dirA, limited, out e)))
                 {
                     workSiteHullPastFace = limited && frontGap < 0;   // the attitude, not the cell: every cell of this side fails alike
@@ -664,8 +635,7 @@ namespace Automata.Drone
                 var b = shape[i];
                 Vector3D c = ctrlWork + Vector3D.TransformNormal(b.Center, frame);
                 Vector3D hb = b.HalfExtents;
-                double half = Math.Abs(Vector3D.Dot(dirW, frame.Right)) * hb.X + Math.Abs(Vector3D.Dot(dirW, frame.Up)) * hb.Y
-                            + Math.Abs(Vector3D.Dot(dirW, frame.Backward)) * hb.Z;
+                double half = Pathfinding.PathfindingManager.HalfSizeAlong(ref frame, ref hb, dirW);
                 frontGap = Math.Min(frontGap, Vector3D.Dot(c - point, dirW) - half);
             }
             double along = Vector3D.Dot(dirA, dirW);
@@ -703,8 +673,7 @@ namespace Automata.Drone
         private double ClosestApproach(Vector3D point, Vector3D dirW, Vector3D dirA, Vector3D sphereCentre, Vector3D hullFromTool, ref MatrixD frame)
         {
             Vector3D half = localHullBox.Max.X >= localHullBox.Min.X ? localHullBox.HalfExtents : new Vector3D(1);
-            double halfAlongW = Math.Abs(Vector3D.Dot(dirW, frame.Right)) * half.X + Math.Abs(Vector3D.Dot(dirW, frame.Up)) * half.Y
-                              + Math.Abs(Vector3D.Dot(dirW, frame.Backward)) * half.Z;
+            double halfAlongW = PathfindingManager.HalfSizeAlong(ref frame, ref half, dirW);
             double centreOut = Vector3D.Dot(sphereCentre + hullFromTool - point, dirW);   // hull centre over the face, working
             double along = Math.Max(0.3, Vector3D.Dot(dirA, dirW));
             double d = (halfAlongW + TURN_ROOM_MARGIN - centreOut) / along;
@@ -775,7 +744,7 @@ namespace Automata.Drone
             free = true;
             turnRoomBlocker = null;
             var pm = PathfindingManager.Instance;
-            if (pm == null || !AutomataSession.GetConfig().Pathfinding.AllowDirectPathfinding() || outward.LengthSquared() < 1e-6) return point;
+            if (pm == null || outward.LengthSquared() < 1e-6) return point;
             outward.Normalize();
             RefreshDroneGrids();
             PathQuery q;
@@ -1000,7 +969,7 @@ namespace Automata.Drone
             if (dockingOrder != null && (o == dockingOrder || nextLeg == dockingOrder
                 || (nextLeg == null && queuedLegs.Count > 0 && queuedLegs.Peek() == dockingOrder))) return;   // docking
             var pm = PathfindingManager.Instance;
-            if (pm == null || !AutomataSession.GetConfig().Pathfinding.AllowDirectPathfinding()) return;
+            if (pm == null) return;
             if (droneGrids.Count == 0) RefreshDroneGrids();
             CaptureFlightState();
             Vector3D from = HullCentreWorld;
@@ -1034,7 +1003,7 @@ namespace Automata.Drone
                 bool cWork = o == constructionOrder;
                 string cBy;
                 double cAlong;
-                if (SweepClear(ref legAtt, from, to, cWork ? HARVEST_LINE_BERTH : DIRECT_BERTH, !looseEnd && !cWork, out cBy, out cAlong))
+                if (pm.RealSweepClear(ref q, ref legAtt, from, to, cWork ? HARVEST_LINE_BERTH : DIRECT_BERTH, !looseEnd && !cWork, out cBy, out cAlong))
                 {
                     if (routeWaitFor != 0) EndYield("the leg is clear");
                     return;
@@ -1161,7 +1130,7 @@ namespace Automata.Drone
             if (++routeWatchCounter < ROUTE_WATCH_EVERY) return;
             routeWatchCounter = 0;
             var pm = PathfindingManager.Instance;
-            if (pm == null || !AutomataSession.GetConfig().Pathfinding.AllowDirectPathfinding()) return;
+            if (pm == null) return;
             if (droneGrids.Count == 0) RefreshDroneGrids();   // the drone's own grids are never obstacles
             int now = MyAPIGateway.Session.GameplayFrameCounter;
             if (now - lastReplanFrame < ROUTE_REPLAN_MIN_TICKS) return;
@@ -1211,7 +1180,7 @@ namespace Automata.Drone
                 bool wWork = o == constructionOrder;
                 string wBy;
                 double wLook = wWork ? remaining : look, wAlong;
-                if (SweepClear(ref legAtt, from, from + along / remaining * wLook, wWork ? HARVEST_LINE_BERTH : DIRECT_BERTH, false, out wBy, out wAlong)) return;
+                if (pm.RealSweepClear(ref q, ref legAtt, from, from + along / remaining * wLook, wWork ? HARVEST_LINE_BERTH : DIRECT_BERTH, false, out wBy, out wAlong)) return;
                 RealShapeBlocked("real shape: " + wBy + " ahead", wAlong);
                 return;
             }
