@@ -15,7 +15,6 @@ How drones plan their routes and see obstacles. These are the main CPU settings 
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| AllowDirectPathfinding | true | The drones' route planner. Off: drones fly straight lines to their targets without checking for obstacles. Leave it on. |
 | AllowLazyTheta | true | Route planner stage 3: when the straight line (with a few detours) and the route memory find no way, a Lazy Theta* search looks for one around the obstacle (out of asteroid pockets and caves, through cluttered bases). Off: those routes fail and the drone repositions. (Replaces AllowAStar, which is no longer read.) |
 | ThetaSearchRadius | 300 | Metres the search covers around the stretch that failed (50 to 2000). Further goals are searched for part of the way. |
 | ThetaMaxExpansions | 3000 | Most cells one search looks at (100 to 100000). |
@@ -29,9 +28,7 @@ How drones plan their routes and see obstacles. These are the main CPU settings 
 | PathMemoryMaxNodes | 4000 | Most remembered points (100 to 100000); the least recently used are forgotten first. |
 | PathMemoryMaxAgeHours | 24 | Hours a remembered way may go unused before it is forgotten (1 to 8760). |
 | FlightLaneExpirationMinutes | 240 | Minutes a flight lane may go unused before it is dropped (5 to 525600). Lanes are always on. |
-| AllowSensors, AllowObstacleAvoidance, AllowSimpleRepositioning, AllowDStarLite, UseGravityAwarePathing, RepositionStep | | *Not used yet.* |
 | UsePlanetAwarePathfinding | true | On planets, long routes follow the planet's curve and climb over terrain. Off: straight lines, which can run into hills and mountains. |
-| MinWaypointDistance, MaxWaypointDistance | 5, 15 | *Not used yet.* |
 | MaxRepositionAttempts | 10 | How many detours one route may take around obstacles, and how many times a drone re-plans a blocked route before the task fails. |
 | MinAltitudeBuffer | 20 | Metres kept above the highest terrain when a route climbs over a hill (the drone's own **Min altitude** is used when higher). 0 to 1000. |
 | MaxPathNodes | 1000 | Most points in one route (at least 100). Very long planet routes use wider steps to stay within it. |

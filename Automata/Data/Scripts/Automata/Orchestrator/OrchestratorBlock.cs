@@ -67,6 +67,9 @@ namespace Automata.Orchestrator
         public State currentState { get; private set; }
         private string status = Loc.T(MyStrings.Orchestrator_Starting);
 
+        private const int BID_COLLECTION_WINDOW_TICKS = 300;
+        public const int BID_BLACKLIST_COOLDOWN_TICKS = 3600;
+
         private sealed class OpenAuction
         {
             public Auction Auction;
@@ -849,11 +852,9 @@ namespace Automata.Orchestrator
                     continue;
                 }
                 bool expired = now - open.Started >= AUCTION_LIFETIME_SECONDS * 60;   // frames, like the no-bid timeout
-                // Pooling: a job bigger than one trip of every drone that bid so far waits a little longer for more drones
-                int window = config != null ? config.OrchestratorServerSettings.BidCollectionWindowTicks : 300;
                 // (not a sequential job: one drone does every trip anyway)
-                bool pooling = now - open.Started < Math.Max(AUCTION_POOL_TICKS, window) && !open.Auction.Sequential && !BidsCoverOneTrip(open);
-                if (now - open.Started >= window && !pooling)
+                bool pooling = now - open.Started < Math.Max(AUCTION_POOL_TICKS, BID_COLLECTION_WINDOW_TICKS) && !open.Auction.Sequential && !BidsCoverOneTrip(open);
+                if (now - open.Started >= BID_COLLECTION_WINDOW_TICKS && !pooling)
                 {
                     Dictionary<long, List<Task>> assignments;
                     long droneId;

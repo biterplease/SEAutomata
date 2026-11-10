@@ -9,12 +9,7 @@ namespace Automata.Config
         float MaxSimulatedCameraRaycastMeters();
         bool UsePlanetAwarePathfinding();
         bool AllowRepathing();
-        bool AllowDirectPathfinding();
-        bool AllowAStar();
-        //bool AllowDStarLite();
         float MinAltitudeBuffer();
-        float MinWaypointDistance();
-        float MaxWaypointDistance();
         int MaxRepositionAttempts();
         int MaxPathNodes();
         TimeSpan MaxPathfindingTime();
@@ -62,30 +57,8 @@ namespace Automata.Config
         /// </summary>
         public bool allowRepathing { get; internal set; } = true;
         public bool AllowRepathing() => allowRepathing;
-        /// <summary>
-        /// Basic direct pathfinding method. Its literally a direct line to target with no obstacle
-        /// avoidance. Disabling this will render the drones unusable.
-        /// </summary>
-        public bool allowDirectPathfinding { get; internal set; } = true;
-        public bool AllowDirectPathfinding() => allowDirectPathfinding;
-        // A* is an advanced pathfinding method.
-        public bool allowAStar { get; internal set; } = false;
-        public bool AllowAStar() => allowAStar;
-        //public bool allowDStarLite { get; internal set; } = false;
-        //public bool AllowDStarLite() => allowDStarLite;
-        /// <summary>
-        /// Minimum distance between waypoint, in meters. If target is closer than this, a one-step move at ApproachSpeed
-        /// is performed.
-        /// </summary>
         public float minAltitudeBuffer { get; internal set; } = 50f;
         public float MinAltitudeBuffer() => minAltitudeBuffer;
-        public float minWaypointDistance { get; internal set; } = 12.5f;
-        public float MinWaypointDistance() => minWaypointDistance;
-        /// <summary>
-        /// Maximum distance between waypoints, in meters.
-        /// </summary>
-        public float maxWaypointDistance { get; internal set; } = 500.0f;
-        public float MaxWaypointDistance() => maxWaypointDistance;
         public int maxRepositionAttempts { get; internal set; } = 10;
         public int MaxRepositionAttempts() => maxRepositionAttempts;
 

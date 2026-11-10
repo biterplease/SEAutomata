@@ -29,7 +29,6 @@ namespace Automata.Construction
         private IMyEntity Entity;
         private int _lastScanFrameAttempt = 0;
         public int PerScanLimits { get; set; }
-        private long _lastMaintenanceFrame = 0;
         private int _maintenanceIntervalTicks;
         private int _scanRetryIntervalTicks;
         private Vector3 weldIgnoreColor;
@@ -119,12 +118,10 @@ namespace Automata.Construction
                 this.settings.GrindIgnoreList = new List<ulong>();
                 this.settings.PerScanLimits = MathHelper.Clamp(this.settings.PerScanLimits, (byte)1, ServerConfig.Instance.ConstructionComputer.BlockLimitPerScan);
                 this.settings.ScanRetryIntervalSeconds = MathHelper.Clamp(this.settings.ScanRetryIntervalSeconds, ServerConfig.Instance.ConstructionComputer.MinScanRetryIntervalSeconds, ServerConfig.Instance.ConstructionComputer.MaxScanRetryIntervalSeconds);
-                _maintenanceIntervalTicks = TimeUtil.TimeSpanToTick(new TimeSpan(0, 0, ServerConfig.Instance.ConstructionComputer.MaintenanceIntervalSeconds));
                 _scanRetryIntervalTicks = TimeUtil.TimeSpanToTick(new TimeSpan(0, 0, this.settings.ScanRetryIntervalSeconds));
                 this.settings.MaxJobAnnouncementsPerUpdate = MathHelper.Clamp(this.settings.MaxJobAnnouncementsPerUpdate, 1, ServerConfig.Instance.ConstructionComputer.MaxJobAnnouncementsPerUpdate);
             }
 
-            _maintenanceIntervalTicks = TimeUtil.TimeSpanToTick(new TimeSpan(0, 0, ServerConfig.Instance.ConstructionComputer.MaintenanceIntervalSeconds));
             _scanRetryIntervalTicks = TimeUtil.TimeSpanToTick(new TimeSpan(0, 0, this.settings.ScanRetryIntervalSeconds));
         }
 
@@ -138,11 +135,6 @@ namespace Automata.Construction
         {
             var currentFrame = sessionDelegate.GameplayFrameCounter;
 
-            // Perform maintenance periodically, regardless of state
-            if (currentFrame - _lastMaintenanceFrame >= _maintenanceIntervalTicks)
-            {
-                _lastMaintenanceFrame = currentFrame;
-            }
             // built in operation mode will be called by orchestrator directly in its UpdateAI loop
             if (operationMode == OperationMode.ConstructionComputer)
             {

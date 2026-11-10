@@ -67,6 +67,14 @@ namespace Automata.Orchestrator
         private readonly List<uint> playerJobsEnded = new List<uint>();
         private readonly List<PlayerOrder> playerOrdersTouched = new List<PlayerOrder>();
 
+        /// <summary>Industrial designator order marker while the orchestrator hasn't confirmed it (yellow).</summary>
+        public static readonly Color PENDING_GPS_COLOR = new Color(255, 210, 0);
+        /// <summary>Marker once every job of the order has a drone (green).</summary>
+        public static readonly Color CONFIRMED_GPS_COLOR = new Color(40, 220, 60);
+        /// <summary>Hostile designator markers (combat jobs, to come) (dark red).</summary>
+        public static readonly Color COMBAT_GPS_COLOR= new Color(139, 0, 0);
+        public static int CONFIRM_TIMEOUT_SECONDS = 10;
+
         /// <summary>
         /// The behaviour profile a job type requires of its drone (the player designates the drones for it). None:
         /// any capable drone. Area sweeps: ore scouts; spot checks: any drone with an ore detector (CanScoutOre, checked
@@ -97,12 +105,6 @@ namespace Automata.Orchestrator
         {
             return p == Drone.BehaviourProfile.IsOreScout ? Loc.T(MyStrings.Orchestrator_OreScoutLower) : p == Drone.BehaviourProfile.IsCombatDrone ? Loc.T(MyStrings.Orchestrator_CombatDroneLower)
                  : p == Drone.BehaviourProfile.IsOreHauler ? Loc.T(MyStrings.Orchestrator_OreHaulerLower) : p == Drone.BehaviourProfile.IsMiningDrone ? Loc.T(MyStrings.Orchestrator_MiningDroneLower) : p.ToString();
-        }
-
-        private static Config.ServerConfig.ScoutPointerConfig PointerConfig()
-        {
-            var config = AutomataSession.GetConfig();
-            return config != null ? config.ScoutPointer : new Config.ServerConfig.ScoutPointerConfig();
         }
 
         // The tagged drone a player job is for (0: any drone of the profile; not a player job)
@@ -196,7 +198,7 @@ namespace Automata.Orchestrator
                     order.Cancelled++;
                     if (!playerOrdersTouched.Contains(order)) playerOrdersTouched.Add(order);
                 }
-                AddEvent(Loc.F(MyStrings.Orchestrator_CancelledNotConfirmedInS, jobId, pj.Announcement.Type, PointerConfig().ConfirmTimeoutSeconds));
+                AddEvent(Loc.F(MyStrings.Orchestrator_CancelledNotConfirmedInS, jobId, pj.Announcement.Type, CONFIRM_TIMEOUT_SECONDS));
                 EndPlayerJob(jobId, Loc.T(MyStrings.Orchestrator_NotConfirmedInTime));
             }
             playerJobsEnded.Clear();
@@ -221,7 +223,7 @@ namespace Automata.Orchestrator
             {
                 if (!pj.Held || utc < pj.HeldUntil) continue;
                 pj.Held = false;
-                pj.ExpiresAt = utc.AddSeconds(PointerConfig().ConfirmTimeoutSeconds);
+                pj.ExpiresAt = utc.AddSeconds(CONFIRM_TIMEOUT_SECONDS);
                 var key = new KeyValuePair<long, uint>(entityId, pj.JobId);
                 jobQueue.Add(new QueuedJob { Announcement = pj.Announcement, Key = key, SenderOwner = pj.SenderOwner, Received = now });
                 if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: quarry preparation {1} queued ({2} bench(es))", entityId, pj.JobId, QuarryBenches(pj.Announcement));
@@ -233,7 +235,7 @@ namespace Automata.Orchestrator
         {
             if (order.Confirmed || order.Jobs <= 0 || order.Assigned < order.Jobs) return;
             order.Confirmed = true;
-            SetGpsColor(order, PointerConfig().ConfirmedGpsColor);
+            SetGpsColor(order, CONFIRMED_GPS_COLOR);
             // Spot check / engage: green; area sweep / escort: blue
             ScoutPointer.Feedback(order.Identity, order.Type == JobType.DesignatorScoutArea || order.Type == JobType.DesignatorEscort || order.Type == JobType.DesignatorQuarry
                                                   ? DesignatorSignal.ConfirmedBlue : DesignatorSignal.ConfirmedGreen);
@@ -325,11 +327,10 @@ namespace Automata.Orchestrator
             if (order.Identity == 0 || order.Kind == PointerKind.Combat) return;
             try
             {
-                var cfg = PointerConfig();
                 var gps = MyAPIGateway.Session.GPS.Create(order.Name, Loc.F(MyStrings.Orchestrator_AutomataDesignatorOrderOrchestrator,
                                                           order.Kind, order.OrderId, block != null ? block.CustomName : entityId.ToString()),
                                                           order.Position, true, true);
-                gps.GPSColor = order.Confirmed ? cfg.ConfirmedGpsColor : cfg.PendingGpsColor;
+                gps.GPSColor = order.Confirmed ? CONFIRMED_GPS_COLOR : PENDING_GPS_COLOR;
                 MyAPIGateway.Session.GPS.AddGps(order.Identity, gps);
                 order.Gps = gps;
             }

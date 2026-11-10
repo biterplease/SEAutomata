@@ -115,7 +115,7 @@ namespace Automata.Drone
         {
             var pm = PathfindingManager.Instance;
             var cfg = AutomataSession.GetConfig();
-            if (pm == null || cfg == null || !cfg.Pathfinding.AllowDirectPathfinding() || outDir.LengthSquared() < 1e-6) return turnAt;
+            if (pm == null || cfg == null || outDir.LengthSquared() < 1e-6) return turnAt;
             RefreshDroneGrids();
             PathQuery q;
             BuildPathQuery(out q);
@@ -273,7 +273,7 @@ namespace Automata.Drone
             pm = PathfindingManager.Instance;
             q = default(PathQuery);
             var cfg = AutomataSession.GetConfig();
-            if (pm == null || cfg == null || !cfg.Pathfinding.AllowDirectPathfinding()) return false;
+            if (pm == null || cfg == null) return false;
             RefreshDroneGrids();
             BuildPathQuery(out q);
             q.SeeAll = true;

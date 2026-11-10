@@ -41,8 +41,6 @@ namespace Automata.Config
         private static bool _configLoaded = false;
         private static readonly string CONFIG_FILENAME = "Automata.ini";
 
-        public SessionConfig Session { get; private set; }
-        public BlockLimitConfig BlockLimits { get; private set; }
         public PathfindingConfig Pathfinding { get; private set; }
         public DroneControllerBlockConfig Drone { get; private set; }
         public MessageQueueConfig MessageQueue { get; private set; }
@@ -51,13 +49,10 @@ namespace Automata.Config
         public LogisticsComputerConfig LogisticsComputer { get; private set; }
         public ConstructionComputerConfig ConstructionComputer { get; private set; }
         public MiningConfig Mining { get; private set; }
-        public ScoutPointerConfig ScoutPointer { get; private set; }
 
         public ServerConfig()
         {
             // Initialize all nested config objects
-            Session = new SessionConfig();
-            BlockLimits = new BlockLimitConfig();
             Pathfinding = new PathfindingConfig();
             Drone = new DroneControllerBlockConfig();
             OrchestratorServerSettings = new OrchestratorBlockConfig();
@@ -66,15 +61,6 @@ namespace Automata.Config
             LogisticsComputer = new LogisticsComputerConfig();
             ConstructionComputer = new ConstructionComputerConfig();
             Mining = new MiningConfig();
-            ScoutPointer = new ScoutPointerConfig();
-        }
-
-        public class SessionConfig
-        {
-            public int UpdateInterval { get; internal set; } = 100;
-            public bool EnableLogistics { get; internal set; } = true;
-            public bool EnableWeldTasks { get; internal set; } = true;
-            public bool EnableGrindTasks { get; internal set; } = true;
         }
 
         public class LogisticsComputerConfig
@@ -96,23 +82,10 @@ namespace Automata.Config
             public int MaxPushFrequencyTicks { get; internal set; } = TimeUtil.TimeSpanToTick(new TimeSpan(0, 30, 0)); // 30 minutes
         }
 
-        public class BlockLimitConfig
-        {
-            public int MaxSchedulersPerPlayer { get; internal set; } = 1;
-            public int MaxSchedulersPerFaction { get; internal set; } = 5;
-            public int MaxDroneControllersPerPlayer { get; internal set; } = 10;
-            public int MaxDroneControllersPerFaction { get; internal set; } = 50;
-        }
 
 
         public class DroneControllerBlockConfig
         {
-            public float DefaultHydrogenRefuelThreshold { get; internal set; } = 25.0f;
-            public float DefaultHydrogenOperationalThreshold { get; internal set; } = 50.0f;
-            public float DefaultBatteryRefuelThreshold { get; internal set; } = 20.0f;
-            public float DefaultBatteryOperationalThreshold { get; internal set; } = 40.0f;
-            public float MinPowerThreshold { get; internal set; } = 5.0f;
-            public float MaxPowerThreshold { get; internal set; } = 95.0f;
             /// <summary>
             /// Minimum number of ticks between drone power checks. Maximum is clamped to min*10.
             /// </summary>
@@ -129,7 +102,10 @@ namespace Automata.Config
             /// A job task fails after this many seconds (navigation: this long without getting closer). Any mode.
             /// </summary>
             public int TaskTimeoutSeconds { get; internal set; } = 60;
-            /// <summary>Combat handover: enemies the AI Defensive block reports farther than this (m) from the drone are ignored (vanilla block limit 2000; modded blocks can see further).</summary>
+            /// <summary>
+            /// Combat handover: enemies the AI Defensive block reports farther than this (m) from the drone are ignored (vanilla block limit 2000; modded blocks can see further).
+            /// Modify if you're using longer ranges.
+            /// </summary>
             public int CombatMaxDetectionRange { get; internal set; } = 2000;
             /// <summary>
             /// Debug overlays (observation area, navigation targets) switch themselves off after this many seconds.
@@ -161,16 +137,6 @@ namespace Automata.Config
             /// Minimum time between "Add by name" searches, per drone (seconds).
             /// </summary>
             public int ConnectorNameSearchIntervalSeconds { get; internal set; } = 10;
-            /// <summary>
-            /// Weld work sites: where the drone's bounding box doesn't fit the way in, check the drone's real shape (its
-            /// blocks, merged into a few boxes) - a welder snout reaches between built neighbours the box can't.
-            /// </summary>
-            public bool WeldUseDroneShape { get; internal set; } = true;
-            /// <summary>
-            /// Weld work sites: built blocks of the target grid in the way are checked against their real shape (rays
-            /// against the physics: slopes, panels) instead of as full cubes.
-            /// </summary>
-            public bool WeldUseNeighbourShapes { get; internal set; } = true;
         }
 
         public class ConstructionComputerConfig{
@@ -182,7 +148,6 @@ namespace Automata.Config
             /// The Construction Computer will perform a cleanup of orphaned tasks that are no longer in its range.
             /// For whatever reason. Default is 30 minutes.
             /// </summary>
-            public int MaintenanceIntervalSeconds { get; internal set; } = 30; // 30 seconds
             public int MinScanRetryIntervalSeconds { get; internal set; } = 10; // 10 seconds
             public int MaxScanRetryIntervalSeconds { get; internal set; } = 3600; // 3600 seconds
 
@@ -222,14 +187,8 @@ namespace Automata.Config
         }
 
         /// <summary>Scout pointers (TODO/11): the jobs players order with them, and their GPS markers.</summary>
-        public class ScoutPointerConfig
+        public class TargetDesignatorConfig
         {
-            /// <summary>Industrial designator order marker while the orchestrator hasn't confirmed it (yellow).</summary>
-            public Color PendingGpsColor { get; internal set; } = new Color(255, 210, 0);
-            /// <summary>Marker once every job of the order has a drone (green).</summary>
-            public Color ConfirmedGpsColor { get; internal set; } = new Color(40, 220, 60);
-            /// <summary>Hostile designator markers (combat jobs, to come) (dark red).</summary>
-            public Color CombatGpsColor { get; internal set; } = new Color(139, 0, 0);
             /// <summary>An order whose jobs don't all have a drone this long (seconds) is cancelled and its marker removed.</summary>
             public int ConfirmTimeoutSeconds { get; internal set; } = 10;
         }
@@ -255,15 +214,6 @@ namespace Automata.Config
 
         public class OrchestratorBlockConfig
         {
-            /// <summary>
-            /// Maximum number of job targets when ran by a drone.
-            /// </summary>
-            public int StandAloneOrchestratorMaxTargetLimit { get; internal set; } = 10;
-            public int OrchestratorMaxTargetLimit { get; internal set; } = 100;
-            public int MaxTaskAssignmentPerBatch { get; internal set; } = 10;
-
-            public int MaxBidRoundExpirationSeconds { get; internal set; } = 30;
-
             /// <summary>Auctions open at once; further job announcements wait in the orchestrator's queue.</summary>
             public int MaxConcurrentAuctions { get; internal set; } = 10;
             /// <summary>An auction without a single bid this long: JOB_ANNOUNCEMENT_FAILED to the announcer, dropped.</summary>
@@ -271,35 +221,7 @@ namespace Automata.Config
             /// <summary>How long an announcer holds a job whose auction failed (sent with the failure).</summary>
             public int FailedJobHoldSeconds { get; internal set; } = 60;
 
-            /// <summary>
-            /// Update intervals different for every state
-            /// </summary>
-            public class StateUpdateIntervalTicksConfig
-            {
-                public int Initializing { get; internal set; } = 600;
-                public int Error { get; internal set; } = 600;
-                public int Standby { get; internal set; } = 600;
-                public int Scanning { get; internal set; } = 60;
-                public int Assigning { get; internal set; } = 60;
-            }
 
-            public StateUpdateIntervalTicksConfig StateUpdateIntervalTicks { get; internal set; } = new StateUpdateIntervalTicksConfig();
-
-            /// <summary>
-            /// When on standby, wait ScanDelayTicks before scanning again.
-            /// </summary>
-            public int ScanDelayTicks { get; internal set; } = 600;
-            public int ErrorRecoveryIntervalTicks { get; internal set; } = 300;
-            public int MaxConsecutiveErrors { get; internal set; } = 3;
-            /// <summary>
-            /// The scheduler will perform a cleanup of orphaned drones that are no longer in its range.
-            /// For whatever reason. Default is 5 minutes.
-            /// </summary>
-            public int ManintenanceIntervalTicks { get; internal set; } = 300; // 30 seconds
-            /// <summary>
-            /// Gameplay frames an orchestrator collects bids before it assigns (longer while pooling drones for a big job).
-            /// </summary>
-            public int BidCollectionWindowTicks { get; internal set; } = 300;
             /// <summary>
             /// Gameplay frames a construction computer holds back a block after a drone aborted / declined it
             /// (Unreachable: 5 min, fixed).
@@ -429,25 +351,8 @@ namespace Automata.Config
                 return;
             }
 
-            // Parse Session section
-            Session.UpdateInterval = Math.Max(1, ini.Get("Session", "UpdateInterval").ToInt32(Session.UpdateInterval));
-            Session.EnableLogistics = ini.Get("Session", "EnableLogistics").ToBoolean(Session.EnableLogistics);
-            Session.EnableWeldTasks = ini.Get("Session", "EnableWeldTasks").ToBoolean(Session.EnableWeldTasks);
-            Session.EnableGrindTasks = ini.Get("Session", "EnableGrindTasks").ToBoolean(Session.EnableGrindTasks);
-
-            // Parse Limits section
-            BlockLimits.MaxSchedulersPerPlayer = Math.Max(0, ini.Get("Limits", "MaxSchedulersPerPlayer").ToInt32(BlockLimits.MaxSchedulersPerPlayer));
-            BlockLimits.MaxSchedulersPerFaction = Math.Max(0, ini.Get("Limits", "MaxSchedulersPerFaction").ToInt32(BlockLimits.MaxSchedulersPerFaction));
-            BlockLimits.MaxDroneControllersPerPlayer = Math.Max(0, ini.Get("Limits", "MaxDroneControllersPerPlayer").ToInt32(BlockLimits.MaxDroneControllersPerPlayer));
-            BlockLimits.MaxDroneControllersPerFaction = Math.Max(0, ini.Get("Limits", "MaxDroneControllersPerFaction").ToInt32(BlockLimits.MaxDroneControllersPerFaction));
-
             // Parse Pathfinding section
-            Pathfinding.allowDirectPathfinding = ini.Get("Pathfinding", "AllowDirectPathfinding").ToBoolean(Pathfinding.allowDirectPathfinding);
-            Pathfinding.allowAStar = ini.Get("Pathfinding", "AllowAStar").ToBoolean(Pathfinding.allowAStar);
-            //Pathfinding.allowDStarLite = ini.Get("Pathfinding", "AllowDStarLite").ToBoolean(Pathfinding.AllowDStarLite);
             Pathfinding.usePlanetAwarePathfinding = ini.Get("Pathfinding", "UsePlanetAwarePathfinding").ToBoolean(Pathfinding.usePlanetAwarePathfinding);
-            Pathfinding.minWaypointDistance = (float)Math.Max(1.0, ini.Get("Pathfinding", "MinWaypointDistance").ToDouble(Pathfinding.minWaypointDistance));
-            Pathfinding.maxWaypointDistance = (float)Math.Max(Pathfinding.minWaypointDistance, ini.Get("Pathfinding", "MaxWaypointDistance").ToDouble(Pathfinding.maxWaypointDistance));
             Pathfinding.maxRepositionAttempts = Math.Max(1, ini.Get("Pathfinding", "MaxRepositionAttempts").ToInt32(Pathfinding.maxRepositionAttempts));
             Pathfinding.maxPathNodes = Math.Max(100, ini.Get("Pathfinding", "MaxPathNodes").ToInt32(Pathfinding.maxPathNodes));
             var maxPathfindingMs = Math.Max(10, ini.Get("Pathfinding", "MaxPathfindingTimeMs").ToInt32(50));
@@ -481,32 +386,7 @@ namespace Automata.Config
             Pathfinding.DockClearanceMin = MathHelper.Clamp(ini.Get("Pathfinding", "DockClearanceMin").ToDouble(Pathfinding.DockClearanceMin), 0.05, 3.0);
             Pathfinding.DockCorridorMaxLength = MathHelper.Clamp(ini.Get("Pathfinding", "DockCorridorMaxLength").ToDouble(Pathfinding.DockCorridorMaxLength), 10.0, 200.0);
 
-            // Parse SchedulerBounds (sample Automata.ini); [Scheduler] kept as legacy alias for same keys.
-            const string schedBounds = "SchedulerBounds";
-            const string schedLegacy = "Scheduler";
-            const string schedState = "SchedulerBounds.StateUpdateIntervalTicks";
-            OrchestratorServerSettings.OrchestratorMaxTargetLimit = Math.Max(1, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "MaxTargetLimit", OrchestratorServerSettings.OrchestratorMaxTargetLimit));
-            OrchestratorServerSettings.MaxTaskAssignmentPerBatch = Math.Max(1, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "MaxTaskAssignmentPerBatch", OrchestratorServerSettings.MaxTaskAssignmentPerBatch));
-            OrchestratorServerSettings.ScanDelayTicks = Math.Max(60, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "ScanDelayTicks", OrchestratorServerSettings.ScanDelayTicks));
-            OrchestratorServerSettings.ErrorRecoveryIntervalTicks = Math.Max(60, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "ErrorRecoveryIntervalTicks", OrchestratorServerSettings.ErrorRecoveryIntervalTicks));
-            OrchestratorServerSettings.MaxConsecutiveErrors = Math.Max(1, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "MaxConsecutiveErrors", OrchestratorServerSettings.MaxConsecutiveErrors));
-            OrchestratorServerSettings.ManintenanceIntervalTicks = Math.Max(60, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "MaintenanceIntervalTicks", OrchestratorServerSettings.ManintenanceIntervalTicks));
-            OrchestratorServerSettings.BidCollectionWindowTicks = Math.Max(60, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "BidCollectionWindowTicks", OrchestratorServerSettings.BidCollectionWindowTicks));
-            OrchestratorServerSettings.BidBlacklistCooldownTicks = Math.Max(60, ReadIniIntPreferSections(ini, schedBounds, schedLegacy, "BidBlacklistCooldownTicks", OrchestratorServerSettings.BidBlacklistCooldownTicks));
-
-            OrchestratorServerSettings.StateUpdateIntervalTicks.Initializing = Math.Max(60, ReadIniSchedulerStateInterval(ini, schedState, schedLegacy, "Initializing", "InitializingUpdateInterval", OrchestratorServerSettings.StateUpdateIntervalTicks.Initializing));
-            OrchestratorServerSettings.StateUpdateIntervalTicks.Error = Math.Max(60, ReadIniSchedulerStateInterval(ini, schedState, schedLegacy, "Error", "ErrorUpdateInterval", OrchestratorServerSettings.StateUpdateIntervalTicks.Error));
-            OrchestratorServerSettings.StateUpdateIntervalTicks.Standby = Math.Max(60, ReadIniSchedulerStateInterval(ini, schedState, schedLegacy, "Standby", "StandbyUpdateInterval", OrchestratorServerSettings.StateUpdateIntervalTicks.Standby));
-            OrchestratorServerSettings.StateUpdateIntervalTicks.Scanning = Math.Max(10, ReadIniSchedulerStateInterval(ini, schedState, schedLegacy, "Scanning", "ScanningUpdateInterval", OrchestratorServerSettings.StateUpdateIntervalTicks.Scanning));
-            OrchestratorServerSettings.StateUpdateIntervalTicks.Assigning = Math.Max(10, ReadIniSchedulerStateInterval(ini, schedState, schedLegacy, "Assigning", "AssigningUpdateInterval", OrchestratorServerSettings.StateUpdateIntervalTicks.Assigning));
-
             // Parse Drone section
-            Drone.DefaultHydrogenRefuelThreshold = MathHelper.Clamp(ini.Get("Drone", "DefaultHydrogenRefuelThreshold").ToSingle(Drone.DefaultHydrogenRefuelThreshold), 5.0f, 95.0f);
-            Drone.DefaultHydrogenOperationalThreshold = MathHelper.Clamp(ini.Get("Drone", "DefaultHydrogenOperationalThreshold").ToSingle(Drone.DefaultHydrogenOperationalThreshold), Drone.DefaultHydrogenRefuelThreshold + 5.0f, 95.0f);
-            Drone.DefaultBatteryRefuelThreshold = MathHelper.Clamp(ini.Get("Drone", "DefaultBatteryRefuelThreshold").ToSingle(Drone.DefaultBatteryRefuelThreshold), 5.0f, 95.0f);
-            Drone.DefaultBatteryOperationalThreshold = MathHelper.Clamp(ini.Get("Drone", "DefaultBatteryOperationalThreshold").ToSingle(Drone.DefaultBatteryOperationalThreshold), Drone.DefaultBatteryRefuelThreshold + 5.0f, 95.0f);
-            Drone.MinPowerThreshold = MathHelper.Clamp(ini.Get("Drone", "MinPowerThreshold").ToSingle(Drone.MinPowerThreshold), 1.0f, 50.0f);
-            Drone.MaxPowerThreshold = MathHelper.Clamp(ini.Get("Drone", "MaxPowerThreshold").ToSingle(Drone.MaxPowerThreshold), 50.0f, 99.0f);
             Drone.ComponentCheckIntervalMinSeconds = (uint)MathHelper.Clamp(ini.Get("Drone", "ComponentCheckIntervalSeconds").ToInt32((int)Drone.ComponentCheckIntervalMinSeconds), 60, 86400);
             Drone.TaskTimeoutSeconds = MathHelper.Clamp(ini.Get("Drone", "TaskTimeoutSeconds").ToInt32(Drone.TaskTimeoutSeconds), 10, 600);
             Drone.CombatMaxDetectionRange = MathHelper.Clamp(ini.Get("Drone", "CombatMaxDetectionRange").ToInt32(Drone.CombatMaxDetectionRange), 100, 50000);
@@ -518,8 +398,6 @@ namespace Automata.Config
             Drone.ConnectorScanRadius = MathHelper.Clamp(ini.Get("Drone", "ConnectorScanRadius").ToDouble(Drone.ConnectorScanRadius), 100.0, 5000.0);
             Drone.ConnectorNameSearchRadius = MathHelper.Clamp(ini.Get("Drone", "ConnectorNameSearchRadius").ToDouble(Drone.ConnectorNameSearchRadius), Drone.ConnectorScanRadius, 50000.0);
             Drone.ConnectorNameSearchIntervalSeconds = MathHelper.Clamp(ini.Get("Drone", "ConnectorNameSearchIntervalSeconds").ToInt32(Drone.ConnectorNameSearchIntervalSeconds), 1, 3600);
-            Drone.WeldUseDroneShape = ini.Get("Drone", "WeldUseDroneShape").ToBoolean(Drone.WeldUseDroneShape);
-            Drone.WeldUseNeighbourShapes = ini.Get("Drone", "WeldUseNeighbourShapes").ToBoolean(Drone.WeldUseNeighbourShapes);
 
             // Parse ConstructionComputer section (stand-alone drone construction)
             ConstructionComputer.DroneMaxJobsPerScan = MathHelper.Clamp(ini.Get("ConstructionComputer", "DroneMaxJobsPerScan").ToInt32(ConstructionComputer.DroneMaxJobsPerScan), 1, 1000);
@@ -540,12 +418,6 @@ namespace Automata.Config
             OrchestratorServerSettings.MaxConcurrentAuctions = MathHelper.Clamp(ini.Get("Orchestrator", "MaxConcurrentAuctions").ToInt32(OrchestratorServerSettings.MaxConcurrentAuctions), 1, 100);
             OrchestratorServerSettings.NoBidTimeoutSeconds = MathHelper.Clamp(ini.Get("Orchestrator", "NoBidTimeoutSeconds").ToInt32(OrchestratorServerSettings.NoBidTimeoutSeconds), 10, 600);
             OrchestratorServerSettings.FailedJobHoldSeconds = MathHelper.Clamp(ini.Get("Orchestrator", "FailedJobHoldSeconds").ToInt32(OrchestratorServerSettings.FailedJobHoldSeconds), 10, 7200);
-
-            // Parse ScoutPointer section
-            ScoutPointer.PendingGpsColor = ParseColor(ini.Get("ScoutPointer", "PendingGpsColor").ToString(""), ScoutPointer.PendingGpsColor);
-            ScoutPointer.ConfirmedGpsColor = ParseColor(ini.Get("ScoutPointer", "ConfirmedGpsColor").ToString(""), ScoutPointer.ConfirmedGpsColor);
-            ScoutPointer.CombatGpsColor = ParseColor(ini.Get("ScoutPointer", "CombatGpsColor").ToString(""), ScoutPointer.CombatGpsColor);
-            ScoutPointer.ConfirmTimeoutSeconds = MathHelper.Clamp(ini.Get("ScoutPointer", "ConfirmTimeoutSeconds").ToInt32(ScoutPointer.ConfirmTimeoutSeconds), 3, 300);
 
             // Parse MessageQueue section
             MessageQueue.messageRetentionTicks = Math.Max(600, ini.Get("MessageQueue", "MessageRetentionTicks").ToInt32(MessageQueue.messageRetentionTicks));
@@ -589,10 +461,6 @@ namespace Automata.Config
         {
             string unlimited = Loc.T(MyStrings.Keen_Unlimited);
             var summary = Loc.T(MyStrings.Common_AutomataServerConfig) + "\n";
-            summary += Loc.F(MyStrings.Common_SchedulersMaxPerPlayer, BlockLimits.MaxSchedulersPerPlayer > 0 ? BlockLimits.MaxSchedulersPerPlayer.ToString() : unlimited) + "\n";
-            summary += Loc.F(MyStrings.Common_SchedulersMaxPerFaction, BlockLimits.MaxSchedulersPerFaction > 0 ? BlockLimits.MaxSchedulersPerFaction.ToString() : unlimited) + "\n";
-            summary += Loc.F(MyStrings.Common_DroneControllersMaxPerPlayer, BlockLimits.MaxDroneControllersPerPlayer > 0 ? BlockLimits.MaxDroneControllersPerPlayer.ToString() : unlimited) + "\n";
-            summary += Loc.F(MyStrings.Common_DroneControllersMaxPerFaction, BlockLimits.MaxDroneControllersPerFaction > 0 ? BlockLimits.MaxDroneControllersPerFaction.ToString() : unlimited) + "\n";
             // summary += $"Current Schedulers: {AutomataSession.Instance?.AIDroneSchedulers?.Count ?? 0}\n";
             // summary += $"Current Drone Controllers: {AutomataSession.Instance?.AIDroneControllers?.Count ?? 0}\n";
             summary += Loc.F(MyStrings.Common_Logistics, Loc.T(LogisticsComputer.AllowLogistics ? MyStrings.Common_Enabled : MyStrings.Keen_Disabled)) + "\n";

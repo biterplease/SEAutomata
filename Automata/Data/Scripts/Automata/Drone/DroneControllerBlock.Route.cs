@@ -87,6 +87,9 @@ namespace Automata.Drone
         private int dockReplanMount;
         private Vector3DData dockReplanOffset, dockReplanForward, dockReplanUp;
 
+        private static bool WELDER_USE_DRONE_SHAPE = true;
+        private static bool WELDER_USE_NEIGHBOR_SHAPES = true;
+
         /// <summary>
         /// The header warning for missing eyes, or null: no camera / no sensor / neither, among the ones the server
         /// requires for pathfinding (an instrument that isn't required is simulated all around). Docked instruments
@@ -167,7 +170,7 @@ namespace Automata.Drone
             // No way from here (boxed in where it hovers: under / beside the build, between drones): reposition - a free
             // spot it can reach in a straight line - and plan from there; the move there becomes the route's first leg
             var pm = PathfindingManager.Instance;
-            if (pm == null || !AutomataSession.GetConfig().Pathfinding.AllowDirectPathfinding()) return false;
+            if (pm == null) return false;
             RefreshDroneGrids();
             PathQuery q;
             BuildPathQuery(out q);
@@ -307,7 +310,7 @@ namespace Automata.Drone
                 }
                 else laneName = null;
             }
-            bool usePathfinder = pm != null && AutomataSession.GetConfig().Pathfinding.AllowDirectPathfinding();
+            bool usePathfinder = pm != null;
             PathQuery q = default(PathQuery);
             int now = MyAPIGateway.Session.GameplayFrameCounter;
             if (routePlanFrame != now)
@@ -570,7 +573,7 @@ namespace Automata.Drone
             // Closest first: from where the hull just clears the face plane, out until it has room to turn there (was:
             // the drone's length + 2.5 m from the start, ~10-15 m out for a big drone, before any check)
             // (Without the pathfinder nothing is checked: the old fixed distance)
-            double closest = PathfindingManager.Instance != null && AutomataSession.GetConfig().Pathfinding.AllowDirectPathfinding()
+            double closest = PathfindingManager.Instance != null
                 ? ClosestApproach(point, dirW, dirA, sphereCentre, hullFromTool, ref frame) : ManoeuvreDistance();
             approach = sphereCentre + dirA * closest;
             bool free;
@@ -581,7 +584,7 @@ namespace Automata.Drone
             if (!checkSite) return true;
             if (!free) { workSiteWhy = "no room to turn at the approach point: " + turnRoomBlocker; return false; }
             var pm = PathfindingManager.Instance;
-            if (pm == null || !AutomataSession.GetConfig().Pathfinding.AllowDirectPathfinding()) return true;
+            if (pm == null) return true;
             PathQuery q;
             BuildPathQuery(out q);
             q.SeeAll = true;
@@ -608,11 +611,11 @@ namespace Automata.Drone
             else if (frontGap < WORK_STANDOFF && (along >= 0.999 || frontGap >= 0))
                 hullWork += dirA * ((WORK_STANDOFF - frontGap) / Math.Max(0.5, along));
             // Weld sites: built neighbours of the target in the way by their cells are checked by their real shape
-            if (siteWeld && targetGrid != null && AutomataSession.GetConfig().Drone.WeldUseNeighbourShapes) q.RealShapeGrid = targetGrid;
+            if (siteWeld && targetGrid != null && WELDER_USE_NEIGHBOR_SHAPES) q.RealShapeGrid = targetGrid;
             if (pm.SegmentBlocked(ref q, ref att, approach + hullFromTool, hullWork, 0.5, out h, out e, true, false))
             {
                 // Weld sites: the bounding box doesn't fit; the drone's real shape (a welder snout between neighbours) may
-                if (!(siteWeld && AutomataSession.GetConfig().Drone.WeldUseDroneShape
+                if (!(siteWeld && WELDER_USE_DRONE_SHAPE
                       && ShapeWayInFree(pm, q, ref att, ref mount, ref frame, approach, sphereCentre, point, dirW, dirA, limited, out e)))
                 {
                     workSiteHullPastFace = limited && frontGap < 0;   // the attitude, not the cell: every cell of this side fails alike
@@ -775,7 +778,7 @@ namespace Automata.Drone
             free = true;
             turnRoomBlocker = null;
             var pm = PathfindingManager.Instance;
-            if (pm == null || !AutomataSession.GetConfig().Pathfinding.AllowDirectPathfinding() || outward.LengthSquared() < 1e-6) return point;
+            if (pm == null || outward.LengthSquared() < 1e-6) return point;
             outward.Normalize();
             RefreshDroneGrids();
             PathQuery q;
@@ -1000,7 +1003,7 @@ namespace Automata.Drone
             if (dockingOrder != null && (o == dockingOrder || nextLeg == dockingOrder
                 || (nextLeg == null && queuedLegs.Count > 0 && queuedLegs.Peek() == dockingOrder))) return;   // docking
             var pm = PathfindingManager.Instance;
-            if (pm == null || !AutomataSession.GetConfig().Pathfinding.AllowDirectPathfinding()) return;
+            if (pm == null) return;
             if (droneGrids.Count == 0) RefreshDroneGrids();
             CaptureFlightState();
             Vector3D from = HullCentreWorld;
@@ -1161,7 +1164,7 @@ namespace Automata.Drone
             if (++routeWatchCounter < ROUTE_WATCH_EVERY) return;
             routeWatchCounter = 0;
             var pm = PathfindingManager.Instance;
-            if (pm == null || !AutomataSession.GetConfig().Pathfinding.AllowDirectPathfinding()) return;
+            if (pm == null) return;
             if (droneGrids.Count == 0) RefreshDroneGrids();   // the drone's own grids are never obstacles
             int now = MyAPIGateway.Session.GameplayFrameCounter;
             if (now - lastReplanFrame < ROUTE_REPLAN_MIN_TICKS) return;

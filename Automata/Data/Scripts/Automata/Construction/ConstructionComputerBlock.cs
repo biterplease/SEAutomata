@@ -18,6 +18,7 @@ using Automata.Util.Logging;
 using Automata.VirtualNetwork;
 using VRage.Utils;
 using Automata.Util.Strings;
+using Automata.Orchestrator;
 
 namespace Automata.Construction
 {
@@ -100,11 +101,6 @@ namespace Automata.Construction
         private readonly Dictionary<KeyValuePair<long, Vector3I>, int> blockCooldown = new Dictionary<KeyValuePair<long, Vector3I>, int>();
         private readonly Dictionary<KeyValuePair<long, Vector3I>, int> unreachableStrikes = new Dictionary<KeyValuePair<long, Vector3I>, int>();
         #region Timing
-        private static int AbortCooldownTicks()
-        {
-            var config = AutomataSession.GetConfig();
-            return config != null ? config.OrchestratorServerSettings.BidBlacklistCooldownTicks : 3600;
-        }
         private const int UNREACHABLE_COOLDOWN_TICKS = 5 * 60 * 60;   // after "Unreachable"
         private const int UNREACHABLE_COOLDOWN_MAX_TICKS = 30 * 60 * 60;   // a block reported unreachable again and again: doubled each time up to this
         // after any other abort / decline: BidBlacklistCooldownTicks (server config, 3600 = 60 s)
@@ -865,7 +861,7 @@ namespace Automata.Construction
                             // Older drones say only why the job ended: an "Unreachable" holds every block of it (the way home
                             // failing too, though its blocks were fine)
                             bool unreachable = !job.PerBlock && job.LastFailure != null && job.LastFailure.IndexOf("Unreachable", StringComparison.OrdinalIgnoreCase) >= 0;
-                            int until = now + (unreachable ? UNREACHABLE_COOLDOWN_TICKS : AbortCooldownTicks());
+                            int until = now + (unreachable ? UNREACHABLE_COOLDOWN_TICKS : OrchestratorBlock.BID_BLACKLIST_COOLDOWN_TICKS);
                             int held = 0;
                             foreach (var k in job.Blocks)
                             {

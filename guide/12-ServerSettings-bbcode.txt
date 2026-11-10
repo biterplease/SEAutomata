@@ -16,7 +16,6 @@ How drones plan their routes and see obstacles. These are the main CPU settings 
 
 [table]
 [tr][th]Setting[/th][th]Default[/th][th]What it does[/th][/tr]
-[tr][td]AllowDirectPathfinding[/td][td]true[/td][td]The drones' route planner. Off: drones fly straight lines to their targets without checking for obstacles. Leave it on.[/td][/tr]
 [tr][td]AllowLazyTheta[/td][td]true[/td][td]Route planner stage 3: when the straight line (with a few detours) and the route memory find no way, a Lazy Theta* search looks for one around the obstacle (out of asteroid pockets and caves, through cluttered bases). Off: those routes fail and the drone repositions. (Replaces AllowAStar, which is no longer read.)[/td][/tr]
 [tr][td]ThetaSearchRadius[/td][td]300[/td][td]Metres the search covers around the stretch that failed (50 to 2000). Further goals are searched for part of the way.[/td][/tr]
 [tr][td]ThetaMaxExpansions[/td][td]3000[/td][td]Most cells one search looks at (100 to 100000).[/td][/tr]
@@ -30,9 +29,7 @@ How drones plan their routes and see obstacles. These are the main CPU settings 
 [tr][td]PathMemoryMaxNodes[/td][td]4000[/td][td]Most remembered points (100 to 100000); the least recently used are forgotten first.[/td][/tr]
 [tr][td]PathMemoryMaxAgeHours[/td][td]24[/td][td]Hours a remembered way may go unused before it is forgotten (1 to 8760).[/td][/tr]
 [tr][td]FlightLaneExpirationMinutes[/td][td]240[/td][td]Minutes a flight lane may go unused before it is dropped (5 to 525600). Lanes are always on.[/td][/tr]
-[tr][td]AllowSensors, AllowObstacleAvoidance, AllowSimpleRepositioning, AllowDStarLite, UseGravityAwarePathing, RepositionStep[/td][td][/td][td][i]Not used yet.[/i][/td][/tr]
 [tr][td]UsePlanetAwarePathfinding[/td][td]true[/td][td]On planets, long routes follow the planet's curve and climb over terrain. Off: straight lines, which can run into hills and mountains.[/td][/tr]
-[tr][td]MinWaypointDistance, MaxWaypointDistance[/td][td]5, 15[/td][td][i]Not used yet.[/i][/td][/tr]
 [tr][td]MaxRepositionAttempts[/td][td]10[/td][td]How many detours one route may take around obstacles, and how many times a drone re-plans a blocked route before the task fails.[/td][/tr]
 [tr][td]MinAltitudeBuffer[/td][td]20[/td][td]Metres kept above the highest terrain when a route climbs over a hill (the drone's own [b]Min altitude[/b] is used when higher). 0 to 1000.[/td][/tr]
 [tr][td]MaxPathNodes[/td][td]1000[/td][td]Most points in one route (at least 100). Very long planet routes use wider steps to stay within it.[/td][/tr]

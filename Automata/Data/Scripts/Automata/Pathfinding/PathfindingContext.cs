@@ -26,8 +26,6 @@ namespace Automata.Pathfinding
         }
 
         // Configuration primitives (derived from PathfindingConfig)
-        public float MinWaypointDistance;
-        public float MaxWaypointDistance;
         public float MinAltitudeBuffer;
         public int MaxPathNodes;
         public int MaxRepositionAttempts;
