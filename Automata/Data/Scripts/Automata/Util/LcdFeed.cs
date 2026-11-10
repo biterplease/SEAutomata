@@ -129,7 +129,6 @@ namespace Automata.Util
         public long OwnerId { get { return owner != null ? owner.EntityId ^ feedSalt : 0; } }
         private long feedSalt;
         public string Tag { get { return tag; } }
-        public bool OwnGridOnly { get { return ownGridOnly; } }
         public bool ShowOwnScreens { get; private set; }
 
         /// <summary>The block, its LCD tag and which grids its LCDs may be on (own grid only, or its whole construct); 'channel':

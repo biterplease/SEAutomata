@@ -193,25 +193,6 @@ namespace Automata.Config
             public int ConfirmTimeoutSeconds { get; internal set; } = 10;
         }
 
-        /// <summary>"R,G,B" (0-255) or "#RRGGBB"; anything else: the default.</summary>
-        private static Color ParseColor(string text, Color fallback)
-        {
-            if (string.IsNullOrWhiteSpace(text)) return fallback;
-            text = text.Trim();
-            var hex = System.Globalization.NumberStyles.HexNumber;
-            var inv = System.Globalization.CultureInfo.InvariantCulture;
-            int r, g, b;
-            if (text.StartsWith("#") && text.Length == 7
-                && int.TryParse(text.Substring(1, 2), hex, inv, out r) && int.TryParse(text.Substring(3, 2), hex, inv, out g)
-                && int.TryParse(text.Substring(5, 2), hex, inv, out b))
-                return new Color(r, g, b);
-            var parts = text.Split(',');
-            if (parts.Length == 3 && int.TryParse(parts[0].Trim(), out r) && int.TryParse(parts[1].Trim(), out g) && int.TryParse(parts[2].Trim(), out b))
-                return new Color(MathHelper.Clamp(r, 0, 255), MathHelper.Clamp(g, 0, 255), MathHelper.Clamp(b, 0, 255));
-            if (Log.DebugEnabled) Log.Debug("Config: color '{0}' not understood (R,G,B or #RRGGBB), default used", text);
-            return fallback;
-        }
-
         public class OrchestratorBlockConfig
         {
             /// <summary>Auctions open at once; further job announcements wait in the orchestrator's queue.</summary>
@@ -233,9 +214,6 @@ namespace Automata.Config
         {
             // Server log (Automata.log). Debug on by default while the network layer is being tested.
             public LogLevel LogLevel { get; internal set; } = LogLevel.Info|LogLevel.Debug|LogLevel.Warning|LogLevel.Error;
-            public bool LogPathfinding { get; internal set; } = false;
-            public bool LogDroneNetwork { get; internal set; } = true;
-            public bool LogDroneOrders { get; internal set; } = true;
         }
 
         private VRage.Game.ModAPI.IMyModContext _modContext;
@@ -432,9 +410,6 @@ namespace Automata.Config
 
             // Parse Logging section
             Logging.LogLevel = ParseLogLevel(ini.Get("Logging", "LogLevel").ToString("Info|Debug|Warning|Error"));
-            Logging.LogPathfinding = ini.Get("Logging", "LogPathfinding").ToBoolean(Logging.LogPathfinding);
-            Logging.LogDroneNetwork = ini.Get("Logging", "LogDroneNetwork").ToBoolean(Logging.LogDroneNetwork);
-            Logging.LogDroneOrders = ini.Get("Logging", "LogDroneOrders").ToBoolean(Logging.LogDroneOrders);
         }
 
         public LogLevel ParseLogLevel(string logLevelStr)

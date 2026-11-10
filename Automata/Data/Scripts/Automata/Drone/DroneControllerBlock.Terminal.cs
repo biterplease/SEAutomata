@@ -46,7 +46,6 @@ namespace Automata.Drone
         }
 
         public static bool Terminal_HasCopiedSettings { get { return settingsClipboard != null; } }
-        public static string Terminal_CopiedFrom { get { return settingsClipboardFrom ?? ""; } }
 
         public void Terminal_CopySettings()
         {

@@ -17,16 +17,6 @@ namespace Automata.Util
             Z = z;
         }
 
-        public static Vector3Data FromVector3(Vector3 v)
-        {
-            return new Vector3Data
-            {
-                X = v.X,
-                Y = v.Y,
-                Z = v.Z
-            };
-        }
-
         public Vector3 ToVector3()
         {
             return new Vector3(X, Y, Z);

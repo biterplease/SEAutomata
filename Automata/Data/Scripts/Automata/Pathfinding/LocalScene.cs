@@ -95,7 +95,6 @@ namespace Automata.Pathfinding
         /// </summary>
         public int RemovalVersion;
         private readonly System.Diagnostics.Stopwatch buildWatch = new System.Diagnostics.Stopwatch();
-        public int EntryCount { get { return entries.Count; } }
 
         /// <summary>
         /// Makes sure the obstacles in 'sphere' are in the tree (looked up within REFRESH_TICKS, by any drone).

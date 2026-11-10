@@ -29,7 +29,6 @@ namespace Automata.VirtualNetwork
         NotSubscribed = 2048,
         SubscriberAntennaNotRegistered = 4096,
         SenderAntennaNotRegistered = 8192,
-        ShutdownInProgress = 16384,
         /// <summary>ReadMessages: nothing to take now (early exit, no work done): ask again later.</summary>
         TryAgainLater = 32768,
     }
@@ -58,11 +57,9 @@ namespace Automata.VirtualNetwork
     public enum PayloadType : ushort
     {
         None = 0,
-        // Free bits (payloads that never existed or were removed; no saved message carries them): 4, 8, 64, 128.
+        // Free bits (payloads that never existed or were removed; no saved message carries them): 4, 8, 16, 32, 64, 128.
         DesignatorOrderUpdate = 1,
         TaskAssignment = 2,
-        RelayMessage = 16,
-        TaskAborted = 32,
         JobAnnouncement = 256,
         MiningSurveyDataBroadcast = 512,
         Auction = 1024,
@@ -138,30 +135,7 @@ namespace Automata.VirtualNetwork
         public List<Orchestrator.Task> Tasks;
     }
 
-    /// <summary>
-    /// Drone gives up on an assigned task (e.g. pathfinding complexity budget exceeded).
-    /// Scheduler should release the assignment and may blacklist this drone for the task temporarily.
-    /// </summary>
-    [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
-    public class TaskAborted : IMessagePayload
-    {
-        [ProtoMember(1)]
-        public ushort TaskId;
-        [ProtoMember(2)]
-        public string Reason;
-    }
 
-
-    [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
-    public class RelayMessage : IMessagePayload
-    {
-        [ProtoMember(1)]
-        public long DestinationEntityId;
-        [ProtoMember(2)]
-        public Channel DestinationTopic;
-        [ProtoMember(3)]
-        public long OriginalSenderId;
-    }
     [Serializable, ProtoContract(UseProtoMembersOnly = true, SkipConstructor = true)]
     public class Message<T> where T : class, IMessagePayload
     {

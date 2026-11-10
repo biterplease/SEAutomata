@@ -54,7 +54,6 @@ How drones plan their routes and see obstacles. These are the main CPU settings 
 | --- | --- | --- |
 | TaskTimeoutSeconds | 30 | The highest **Task timeout** a player can set on a drone (10 to 600). A task that stops making progress for that long fails. |
 | DebugDrawTimeoutSeconds | 3600 | The debug overlays (drone construction field and navigation targets, construction computer field, orchestrator parking area and lanes, `/automata debugdraw`) switch themselves off after this many seconds (10 to 3600). |
-| DefaultMonitorHydrogen, DefaultMonitorBattery, DefaultHydrogenRefuelThreshold, DefaultHydrogenOperationalThreshold, DefaultBatteryRefuelThreshold, DefaultBatteryOperationalThreshold, MinPowerThreshold, MaxPowerThreshold | | *Not used yet.* Each drone uses its own terminal settings. |
 | ComponentCheckIntervalSeconds | 600 | How often a drone re-checks all of its own blocks (60 to 86400). Adding or removing blocks triggers a check anyway. |
 | ConnectorScanIntervalSeconds | 60 | How often a drone's home connector / beacon lists may refresh on their own. |
 | ConnectorScanMinMoveMeters | 250 | ...but only if the drone moved at least this far since the last refresh... |
@@ -63,8 +62,6 @@ How drones plan their routes and see obstacles. These are the main CPU settings 
 | ConnectorScanRadius | 1000 | Radius of the automatic connector / beacon lists, in metres (100 to 5000). |
 | ConnectorNameSearchRadius | 15000 | Radius of **Add to list** (search by name), and the farthest a home connector or beacon may be from the drone, in metres. |
 | ConnectorNameSearchIntervalSeconds | 10 | Shortest time between two name searches on one drone. |
-| WeldUseDroneShape | true | Weld jobs: where the drone's bounding box doesn't fit the way in to a block, its real shape is checked (its blocks merged into a few boxes), so a welder snout can reach between built neighbours. |
-| WeldUseNeighbourShapes | true | Weld jobs: built blocks next to the target that are in the way are checked against their real shape (slopes, panels), not as full cubes. |
 | CombatMaxDetectionRange | 2000 | Enemies the AI Defensive block reports farther away than this (metres) are ignored (100 to 50000). The vanilla block sees 2000 m; raise it only for modded AI blocks. |
 
 ### [ConstructionComputer]
@@ -83,17 +80,6 @@ How drones plan their routes and see obstacles. These are the main CPU settings 
 | NoBidTimeoutSeconds | 60 | An auction with no drone bid for this long is dropped, and the computer that announced it is told (10 to 600). |
 | FailedJobHoldSeconds | 60 | How long that computer then waits before announcing the job again (10 to 7200). The **Retry jobs** buttons skip the wait. |
 
-### [ScoutPointer]
-
-The target designators.
-
-| Setting | Default | What it does |
-| --- | --- | --- |
-| PendingGpsColor | 255,210,0 | Colour of an industrial designator order's GPS marker while it waits for a drone. `R,G,B` or `#RRGGBB`. |
-| ConfirmedGpsColor | 40,220,60 | Colour of the marker once every job of the order has a drone. |
-| CombatGpsColor | 139,0,0 | *Not used yet.* Combat orders have no marker, since the target moves. |
-| ConfirmTimeoutSeconds | 10 | A designator order that no suitable drone takes within this many seconds is cancelled (3 to 300). |
-
 ### [Mining]
 
 | Setting | Default | What it does |
@@ -106,16 +92,6 @@ The target designators.
 | SurveyorScanIntervalSeconds | 120 | Seconds between a Mining Surveyor's scans with the ore detector on its own grid (10 to 3600). |
 | DroneSurveyIntervalSeconds | 10 | Seconds between a surveying drone's scans; it must also have moved half a scan radius (2 to 600). |
 | MaxGpsMarkers | 30 | Most deposit markers **Show known deposits** puts on the GPS, nearest first (1 to 200). |
-
-### [SchedulerBounds]
-
-| Setting | Default | What it does |
-| --- | --- | --- |
-| BidCollectionWindowTicks | 300 | How long an Orchestrator collects bids before picking the winners (at least 60). Longer gives better picks but slower starts. Big jobs wait a bit longer for more drones. |
-| BidBlacklistCooldownTicks | 3600 | How long a Construction Computer holds a block back after a drone gave it up (at least 60). Blocks a drone couldn't reach are always held 5 minutes. |
-| MaxTargetLimit, PerScanLimit, MaxTaskAssignmentPerBatch, ScanDelayTicks, ErrorRecoveryIntervalTicks, MaxConsecutiveErrors, MaintenanceIntervalTicks | | *Not used yet.* |
-
-The **[SchedulerBounds.StateUpdateIntervalTicks]** section (Initializing, Error, Standby, Scanning, Assigning) is *not used yet*.
 
 ### [MessageQueue]
 
@@ -131,7 +107,6 @@ The virtual radio network the Automata blocks talk over.
 | Setting | Default | What it does |
 | --- | --- | --- |
 | LogLevel | Error, Warning | What goes into the mod's log file: any combination of `Verbose`, `Info`, `Debug`, `Warning`, `Error`, or `Quiet` for nothing. `Debug` logs every auction, bid and drone decision: useful to find out why a drone doesn't take a job, but the file grows fast. |
-| LogPathfinding, LogDroneNetwork, LogDroneOrders | | *Not used yet.* |
 
 The log is **Automata.log**, in `%AppData%\SpaceEngineers\Storage\<mod id>.sbm_Automata\` (on a dedicated server, the same `Storage` folder of the server's instance).
 

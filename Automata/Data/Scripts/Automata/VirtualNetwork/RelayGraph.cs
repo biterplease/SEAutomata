@@ -370,15 +370,6 @@ namespace Automata.VirtualNetwork
             }
         }
 
-        /// <summary>The grid's group has a working antenna (it is a node of the network).</summary>
-        public bool OnNetwork(IMyCubeGrid grid)
-        {
-            if (grid == null) return false;
-            EnsureIndex();
-            long key = GroupOf(grid.EntityId);
-            return key != 0 && nodes.ContainsKey(key);
-        }
-
         /// <summary>Are the two grids connected by rotors, pistons or hinges (or the same grid)?</summary>
         public bool SameGroup(long gridA, long gridB)
         {

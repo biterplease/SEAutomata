@@ -1851,7 +1851,12 @@ namespace Automata.Drone
                     // Harvesters: the real shape against the real physics (out of a plot's cell, the nose over its soil: the
                     // cell box had it blocked at once and the drone stayed there)
                     MatrixD att = flightState.WorldMatrix;
-                    if (!SweepClear(ref att, HullCentreWorld, HullCentreWorld + dir * len, HARVEST_LINE_BERTH, true, out blocker, out run)) run = Math.Max(0, run - 0.1);
+                    Pathfinding.PathfindingManager rpm;
+                    Pathfinding.PathQuery rq;
+                    blocker = null;
+                    run = len;
+                    if (RealShapeQuery(out rpm, out rq) && !rpm.RealSweepClear(ref rq, ref att, HullCentreWorld, HullCentreWorld + dir * len, HARVEST_LINE_BERTH, true, out blocker, out run))
+                        run = Math.Max(0, run - 0.1);
                 }
                 else run = FreeRun(HullCentreWorld, dir, len, out blocker);
                 if (blocker != null)
@@ -2174,8 +2179,7 @@ namespace Automata.Drone
             // Closest the sphere may come to the face: the hull's front WORK_STANDOFF off it
             Vector3D fromTool = Vector3D.TransformNormal(HullCentreLocal - mount.LocalPoint, frame);
             Vector3D half = localHullBox.Max.X >= localHullBox.Min.X ? localHullBox.HalfExtents : new Vector3D(1);
-            double halfAlongW = Math.Abs(Vector3D.Dot(fn, frame.Right)) * half.X + Math.Abs(Vector3D.Dot(fn, frame.Up)) * half.Y
-                              + Math.Abs(Vector3D.Dot(fn, frame.Backward)) * half.Z;
+            double halfAlongW = Pathfinding.PathfindingManager.HalfSizeAlong(ref frame, ref half, fn);
             double minOut = WORK_STANDOFF - Vector3D.Dot(fromTool, fn) + halfAlongW;
             double defaultOut = Vector3D.Dot(defaultCentre - fp, fn);
             // Candidates, fewest touched first, then the smallest move
@@ -3035,29 +3039,6 @@ namespace Automata.Drone
             if (auction.IsInSpace && (caps & Capabilities.CanFlySpace) == 0) return "job in space, the drone can't fly there (" + caps + ")";
             if (auction.IsInAtmosphere && (caps & Capabilities.CanFlyAtmosphere) == 0) return "job in gravity, the drone can't lift itself there (" + caps + ")";
             return null;
-        }
-
-        // The drone's own minimum check (the orchestrator checks again): equipment, environment, load
-        private bool CanTakeJob(Auction auction)
-        {
-            var caps = BidCapabilities;
-            switch (auction.JobType)
-            {
-                case Orchestrator.JobType.Weld:    if ((caps & Capabilities.CanWeld) == 0) return false; break;
-                case Orchestrator.JobType.Grind:   if ((caps & Capabilities.CanGrind) == 0) return false; break;
-                case Orchestrator.JobType.MineOre: if ((caps & Capabilities.CanDrill) == 0 || (caps & Capabilities.CanScoutOre) == 0) return false; break;
-                case Orchestrator.JobType.DesignatorScoutPoint:
-                case Orchestrator.JobType.DesignatorScoutArea: if ((caps & Capabilities.CanScoutOre) == 0) return false; break;
-                case Orchestrator.JobType.DesignatorQuarry: if ((caps & Capabilities.CanDrill) == 0) return false; break;
-                case Orchestrator.JobType.TrashCollection:
-                case Orchestrator.JobType.FarmCrops: if ((caps & Capabilities.CanCollect) == 0 || (caps & Capabilities.CargoVolumeNil) != 0) return false; break;
-                case Orchestrator.JobType.DesignatorEngage:
-                case Orchestrator.JobType.DesignatorEscort: if ((caps & Capabilities.HasDefenseSystems) == 0) return false; break;
-                default:                           if ((caps & Capabilities.CargoVolumeNil) != 0) return false; break;
-            }
-            if (auction.IsInSpace && (caps & Capabilities.CanFlySpace) == 0) return false;
-            if (auction.IsInAtmosphere && (caps & Capabilities.CanFlyAtmosphere) == 0) return false;
-            return true;
         }
 
         private void SendBid(MessageQueue queue, Auction auction)

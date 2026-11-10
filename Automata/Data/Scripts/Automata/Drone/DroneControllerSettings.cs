@@ -25,8 +25,6 @@ namespace Automata.Drone
                         /// </summary>
                 [ProtoMember(3)]
                 public Vector3D HomePosition;
-                public Vector3D HomeForwardDirection = Vector3D.Forward;
-                public bool EnforceHomeOrientation = true;
                 // [ProtoMember(24)]
                 // public IMyGps HomeIsRelativeTo;
                 // ProtoMembers 4/5 were UseTaskTypeFilters / TaskTypeFilters (retired: TaskType is no longer a flags enum)
@@ -99,15 +97,7 @@ namespace Automata.Drone
                 public float BatteryRefuelThreshold = 20.0f;      // Return to base when battery below this %
                 [ProtoMember(22)]
                 public float BatteryOperationalThreshold = 80.0f; // Resume ops when battery above this %
-                [ProtoMember(23)]
-                public Base6Directions.Direction ControllerForwardDirection = Base6Directions.Direction.Forward;
-                /// <summary>
-                /// If enabled, a drone that equips an ore detector, will store detected ore location 
-                /// data and relay it to a mining surveyor block. Other drones, and orchestrators, will
-                /// try to use this data to mine.
-                /// </summary>
-                [ProtoMember(25)]
-                public bool SurveyForMiningData = false;
+                // ProtoMember 23 was ControllerForwardDirection, 25 SurveyForMiningData (retired: never read)
                 // ProtoMember 26 was EnableInertialDampening (retired: the drone always holds itself)
 
                 /// <summary>
@@ -228,9 +218,7 @@ namespace Automata.Drone
                 /// <summary>s without a target (AI Offensive) before the drone comes home.</summary>
                 [ProtoMember(55, IsRequired = true)]
                 public int CombatNoTargetSeconds = 15;
-                /// <summary>Obsolete (was: launch radius from the home connector, 0 = any). Replaced by AutoLaunchRadius.</summary>
-                [ProtoMember(56)]
-                public float CombatLaunchRadius;
+                // ProtoMember 56 was CombatLaunchRadius (retired: replaced by AutoLaunchRadius)
                 /// <summary>The AI Defensive block fleeing (its flee trigger) brings the drone home.</summary>
                 [ProtoMember(57, IsRequired = true)]
                 public bool CombatRetreatOnFlee = true;

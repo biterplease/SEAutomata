@@ -7,9 +7,6 @@ namespace Automata.Util
 {
     public static class ColorUtil
     {
-        /// <summary>Packed defaults (Color.PackedValue, ABGR): grind red RGB(255,0,0), weld-ignore magenta RGB(255,0,255).</summary>
-        public const uint DEFAULT_GRIND_COLOR = 0xFF0000FF;
-        public const uint DEFAULT_WELD_IGNORE_COLOR = 0xFFFF00FF;
 
         /// <summary>
         /// The block is painted exactly this color: its color mask turned back into the RGB the color picker shows, byte

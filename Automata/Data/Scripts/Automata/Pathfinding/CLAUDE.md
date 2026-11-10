@@ -4,9 +4,9 @@
 
 `PathfindingManager` is a session singleton (`AutomataSession.Init` -> `PathfindingManager.Load`, `Update()` every tick
 refills the look-ahead ray budget). It implements **direct pathfinding with geometric repositioning**. A* is **not
-wired**; the legacy planners (`AStarPathfinder`, `DirectPathfinder`,
-`PathfindingContext`, `IPathfinder`, `Util`, `AdjancencyList`) still compile but nothing calls them. See
-`TODO/04-pathfinding-architecture.md` for what to keep from them.
+wired**; the legacy planners (`AStarPathfinder`, `DirectPathfinder`, `PathfindingContext`, ...) were removed
+(2026-11-10). Also here, moved from the drone: the real-shape checks (`PathfindingManager.RealShape`), the dock entry
+corridor search (`.Corridor`) and the reposition spots (`.Reposition`).
 
 ## 2026-10-13: fall-forward chain, memory, Lazy Theta*, lanes, localized sensing (TODO/20)
 

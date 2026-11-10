@@ -228,8 +228,6 @@ namespace Automata.Orchestrator
             return true;
         }
 
-        public bool Terminal_LaneClearArmed { get { return MyAPIGateway.Session.GameplayFrameCounter - laneClearArmed <= 5 * 60; } }
-
         /// <summary>Draws the selected lane pair (nothing without a selection), off after DebugDrawTimeoutSeconds.</summary>
         public bool Terminal_VisualizeLane()
         {

@@ -20,9 +20,6 @@ namespace Automata.Util.Logging
         private static LoggingEngine _logger;
         private static readonly object _lock = new object();
         public static readonly LogLevel LogLevel = ServerConfig.Instance.Logging.LogLevel;
-        public static readonly bool logPathfinding = ServerConfig.Instance.Logging.LogPathfinding;
-        public static readonly bool logDroneNetwork = ServerConfig.Instance.Logging.LogDroneNetwork;
-        public static readonly bool logDroneOrders = ServerConfig.Instance.Logging.LogDroneOrders;
 
         /// <summary>
         /// Initialize the logging system
@@ -53,31 +50,6 @@ namespace Automata.Util.Logging
         public static void Warning(string msg, params object[] args) => WriteIfEnabled(LogLevel.Warning, msg, args);
         public static void Error(string msg, params object[] args) => WriteIfEnabled(LogLevel.Error, msg, args);
         public static void Error(Exception ex) => WriteIfEnabled(LogLevel.Error, ex.ToString());
-
-        // Specialized logging that checks server config flags
-        public static void LogPathfinding(string msg, params object[] args)
-        {
-            if (logPathfinding && IsLevelEnabled(LogLevel.Debug))
-            {
-                _logger?.Write("[Automata.Pathfinding] " + string.Format(msg, args));
-            }
-        }
-
-        public static void LogDroneNetwork(LogLevel level, string msg, params object[] args)
-        {
-            if (logDroneNetwork)
-            {
-                WriteIfEnabled(level, "[Automata.DroneNetwork] " + msg, args);
-            }
-        }
-
-        public static void LogDroneOrders(string msg, params object[] args)
-        {
-            if (logDroneOrders && IsLevelEnabled(LogLevel.Info))
-            {
-                _logger?.Write("[Automata.DroneOrders] " + string.Format(msg, args));
-            }
-        }
 
         // Utility methods
         public static string BlockName(object block) => LoggingEngine.BlockName(block);
@@ -156,7 +128,6 @@ namespace Automata.Util.Logging
     {
 
         private string _modName;
-        private int _workshopId;
         private string _logFilename;
         private Type _typeOfMod;
 
@@ -176,7 +147,6 @@ namespace Automata.Util.Logging
         {
             MyLog.Default.WriteLineAndConsole(modName + " Create Log instance Utils=" + (MyAPIGateway.Utilities != null).ToString());
             _modName = modName;
-            _workshopId = workshopId;
             _logFilename = logFileName;
             _typeOfMod = typeOfMod;
         }

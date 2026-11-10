@@ -180,12 +180,6 @@ namespace Automata.Orchestrator
             return t >= JobType.DesignatorScoutPoint && t <= JobType.DesignatorQuarry;
         }
 
-        /// <summary>Hostile designator jobs (engage / escort): combat drones with the three AI blocks.</summary>
-        public static bool IsDesignatorCombat(this JobType t)
-        {
-            return t == JobType.DesignatorEngage || t == JobType.DesignatorEscort;
-        }
-
         // Weld jobs: which weld (Job / JobAnnouncement / Auction / award / report .WeldCategory). 0: unknown (any).
         public const byte WELD_ANY = 0, WELD_REPAIR = 1, WELD_PROJECTED = 2, WELD_UNBUILT = 3;
 

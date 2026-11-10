@@ -66,8 +66,6 @@ namespace Automata.Drone
         private long _entityId;
         private IMyEntity entity;
         private IMyCubeBlock block;
-        private IMyGamePruningStructureDelegate pruningStructureDelegate;
-        private IMyPlanetDelegate planetDelegate;
         private readonly List<IMyCubeGrid> _gridCache = new List<IMyCubeGrid>();
         private readonly List<IMySlimBlock> _blockCache = new List<IMySlimBlock>();
 
@@ -124,15 +122,11 @@ namespace Automata.Drone
         // cache to prevent recalculating every time
         private readonly List<IMyThrust>[] allThrusters = new List<IMyThrust>[6];
 
-        private ThrustProfile h2ThrustProfile;
-        private ThrustProfile ionThrustProfile;
-        private ThrustProfile atmoThrustProfile;
         private ThrustProfile combinedThrustProfile;
         private readonly List<IMyGasTank> hydrogenTanks = new List<IMyGasTank>();
         private readonly List<IMyBatteryBlock> batteries = new List<IMyBatteryBlock>();
         private readonly List<IMyCargoContainer> cargoContainers = new List<IMyCargoContainer>();
 
-        private Vector3D gravityVector = Vector3D.Zero;
         private float physicalMass = 0.0f;
         private float baseMass = 0.0f;
 
@@ -177,7 +171,6 @@ namespace Automata.Drone
 
         // Hull box of the whole mechanical grid group, controller frame (for pathfinding ray bundles / clearance)
         private BoundingBoxD localHullBox = BoundingBoxD.CreateInvalid();
-        public BoundingBoxD LocalHullBox { get { return localHullBox; } }
 
         // Home connector / observation area
         private IMyShipConnector homeConnector;
@@ -269,8 +262,6 @@ namespace Automata.Drone
             // this.operationMode = settings.OperationMode;
             this.utilitiesDelegate = utilitiesDelegate ?? new MyUtilitiesDelegate();
             this.sessionDelegate = sessionDelegate ?? new MySessionDelegate();
-            // this.pruningStructureDelegate = new MyGamePruningStructureDelegate();
-            // this.planetDelegate = planetDelegate ?? new MyPlanetDelegate();
 
             foreach (Base6Directions.Direction dir in Enum.GetValues(typeof(Base6Directions.Direction)))
             {
@@ -787,8 +778,6 @@ namespace Automata.Drone
             this.sessionDelegate = new MySessionDelegate();
             if (terminalLogger == null)
                 terminalLogger = new TerminalDisplayManager(block as IMyTerminalBlock, 10);
-            this.pruningStructureDelegate = new MyGamePruningStructureDelegate();
-            this.planetDelegate =  new MyPlanetDelegate();
             if (settings == null) LoadSettings();   // Initialize retries every 10 ticks: keep what was loaded / received
 
 
@@ -822,7 +811,6 @@ namespace Automata.Drone
                 return;
             }
 
-            // pathfindingManager = new PathfindingManager(AutomataSession.GetConfig().Pathfinding, pruningStructureDelegate, planetDelegate);
 
             if (IsServer) SyncAntennaReg(AutomataSession.GetMessageQueue());   // the virtual network is simulated on the server only
 
@@ -1121,9 +1109,6 @@ namespace Automata.Drone
             bool potential = IsParkedNow() || preflightStage != 0;
             float airDensity; bool airAtmosphere;
             AirAt(shipController, out airDensity, out airAtmosphere);
-            h2ThrustProfile = CalculateThrustProfile(shipController, capabilityMass, hydrogenThrusters, airDensity, airAtmosphere, potential);
-            atmoThrustProfile = CalculateThrustProfile(shipController, capabilityMass, atmoThrusters, airDensity, airAtmosphere, potential);
-            ionThrustProfile = CalculateThrustProfile(shipController, capabilityMass, ionThrusters, airDensity, airAtmosphere, potential);
             combinedThrustProfile = CalculateThrustProfile(shipController, capabilityMass, allThrusters, airDensity, airAtmosphere, potential);
 
             capabilities = Capabilities.None;
@@ -1260,16 +1245,6 @@ namespace Automata.Drone
             if (payloadKg < 10000) return Capabilities.LiftLt10t;
             if (payloadKg < 100000) return Capabilities.LiftLt100t;
             return Capabilities.LiftLt1000t;
-        }
-
-        /// <summary>Upper bound of a lift class in kg (for planning from capabilities alone).</summary>
-        public static double LiftClassMaxKg(Capabilities caps)
-        {
-            if ((caps & Capabilities.LiftLt1000t) != 0) return double.MaxValue;
-            if ((caps & Capabilities.LiftLt100t) != 0) return 100000;
-            if ((caps & Capabilities.LiftLt10t) != 0) return 10000;
-            if ((caps & Capabilities.LiftLt1t) != 0) return 1000;
-            return 0;
         }
 
         private void CalibrateRotationCapabilities()
@@ -1752,37 +1727,6 @@ namespace Automata.Drone
             return constructionOrder;
         }
 
-        /// <summary>
-        /// Places a mount's working point (connector: its detector dummy) at 'goal', facing 'toolForward'.
-        /// The drone starts from a level frame at its current heading and turns by the smallest rotation that
-        /// lines the mount up, so a belly connector pointed down keeps the drone level. The final approach runs
-        /// along the mount's axis from 'approachDistance' metres out.
-        /// </summary>
-        public FlightOrder OrderPlaceMount(ref ToolMount mount, Vector3D goal, Vector3D toolForward, double approachDistance = 10.0)
-        {
-            if (mount.Block == null || toolForward.LengthSquared() < 1e-6) return null;
-            CaptureFlightState();
-            toolForward.Normalize();
-            Vector3D gUp = flightState.InGravity ? flightState.GravityUp : flightState.WorldMatrix.Up;
-            MatrixD frame = WorkFrame(ref mount, toolForward);   // within the P-Gravity limits
-
-            Vector3D offsetWorld = Vector3D.TransformNormal(mount.LocalPoint, frame);
-            Vector3D controllerGoal = goal - offsetWorld;
-            Vector3D approach = controllerGoal - toolForward * approachDistance;
-            var order = CreateGoTo(controllerGoal, approachDistance > 0 ? approach : (Vector3D?)null);
-            SetOrderOrientation(frame.Forward, frame.Up);
-            order.IgnoreGravityLimits = true;   // already within them (WorkFrame); not re-clamped in flight
-            order.ArrivalTolerance = 0.2f;
-
-            if (flightState.InGravity)
-            {
-                double tilt = MathHelperD.ToDegrees(Math.Acos(MathHelperD.Clamp(Vector3D.Dot(frame.Up, gUp), -1, 1)));
-                if (tilt > 30)
-                    Report(MyStrings.Drone_WarningMountAlignmentTilts, tilt);
-            }
-            return order;
-        }
-
         // Current forward flattened onto the plane normal to 'up' (falls back to other axes when vertical)
         private Vector3D LevelHeading(ref Vector3D up)
         {
@@ -1810,12 +1754,6 @@ namespace Automata.Drone
             return v * cos + Vector3D.Cross(k, v) * sin + k * (Vector3D.Dot(k, v) * (1 - cos));
         }
 
-        public void SetOrderLookAt(Vector3D point)
-        {
-            activeFlightOrder.Orientation = FlightOrientationMode.LookAt;
-            activeFlightOrder.LookAtPoint = Vector3DData.FromVector3D(point);
-        }
-
         public void SetOrderOrientation(Vector3D forward, Vector3D up)   // must not be parallel
         {
             var o = activeFlightOrder;
@@ -1830,15 +1768,6 @@ namespace Automata.Drone
                 o.ForwardLocal = Vector3DData.FromVector3D(WorldToAnchorDir(ref m, forward));
                 o.UpLocal = Vector3DData.FromVector3D(WorldToAnchorDir(ref m, up));
             }
-        }
-
-        // Position a tool's working point instead of the controller (e.g. welder tip 'reach' metres ahead of the block)
-        public void SetOrderReferenceBlock(IMyCubeBlock tool, double reach)
-        {
-            MatrixD w = shipController.WorldMatrix;
-            Vector3D tip = tool.WorldMatrix.Translation + tool.WorldMatrix.Forward * reach;
-            activeFlightOrder.ReferenceOffset = Vector3DData.FromVector3D(
-                Vector3D.TransformNormal(tip - w.Translation, MatrixD.Transpose(w)));
         }
 
         /// <summary>
@@ -2932,10 +2861,6 @@ namespace Automata.Drone
         #endregion
 
         #region Terminal Properties
-        public long Terminal_EntityId
-        {
-            get { return Entity != null ? Entity.EntityId : 0L; }
-        }
 
         public bool Terminal_Enabled
         {
@@ -2974,20 +2899,6 @@ namespace Automata.Drone
                 SaveSettings();
                 SyncSetting(DroneSettingKey.OperationModeValue);
                 RefreshTerminal();   // job / debug controls enable by mode
-            }
-        }
-        public StringBuilder Terminal_HomePositionGPS
-        {
-            get
-            {
-                if (settings == null) return new StringBuilder("");
-                return new StringBuilder(ConvertVectorToGPS(Loc.T(MyStrings.Drone_DroneHome), settings.HomePosition));
-            }
-            set
-            {
-                if (settings == null) return;
-                Vector3D? pos = ParseGPSString(value != null ? value.ToString() : null);
-                if (pos.HasValue) { settings.HomePosition = pos.Value; SaveSettings(); }
             }
         }
 
@@ -3204,12 +3115,6 @@ namespace Automata.Drone
         {
             get { return settings != null ? settings.BatteryOperationalThreshold : 80f; }
             set { if (settings != null) { settings.BatteryOperationalThreshold = MathHelper.Clamp(value, 10f, 95f); SaveSettings(); SyncSetting(DroneSettingKey.BatteryOperationalThreshold); } }
-        }
-
-        public long Terminal_ControllerForwardDirectionValue
-        {
-            get { return settings != null ? (long)settings.ControllerForwardDirection : (long)Base6Directions.Direction.Forward; }
-            set { if (settings != null) { settings.ControllerForwardDirection = (Base6Directions.Direction)value; SaveSettings(); } }
         }
 
         public StringBuilder Terminal_Debug_SetOrientationTargetInput

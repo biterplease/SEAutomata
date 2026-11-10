@@ -38,16 +38,8 @@ namespace Automata.Drone
     public partial class DroneControllerBlock
     {
 
-        private const double CORRIDOR_SLIDE = 0.5;           // m: P1 -> P0, the final slide onto the connector
-        private const double CORRIDOR_STEP = 0.25;           // m: candidate heights along the connector axis
-        private const double CORRIDOR_ACROSS_STEP = 1.0;     // m: candidate distances across it
-        private const int CORRIDOR_AXIS_STEPS = 60;          // along the axis, at most (15 m)
-        private const int CORRIDOR_TURN_CHECKS = 600;        // exit checks per search (the expensive part)
-        private const double CORRIDOR_EXIT_EXTRA = 3.0;      // m: T moved this much further out when clear (room for the route to arrive)
-        private const double CORRIDOR_RISE_MAX = 6.0;        // m: out of a door at floor level, up this much at most to find room to turn
-        private const double CORRIDOR_RISE_STEP = 0.5;
+        private const double CORRIDOR_SLIDE = PathfindingManager.CORRIDOR_SLIDE;   // m: P1 -> P0, the final slide onto the connector
         private const float CORRIDOR_LINE_TOLERANCE = 0.15f; // m: corridor legs, off the line (at most half the clearance)
-        private const float CORRIDOR_ARRIVAL = 0.15f;        // m: corridor legs, arrival (same)
         private const double CORRIDOR_LINE_TOLERANCE_MIN = 0.08;   // m: the tightest line the controller is asked to hold
         private const double BACKOUT_MARGIN = 1.5;           // m: straight back-out = the hull's depth along the axis + this
 
@@ -61,14 +53,6 @@ namespace Automata.Drone
         private readonly List<FlightOrder> dockCorridorLegs = new List<FlightOrder>();
         private bool dockCorridor;                           // the current docking uses an entry corridor
         private Vector3D corridorExitDir;                    // the last corridor found: the way out at its outer end
-        private readonly System.Diagnostics.Stopwatch corridorWatch = new System.Diagnostics.Stopwatch();
-
-        private struct CorridorCandidate
-        {
-            public double Cost;
-            public Vector3D M, T, Out;
-        }
-        private readonly List<CorridorCandidate> corridorCandidates = new List<CorridorCandidate>();
 
         // Corridor / back-out leg: precise (tight line and arrival, full attitude), slow, not watched (the walls are close)
         private void MakeCorridorLeg(FlightOrder leg, double cap, float tol)
@@ -151,48 +135,41 @@ namespace Automata.Drone
         }
         #endregion
 
-        // The clearances a corridor is searched with: the configured one, then the minimum (tight doors)
-        private void CorridorClearances(out double normal, out double tight)
-        {
-            var cfg = AutomataSession.GetConfig();
-            normal = cfg != null ? cfg.Pathfinding.DockClearance : 0.5;
-            tight = cfg != null ? Math.Min(normal, cfg.Pathfinding.DockClearanceMin) : 0.2;
-        }
-
         // Speed and line tolerance in a corridor found with clearance 'berth': half the clearance off the line at most;
         // below the configured clearance, half the speed
         private void CorridorFlight(double berth, out float speed, out float tol)
         {
             double normal, tight;
-            CorridorClearances(out normal, out tight);
+            PathfindingManager.CorridorClearances(out normal, out tight);
             tol = (float)Math.Max(CORRIDOR_LINE_TOLERANCE_MIN, Math.Min(CORRIDOR_LINE_TOLERANCE, berth * 0.6));
             speed = CorridorSpeed;
             if (berth < normal - 1e-3) speed = Math.Max(MIN_FLIGHT_SPEED, speed * 0.5f);
         }
 
-        /// <summary>FindCorridor with the configured clearance, then with the minimum one. 'berth': the one that worked.</summary>
+        /// <summary>
+        /// The pathfinder's corridor search (PathfindingManager.FindCorridorAny) with the drone's corridor query; on success
+        /// corridorExitDir is the way out at its outer end. 'berth': the clearance that worked.
+        /// </summary>
         private bool FindCorridorAny(Vector3D p0, Vector3D axis, ref MatrixD att, ref MatrixD frame, List<Vector3D> pts, out string how, out double berth)
         {
-            double normal, tight;
-            CorridorClearances(out normal, out tight);
-            berth = normal;
-            if (FindCorridor(p0, axis, ref att, ref frame, pts, out how, normal)) return true;
-            if (tight >= normal - 1e-3) return false;
-            string howTight;
-            berth = tight;
-            if (FindCorridor(p0, axis, ref att, ref frame, pts, out howTight, tight)) { how = Loc.F(MyStrings.Drone_Tight, howTight); return true; }
-            how = Loc.F(MyStrings.Drone_MM, normal, how, tight, howTight);
-            return false;
+            pts.Clear();
+            berth = 0;
+            PathQuery q;
+            PathfindingManager pm;
+            if (!CorridorQuery(out q, out pm)) { how = Loc.T(MyStrings.Drone_NoPathfinder); return false; }
+            Vector3D exitDir;
+            if (!pm.FindCorridorAny(ref q, p0, axis, ref att, ref frame, TURN_ROOM_MARGIN, pts, out how, out berth, out exitDir)) return false;
+            corridorExitDir = exitDir;
+            return true;
         }
 
         // The hull box's size along world direction 'axis' (unit), as the drone is now
         private double HullDepthAlong(Vector3D axis)
         {
             if (localHullBox.Max.X < localHullBox.Min.X) return DroneRadius();
-            Vector3D size = localHullBox.Size;
+            Vector3D half = localHullBox.HalfExtents;
             MatrixD m = flightState.WorldMatrix;
-            return Math.Abs(Vector3D.Dot(axis, m.Right)) * size.X + Math.Abs(Vector3D.Dot(axis, m.Up)) * size.Y
-                 + Math.Abs(Vector3D.Dot(axis, m.Backward)) * size.Z;
+            return 2 * PathfindingManager.HalfSizeAlong(ref m, ref half, axis);
         }
 
         /// <summary>
@@ -312,7 +289,7 @@ namespace Automata.Drone
             PathfindingManager pm;
             if (!CorridorQuery(out q, out pm)) return true;
             double normal, tight;
-            CorridorClearances(out normal, out tight);
+            PathfindingManager.CorridorClearances(out normal, out tight);
             q.Berth = tight;
             pm.BeginPlan();
             Vector3D dir = approachHull - p0Hull;
@@ -326,171 +303,6 @@ namespace Automata.Drone
             if (!pm.SegmentBlocked(ref q, ref rot, p0Hull + dir * CORRIDOR_SLIDE, approachHull, 0, out hit, out e)) return true;
             blocker = PathfindingManager.Describe(pm.LastHitBlock);
             return false;
-        }
-
-        // How far the hull centre can move from 'from' along 'dir' (unit) with the berth, up to 'max'
-        private static double ClearAlong(PathfindingManager pm, ref PathQuery q, ref MatrixD att, Vector3D from, Vector3D dir, double max)
-        {
-            string blocker;
-            return ClearAlong(pm, ref q, ref att, from, dir, max, out blocker);
-        }
-
-        private static double ClearAlong(PathfindingManager pm, ref PathQuery q, ref MatrixD att, Vector3D from, Vector3D dir, double max, out string blocker)
-        {
-            blocker = null;
-            if (max <= 0) return 0;
-            Vector3D hit;
-            IMyEntity e;
-            if (!pm.SegmentBlocked(ref q, ref att, from, from + dir * max, 0, out hit, out e)) return max;
-            blocker = PathfindingManager.Describe(pm.LastHitBlock);
-            double half = PathfindingManager.HullHalfSizeAlong(ref q, ref att, dir);
-            return MathHelper.Clamp(Vector3D.Dot(hit - from, dir) - half - q.Berth, 0, max);
-        }
-
-        /// <summary>
-        /// The entry corridor of a dock pose: 'p0' the hull centre docked (world), 'axis' out of the target connector,
-        /// 'att' the dock attitude (rotation), 'frame' the target connector's matrix (its axes: the directions tried).
-        /// 'pts': hull centres in flight order inbound, T (room to turn) ... P1 (the slide's start); one point when T is
-        /// P1. False (with why): no room at P1, or no way out within the limits.
-        /// </summary>
-        private bool FindCorridor(Vector3D p0, Vector3D axis, ref MatrixD att, ref MatrixD frame, List<Vector3D> pts, out string how, double berth)
-        {
-            pts.Clear();
-            how = Loc.T(MyStrings.Drone_NoPathfinder);
-            PathQuery q;
-            PathfindingManager pm;
-            if (!CorridorQuery(out q, out pm)) return false;
-            q.Berth = berth;
-            corridorWatch.Reset();
-            corridorWatch.Start();
-            var cfg = AutomataSession.GetConfig().Pathfinding;
-            double maxLen = cfg.DockCorridorMaxLength;
-            MatrixD rot = att;
-            rot.Translation = Vector3D.Zero;
-            // The corridor's outer end T: where the route takes over, so room to turn there with the route's own
-            // clearance (ObstacleClearance) around the hull - not merely room to turn inside a big hangar the route
-            // couldn't reach through its door
-            double exitMargin = Math.Max(TURN_ROOM_MARGIN, cfg.ObstacleClearance);
-            PathQuery qt = q;
-            qt.StrictEnds = false;
-            qt.Berth = exitMargin;
-            pm.BeginPlan();
-            int turnChecks = 0, sweeps = 0;
-            axis.Normalize();
-
-            // P1 itself, with the berth across the axis (along it the hull is about to touch the connector; the floor
-            // around a flush connector is that close too)
-            Vector3D p1 = p0 + axis * CORRIDOR_SLIDE;
-            Vector3D axisLocal = Vector3D.TransformNormal(axis, MatrixD.Transpose(rot));
-            Vector3D grow = new Vector3D(1 - Math.Abs(axisLocal.X), 1 - Math.Abs(axisLocal.Y), 1 - Math.Abs(axisLocal.Z)) * q.Berth;
-            var box = new MyOrientedBoundingBoxD(p1, localHullBox.HalfExtents + grow, Quaternion.CreateFromRotationMatrix(rot));
-            if (localHullBox.Max.X >= localHullBox.Min.X && !pm.BoxFree(ref q, ref box, false))   // (blocks: the corridor is about the station)
-            {
-                how = Loc.F(MyStrings.Drone_NoRoomMOff, CORRIDOR_SLIDE, PathfindingManager.Describe(pm.LastHitBlock), q.Berth);
-                return false;
-            }
-            double axisClear = Math.Min(ClearAlong(pm, ref q, ref rot, p1, axis, maxLen), CORRIDOR_AXIS_STEPS * CORRIDOR_STEP);
-            sweeps++;
-
-            // 1. Straight out along the axis: the first height with room to turn
-            double best = double.MaxValue;
-            Vector3D bestT = p1, bestM = p1, bestOut = axis;
-            for (double s = 0; s <= axisClear + 1e-6 && turnChecks < CORRIDOR_TURN_CHECKS; s += CORRIDOR_STEP)
-            {
-                Vector3D m = p1 + axis * s;
-                turnChecks++;
-                if (pm.TurnSweepFree(ref qt, m, ref rot, exitMargin)) { best = s; bestT = bestM = m; break; }
-            }
-
-            // 2. Out along the axis, then across it along one of the target block's axes: only where shorter
-            corridorCandidates.Clear();
-            for (double s = 0; s <= axisClear + 1e-6 && s + CORRIDOR_ACROSS_STEP < best; s += CORRIDOR_STEP)
-            {
-                Vector3D m = p1 + axis * s;
-                for (int d = 0; d < 6; d++)
-                {
-                    Vector3D dir = frame.GetDirectionVector((Base6Directions.Direction)d);
-                    if (Math.Abs(Vector3D.Dot(dir, axis)) > 0.1) continue;
-                    double reach = Math.Min(maxLen, best - s);
-                    double clear = ClearAlong(pm, ref q, ref rot, m, dir, reach);
-                    sweeps++;
-                    for (double k = CORRIDOR_ACROSS_STEP; k <= clear + 1e-6; k += CORRIDOR_ACROSS_STEP)
-                        corridorCandidates.Add(new CorridorCandidate { Cost = s + k, M = m, T = m + dir * k, Out = dir });
-                }
-            }
-            corridorCandidates.Sort((x, y) => x.Cost.CompareTo(y.Cost));
-            // Out through a door at floor level the turn may not fit at that height (the deck outside): up from there
-            // (away from gravity; in space along the axis), where clear, a little at a time
-            Vector3D rise = q.GravityUp.LengthSquared() > 0.5 ? q.GravityUp : axis;
-            double bestRise = 0;
-            for (int i = 0; i < corridorCandidates.Count && turnChecks < CORRIDOR_TURN_CHECKS; i++)
-            {
-                var c = corridorCandidates[i];
-                if (c.Cost >= best) break;
-                turnChecks++;
-                double up = 0;
-                bool room = pm.TurnSweepFree(ref qt, c.T, ref rot, exitMargin);
-                if (!room && Math.Abs(Vector3D.Dot(rise, c.Out)) < 0.1)
-                {
-                    double riseClear = ClearAlong(pm, ref q, ref rot, c.T, rise, Math.Min(CORRIDOR_RISE_MAX, best - c.Cost));
-                    sweeps++;
-                    for (up = CORRIDOR_RISE_STEP; up <= riseClear + 1e-6 && !room && turnChecks < CORRIDOR_TURN_CHECKS; up += CORRIDOR_RISE_STEP)
-                    {
-                        turnChecks++;
-                        room = pm.TurnSweepFree(ref qt, c.T + rise * up, ref rot, exitMargin);
-                        if (room) break;
-                    }
-                }
-                if (!room || c.Cost + up >= best) continue;
-                best = c.Cost + up;
-                bestT = c.T;
-                bestM = c.M;
-                bestOut = c.Out;
-                bestRise = up;
-                break;
-            }
-            int candidates = corridorCandidates.Count;
-            corridorCandidates.Clear();
-            corridorWatch.Stop();
-            if (best == double.MaxValue)
-            {
-                // Why, for the log: what stops each direction at P1 (hull size across it, clear length, the block)
-                var sb = new System.Text.StringBuilder();
-                string axisBlock;
-                ClearAlong(pm, ref q, ref rot, p1, axis, maxLen, out axisBlock);
-                sb.AppendLoc(MyStrings.Drone_NoRoomToTurnWithin, axisClear, axisBlock != null ? " (" + axisBlock + ")" : "");
-                for (int d = 0; d < 6; d++)
-                {
-                    Vector3D dir = frame.GetDirectionVector((Base6Directions.Direction)d);
-                    if (Math.Abs(Vector3D.Dot(dir, axis)) > 0.1) continue;
-                    string blocker;
-                    double clear = ClearAlong(pm, ref q, ref rot, p1, dir, maxLen, out blocker);
-                    sb.AppendLoc(MyStrings.Drone_MHullMAcross, (Base6Directions.Direction)d, clear,
-                                    2 * PathfindingManager.HullHalfSizeAlong(ref q, ref rot, Vector3D.Cross(dir, axis)),
-                                    blocker != null ? ", " + blocker : "");
-                }
-                sb.AppendLoc(MyStrings.Drone_ClearanceMCandidatesTurnChecks, q.Berth, candidates, turnChecks, sweeps,
-                                corridorWatch.Elapsed.TotalMilliseconds);
-                how = sb.ToString();
-                return false;
-            }
-            // A little further out where clear (up, after a rise): more room for the route to arrive and to turn
-            Vector3D exitDir = bestRise > 0 ? rise : bestOut;
-            corridorExitDir = exitDir;
-            Vector3D turnAt = bestT + rise * bestRise;
-            double extra = ClearAlong(pm, ref q, ref rot, turnAt, exitDir, CORRIDOR_EXIT_EXTRA);
-            turnAt += exitDir * extra;
-            pts.Add(turnAt);
-            if (bestRise > 0) pts.Add(bestT);   // the corner outside the door
-            if (Vector3D.DistanceSquared(bestM, bestT) > 0.01 && Vector3D.DistanceSquared(bestM, p1) > 0.01) pts.Add(bestM);
-            if (Vector3D.DistanceSquared(turnAt, p1) > 0.01 && Vector3D.DistanceSquared(pts[pts.Count - 1], p1) > 0.01) pts.Add(p1);
-            bool straight = Vector3D.DistanceSquared(bestM, bestT) < 0.01 || Vector3D.Dot(bestOut, axis) > 0.9;
-            how = straight
-                ? string.Format("straight out {0:F1} m", Vector3D.Distance(p1, bestT) + CORRIDOR_SLIDE)
-                : string.Format("{0:F1} m out along the axis, then {1:F1} m across{2}", Vector3D.Distance(p1, bestM) + CORRIDOR_SLIDE, Vector3D.Distance(bestM, bestT),
-                                bestRise > 0 ? string.Format(", then {0:F1} m up", Vector3D.Distance(bestT, turnAt)) : "");
-            how += string.Format("; {0} candidates, {1} turn checks, {2} sweeps, {3:F2} ms", candidates, turnChecks, sweeps, corridorWatch.Elapsed.TotalMilliseconds);
-            return true;
         }
     }
 }

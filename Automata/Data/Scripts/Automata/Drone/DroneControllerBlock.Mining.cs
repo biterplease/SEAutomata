@@ -632,9 +632,7 @@ namespace Automata.Drone
                         Vector3D dir = pts[i] - from;
                         double len = dir.Length();
                         dir /= len;
-                        Vector3D dl = Vector3D.TransformNormal(dir, MatrixD.Transpose(flightState.WorldMatrix));
-                        Vector3D h = localHullBox.HalfExtents;
-                        double half = Math.Abs(dl.X) * h.X + Math.Abs(dl.Y) * h.Y + Math.Abs(dl.Z) * h.Z;
+                        double half = PathfindingManager.HullHalfSizeAlong(ref q, ref q.Controller, dir);
                         double run = MathHelper.Clamp(Vector3D.Dot(hit - (from + off), dir) - half - FREE_RUN_MARGIN, 0, len);
                         pts.RemoveRange(i, pts.Count - i);
                         if (run >= BACK_OUT_MIN) pts.Add(from + dir * run);
@@ -930,7 +928,6 @@ namespace Automata.Drone
         #region Survey task (scout jobs) and recall
         private readonly OreScanner taskScanner = new OreScanner();
         private readonly List<OreHit> taskHits = new List<OreHit>();
-        private int surveysDone;
 
         // Fly-by ore scan: the scan is centred where the drone is when the task starts and runs in the background
         // (UpdateTaskScan10) while the drone flies on. A scan still running from the previous waypoint is finished first.
@@ -958,7 +955,6 @@ namespace Automata.Drone
         {
             if (!taskScanner.Step(MiningConfig.ScanCellsPerUpdate, taskHits)) return;
             RecordSweep(taskScanner.Center, taskScanner.Radius, taskHits);
-            surveysDone++;
             Report(MyStrings.Drone_SurveyOreHitM, taskHits.Count, taskScanner.Radius);
             taskHits.Clear();
         }

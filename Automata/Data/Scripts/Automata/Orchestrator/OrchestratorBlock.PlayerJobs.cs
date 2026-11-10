@@ -71,8 +71,6 @@ namespace Automata.Orchestrator
         public static readonly Color PENDING_GPS_COLOR = new Color(255, 210, 0);
         /// <summary>Marker once every job of the order has a drone (green).</summary>
         public static readonly Color CONFIRMED_GPS_COLOR = new Color(40, 220, 60);
-        /// <summary>Hostile designator markers (combat jobs, to come) (dark red).</summary>
-        public static readonly Color COMBAT_GPS_COLOR= new Color(139, 0, 0);
         public static int CONFIRM_TIMEOUT_SECONDS = 10;
 
         /// <summary>
