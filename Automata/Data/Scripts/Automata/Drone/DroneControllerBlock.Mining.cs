@@ -40,8 +40,8 @@ namespace Automata.Drone
 
         private const double MINE_SITE_RADIUS = 40;
         private const int MINE_SITE_MAX_CELLS = 64;
-        private const double MINE_COLLECT_DOWN = 7.5;      // m from the nearest ore voxel (drill point): collecting from here on
-        private const double MINE_COLLECT_ANGLED = 10;     // the same for angled bores
+        private const double MINE_COLLECT_DOWN = 5.0;      // m from the nearest ore voxel (drill point): collecting from here on
+        private const double MINE_COLLECT_ANGLED = 5.0;     // the same for angled bores
         private const double MINE_NEAR_RADIUS = 16;        // m around the drill point read for the nearest ore voxel
         private const double MINE_BORE_EXTEND = 8;         // m further along the bore line per extension, until full
         private const int MINE_BORE_EXTENSIONS = 12;       // at most (~100 m past the deposit): then it takes what it has
