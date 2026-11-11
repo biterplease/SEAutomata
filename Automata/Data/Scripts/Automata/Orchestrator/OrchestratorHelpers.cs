@@ -143,7 +143,7 @@ namespace Automata.Orchestrator
         /// </summary>
         [ProtoEnum]
         MineOre = 5,
-        // Designator- jobs: ordered by a player with a target designator (Pointer/ScoutPointer), queued and auctioned by
+        // Designator- jobs: ordered by a player with a target designator (Designator/ScoutPointer), queued and auctioned by
         // the orchestrator itself (OrchestratorBlock.PlayerJobs), only for drones of the job's behaviour profile.
         /// <summary>Industrial designator, red: fly to a point, ore scan, home. Ore scouts only.</summary>
         [ProtoEnum]

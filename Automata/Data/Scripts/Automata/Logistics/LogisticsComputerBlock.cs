@@ -322,6 +322,46 @@ namespace Automata.Logistics
             CheckFarm(now);
             ReadAuctions(now);
             ReadAwards(now);
+            SaveStateOnChange(now);
+        }
+
+        // The state into the block's storage when it changed (open jobs, promises, the job counter), not only at world save:
+        // the world save didn't write it (2026-11-11: no "state saved" at the saves, only at terminal edits), so a load
+        // brought back an old job counter and no open jobs while the drones held theirs (newer). The computer re-asked
+        // what was on its way (delivered twice: a network at 38k ice for a 25k Min) under the same job ids, which the
+        // orchestrator ignored as "announced again" (as the miningsurveyor's SaveStateOnChange)
+        private long lastStateSignature;
+        private int lastStateWrite = int.MinValue / 2;
+        private const int STATE_WRITE_TICKS = 10 * 60;   // at most this often
+
+        private void SaveStateOnChange(int now)
+        {
+            if (!IsServer || now - lastStateWrite < STATE_WRITE_TICKS) return;
+            long sig = StateSignature();
+            if (sig == lastStateSignature) return;
+            lastStateSignature = sig;
+            lastStateWrite = now;
+            WriteStorage();
+        }
+
+        private long StateSignature()
+        {
+            unchecked
+            {
+                long h = jobCounter;
+                h = h * 31 + JobSignature(mainSet.Request);
+                h = h * 31 + JobSignature(mainSet.Push);
+                foreach (var s in netSets.Values) h = h * 31 + s.Index * 7 + JobSignature(s.Request) * 3 + JobSignature(s.Push);
+                h = h * 31 + commitments.Count;
+                foreach (var c in commitments) h = h * 31 + c.Key + (c.Value.Won ? 1 : 0);
+                return h;
+            }
+        }
+
+        private static long JobSignature(OpenJob j)
+        {
+            if (j == null) return 0;
+            unchecked { return j.JobId * 31L + (j.Assigned != 0 ? 1 : 0) + (j.Finished ? 2 : 0) + j.DronesOut * 4 + j.LastTotal * 64L; }
         }
         #endregion
 
@@ -414,7 +454,6 @@ namespace Automata.Logistics
                 if (found < 0)
                 {
                     var network = new ConveyorNetwork();
-                    network.ConveyorNetworkId = IdGenerator.GenerateId(ref networkCounter, entityId);
                     network.Nickname = Loc.F(MyStrings.Logistics_Network, networks.Count + 1);
                     networks.Add(network);
                     networkKeys.Add(long.MaxValue);
@@ -424,13 +463,33 @@ namespace Automata.Logistics
                 ConveyorNetwork.CategorizeBlock(networks[found], blk);
                 if (blk.EntityId < networkKeys[found]) networkKeys[found] = blk.EntityId;
             }
-            for (int i = 0; i < networks.Count; i++) networks[i].Attach();
+            // A network needs a connector (to deliver / collect at) and a cargo container (room for it). The rest is no network
+            // at all - not listed, no index, no list: a desk or locker with no conveyor port, a cargo block used as decoration,
+            // a charge-only connector, a refinery on its own. (Conveyored lockers and barrels of mods do count.)
+            int dropped = 0;
+            for (int i = networks.Count - 1; i >= 0; i--)
+            {
+                if (IsUsableNetwork(networks[i])) continue;
+                networks.RemoveAt(i);
+                networkKeys.RemoveAt(i);
+                dropped++;
+            }
+            for (int i = 0; i < networks.Count; i++)
+            {
+                networks[i].ConveyorNetworkId = IdGenerator.GenerateId(ref networkCounter, entityId);
+                networks[i].Attach();
+            }
             AssignNetworkIndexes();
             if (Log.DebugEnabled)
             {
-                Log.Debug("LC {0}: {1} inventory blocks mapped with {2} connectivity checks", entityId, ordered.Count, calls);
+                Log.Debug("LC {0}: {1} inventory blocks mapped with {2} connectivity checks, {3} group(s) without a connector or a cargo container dropped", entityId, ordered.Count, calls, dropped);
                 for (int i = 0; i < networks.Count; i++) Log.Debug("LC {0}: {1}", entityId, DescribeNetwork(i));
             }
+        }
+
+        private static bool IsUsableNetwork(ConveyorNetwork n)
+        {
+            return n.connectors.Count > 0 && n.cargoContainers.Count > 0;
         }
 
         // The main network: has a free port; the most cargo room
@@ -1425,12 +1484,6 @@ namespace Automata.Logistics
             if (reportedSmallConnectors != null)
                 info.AppendLoc(MyStrings.Logistics_SmallConnectorOnlyCombatDronesOre, reportedSmallConnectors).Append('\n');
             for (int i = 0; i < quotaWarnings.Count; i++) info.AppendLoc(MyStrings.Logistics_Warning, quotaWarnings[i]).Append('\n');
-            // Networks that can't take a request: no connector to deliver / collect at, no cargo container to hold it
-            for (int i = 0; i < networks.Count; i++)
-            {
-                if (networks[i].connectors.Count == 0) info.AppendLoc(MyStrings.Logistics_Warning, Loc.F(MyStrings.Logistics_CnNoConnectors, networks[i].Nickname)).Append('\n');
-                if (networks[i].cargoContainers.Count == 0) info.AppendLoc(MyStrings.Logistics_Warning, Loc.F(MyStrings.Logistics_CnNoCargo, networks[i].Nickname)).Append('\n');
-            }
             BuildHeader();
             info.Append('\n');
             for (int i = 0; i < header.Count; i++) info.Append(header[i]).Append('\n');

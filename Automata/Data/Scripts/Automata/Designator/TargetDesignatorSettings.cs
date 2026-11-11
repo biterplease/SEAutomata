@@ -15,11 +15,13 @@ namespace Automata.Designator
         [ProtoMember(4)] public Util.LcdStyle Lcd = new Util.LcdStyle();
     }
 
-    /// <summary>A target designator's save struct (<see cref="Util.BlockSave"/>; it has no runtime state worth saving).</summary>
+    /// <summary>A target designator's save struct (<see cref="Util.BlockSave"/>): its settings and its job id counter.</summary>
     [ProtoContract]
     public class TargetDesignatorSaveData
     {
         [ProtoMember(1)] public TargetDesignatorSettings Settings;
         [ProtoMember(2)] public long EntityId;
+        /// <summary>The order / job id counter (NextId): ids not reused after a load (orchestrators ignore a job id they know).</summary>
+        [ProtoMember(3)] public int IdCounter;
     }
 }

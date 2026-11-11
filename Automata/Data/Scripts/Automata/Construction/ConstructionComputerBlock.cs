@@ -367,6 +367,7 @@ namespace Automata.Construction
                 RestoreState(pendingState);
                 pendingState = null;
             }
+            SaveStateOnChange(now);
             if (!settings.Enabled || !block.IsWorking)
             {
                 status = Loc.T(!settings.Enabled ? MyStrings.Construction_OffTerminal : MyStrings.Construction_NotWorkingPowerDamage);
@@ -1069,6 +1070,43 @@ namespace Automata.Construction
         }
 
         private int savedJobCounter;
+
+        // The state into the block's storage when it changed (open jobs, their awards, the job counter), not only at world
+        // save: the world save didn't write it (2026-11-11: no "state saved" at the saves), so a load brought back old jobs
+        // and an old job counter while the drones held theirs (newer): blocks planned again, job ids reused (the
+        // orchestrator ignores those as "announced again"). As the logistics computer's / mining surveyor's
+        private long lastStateSignature;
+        private int lastStateWrite = int.MinValue / 2;
+        private const int STATE_WRITE_TICKS = 10 * 60;   // at most this often
+
+        private void SaveStateOnChange(int now)
+        {
+            if (!IsServer || !ready || now - lastStateWrite < STATE_WRITE_TICKS) return;
+            long sig = StateSignature();
+            if (sig == lastStateSignature) return;
+            lastStateSignature = sig;
+            lastStateWrite = now;
+            WriteStorage();
+        }
+
+        private long StateSignature()
+        {
+            unchecked
+            {
+                long h = computer != null ? computer.JobIdCounter : savedJobCounter;
+                h = h * 31 + doneCount;
+                h = h * 31 + expiredCount;
+                h = h * 31 + failedCount;
+                for (int j = 0; j < jobs.Count; j++)
+                {
+                    var job = jobs[j];
+                    h = h * 31 + job.JobId;
+                    h = h * 31 + (job.Assigned != 0 ? 1 : 0) + (job.HeldUntil != 0 ? 2 : 0) + job.DronesOut * 4;
+                    h = h * 31 + job.Blocks.Count;
+                }
+                return h;
+            }
+        }
 
         private void RestoreState(ConstructionComputerState s)
         {

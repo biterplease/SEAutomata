@@ -336,6 +336,60 @@ namespace Automata.Drone
             }
         }
 
+        /// <summary>
+        /// The economy flight line under the checkbox, at the drone's current load (its own mass, cargo included) and
+        /// settings. Gravity: the pitch / roll limits it needs (ECO_G_TILT_MIN; it tilts up to the smaller of the two) and the
+        /// most tilt this load leaves (QuadStart's rule), or that the lift is too weak. Space: the time to Max speed with the
+        /// strongest face at Max thrust. The row's tooltip: the same with the load.
+        /// </summary>
+        public void Terminal_EconomyInfoContent(List<MyTerminalControlListBoxItem> items, List<MyTerminalControlListBoxItem> selected)
+        {
+            if (shipController == null || settings == null) return;
+            double mass = DroneOwnMass();
+            if (mass < 1) return;
+            string kg = mass.ToString("N0");
+            string text, tip;
+            Vector3D g = shipController.GetNaturalGravity();
+            double gm = g.Length();
+            if (gm > 0.05)
+            {
+                // The lift group: the face pushing up (Up or Down); parked at an angle, the stronger of the two
+                Vector3D gUp = -g / gm;
+                var dir = Base6Directions.Direction.Up;
+                double bestDot = 0;
+                for (int i = 4; i < 6; i++)
+                {
+                    double dot = Vector3D.Dot(shipController.WorldMatrix.GetDirectionVector((Base6Directions.Direction)i), gUp);
+                    if (dot > bestDot) { bestDot = dot; dir = (Base6Directions.Direction)i; }
+                }
+                if (bestDot <= 0.7 && RatedThrust(Base6Directions.Direction.Down) > RatedThrust(Base6Directions.Direction.Up)) dir = Base6Directions.Direction.Down;
+                double ratio = RatedThrust(dir) / (mass * gm);
+                if (ratio < ECO_G_LIFT_MARGIN)
+                {
+                    text = Loc.F(MyStrings.Drone_EconomyLiftTooWeak, ratio.ToString("F2"), ECO_G_LIFT_MARGIN.ToString("F1"));
+                    tip = Loc.F(MyStrings.Drone_EconomyLiftTooWeakTooltip, ratio.ToString("F2"), kg, ECO_G_LIFT_MARGIN.ToString("F1"));
+                }
+                else
+                {
+                    string min = MathHelperD.ToDegrees(ECO_G_TILT_MIN).ToString("F0");
+                    string most = Math.Min(MathHelperD.ToDegrees(ECO_G_TILT_MAX), MathHelperD.ToDegrees(Math.Acos(Math.Min(1.0, ECO_G_HOVER_SHARE / ratio)))).ToString("F0");
+                    text = Loc.F(MyStrings.Drone_EconomyMinTilt, min, min, most);
+                    tip = Loc.F(MyStrings.Drone_EconomyMinTiltTooltip, min, min, kg, most, ratio.ToString("F2"));
+                }
+            }
+            else
+            {
+                double strongest = 0;
+                for (int i = 0; i < 6; i++) strongest = Math.Max(strongest, RatedThrust((Base6Directions.Direction)i));
+                double accel = ThrustFraction * strongest / mass;
+                if (accel <= 0) return;
+                string speed = MaxSpeed.ToString("F0"), secs = (MaxSpeed / accel).ToString("F0");
+                text = Loc.F(MyStrings.Drone_EconomyFullSpeed, speed, secs);
+                tip = Loc.F(MyStrings.Drone_EconomyFullSpeedTooltip, speed, secs, kg, (ThrustFraction * 100).ToString("F0"), (strongest / 1000).ToString("N0"));
+            }
+            items.Add(new MyTerminalControlListBoxItem(MyStringId.GetOrCompute(text), MyStringId.GetOrCompute(tip), 0L));
+        }
+
         public bool Terminal_CombatRetreatOnFlee
         {
             get { return settings == null || settings.CombatRetreatOnFlee; }

@@ -7,7 +7,7 @@ using VRage.Game.ModAPI;
 using VRageMath;
 
 using Automata.Inventory;
-using Automata.Pointer;
+using Automata.Designator;
 using Automata.Util;
 using Automata.Util.Logging;
 using Automata.VirtualNetwork;

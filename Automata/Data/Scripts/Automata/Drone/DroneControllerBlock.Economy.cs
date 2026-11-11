@@ -25,7 +25,11 @@ namespace Automata.Drone
     /// error -> wanted acceleration -> thrust vector
     /// T = m (a - g) -> attitude (the group along T, heading kept) and throttle (T along the group). The tilt is bounded
     /// (the P-Gravity align limits, and what the group can lift), and so is the speed: the brake is planned with the
-    /// horizontal acceleration that tilt gives. The last ECO_G_HANDOVER metres are flown normally.
+    /// horizontal acceleration that tilt gives. The last ECO_G_HANDOVER metres are flown normally - unless the next leg
+    /// goes on within the run-through angle and is ECO_G_CARRY_MIN_LEG long or more (EcoCarries): then the flight carries
+    /// on through the waypoint into the next leg (no level-out, no new start: a lane over terrain is one flight).
+    /// Both: the speed at a waypoint is planned with the legs after it as soon as they are queued (EcoExitSpeed), not only
+    /// once the next one is requested.
     /// </summary>
     public partial class DroneControllerBlock
     {
@@ -33,6 +37,7 @@ namespace Automata.Drone
 
         private const double ECO_G_MIN_LEG = 500;        // m: shorter legs in gravity are flown normally
         private const double ECO_G_HANDOVER = 100;       // m before the leg's end: normal control again
+        private const double ECO_G_CARRY_MIN_LEG = 2 * ECO_G_HANDOVER;   // m: a run-through next leg this long: carried on into
         private const double ECO_G_TILT_MAX = 0.61;      // rad (35°): most tilt, whatever the settings allow
         private const double ECO_G_TILT_MIN = 0.17;      // rad (10°): less than this and the group can't move the drone sideways
         private const double ECO_G_LIFT_MARGIN = 1.3;    // the lift group must carry this many times the weight
@@ -104,6 +109,8 @@ namespace Automata.Drone
         private int ecoRestUntil;                        // ...until this frame (EcoMaybeRest)
         private bool flightTickSkipped;                  // ticks were skipped (coast rest, dampener hold): per-tick differences restart
         private bool ecoSideFiring;                      // this tick: faces other than the group correct the course
+        private bool ecoCarrying;                        // gravity: this leg's flight carries on into the next one (EcoCarries)
+        private bool ecoCarriedIn;                       // gravity: this leg was entered so (QuadStart: no new start checks)
 
         // Economy flight owns the thrusters from the first burn to the handover: no replan may cut in
         private bool EconomyFlying()
@@ -134,14 +141,19 @@ namespace Automata.Drone
                 else if (settings != null && settings.EconomyFlight && !ReferenceEquals(ecoSkipOrder, o)) LogEcoSkip(o);
                 return false;
             }
-            if (!ReferenceEquals(ecoOrder, o)) { ecoOrder = o; ecoPhase = EcoPhase.None; ecoHasCourse = false; ecoLastTrim = int.MinValue / 2; ecoPreflipAsked = false; }
+            if (!ReferenceEquals(ecoOrder, o))
+            {
+                ecoCarriedIn = ecoCarrying && ecoPhase == EcoPhase.Quad;
+                ecoCarrying = false;
+                ecoOrder = o; ecoPhase = EcoPhase.None; ecoHasCourse = false; ecoLastTrim = int.MinValue / 2; ecoPreflipAsked = false;
+            }
             if (ecoPhase == EcoPhase.Off) return false;
 
             Vector3D d, crossTrack, vLat;
             double len, remaining, vAlong;
             if (!EcoLeg(o, out d, out len, out remaining, out crossTrack, out vAlong, out vLat)) return false;
             int now = Sandbox.ModAPI.MyAPIGateway.Session.GameplayFrameCounter;
-            double vHand = Math.Min(MaxSpeed, Math.Max(ExitSpeedFor(o), ECO_HAND_SPEED));
+            double vHand = Math.Min(MaxSpeed, Math.Max(EcoExitSpeed(o), ECO_HAND_SPEED));
 
             // A flight that began in gravity ends where the gravity does (and the other way round)
             if (ecoPhase != EcoPhase.None && ecoPhase != EcoPhase.Off && ecoQuad != flightState.InGravity)
@@ -289,7 +301,9 @@ namespace Automata.Drone
         // The start checks: a long enough leg, a lift group that can carry the weight with room to tilt. false: normal control
         private bool QuadStart(FlightOrder o, double len, double remaining)
         {
-            if (len < ECO_G_MIN_LEG || remaining < ECO_G_MIN_LEG * 0.5) return false;
+            bool carried = ecoCarriedIn;
+            ecoCarriedIn = false;
+            if (carried ? remaining <= ECO_G_HANDOVER : len < ECO_G_MIN_LEG || remaining < ECO_G_MIN_LEG * 0.5) return false;
             Vector3D gUp = flightState.GravityUp;
             double bestDot = 0;
             for (int i = 4; i < 6; i++)   // Up, Down: the groups a drone hovers on
@@ -320,7 +334,11 @@ namespace Automata.Drone
         // normal control has it. True while economy flight flies.
         private bool QuadAttitude(FlightOrder o, ref Vector3D fwd, ref Vector3D up, Vector3D d, double remaining, Vector3D crossTrack, double vHand)
         {
-            if (remaining <= ECO_G_HANDOVER) { EcoEnd(o, "handover"); return false; }
+            bool carry = EcoCarries(o);
+            if (carry != ecoCarrying && Log.DebugEnabled)
+                Log.Debug("Drone {0}: economy flight (gravity): {1}", Entity.EntityId, carry ? "carries on through the next waypoint" : "hands over before the next waypoint");
+            ecoCarrying = carry;
+            if (remaining <= ECO_G_HANDOVER && !carry) { EcoEnd(o, "handover"); return false; }
             Vector3D g = flightState.Gravity, gUp = flightState.GravityUp;
             double gm = g.Length();
             double max = EffectiveMax(ecoGroup);
@@ -330,7 +348,7 @@ namespace Automata.Drone
             double aBrake = ECO_G_BRAKE_SHARE * gm * Math.Tan(ecoTilt);
             double vCap = o.SpeedCap > 0 ? Math.Min(MaxSpeed, o.SpeedCap) : MaxSpeed;
             double lag = Math.Max(0, Vector3D.Dot(flightState.RelativeVelocity, d)) * ECO_G_LAG;   // the tilt takes time: the brake starts earlier
-            double vProfile = Math.Min(vCap, Math.Sqrt(vHand * vHand + 2 * aBrake * Math.Max(0, remaining - ECO_G_HANDOVER - lag)));
+            double vProfile = Math.Min(vCap, Math.Sqrt(vHand * vHand + 2 * aBrake * Math.Max(0, remaining - (carry ? 0 : ECO_G_HANDOVER) - lag)));
             double down = -Vector3D.Dot(d, gUp);
             if (down > 1e-3) vProfile = Math.Min(vProfile, MAX_DESCENT_SPEED / down);
             // The course is reassessed every tick: the drone heads for a point on the line ahead of its closest one (further
@@ -455,7 +473,7 @@ namespace Automata.Drone
             Vector3D d, crossTrack, vLat;
             double len, remaining, vAlong;
             if (!EcoLeg(o, out d, out len, out remaining, out crossTrack, out vAlong, out vLat)) return;
-            double vHand = Math.Min(MaxSpeed, Math.Max(ExitSpeedFor(o), ECO_HAND_SPEED));
+            double vHand = Math.Min(MaxSpeed, Math.Max(EcoExitSpeed(o), ECO_HAND_SPEED));
             double ahead = Math.Max(0, vAlong) * ECO_REST_TICKS / 60.0 * 2;
             if (FlipDue(remaining - ahead, vAlong, vHand)) return;
             if (!ecoPreflipAsked && routeUnseen > 0 && FlipDue(remaining - Math.Max(0, vAlong) * ECO_PREFLIP_SECONDS - ahead, vAlong, vHand)) return;
@@ -512,7 +530,7 @@ namespace Automata.Drone
             double len, remaining, vAlong;
             if (!EcoLeg(o, out d, out len, out remaining, out crossTrack, out vAlong, out vLat)) { CoastThrusters(); return; }
             if (ecoPhase == EcoPhase.Quad) { QuadThrust(d, crossTrack, vLat); return; }
-            double vHand = Math.Min(MaxSpeed, Math.Max(ExitSpeedFor(o), ECO_HAND_SPEED));
+            double vHand = Math.Min(MaxSpeed, Math.Max(EcoExitSpeed(o), ECO_HAND_SPEED));
             // The one group (ecoGroup) pushes along the leg: forward to the cruise speed, and after the flip against the
             // motion. The other faces only correct the course while it burns, coasts and brakes (not while it turns)
             double throttle = 0;
@@ -709,8 +727,36 @@ namespace Automata.Drone
             return l.LengthSquared() > 1e-6 ? Vector3D.Normalize(l) : Vector3D.Zero;
         }
 
+        // The leg after 'o': the next leg once requested, else the first queued one ('peeked')
+        private FlightOrder EcoNext(out bool peeked)
+        {
+            peeked = nextLeg == null && queuedLegs.Count > 0;
+            return nextLeg ?? (peeked ? queuedLegs.Peek() : null);
+        }
+
+        // The speed 'o' may end at (ExitSpeedFor), with the queued legs already: the brake isn't planned to a stop before the
+        // next leg is requested (normal control asks for it only as late as its own brake needs)
+        private double EcoExitSpeed(FlightOrder o)
+        {
+            bool peeked;
+            var next = EcoNext(out peeked);
+            return next == null ? 0 : ExitSpeedVia(o, next, peeked);
+        }
+
+        // Gravity: the next leg goes on within the run-through angle (Classify / the attitude: o's behaviour) and is long
+        // enough for economy flight to carry on into it
+        private bool EcoCarries(FlightOrder o)
+        {
+            if (o.Behavior != WaypointBehavior.RunThrough) return false;
+            bool peeked;
+            var next = EcoNext(out peeked);
+            if (next == null || !next.Watched || next.AnchorEntityId != o.AnchorEntityId || next.Phase != FlightPhase.Approach) return false;
+            return Vector3D.Distance(o.Target.ToVector3D(), next.Target.ToVector3D()) >= ECO_G_CARRY_MIN_LEG;
+        }
+
         private void EcoEnd(FlightOrder o, string why)
         {
+            ecoCarrying = false;
             if (Log.DebugEnabled) Log.Debug("Drone {0}: economy flight ends ({1}, phase {2}): normal control", Entity.EntityId, why, ecoPhase);
             ecoPhase = EcoPhase.Off;
             commandedVelocity = flightState.LinearVelocity;

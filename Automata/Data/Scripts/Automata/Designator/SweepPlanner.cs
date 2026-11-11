@@ -8,7 +8,7 @@ using VRage.ModAPI;
 using VRage.Voxels;
 using VRageMath;
 
-namespace Automata.Pointer
+namespace Automata.Designator
 {
     /// <summary>
     /// A scout sweep sector's flight path, mapped once the drone is within MAP_RANGE (the pathfinder "knows" the whole

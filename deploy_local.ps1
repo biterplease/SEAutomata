@@ -3,11 +3,13 @@
   Deploys the mod from this repository to the local Space Engineers Mods folder.
 
 .DESCRIPTION
-  1. Deletes the deployed copy (so files removed from the repo don't linger in the game).
-  2. Copies modinfo.sbm, Automata.ini, CREDITS.txt, Data, Models, Textures and Audio (under Data\Scripts only the
-     *.cs files: no CLAUDE.md or other notes).
-  3. Sets LogLevel in the DEPLOYED Automata.ini (default: every level, Verbose|Info|Debug|Warning|Error); the
+  1. Prepares a clean copy in .deploy\Automata, like deploy_steam.ps1 (New-DeployStage): modinfo.sbmi, Automata.ini,
+     CREDITS.txt, thumb.png, Data, Models, Textures and Audio; under Data\Scripts only the *.cs files (no CLAUDE.md or
+     other notes), without their comments (and the lines they leave empty).
+  2. Sets LogLevel in the prepared Automata.ini (default: every level, Verbose|Info|Debug|Warning|Error); the
      repository's Automata.ini keeps the shipped default.
+  3. Deletes the deployed copy (so files removed from the repo don't linger in the game).
+  4. Copies the prepared copy to the game's Mods folder.
   Every step prints its time and how long it took.
 
 .PARAMETER Target
@@ -24,7 +26,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-. "$PSScriptRoot\deploy_common.ps1"   # Remove-NonScriptFiles
+. "$PSScriptRoot\deploy_common.ps1"   # New-DeployStage
 
 # The log level to deploy: names checked, normalised to a|b|c
 $shippedLevel = ($LogLevel.Trim() -ieq 'Shipped')
@@ -59,7 +61,25 @@ if (-not (Test-Path -LiteralPath (Join-Path $source 'modinfo.sbmi')))
 }
 Write-Step "Deploy started: $source -> $Target"
 
-# 1. The deployed copy goes first
+# 1. Prepared in .deploy\Automata
+New-DeployStage
+Write-Step "Prepared in $($script:StageDir)"
+
+# 2. The log level of the prepared ini (the repository's Automata.ini keeps the shipped default)
+$deployedIni = Join-Path $script:StageDir 'Automata.ini'
+if (-not $shippedLevel -and (Test-Path -LiteralPath $deployedIni))
+{
+    $iniBytes = [System.IO.File]::ReadAllBytes($deployedIni)
+    $iniBom = ($iniBytes.Length -ge 3 -and $iniBytes[0] -eq 0xEF -and $iniBytes[1] -eq 0xBB -and $iniBytes[2] -eq 0xBF)
+    $iniEncoding = New-Object System.Text.UTF8Encoding($iniBom)
+    $iniText = [System.IO.File]::ReadAllText($deployedIni)
+    $patched = [System.Text.RegularExpressions.Regex]::Replace($iniText, '(?m)^LogLevel=.*?(\r?)$', ('LogLevel=' + $LogLevel + '$1'))
+    if (-not [System.Text.RegularExpressions.Regex]::IsMatch($iniText, '(?m)^LogLevel=')) { Write-Warning 'LogLevel not found in the deployed Automata.ini: log levels left as shipped' }
+    else { [System.IO.File]::WriteAllText($deployedIni, $patched, $iniEncoding) }
+    Write-Step "Deployed ini: LogLevel=$LogLevel (the repository's stays as shipped)"
+}
+
+# 3. The deployed copy goes
 if (Test-Path -LiteralPath $Target)
 {
     for ($attempt = 1; $attempt -le 5; $attempt++)
@@ -83,40 +103,10 @@ if (Test-Path -LiteralPath $Target)
 }
 Write-Step 'Old deployed copy deleted'
 
-# 2. Copy
+# 4. Copy
 New-Item -ItemType Directory -Path $Target -Force | Out-Null
-
-foreach ($name in 'modinfo.sbmi', 'Automata.ini', 'CREDITS.txt', 'thumb.png')
-{
-    $path = Join-Path $source $name
-    if (Test-Path -LiteralPath $path) { Copy-Item -LiteralPath $path -Destination $Target -Force }
-    else { Write-Warning "Skipped $name (not in the repository)" }
-}
-Write-Step 'Mod files copied'
-
-foreach ($name in 'Data', 'Models', 'Textures', 'Audio')
-{
-    $path = Join-Path $source $name
-    if (Test-Path -LiteralPath $path) { Copy-Item -LiteralPath $path -Destination $Target -Recurse -Force }
-    else { Write-Warning "Skipped $name (not in the repository)" }
-    Write-Step "$name copied"
-}
-Remove-NonScriptFiles -Root $Target
-Write-Step 'Data\Scripts: only *.cs kept'
-
-# 3. The log level of the deployed ini (the repository's Automata.ini keeps the shipped default)
-$deployedIni = Join-Path $Target 'Automata.ini'
-if (-not $shippedLevel -and (Test-Path -LiteralPath $deployedIni))
-{
-    $iniBytes = [System.IO.File]::ReadAllBytes($deployedIni)
-    $iniBom = ($iniBytes.Length -ge 3 -and $iniBytes[0] -eq 0xEF -and $iniBytes[1] -eq 0xBB -and $iniBytes[2] -eq 0xBF)
-    $iniEncoding = New-Object System.Text.UTF8Encoding($iniBom)
-    $iniText = [System.IO.File]::ReadAllText($deployedIni)
-    $patched = [System.Text.RegularExpressions.Regex]::Replace($iniText, '(?m)^LogLevel=.*?(\r?)$', ('LogLevel=' + $LogLevel + '$1'))
-    if (-not [System.Text.RegularExpressions.Regex]::IsMatch($iniText, '(?m)^LogLevel=')) { Write-Warning 'LogLevel not found in the deployed Automata.ini: log levels left as shipped' }
-    else { [System.IO.File]::WriteAllText($deployedIni, $patched, $iniEncoding) }
-    Write-Step "Deployed ini: LogLevel=$LogLevel (the repository's stays as shipped)"
-}
+Copy-Item -Path (Join-Path $script:StageDir '*') -Destination $Target -Recurse -Force
+Write-Step 'Copied to the Mods folder'
 
 $copied = @(Get-ChildItem -LiteralPath $Target -Recurse -File)
 $megabytes = ($copied | Measure-Object -Property Length -Sum).Sum / 1MB

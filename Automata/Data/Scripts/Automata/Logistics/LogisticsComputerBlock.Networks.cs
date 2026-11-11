@@ -95,6 +95,7 @@ namespace Automata.Logistics
                 if (anchorSet) anchors.Add(new NetworkAnchor { Index = best, Cell = Vector3IData.FromVector3I(anchor), OnSubgrid = anchorSub });
                 networks[i].Nickname = Loc.F(MyStrings.Logistics_Network, best);
             }
+            FreeIndexes(used);
             bool anchorsChanged = SaveAnchors(anchors);
             CarryNetworkLists(indexMembers, members, anchorsChanged);
             indexMembers.Clear();
@@ -108,10 +109,10 @@ namespace Automata.Logistics
         /// <summary>
         /// After a re-map (2026-11-08): networks joined by conveyors (shared blocks with two or more of before) take one list
         /// (MergeQuotaLists); a network split apart (a conveyor, connecting block, hinge, piston or rotor gone) leaves every
-        /// part a copy of its list. A resulting network with no connector or no cargo container can't take a request: its
-        /// list is cleared. The main network's list is the "Any" one: it follows the part of it with the most cargo
+        /// part a copy of its list (a part with no connector or no cargo container is no network: MapNetworks drops it). The
+        /// main network's list is the "Any" one: it follows the part of it with the most cargo
         /// containers (that part, and every other, also gets the list as its own: whichever is main next, nothing is lost).
-        /// Lists of networks gone (joined into another) are dropped. Nothing before (the first map, a load): nothing done.
+        /// Lists of networks joined into another are dropped; a network simply gone keeps its list. Nothing before (the first map, a load): nothing done.
         /// </summary>
         private void CarryNetworkLists(Dictionary<int, HashSet<long>> before, Dictionary<int, HashSet<long>> after, bool anchorsChanged)
         {
@@ -153,12 +154,7 @@ namespace Automata.Logistics
                 for (int s = 0; s < sources.Count; s++) lists.Add(oldLists[sources[s]]);
                 var result = MergeQuotaLists(lists);
                 string name = networks[i].Nickname;
-                if (result.Count > 0 && (networks[i].connectors.Count == 0 || networks[i].cargoContainers.Count == 0))
-                {
-                    result.Clear();
-                    log.Add(Loc.F(MyStrings.Logistics_CnListCleared, name));
-                }
-                else if (joined) log.Add(Loc.F(MyStrings.Logistics_CnJoined, NamesOf(sources), name, result.Count));
+                if (joined) log.Add(Loc.F(MyStrings.Logistics_CnJoined, NamesOf(sources), name, result.Count));
                 else if (sources[0] != idx || result.Count > 0) log.Add(Loc.F(MyStrings.Logistics_CnSplit, Loc.F(MyStrings.Logistics_Network, sources[0]), name, result.Count));
                 if (Log.DebugEnabled) Log.Debug("LC {0}: {1} {2} from {3}: {4} Min / Max line(s)", entityId, name, joined ? "joined" : "split", NamesOf(sources), result.Count);
                 changed |= SetOwnList(idx, result);
@@ -174,9 +170,10 @@ namespace Automata.Logistics
                 settings.Quotas.AddRange(anyList);
                 changed = true;
             }
-            // Joined into another: its own list goes
+            // Joined into another (or split into new ones, each with a copy): its own list goes. A network that is simply
+            // gone (no connector or no cargo container left: a block being replaced) keeps it, for when it is back.
             if (settings.NetworkQuotas != null)
-                changed |= settings.NetworkQuotas.RemoveAll(q => q != null && before.ContainsKey(q.Index) && !after.ContainsKey(q.Index)) > 0;
+                changed |= settings.NetworkQuotas.RemoveAll(q => q != null && parts.ContainsKey(q.Index) && !after.ContainsKey(q.Index)) > 0;
             if (!changed)
             {
                 if (anchorsChanged) SettingsEdited();
@@ -272,6 +269,28 @@ namespace Automata.Logistics
                 if ((a.OnSubgrid ? subCells : cells).Contains(a.Cell.ToVector3I())) return a.Index;
             }
             return 0;
+        }
+
+        /// <summary>
+        /// The periodic cleanup of the indexes (every map): an index with no network now and no list of its own forgets its
+        /// key, and such indexes at the end are dropped - the next new network is numbered right after the last one in use
+        /// (the groups with no connector or no cargo container numbered before 2026-11-11 freed). A list's index stays.
+        /// </summary>
+        private void FreeIndexes(HashSet<int> used)
+        {
+            for (int k = 1; k <= cnKeys.Count; k++)
+                if (!used.Contains(k) && !HasOwnList(k)) cnKeys[k - 1] = 0;
+            int end = cnKeys.Count;
+            while (end > 0 && cnKeys[end - 1] == 0 && !used.Contains(end) && !HasOwnList(end)) end--;
+            if (end < cnKeys.Count) cnKeys.RemoveRange(end, cnKeys.Count - end);
+        }
+
+        private bool HasOwnList(int index)
+        {
+            if (settings == null || settings.NetworkQuotas == null) return false;
+            for (int i = 0; i < settings.NetworkQuotas.Count; i++)
+                if (settings.NetworkQuotas[i] != null && settings.NetworkQuotas[i].Index == index) return true;
+            return false;
         }
 
         // A new index: past every one this computer knows (its keys, its anchors, its lists' labels: a list never lands on

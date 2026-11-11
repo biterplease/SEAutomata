@@ -464,6 +464,7 @@ namespace Automata.Drone
                     RecordFlight10();
                     RecordTrail10();
                     UpdateRecovery10();
+                    UpdateLanes10();
                     UpdateDocking();
                     UpdatePendingRoute10();
                     UpdateConstruction10();
@@ -2545,13 +2546,19 @@ namespace Automata.Drone
 
         private double ExitSpeedFor(FlightOrder o)
         {
-            if (nextLeg == null || o.Phase != FlightPhase.Approach || o.Behavior == WaypointBehavior.FullStop) return 0;
+            return nextLeg == null ? 0 : ExitSpeedVia(o, nextLeg, false);
+        }
+
+        // The same with 'next' as the leg after 'o' ('peeked': the first queued leg, not nextLeg; the rest follow it)
+        private double ExitSpeedVia(FlightOrder o, FlightOrder next, bool peeked)
+        {
+            if (o.Phase != FlightPhase.Approach || o.Behavior == WaypointBehavior.FullStop) return 0;
             double v = Math.Max(0, o.ExitSpeed);
             if (o.Behavior == WaypointBehavior.SlowApproach) v = Math.Min(v, ApproachSpeed);
             Vector3D a, t;
             GetLeg(o, out a, out t);
-            v = Math.Min(v, TurnPassSpeed(a, o.Target.ToVector3D(), nextLeg.Target.ToVector3D()));   // the bend into the next leg
-            v = Math.Min(v, StoppableSpeed(o));
+            v = Math.Min(v, TurnPassSpeed(a, o.Target.ToVector3D(), next.Target.ToVector3D()));   // the bend into the next leg
+            v = Math.Min(v, StoppableSpeed(o, next, peeked));
             return Math.Min(v, MaxSpeed);
         }
 
@@ -2590,11 +2597,17 @@ namespace Automata.Drone
         // The fastest the drone may pass the end of 'o' and still make every following waypoint at its pass speed and stop
         // where the chain stops (short legs after a run-through - a rounded corner's chords, a staging leg - used to be
         // entered at up to twice the Approach speed, and a stop two legs on couldn't be made: it overshot into the ground)
-        private double StoppableSpeed(FlightOrder o)
+        private double StoppableSpeed(FlightOrder o, FlightOrder next, bool peeked)
         {
             stopChain.Clear();
-            stopChain.Add(nextLeg);
-            foreach (var q in queuedLegs) { if (stopChain.Count >= STOP_LOOKAHEAD_LEGS) break; stopChain.Add(q); }
+            stopChain.Add(next);
+            bool skip = peeked;   // (the first queued leg is 'next' itself)
+            foreach (var q in queuedLegs)
+            {
+                if (skip) { skip = false; continue; }
+                if (stopChain.Count >= STOP_LOOKAHEAD_LEGS) break;
+                stopChain.Add(q);
+            }
             // Backwards from the last leg looked at (a stop is assumed after it: conservative)
             double vNext = 0;   // the fastest the leg after this one may be entered
             for (int i = stopChain.Count - 1; i >= 0; i--)

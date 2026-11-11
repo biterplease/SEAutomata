@@ -176,7 +176,7 @@ namespace Automata
             if (MyAPIGateway.Utilities.IsDedicated) return;
             try
             {
-                if (isInitialized) Pointer.ScoutPointer.Draw();   // designator knobs and lights
+                if (isInitialized) Automata.Designator.ScoutPointer.Draw();   // designator knobs and lights
             }
             catch (Exception ex)
             {
@@ -240,7 +240,7 @@ namespace Automata
             {
                 Log.Initialize(MOD_NAME, 0, "Automata.log", typeof(AutomataSession));
                 Log.Info("=== Automata Initializing ===");
-                Pointer.ScoutPointer.Load(ModContext != null ? ModContext.ModPath : null);
+                Automata.Designator.ScoutPointer.Load(ModContext != null ? ModContext.ModPath : null);
 
                 _serverConfig = ServerConfig.Instance;
                 _serverConfig.LoadConfig(ModContext);
@@ -340,7 +340,7 @@ namespace Automata
         {
             try
             {
-                if (isInitialized) Pointer.ScoutPointer.HandleInput();
+                if (isInitialized) Automata.Designator.ScoutPointer.HandleInput();
             }
             catch (Exception ex)
             {
@@ -369,8 +369,8 @@ namespace Automata
                 }
                 UpdateBuildAnnounce();                               // debug: which build this is (once, after load)
                 Pathfinding.PathfindingManager.Instance?.Update();   // look-ahead ray budget
-                Pointer.ScoutPointer.Update();                       // pointers' magazines kept full (no vanilla reload)
-                if (MyAPIGateway.Multiplayer == null || MyAPIGateway.Multiplayer.IsServer) Pointer.ScoutPointer.UpdateServer();
+                Automata.Designator.ScoutPointer.Update();                       // pointers' magazines kept full (no vanilla reload)
+                if (MyAPIGateway.Multiplayer == null || MyAPIGateway.Multiplayer.IsServer) Automata.Designator.ScoutPointer.UpdateServer();
                 RunTerminalDumps(MyAPIGateway.Session.GameplayFrameCounter);
                 if (MyAPIGateway.Multiplayer == null || MyAPIGateway.Multiplayer.IsServer) Util.PerfStats.Update(MyAPIGateway.Session.GameplayFrameCounter);
 
@@ -455,12 +455,12 @@ namespace Automata
         {
             try
             {
-                Pointer.ScoutPointer.Unload();
+                Automata.Designator.ScoutPointer.Unload();
                 Util.NicknameControl.Unregister();
                 if (MyAPIGateway.Utilities != null) MyAPIGateway.Utilities.MessageEntered -= commands.MessageEntered;
                 itemsIndexed = false;   // statics outlive the session (next world in the same game process)
                 Pathfinding.PathfindingManager.Unload();
-                Pointer.QuarrySites.Clear();
+                Automata.Designator.QuarrySites.Clear();
                 Logistics.LogisticsComputerTerminalControls.Unload();
                 Construction.BuildPlanner.ClearFrames();
                 // Reset message queue singleton

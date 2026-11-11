@@ -708,11 +708,13 @@ namespace Automata.Drone
             dockAreaSet = true;   // planned near the platform: no attitude turns there (NearDockArea)
             dockAreaCentre = target.GetPosition();
             bool planned;
+            laneHopOk = true;   // one route to one place: a lane hop is planned again at its end (Replan)
             try { planned = (CompactFlight && TryDirectLegs(start, staged ? staging : hullAtApproach, dockRoutePoints, false))
                             || PlanPath(start, staged ? staging : hullAtApproach, dockRoutePoints, areaDetour, false); }
-            finally { dockAreaSet = false; }
+            finally { dockAreaSet = false; laneHopOk = false; }
             if (!planned)
             {
+                laneHopPending = false;
                 Report(MyStrings.Drone_DockNoRouteTo, target.CustomName);
                 return false;
             }

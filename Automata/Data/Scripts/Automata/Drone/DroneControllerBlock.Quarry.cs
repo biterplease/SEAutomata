@@ -7,7 +7,7 @@ using VRage.Utils;
 using VRageMath;
 
 using Automata.Mining;
-using Automata.Pointer;
+using Automata.Designator;
 using Automata.Util;
 using Automata.Util.Logging;
 using Automata.Util.Strings;
@@ -18,10 +18,10 @@ namespace Automata.Drone
     /// Quarry mining (TODO/19), server side. A Mine task is a quarry when the drone's Mining method is Quarry (a MineOre
     /// job, not a pooled lane) or the task is a designator's quarry preparation (Completion QuarryPrepared, CompletionValue
     /// the order count, TargetBlock its section: X index | cols << 8 | rows << 16, Y the order's group, Z the shaft side in
-    /// dm). Pointer.QuarryPlanner gives the drill points: a straight shaft along the axis, from the highest ground over it
+    /// dm). Automata.Designator.QuarryPlanner gives the drill points: a straight shaft along the axis, from the highest ground over it
     /// (TopAbove) down; the side Q is the Quarry dimension floored at 1.5 x the drone's longest dimension
     /// (QuarryEffectiveSize; a preparation: the largest of its drones', split into sections, QuarryPlanner.Layout).
-    ///  - Site (PlanQuarryGeometry, at the NavigateToolTo): Pointer.QuarrySites puts the shaft on the shared site grid
+    ///  - Site (PlanQuarryGeometry, at the NavigateToolTo): Automata.Designator.QuarrySites puts the shaft on the shared site grid
     ///    (shafts near each other line up, never overlap) and gives this drone's section; its surface point is over the
     ///    section's centre. MineOre: down to the ore. Preparation: the target's surface, Q deeper per order. Ore in the
     ///    section (ColumnBlocked): MineOre tries the 8 neighbouring cells, once; a preparation digs down to QUARRY_GUARD

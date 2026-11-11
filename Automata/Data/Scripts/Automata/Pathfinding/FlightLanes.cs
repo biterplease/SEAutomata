@@ -19,16 +19,29 @@ namespace Automata.Pathfinding
     /// Directional flight lanes (TODO/25). Server only, one store (PathfindingManager.Lanes): written by the orchestrators,
     /// read by them (list, drawing) and by the pathfinder (routes through them).
     ///  - Traced by an orchestrator (Trace), a best estimate straight away (the coordinates are known, no flight needed): when
-    ///    it publishes an auction with a location (its base to the job's place: a base, an asteroid, a planet ore hotspot, else
-    ///    the nearest static grid or the spot), and between the player bases on its relay network. The straight line between
+    ///    it publishes an auction with a location (the base of its network nearest the job to the job's place: a base, an
+    ///    asteroid, a planet ore hotspot, else the nearest static grid or the spot), and between the player bases on its relay
+    ///    network (a relative neighbourhood graph: OrchestratorBlock.TraceBaseLanes). The straight line between
     ///    the two places, ends outside them (BASE_MARGIN off a base's sphere, WORK_MARGIN short of a work point); in gravity
-    ///    over the heightmap (TERRAIN_ALTITUDE to the centre line), sampled every TRACE_SAMPLE m.
-    ///  - A pair of boxes BOX_WIDTH x BOX_HEIGHT along the centre line, one above the other ("up": gravity, else the base's up):
-    ///    A -> B above, B -> A below, BOX_GAP apart. A new lane where another one is gets lifted over it (with ramps).
-    ///  - Sub-lanes (FindLane, for the pathfinder): a drone takes a slot across its box SLOT_WIDTH x its cross-section wide,
-    ///    SLOT_CLEAR x its length clear before and after it, the first from the box's left edge (its own left) free at the
-    ///    entrance; none free: it waits outside (LANE_WAIT_MAX_TICKS at most, then no lane). The drone only gets the slot's
-    ///    line as waypoints. Hulls wider than HULL_MAX fly beside the box, outside it.
+    ///    over the heightmap (TERRAIN_ALTITUDE to the centre line; a lane over LONG_LANE long LONG_LANE_LIFT higher, as the
+    ///    air allows), sampled every TRACE_SAMPLE m.
+    ///  - A pair of boxes (BOX_WIDTH x BOX_HEIGHT to start with) along the centre line, one above the other ("up": gravity,
+    ///    else the base's up): A -> B above, B -> A below, BOX_GAP apart. A new lane where another one is gets lifted over it
+    ///    (with ramps).
+    ///  - Routes (FindLane, for the pathfinder): one lane from near the start to near the goal; else the first lane of the
+    ///    shortest way through the owner's lane graph (a hop: the drone flies it to its end and plans again there).
+    ///  - Sublanes: a drone takes a sublane across its box, its cross-section rounded up to SUBLANE_STEP wide, on a SUBLANE_STEP
+    ///    grid from the box's left edge (its own left), SUBLANE_GAP clear of its neighbours', SLOT_CLEAR x its length clear
+    ///    before and after it. Drones wait at the entrance in a queue: the first takes the first free sublane, one behind it
+    ///    only a sublane clear of the first one's. LANE_WAIT_MAX_TICKS waiting: it gives up (flies without the lane) and
+    ///    reports it to the orchestrator; GIVE_UPS_TO_GROW of them within GIVE_UP_WINDOW: the pair grows BOX_GROW m wider and
+    ///    taller. The drone only gets the sublane's line as waypoints. Hulls too wide for the box fly beside it, outside it.
+    ///  - Confidence (0..1): CONFIDENCE_START for a new or changed lane - drones check every stretch in it as anywhere
+    ///    (planning, sensors / cameras in flight). A drone that flew a direction end to end with nothing in the way reports
+    ///    it (Verified): the boxes swept clear with the server's knowledge too, it becomes MOSTLY_SAFE - drones don't check
+    ///    its stretches when planning, only look ahead in flight - or, the orchestrator's "Enable safe lanes" on, TRUSTED -
+    ///    no checks at all, SLOT_CLEAR_TRUSTED between drones in a sublane. Anything found in it, a redraw, growth, a near
+    ///    miss or a crash: CONFIDENCE_START again.
     ///  - Traffic (Report): a drone is slowed so it can stop behind the one ahead in its slot band.
     ///  - Obstructions: rock, trees or static grids a drone's route check found in a lane, with the points it flew round
     ///    them (the drone reports them through its job reports, held until it is in antenna range): the lane is redrawn
@@ -41,16 +54,41 @@ namespace Automata.Pathfinding
     public sealed class FlightLanes
     {
         public enum LaneState : byte { Pending = 0, Active = 1, Suspended = 2 }   // (Pending: version 1 files only)
-        public enum Join : byte { None, Through, Beside, Wait }
+        public enum Join : byte { None, Through, Beside, Wait, GaveUp }
 
-        public const double BOX_WIDTH = 40;              // m across a lane's box
+        /// <summary>The lane FindLane gave (or the one waited / given up at).</summary>
+        public struct LaneLeg
+        {
+            public string Name;
+            public int Number, Revision;
+            public bool AB;
+            public bool Hop;          // the first lane of a way through several: the drone plans again at its end
+            public bool Relaxed;      // its stretches aren't checked when planning (Confidence MOSTLY_SAFE or more, through its box)
+            public bool Trusted;      // ...nor in flight (Confidence TRUSTED)
+            public bool FromStart, ToEnd;   // joined at its start / left at its end (through its box): a clear ride from one to
+                                            // the other verifies it
+        }
+
+        public const double BOX_WIDTH = 40;              // m across a new lane's box
         public const double BOX_HEIGHT = 40;             // m up / down
         public const double BOX_GAP = 5;                 // m between the A -> B box (above) and the B -> A box (below)
-        public const double HULL_MAX = 25;               // m of cross-section at most for a slot; wider: beside the box
-        private const double SLOT_WIDTH = 1.5;           // x the drone's cross-section: its slot's width
-        private const double SLOT_CLEAR = 4;             // x the drone's length clear before and after it in its slot
+        private const double BOX_GROW = 20;              // m wider and taller a lane gets when drones keep giving up at its entrance
+        private const double BOX_MAX = 120;              // m: wider / taller than this it doesn't get
+        private const double HULL_ROOM = 15;             // m of a box's width a sublane leaves at least (40 m: hulls up to 25 m)
+        private const double SUBLANE_STEP = 5;           // m: sublane widths and positions across the box on this grid
+        private const double SUBLANE_GAP = 5;            // m between two sublanes side by side
+        private const double SLOT_CLEAR = 4;             // x the drone's length clear before and after it in its sublane
         private const double SIDE_MARGIN = 5;            // m between the box and a hull flying beside it
-        private const int LANE_WAIT_MAX_TICKS = 20 * 60; // waiting for a slot at the entrance at most, then no lane
+        private const int LANE_WAIT_MAX_TICKS = 60 * 60; // waiting for a sublane at the entrance at most, then no lane
+        private const int QUEUE_STALE_TICKS = 5 * 60;    // a drone in the queue that didn't ask again for this long: out of it
+        private const int GIVE_UPS_TO_GROW = 3;          // drones giving up at a lane's entrances within GIVE_UP_WINDOW: it grows
+        private static readonly long GIVE_UP_WINDOW = 60 * TimeSpan.TicksPerSecond;   // UTC ticks
+        private const double CHAIN_DETOUR_RATIO = 1.5;   // the way through several lanes: at most this much longer than straight
+        public const double CONFIDENCE_START = 0.25;     // a new / changed lane: its stretches checked as any
+        public const double MOSTLY_SAFE = 0.9;           // flown clear end to end: not checked when planning, looked ahead in flight
+        public const double TRUSTED = 1.0;               // ...and the orchestrator's safe lanes on: not checked at all
+        private const double SLOT_CLEAR_TRUSTED = 6;     // x the drone's length clear before and after it in a TRUSTED lane
+        private const double WHOLE_SLACK = 100;          // m from a lane's end a ride may join / leave and still count as end to end
         private const int RESERVATION_TICKS = 120 * 60;  // a slot given but not flown into: free again after this
         private const int OCCUPANT_TICKS = 60 * 3;       // a report this old: no longer in the lane
         private const double RESUME_MINUTES = 2;         // a suspended lane resumes on its own after this
@@ -58,6 +96,11 @@ namespace Automata.Pathfinding
         private const double REDRAW_STEP = 10;
         private const double TRACE_SAMPLE = 20;          // m between the points of a traced line (trimmed at its ends, over the heightmap)
         private const double TERRAIN_ALTITUDE = 40 + BOX_HEIGHT + BOX_GAP / 2;   // m: the centre line over the heightmap (40 m under the lower box)
+        public const double BASE_MERGE_RANGE = 300;      // m between two bases' centres, at most: one place (chains too)
+        public const double LONG_LANE = 5000;            // m between its ends: a long lane, flown higher in gravity...
+        private const double LONG_LANE_LIFT = 600;       // ...by this much over TERRAIN_ALTITUDE (straighter: fewer legs over the hills)...
+        private const double LONG_LANE_RAMP = 1500;      // ...reached this far from its ends (a climb of ~22° out of the bases)...
+        private const double LANE_AIR_MIN = 0.85;        // ...but not where the air is thinner than this (atmospheric thrusters keep ~80%)
         private const double TERRAIN_SAG = 20;          // m a merged leg may dip under TERRAIN_ALTITUDE (20 m under the lower box left)
         private const double CROSS_MARGIN = 10;          // m between two lanes' boxes where one crosses the other
         private const double BASE_RANGE = 600;           // m: a place this close to a base belongs to it
@@ -75,7 +118,7 @@ namespace Automata.Pathfinding
         private const double HOTSPOT_RANGE = 400;        // m beyond a hotspot's deposits: a trip end there belongs to it
         private const double HOTSPOT_CELL = 500;         // m: a hotspot's id comes from its centre on this grid
         private const double POINT_CELL = 200;           // m: an end in open space: its id comes from this grid
-        private const int FILE_VERSION = 3;              // 3: asteroid ends beside the rock (2: could end inside it - not loaded, traced again; 1: flown lines)
+        private const int FILE_VERSION = 5;              // 5: confidence; 4: box sizes; 3: asteroid ends beside the rock (2: could end inside it - not loaded, traced again; 1: flown lines)
         private const string FILE_NAME = "Automata_Lanes.bin";
 
         public sealed class Lane
@@ -94,12 +137,17 @@ namespace Automata.Pathfinding
             public bool Order;                 // made for an area sweep / spot check that found nothing yet
             public bool OrderFound;
             public List<uint> OrderJobs = new List<uint>();   // its order's scout jobs still out
+            public double Width = BOX_WIDTH, Height = BOX_HEIGHT;   // each box's
+            public readonly List<long> GiveUps = new List<long>();   // UTC ticks drones gave up at its entrances (not saved)
+            public double Confidence = CONFIDENCE_START;   // TRUSTED: drones don't check its stretches
+            public int Revision;                           // its geometry's: a report on an older one doesn't count
             // derived
             public List<Vector3D> AB = new List<Vector3D>(), BA = new List<Vector3D>();   // the boxes' centre lines, each its way
             public List<Vector3D> UpAB = new List<Vector3D>(), UpBA = new List<Vector3D>(); // "up" at each point
             public double Length;
             public string Name(bool ab) { return "L" + Number + " " + (ab ? NameA + " → " + NameB : NameB + " → " + NameA); }
             public string PairName { get { return "L" + Number + " " + NameA + " ⇄ " + NameB; } }
+            public double DirOffset { get { return Height / 2 + BOX_GAP / 2; } }   // m from the centre line to a box's centre line
         }
 
         private enum PlaceKind : byte { Base, Asteroid, Hotspot, Grid, Point }
@@ -128,9 +176,43 @@ namespace Automata.Pathfinding
             public Vector3D Pos;
         }
 
+        // A drone waiting for a sublane at a lane's entrance ('S' m along its way: where it joins)
+        private sealed class Waiter
+        {
+            public long Drone;
+            public int Lane;
+            public bool AB;
+            public double S, W, Clear;
+            public int Since, Asked;           // ticks: it joined the queue, it last asked
+        }
+
+        // A lane the start is near (its way, joined 'S' m along it, 'Off' m off it) or the goal is near (left 'S' m along it);
+        // 'Cost': m from the start to its end / from its start to the goal
+        private struct Hop
+        {
+            public Lane Lane;
+            public bool AB;
+            public double S, Off, Cost;
+        }
+
+        // An owner's active lanes as a graph: lane ends the nodes, lanes the edges (their lengths); the shortest way between
+        // every two ends
+        private sealed class LaneGraph
+        {
+            public int Version = -1;
+            public readonly Dictionary<long, int> Nodes = new Dictionary<long, int>();
+            public double[,] Dist;
+            public double Between(long a, long b)
+            {
+                int i, j;
+                return Nodes.TryGetValue(a, out i) && Nodes.TryGetValue(b, out j) ? Dist[i, j] : double.PositiveInfinity;
+            }
+        }
+
         private readonly Dictionary<int, Lane> lanes = new Dictionary<int, Lane>();
         private readonly Dictionary<long, Rider> riders = new Dictionary<long, Rider>();
-        private readonly Dictionary<long, int> waiting = new Dictionary<long, int>();   // drone -> tick its wait at an entrance began
+        private readonly List<Waiter> queue = new List<Waiter>();   // drones waiting at entrances, first come first (all lanes)
+        private readonly Dictionary<long, LaneGraph> graphs = new Dictionary<long, LaneGraph>();   // owner -> its lane graph
         private readonly Dictionary<string, long> holds = new Dictionary<string, long>();   // "owner|a|b" -> UTC minute the hold ends
         private readonly PathfindingConfig config;
         private int nextNumber = 1;
@@ -146,7 +228,6 @@ namespace Automata.Pathfinding
 
         private static long NowMinutes { get { return DateTime.UtcNow.Ticks / TimeSpan.TicksPerMinute; } }
         private double Clearance { get { return config.ObstacleClearance; } }
-        private static double DirOffset { get { return BOX_HEIGHT / 2 + BOX_GAP / 2; } }   // m from the centre line to a box's centre line
 
         #region Tracing (the orchestrators make lanes)
         /// <summary>
@@ -206,7 +287,7 @@ namespace Automata.Pathfinding
             if (pa.Kind == PlaceKind.Asteroid) TrimRock(pts, pa, true);
             if (pb.Kind == PlaceKind.Asteroid) TrimRock(pts, pb, false);
             if (pts.Count < 2) { if (Log.DebugEnabled) Log.Debug("Lanes: no lane {0} - {1}: nothing left between them", pa.Name, pb.Name); return 0; }
-            pts = OverTerrain(pts);
+            pts = OverTerrain(pts, dist > LONG_LANE ? LONG_LANE_LIFT : 0);
             double len = 0;
             for (int i = 1; i < pts.Count; i++) len += Vector3D.Distance(pts[i - 1], pts[i]);
             if (len < MIN_LENGTH) { if (Log.DebugEnabled) Log.Debug("Lanes: no lane {0} - {1}: {2:F0} m between their ends", pa.Name, pb.Name, len); return 0; }
@@ -296,8 +377,9 @@ namespace Automata.Pathfinding
         // TERRAIN_ALTITUDE over the highest heightmap point under it and BOX_WIDTH / 2 to either side; in the plane through
         // the planet's centre and both ends the line becomes the taut string over that (the outer hull: ridge to ridge,
         // straight up at an end that starts low), then legs are merged while they sag at most TERRAIN_SAG under it
-        // (the planet's curve on long lanes). Out of gravity: the line as it is.
-        private static List<Vector3D> OverTerrain(List<Vector3D> pts)
+        // (the planet's curve on long lanes). 'lift': m more (a long lane), ramped in over LONG_LANE_RAMP from the ends and
+        // only as high as the air stays LANE_AIR_MIN dense (never lower than without it). Out of gravity: the line as it is.
+        private static List<Vector3D> OverTerrain(List<Vector3D> pts, double lift)
         {
             var planet = MyGamePruningStructure.GetClosestPlanet(pts[pts.Count / 2]);
             if (planet == null) return pts;
@@ -312,6 +394,7 @@ namespace Automata.Pathfinding
             if (w.Normalize() < 1) return pts;   // one above the other: the straight line is the climb
             Vector3D side = Vector3D.Cross(u, w);
             int n = pts.Count;
+            double airTop = lift > 0 && planet.HasAtmosphere ? AirCeiling(planet, c, u) : double.MaxValue;
             var need = new Vector2D[n];   // per sample: (cos θ, sin θ) * the radius it needs
             var dirs = new Vector2D[n];
             for (int i = 0; i < n; i++)
@@ -327,7 +410,13 @@ namespace Automata.Pathfinding
                     Vector3D q = pts[i] + side * (k * BOX_WIDTH / 2);
                     g = Math.Max(g, Vector3D.Distance(planet.GetClosestSurfacePointGlobal(ref q), c));
                 }
-                need[i] = d * (g + TERRAIN_ALTITUDE);
+                double want = g + TERRAIN_ALTITUDE;
+                if (lift > 0)
+                {
+                    double ramp = Math.Min(1.0, Math.Min(i, n - 1 - i) * TRACE_SAMPLE / LONG_LANE_RAMP);
+                    want = Math.Max(want, Math.Min(want + lift * ramp, airTop));
+                }
+                need[i] = d * want;
                 if ((i == 0 || i == n - 1) && r > g + TERRAIN_ALTITUDE) need[i] = d * r;   // the ends: where they are, if high enough
             }
             // Outer hull, start to end (θ grows: the centre is on the left of the way)
@@ -357,6 +446,20 @@ namespace Automata.Pathfinding
             var r2 = new List<Vector3D>(keep.Count);
             for (int i = 0; i < keep.Count; i++) r2.Add(c + u * need[keep[i]].X + w * need[keep[i]].Y);
             return r2;
+        }
+
+        // The highest radius (from the planet's centre 'c', along 'u': its air is the same all round) where the air is still
+        // LANE_AIR_MIN dense
+        private static double AirCeiling(MyPlanet planet, Vector3D c, Vector3D u)
+        {
+            double lo = planet.MinimumRadius, hi = Math.Max(lo, planet.AtmosphereRadius);
+            if (planet.GetAirDensity(c + u * lo) < LANE_AIR_MIN) return lo;
+            for (int k = 0; k < 24; k++)
+            {
+                double mid = (lo + hi) / 2;
+                if (planet.GetAirDensity(c + u * mid) >= LANE_AIR_MIN) lo = mid; else hi = mid;
+            }
+            return lo;
         }
 
         // 'p' left of (or on) the way from 'a' to 'b' (towards the planet's centre)
@@ -435,8 +538,49 @@ namespace Automata.Pathfinding
                                         Kind = PlaceKind.Asteroid, Outward = s.Center };
                 }
             }
+            if (place.Kind == PlaceKind.Base && place.Id != 0) MergeBases(ref place, found);
             if (place.Id != 0) return true;
             return FindHotspot(p, out place);
+        }
+
+        private readonly List<IMyCubeGrid> mergeScratch = new List<IMyCubeGrid>();
+
+        // A base and the bases BASE_MERGE_RANGE or closer to it (centre to centre, chained) are one place: its centre the
+        // middle of theirs (a lane ends between them, not through one of them), its sphere round all of them, its id the
+        // lowest of their grids' (the same whichever of them a trace starts from), its name theirs joined
+        private void MergeBases(ref Place place, List<IMyEntity> found)
+        {
+            IMyEntity e;
+            var first = MyAPIGateway.Entities.TryGetEntityById(place.Id, out e) ? e as IMyCubeGrid : null;
+            if (first == null) return;
+            mergeScratch.Clear();
+            mergeScratch.Add(first);
+            double range2 = BASE_MERGE_RANGE * BASE_MERGE_RANGE;
+            for (int m = 0; m < mergeScratch.Count; m++)
+                for (int i = 0; i < found.Count; i++)
+                {
+                    var g = found[i] as IMyCubeGrid;
+                    if (g == null || !g.IsStatic || mergeScratch.Contains(g)) continue;
+                    if (Vector3D.DistanceSquared(g.WorldVolume.Center, mergeScratch[m].WorldVolume.Center) > range2 || !HasAutomataComputer(g)) continue;
+                    mergeScratch.Add(g);
+                }
+            if (mergeScratch.Count < 2) { mergeScratch.Clear(); return; }
+            Vector3D centre = Vector3D.Zero;
+            long id = long.MaxValue;
+            var name = new StringBuilder();
+            for (int i = 0; i < mergeScratch.Count; i++)
+            {
+                centre += mergeScratch[i].WorldVolume.Center;
+                id = Math.Min(id, mergeScratch[i].EntityId);
+                if (i > 0) name.Append(" + ");
+                name.Append(mergeScratch[i].DisplayName);
+            }
+            centre /= mergeScratch.Count;
+            double radius = 0;
+            for (int i = 0; i < mergeScratch.Count; i++)
+                radius = Math.Max(radius, Vector3D.Distance(centre, mergeScratch[i].WorldVolume.Center) + mergeScratch[i].WorldVolume.Radius);
+            place = new Place { Id = id, Name = Short(name.ToString()), Sphere = new BoundingSphereD(centre, radius), Kind = PlaceKind.Base };
+            mergeScratch.Clear();
         }
 
         private readonly List<KeyValuePair<MyStringHash, Vector3D>> depositScratch = new List<KeyValuePair<MyStringHash, Vector3D>>();
@@ -582,12 +726,12 @@ namespace Automata.Pathfinding
             for (int i = 0; i < n; i++)
             {
                 Vector3D up = UpAt(l.Centre[i], l.Up);
-                l.AB.Add(l.Centre[i] + up * DirOffset);
+                l.AB.Add(l.Centre[i] + up * l.DirOffset);
                 l.UpAB.Add(up);
             }
             for (int i = n - 1; i >= 0; i--)
             {
-                l.BA.Add(l.Centre[i] - l.UpAB[i] * DirOffset);
+                l.BA.Add(l.Centre[i] - l.UpAB[i] * l.DirOffset);
                 l.UpBA.Add(l.UpAB[i]);
             }
             l.Length = 0;
@@ -599,11 +743,11 @@ namespace Automata.Pathfinding
         private void AvoidCrossings(Lane l)
         {
             Derive(l);
-            double need = 2 * (BOX_HEIGHT + BOX_GAP / 2) + CROSS_MARGIN;
-            double near = Math.Max(need, BOX_WIDTH + CROSS_MARGIN);
             foreach (var o in lanes.Values)
             {
                 if (o.Number == l.Number) continue;
+                double need = l.Height + o.Height + BOX_GAP + CROSS_MARGIN;
+                double near = Math.Max(need, (l.Width + o.Width) / 2 + CROSS_MARGIN);
                 for (int i = 0; i + 1 < l.Centre.Count; i++)
                     for (int j = 0; j + 1 < o.Centre.Count; j++)
                     {
@@ -754,21 +898,25 @@ namespace Automata.Pathfinding
         #region Planning (the pathfinder)
         /// <summary>
         /// A lane of 'owner' from near 'start' to near 'goal' for drone 'droneId' ('half': its hull's half extents, X across,
-        /// Y up, Z along): Through - its slot's line appended to 'waypoints'; Beside - a line beside the box (a hull wider than
-        /// HULL_MAX); Wait - a lane fits but no slot is free at its entrance (the drone holds, asks again); None - no lane fits
-        /// (or the wait was LANE_WAIT_MAX_TICKS long).
+        /// Y up, Z along): Through - its sublane's line appended to 'waypoints'; Beside - a line beside the box (a hull too wide
+        /// for it); Wait - a lane fits but no sublane is free for it at its entrance yet (the drone holds, asks again); GaveUp -
+        /// it waited LANE_WAIT_MAX_TICKS (no lane; the drone reports it: GaveUp); None - no lane fits. 'chain': no one lane
+        /// fitting, the first lane of the shortest way through the lane graph may be given ('hop': the line to its end - the
+        /// drone plans again there).
         /// </summary>
         public Join FindLane(long owner, long droneId, Vector3D start, Vector3D goal, Vector3D half, int now, List<Vector3D> waypoints,
-                             out string name, out int number, out bool ab)
+                             bool chain, out LaneLeg leg)
         {
-            name = null;
-            number = 0;
-            ab = true;
+            leg = new LaneLeg { AB = true };
+            string name = null;
+            bool hop = false;
             if (owner == 0) return Join.None;
             double direct = Vector3D.Distance(start, goal);
             Lane best = null;
             bool bestAB = true;
             double bestCost = double.MaxValue, bestIn = 0, bestOut = 0, bestOffIn = 0;
+            hopIns.Clear();
+            hopOuts.Clear();
             foreach (var l in lanes.Values)
             {
                 if (l.Owner != owner || l.State != LaneState.Active || l.AB.Count < 2) continue;
@@ -780,55 +928,69 @@ namespace Automata.Pathfinding
                     double sIn, offIn, sOut, offOut;
                     Project(line, start, out sIn, out offIn);
                     Project(line, goal, out sOut, out offOut);
+                    if (chain && offIn <= ENTRY_RANGE && l.Length - sIn >= MIN_RIDE)
+                        hopIns.Add(new Hop { Lane = l, AB = k == 0, S = sIn, Off = offIn, Cost = offIn + l.Length - sIn });
+                    if (chain && offOut <= ENTRY_RANGE && sOut >= MIN_RIDE)
+                        hopOuts.Add(new Hop { Lane = l, AB = k == 0, S = sOut, Off = offOut, Cost = sOut + offOut });
                     if (offIn > ENTRY_RANGE || offOut > ENTRY_RANGE || sOut - sIn < MIN_RIDE) continue;   // its way, far enough
                     double cost = offIn + (sOut - sIn) + offOut;
                     if (cost > direct * DETOUR_RATIO + 200 || cost >= bestCost) continue;
                     bestCost = cost; best = l; bestAB = k == 0; bestIn = sIn; bestOut = sOut; bestOffIn = offIn;
                 }
             }
-            if (best == null) { waiting.Remove(droneId); return Join.None; }
-            number = best.Number;
-            ab = bestAB;
+            if (best == null && FirstHop(owner, direct, out best, out bestAB, out bestIn, out bestOffIn))
+            {
+                bestOut = LineLength(bestAB ? best.AB : best.BA);
+                hop = true;
+            }
+            hopIns.Clear();
+            hopOuts.Clear();
+            if (best == null) { Unqueue(droneId); return Join.None; }
+            name = best.Name(bestAB);
+            leg.Name = name;
+            leg.Number = best.Number;
+            leg.AB = bestAB;
+            leg.Revision = best.Revision;
             var chosen = bestAB ? best.AB : best.BA;
             var ups = bestAB ? best.UpAB : best.UpBA;
             double cross = 2 * Math.Max(half.X, half.Y), length = 2 * half.Z;
+            double w = Math.Ceiling(cross / SUBLANE_STEP - 1e-6) * SUBLANE_STEP;   // its sublane: on the grid
             double lat;
             Join join;
-            if (cross > HULL_MAX)
+            if (w > best.Width - HULL_ROOM)
             {
-                lat = BOX_WIDTH / 2 + cross / 2 + SIDE_MARGIN;   // beside the box, right of its way, outside it
+                lat = best.Width / 2 + cross / 2 + SIDE_MARGIN;   // beside the box, right of its way, outside it
                 riders.Remove(droneId);
+                Unqueue(droneId);
                 join = Join.Beside;
                 best.Trips++;
             }
             else
             {
-                double w = Math.Min(BOX_WIDTH, SLOT_WIDTH * cross), clear = SLOT_CLEAR * length;
+                double clear = (best.Confidence >= TRUSTED ? SLOT_CLEAR_TRUSTED : SLOT_CLEAR) * length;
                 Rider me;
-                if (riders.TryGetValue(droneId, out me) && me.Lane == best.Number && me.AB == bestAB) lat = me.Lat;   // a replan on its way: the same slot
-                else if (FreeSlot(best.Number, bestAB, droneId, bestIn, w, clear, out lat))
+                if (riders.TryGetValue(droneId, out me) && me.Lane == best.Number && me.AB == bestAB) lat = me.Lat;   // a replan on its way: the same sublane
+                else
                 {
+                    var wait = Enqueue(droneId, best.Number, bestAB, bestIn, w, clear, now);
+                    if (!MayEnter(wait, out lat))
+                    {
+                        if (now - wait.Since < LANE_WAIT_MAX_TICKS)
+                        {
+                            if (wait.Since == now && Log.DebugEnabled) Log.Debug("Lanes: drone {0} waits at the entrance of {1}: no sublane free for it ({2:F0} m)", droneId, name, w);
+                            return Join.Wait;
+                        }
+                        Unqueue(droneId);
+                        if (Log.DebugEnabled) Log.Debug("Lanes: drone {0}: no sublane free in {1} for {2} s: not through it", droneId, name, LANE_WAIT_MAX_TICKS / 60);
+                        return Join.GaveUp;
+                    }
+                    Unqueue(droneId);
                     riders[droneId] = new Rider { Lane = best.Number, AB = bestAB, Lat = lat, W = w, Clear = clear, S = bestIn, Frame = now };
                     best.Trips++;
                 }
-                else
-                {
-                    int since;
-                    if (!waiting.TryGetValue(droneId, out since)) { since = now; waiting[droneId] = now; }
-                    if (now - since < LANE_WAIT_MAX_TICKS)
-                    {
-                        if (since == now && Log.DebugEnabled) Log.Debug("Lanes: drone {0} waits at the entrance of {1}: no slot free", droneId, best.Name(bestAB));
-                        name = best.Name(bestAB);
-                        return Join.Wait;
-                    }
-                    waiting.Remove(droneId);
-                    if (Log.DebugEnabled) Log.Debug("Lanes: drone {0}: no slot free in {1} for {2} s: not through it", droneId, best.Name(bestAB), LANE_WAIT_MAX_TICKS / 60);
-                    return Join.None;
-                }
-                waiting.Remove(droneId);
                 join = Join.Through;
             }
-            // The slot's (or the side's) line between where it is joined and where it is left
+            // The sublane's (or the side's) line between where it is joined and where it is left
             if (bestOffIn > JOIN_MIN) waypoints.Add(Across(chosen, ups, bestIn, lat));   // (already on it: from where it is)
             double acc = 0;
             for (int i = 0; i < chosen.Count; i++)
@@ -839,7 +1001,12 @@ namespace Automata.Pathfinding
             waypoints.Add(Across(chosen, ups, bestOut, lat));
             best.LastUsed = NowMinutes;
             dirty = true;
-            name = best.Name(bestAB);
+            leg.Hop = hop;
+            leg.Relaxed = join == Join.Through && best.Confidence >= MOSTLY_SAFE;
+            leg.Trusted = join == Join.Through && best.Confidence >= TRUSTED;
+            leg.FromStart = join == Join.Through && bestIn <= WHOLE_SLACK;
+            leg.ToEnd = join == Join.Through && bestOut >= LineLength(chosen) - WHOLE_SLACK;
+            if (hop && Log.DebugEnabled) Log.Debug("Lanes: drone {0}: no one lane to its goal: {1} first, through the lane graph", droneId, name);
             return join;
         }
 
@@ -847,32 +1014,141 @@ namespace Automata.Pathfinding
         private const double POINT_SLACK = 5;     // m: a lane point this close to the join / leave point is left out
         private const double JOIN_MIN = 20;       // m off the lane at least for a join point (closer: straight to its next point)
 
-        // The first slot from the box's left edge free at the entrance 's': no other drone's slot band overlaps it within
-        // both their clearances along the box. 'lat': its centre across the box (+: right)
-        private bool FreeSlot(int lane, bool ab, long droneId, double s, double w, double clear, out double lat)
+        private readonly List<Hop> hopIns = new List<Hop>(), hopOuts = new List<Hop>();
+
+        // No one lane fits: the first lane of the shortest way from a lane the start is near (hopIns), through the lane graph,
+        // to a lane the goal is near (hopOuts); at most CHAIN_DETOUR_RATIO longer than straight
+        private bool FirstHop(long owner, double direct, out Lane lane, out bool ab, out double sIn, out double offIn)
         {
-            for (lat = -BOX_WIDTH / 2 + w / 2; lat + w / 2 <= BOX_WIDTH / 2 + 1e-6; lat += w)
+            lane = null; ab = true; sIn = offIn = 0;
+            if (hopIns.Count == 0 || hopOuts.Count == 0) return false;
+            var g = GraphOf(owner);
+            double best = direct * CHAIN_DETOUR_RATIO + 200;
+            for (int i = 0; i < hopIns.Count; i++)
             {
-                bool free = true;
+                var a = hopIns[i];
+                long exit = a.AB ? a.Lane.EndB : a.Lane.EndA;
+                for (int j = 0; j < hopOuts.Count; j++)
+                {
+                    var b = hopOuts[j];
+                    if (b.Lane == a.Lane) continue;
+                    double cost = a.Cost + g.Between(exit, b.AB ? b.Lane.EndA : b.Lane.EndB) + b.Cost;
+                    if (cost >= best) continue;
+                    best = cost; lane = a.Lane; ab = a.AB; sIn = a.S; offIn = a.Off;
+                }
+            }
+            return lane != null;
+        }
+
+        // The owner's lane graph, rebuilt when the lanes changed (Floyd-Warshall: a few dozen lane ends)
+        private LaneGraph GraphOf(long owner)
+        {
+            LaneGraph g;
+            if (!graphs.TryGetValue(owner, out g)) { g = new LaneGraph(); graphs[owner] = g; }
+            if (g.Version == listVersion) return g;
+            g.Version = listVersion;
+            g.Nodes.Clear();
+            foreach (var l in lanes.Values)
+            {
+                if (l.Owner != owner || l.State != LaneState.Active) continue;
+                if (!g.Nodes.ContainsKey(l.EndA)) g.Nodes[l.EndA] = g.Nodes.Count;
+                if (!g.Nodes.ContainsKey(l.EndB)) g.Nodes[l.EndB] = g.Nodes.Count;
+            }
+            int n = g.Nodes.Count;
+            var d = new double[n, n];
+            for (int i = 0; i < n; i++)
+                for (int j = 0; j < n; j++) d[i, j] = i == j ? 0 : double.PositiveInfinity;
+            foreach (var l in lanes.Values)
+            {
+                if (l.Owner != owner || l.State != LaneState.Active) continue;
+                int a = g.Nodes[l.EndA], b = g.Nodes[l.EndB];
+                if (l.Length < d[a, b]) d[a, b] = d[b, a] = l.Length;
+            }
+            for (int k = 0; k < n; k++)
+                for (int i = 0; i < n; i++)
+                    for (int j = 0; j < n; j++)
+                        if (d[i, k] + d[k, j] < d[i, j]) d[i, j] = d[i, k] + d[k, j];
+            g.Dist = d;
+            return g;
+        }
+
+        private static double LineLength(List<Vector3D> line)
+        {
+            double len = 0;
+            for (int i = 1; i < line.Count; i++) len += Vector3D.Distance(line[i - 1], line[i]);
+            return len;
+        }
+
+        // The drone's place in the queue at the entrance of 'lane' its way 'ab': at the back on its first ask (another lane's
+        // place given up), kept when it asks again
+        private Waiter Enqueue(long droneId, int lane, bool ab, double s, double w, double clear, int now)
+        {
+            for (int i = 0; i < queue.Count; i++)
+            {
+                var q = queue[i];
+                if (q.Drone != droneId) continue;
+                if (q.Lane == lane && q.AB == ab) { q.S = s; q.W = w; q.Clear = clear; q.Asked = now; return q; }
+                queue.RemoveAt(i);
+                break;
+            }
+            var me = new Waiter { Drone = droneId, Lane = lane, AB = ab, S = s, W = w, Clear = clear, Since = now, Asked = now };
+            queue.Add(me);
+            return me;
+        }
+
+        private void Unqueue(long droneId)
+        {
+            for (int i = 0; i < queue.Count; i++)
+                if (queue[i].Drone == droneId) { queue.RemoveAt(i); return; }
+        }
+
+        // A sublane free for 'me' ('lat': its centre): the first in its queue takes it; one behind it only a sublane clear of
+        // the first one's (the one it gets soonest: a wide hull isn't kept waiting by narrow ones slipping in)
+        private bool MayEnter(Waiter me, out double lat)
+        {
+            if (SublaneWait(me, out lat) > 0) return false;
+            for (int i = 0; i < queue.Count; i++)
+            {
+                var first = queue[i];
+                if (first.Lane != me.Lane || first.AB != me.AB) continue;
+                if (first == me) return true;
+                double its;
+                SublaneWait(first, out its);
+                return Math.Abs(its - lat) >= (first.W + me.W) / 2 + SUBLANE_GAP;
+            }
+            return true;
+        }
+
+        // A waiter's sublane: across the box on the SUBLANE_STEP grid from its left edge, SUBLANE_GAP clear of the sublanes of
+        // the drones in it (or given one) within both their clearances along it. 0: the first free one ('lat': its centre,
+        // +: right); else the one free soonest, and how many m its drones still have to fly for that
+        private double SublaneWait(Waiter me, out double lat)
+        {
+            lat = 0;
+            Lane l;
+            if (!lanes.TryGetValue(me.Lane, out l)) return double.MaxValue;
+            double best = double.MaxValue;
+            for (double left = -l.Width / 2; left + me.W <= l.Width / 2 + 1e-6; left += SUBLANE_STEP)
+            {
+                double c = left + me.W / 2, need = 0;
                 foreach (var kv in riders)
                 {
                     var o = kv.Value;
-                    if (kv.Key == droneId || o.Lane != lane || o.AB != ab) continue;
-                    if (Math.Abs(o.Lat - lat) >= (o.W + w) / 2 || Math.Abs(o.S - s) >= o.Clear + clear) continue;
-                    free = false;
-                    break;
+                    if (kv.Key == me.Drone || o.Lane != me.Lane || o.AB != me.AB) continue;
+                    if (Math.Abs(o.Lat - c) >= (o.W + me.W) / 2 + SUBLANE_GAP) continue;
+                    need = Math.Max(need, o.Clear + me.Clear - Math.Abs(o.S - me.S));
                 }
-                if (free) return true;
+                if (need <= 0) { lat = c; return 0; }
+                if (need < best) { best = need; lat = c; }
             }
-            lat = 0;
-            return false;
+            return best;
         }
 
-        /// <summary>The drone stopped flying (arrived, docked, working): its slot is free.</summary>
+        /// <summary>The drone stopped flying (arrived, docked, working): its sublane is free.</summary>
         public void OnTripEnd(long droneId)
         {
             riders.Remove(droneId);
-            waiting.Remove(droneId);
+            Unqueue(droneId);
         }
         #endregion
 
@@ -890,7 +1166,7 @@ namespace Automata.Pathfinding
             if (!lanes.TryGetValue(me.Lane, out lane) || lane.Owner != owner) { riders.Remove(droneId); return double.MaxValue; }
             double s, lat, vert;
             ProjectBox(me.AB ? lane.AB : lane.BA, me.AB ? lane.UpAB : lane.UpBA, pos, out s, out lat, out vert);
-            bool inside = s > 0.5 && s < lane.Length - 0.5 && Math.Abs(lat) <= BOX_WIDTH / 2 + 2 && Math.Abs(vert) <= BOX_HEIGHT / 2 + 2;
+            bool inside = s > 0.5 && s < lane.Length - 0.5 && Math.Abs(lat) <= lane.Width / 2 + 2 && Math.Abs(vert) <= lane.Height / 2 + 2;
             if (!inside)
             {
                 if (me.In) riders.Remove(droneId);   // through it
@@ -940,6 +1216,12 @@ namespace Automata.Pathfinding
         #endregion
 
         #region Obstructions, orders
+        /// <summary>A drone's lane report (VirtualNetwork.LaneObstruction.Kind) that isn't an obstruction: it gave up waiting at an entrance.</summary>
+        public const byte GAVE_UP = 4;
+
+        /// <summary>A drone's lane report that isn't an obstruction: it flew the lane end to end with nothing in the way (Verified).</summary>
+        public const byte CLEAR = 5;
+
         /// <summary>
         /// What a drone's route check found in a lane: 0 - not reported (a moving grid may get out of the way), 1 rock, 2 a
         /// tree, 3 a static grid.
@@ -963,8 +1245,9 @@ namespace Automata.Pathfinding
         {
             Lane l;
             if (!lanes.TryGetValue(number, out l) || l.Owner != owner || l.Centre.Count < 2 || pm == null) return false;
+            Distrust(l, what + " in it");
             // To the centre line (the drone flew its box: half the pair above / below it)
-            Vector3D shift = UpAt((a + b) / 2, l.Up) * (ab ? DirOffset : -DirOffset);
+            Vector3D shift = UpAt((a + b) / 2, l.Up) * (ab ? l.DirOffset : -l.DirOffset);
             double sa, sb, off;
             Project(l.Centre, a - shift, out sa, out off);
             Project(l.Centre, b - shift, out sb, out off);
@@ -1019,7 +1302,7 @@ namespace Automata.Pathfinding
             var q = new PathQuery
             {
                 Controller = MatrixD.CreateWorld(a, Vector3D.Normalize(d), UpAt(a, l.Up)),
-                LocalHull = new BoundingBoxD(new Vector3D(-BOX_WIDTH / 2, -(BOX_HEIGHT + BOX_GAP / 2), -1), new Vector3D(BOX_WIDTH / 2, BOX_HEIGHT + BOX_GAP / 2, 1)),
+                LocalHull = new BoundingBoxD(new Vector3D(-l.Width / 2, -(l.Height + BOX_GAP / 2), -1), new Vector3D(l.Width / 2, l.Height + BOX_GAP / 2, 1)),
                 OwnGrids = emptyGrids,
                 Clearance = 0,
                 HullCentred = true,
@@ -1052,8 +1335,166 @@ namespace Automata.Pathfinding
             }
             l.Centre = r;
             Derive(l);
+            l.Revision++;
+            Distrust(l, "redrawn");
             dirty = true;
             listVersion++;
+        }
+
+        // Back to CONFIDENCE_START: its stretches checked again until a drone flies it clear end to end
+        private void Distrust(Lane l, string why)
+        {
+            if (l.Confidence <= CONFIDENCE_START) return;
+            l.Confidence = CONFIDENCE_START;
+            dirty = true;
+            listVersion++;
+            if (Log.DebugEnabled) Log.Debug("Lanes: {0} no longer trusted ({1}): its stretches checked again", l.PairName, why);
+        }
+
+        /// <summary>
+        /// A drone flew lane 'number' end to end (its geometry 'revision') with nothing in the way: if its boxes sweep clear
+        /// with the server's knowledge (rock, static grids) too, it is MOSTLY_SAFE, or TRUSTED with the owner's safe lanes on
+        /// (SetSafeLanes). True: one of them now.
+        /// </summary>
+        public bool Verified(long owner, int number, int revision, PathfindingManager pm)
+        {
+            Lane l;
+            if (!lanes.TryGetValue(number, out l) || l.Owner != owner || pm == null || l.State != LaneState.Active) return false;
+            if (l.Confidence >= MOSTLY_SAFE) return true;
+            if (revision != l.Revision)
+            {
+                if (Log.DebugEnabled) Log.Debug("Lanes: {0}: a clear ride reported on an older drawing of it: not trusted yet", l.PairName);
+                return false;
+            }
+            pm.BeginPlan();
+            for (int i = 0; i + 1 < l.Centre.Count; i++)
+            {
+                if (!BoxesBlocked(pm, l, l.Centre[i], l.Centre[i + 1])) continue;
+                if (Log.DebugEnabled) Log.Debug("Lanes: {0}: flown clear, but its boxes don't sweep clear (stretch {1}): not trusted", l.PairName, i + 1);
+                return false;
+            }
+            bool safe = SafeLanes(owner);
+            l.Confidence = safe ? TRUSTED : MOSTLY_SAFE;
+            dirty = true;
+            listVersion++;
+            Log.Info("Lanes: {0} {1}: flown clear end to end; drones fly it {2}", l.PairName, safe ? "trusted" : "mostly safe",
+                     safe ? "without checks" : "looking ahead only");
+            return true;
+        }
+
+        private readonly Dictionary<long, bool> safeLanes = new Dictionary<long, bool>();   // owner -> "Enable safe lanes"
+
+        private bool SafeLanes(long owner)
+        {
+            bool safe;
+            return safeLanes.TryGetValue(owner, out safe) && safe;
+        }
+
+        /// <summary>
+        /// The orchestrator's "Enable safe lanes" (every update): its lanes flown clear are TRUSTED with it on, MOSTLY_SAFE with
+        /// it off.
+        /// </summary>
+        public void SetSafeLanes(long owner, bool safe)
+        {
+            bool was;
+            if (safeLanes.TryGetValue(owner, out was) && was == safe) return;
+            safeLanes[owner] = safe;
+            int changed = 0;
+            foreach (var l in lanes.Values)
+            {
+                if (l.Owner != owner || l.Confidence < MOSTLY_SAFE) continue;
+                double c = safe ? TRUSTED : MOSTLY_SAFE;
+                if (l.Confidence == c) continue;
+                l.Confidence = c;
+                changed++;
+            }
+            if (changed == 0) return;
+            dirty = true;
+            listVersion++;
+            if (Log.DebugEnabled) Log.Debug("Lanes: orchestrator {0}: safe lanes {1}: {2} lane(s) {3}", owner, safe ? "on" : "off", changed, safe ? "trusted" : "mostly safe");
+        }
+
+        /// <summary>
+        /// The lane place at 'p' (a base, an asteroid, a planet ore hotspot, else the nearest static grid or the spot): its
+        /// id, whether it is natural (asteroid, hotspot: no lane to another one) and whether it is a base. False: none.
+        /// </summary>
+        public bool Locate(Vector3D p, out long id, out bool natural, out bool isBase)
+        {
+            id = 0; natural = isBase = false;
+            try
+            {
+                Place place;
+                if (!FindPlace(p, out place)) place = GenericEnd(p);
+                id = place.Id;
+                natural = place.Natural;
+                isBase = place.Kind == PlaceKind.Base;
+                return id != 0;
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Lanes: no place found at {0}: {1}", p, ex.Message);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Two places 'distance' m apart (centre to centre) leave room for a lane between them: MIN_LENGTH once its ends are
+        /// trimmed (BASE_MARGIN outside a base's sphere of 'radius', WORK_MARGIN short of a work place). An estimate of
+        /// MakeLane's own test, before tracing.
+        /// </summary>
+        public static bool LaneFits(double distance, bool baseA, double radiusA, bool baseB, double radiusB)
+        {
+            double ends = (baseA ? radiusA + BASE_MARGIN : WORK_MARGIN) + (baseB ? radiusB + BASE_MARGIN : WORK_MARGIN);
+            return distance - ends >= MIN_LENGTH;
+        }
+
+        /// <summary>Minutes an unused lane lives (FlightLaneExpirationMinutes).</summary>
+        public double ExpiryMinutes { get { return config.FlightLaneExpirationMinutes; } }
+
+        /// <summary>
+        /// A drone gave up waiting at an entrance of lane 'number' ('ticks': UTC, when; its orchestrator heard it with the
+        /// drone's report). GIVE_UPS_TO_GROW of them within GIVE_UP_WINDOW: the pair grows (Grow). True: it grew.
+        /// </summary>
+        public bool GaveUp(long owner, int number, long ticks)
+        {
+            Lane l;
+            if (!lanes.TryGetValue(number, out l) || l.Owner != owner) return false;
+            l.GiveUps.Add(ticks);
+            l.GiveUps.Sort();   // (reports come late: out of order)
+            if (l.GiveUps.Count > 16) l.GiveUps.RemoveAt(0);
+            for (int i = 0; i + GIVE_UPS_TO_GROW - 1 < l.GiveUps.Count; i++)
+            {
+                if (l.GiveUps[i + GIVE_UPS_TO_GROW - 1] - l.GiveUps[i] > GIVE_UP_WINDOW) continue;
+                l.GiveUps.Clear();
+                return Grow(l);
+            }
+            return false;
+        }
+
+        // Both boxes BOX_GROW m wider and taller (BOX_MAX at most). In gravity the centre line goes up as much as they grew
+        // (the lower box's floor stays as high over the ground); lifted over lanes it now reaches
+        private bool Grow(Lane l)
+        {
+            double dw = Math.Min(BOX_GROW, BOX_MAX - l.Width), dh = Math.Min(BOX_GROW, BOX_MAX - l.Height);
+            if (dw <= 0 && dh <= 0)
+            {
+                if (Log.DebugEnabled) Log.Debug("Lanes: {0}: drones keep giving up at its entrances; already {1:F0} x {2:F0} m: not grown", l.PairName, l.Width, l.Height);
+                return false;
+            }
+            l.Width += Math.Max(0, dw);
+            l.Height += Math.Max(0, dh);
+            float interference;
+            for (int i = 0; i < l.Centre.Count && dh > 0; i++)
+                if (MyAPIGateway.Physics.CalculateNaturalGravityAt(l.Centre[i], out interference).LengthSquared() > 0.01f)
+                    l.Centre[i] += UpAt(l.Centre[i], l.Up) * dh;
+            AvoidCrossings(l);
+            l.Revision++;
+            Distrust(l, "grown");
+            dirty = true;
+            listVersion++;
+            Log.Info("Lanes: {0} grown to {1:F0} x {2:F0} m: {3} drones gave up waiting at its entrances within {4} s", l.PairName, l.Width, l.Height,
+                     GIVE_UPS_TO_GROW, GIVE_UP_WINDOW / TimeSpan.TicksPerSecond);
+            return true;
         }
 
         /// <summary>
@@ -1085,6 +1526,7 @@ namespace Automata.Pathfinding
         private void Suspend(Lane l, string why)
         {
             if (l.State == LaneState.Suspended) return;
+            Distrust(l, why);
             l.State = LaneState.Suspended;
             l.Reason = why;
             l.SuspendedAt = DateTime.UtcNow.Ticks;
@@ -1120,8 +1562,7 @@ namespace Automata.Pathfinding
                 if (now - kv.Value.Frame > (kv.Value.In ? 10 * OCCUPANT_TICKS : RESERVATION_TICKS)) riderScratch.Add(kv.Key);
             for (int i = 0; i < riderScratch.Count; i++) riders.Remove(riderScratch[i]);
             riderScratch.Clear();
-            foreach (var kv in waiting) if (now - kv.Value > 2 * LANE_WAIT_MAX_TICKS) riderScratch.Add(kv.Key);
-            for (int i = 0; i < riderScratch.Count; i++) waiting.Remove(riderScratch[i]);
+            queue.RemoveAll(w => now - w.Asked > QUEUE_STALE_TICKS);   // (it went elsewhere: a new job, a stop)
         }
 
         private void Expire()
@@ -1157,6 +1598,8 @@ namespace Automata.Pathfinding
                 var sb = new StringBuilder();
                 sb.Append(l.Number).Append('|').Append(l.PairName).Append(", ").Append((l.Length / 1000).ToString("0.0")).Append(" km, ")
                   .Append(l.Trips).Append(l.Trips == 1 ? " trip" : " trips").Append(", last ").Append(Math.Max(0, minute - l.LastUsed)).Append(" min ago");
+                sb.Append(", ").Append(l.Confidence >= TRUSTED ? "trusted" : l.Confidence >= MOSTLY_SAFE ? "mostly safe" : "confidence " + (l.Confidence * 100).ToString("0") + "%");
+                if (l.Width != BOX_WIDTH || l.Height != BOX_HEIGHT) sb.Append(", ").Append(l.Width.ToString("0")).Append(" x ").Append(l.Height.ToString("0")).Append(" m");
                 if (l.Order) sb.Append(" (order)");
                 if (l.State == LaneState.Suspended) sb.Append(" (suspended: ").Append(l.Reason).Append(')');
                 r.Add(sb.ToString());
@@ -1178,6 +1621,25 @@ namespace Automata.Pathfinding
             listVersion++;
             if (Log.DebugEnabled) Log.Debug("Lanes: {0} deleted by a player{1}", l.PairName, hold ? " (not traced again for " + config.FlightLaneExpirationMinutes + " min)" : "");
             return true;
+        }
+
+        /// <summary>
+        /// The owner's lanes between two of 'bases' (lane graph nodes: bases' grid entity ids, job places' ids) that 'keep'
+        /// (lane numbers) doesn't hold go: their ends no longer get a lane between them (a node in between: the way is through
+        /// it). Order lanes stay (their order decides). The number dropped.
+        /// </summary>
+        public int DropBaseLanes(long owner, HashSet<long> bases, HashSet<int> keep)
+        {
+            var gone = new List<int>();
+            foreach (var l in lanes.Values)
+                if (l.Owner == owner && !l.Order && !keep.Contains(l.Number) && bases.Contains(l.EndA) && bases.Contains(l.EndB)) gone.Add(l.Number);
+            for (int i = 0; i < gone.Count; i++)
+            {
+                if (Log.DebugEnabled) Log.Debug("Lanes: {0} dropped: the way between its ends is through another base or place now", lanes[gone[i]].PairName);
+                lanes.Remove(gone[i]);
+            }
+            if (gone.Count > 0) { dirty = true; listVersion++; }
+            return gone.Count;
         }
 
         public bool Resume(long owner, int number)
@@ -1210,7 +1672,7 @@ namespace Automata.Pathfinding
         public void Near(Vector3D c, double r, List<Lane> found)
         {
             foreach (var l in lanes.Values)
-                if (LineWithin(l.AB, c, r + BOX_WIDTH) || LineWithin(l.BA, c, r + BOX_WIDTH)) found.Add(l);
+                if (LineWithin(l.AB, c, r + l.Width) || LineWithin(l.BA, c, r + l.Width)) found.Add(l);
         }
 
         private static bool LineWithin(List<Vector3D> line, Vector3D c, double r)
@@ -1227,11 +1689,12 @@ namespace Automata.Pathfinding
             return false;
         }
 
-        /// <summary>A lane pair's two directed box lines and their "up"s (for the drawing). False: no such lane of 'owner'.</summary>
+        /// <summary>A lane pair's two directed box lines, their "up"s and its boxes' size (for the drawing). False: no such lane of 'owner'.</summary>
         public bool Geometry(long owner, int number, List<Vector3D> ab, List<Vector3D> ba, List<Vector3D> upAB, List<Vector3D> upBA,
-                             out bool suspended, out string nameAB, out string nameBA)
+                             out bool suspended, out string nameAB, out string nameBA, out double width, out double height)
         {
             suspended = false; nameAB = nameBA = null;
+            width = BOX_WIDTH; height = BOX_HEIGHT;
             Lane l;
             if (!lanes.TryGetValue(number, out l) || l.Owner != owner) return false;
             ab.AddRange(l.AB);
@@ -1241,6 +1704,8 @@ namespace Automata.Pathfinding
             suspended = l.State != LaneState.Active;
             nameAB = l.Name(true);
             nameBA = l.Name(false);
+            width = l.Width;
+            height = l.Height;
             return true;
         }
         #endregion
@@ -1266,6 +1731,8 @@ namespace Automata.Pathfinding
                         w.Write(l.Order); w.Write(l.OrderFound);
                         w.Write(l.OrderJobs.Count);
                         for (int i = 0; i < l.OrderJobs.Count; i++) w.Write(l.OrderJobs[i]);
+                        w.Write(l.Width); w.Write(l.Height);
+                        w.Write(l.Confidence); w.Write(l.Revision);
                         w.Write(l.Centre.Count);
                         for (int i = 0; i < l.Centre.Count; i++) { w.Write(l.Centre[i].X); w.Write(l.Centre[i].Y); w.Write(l.Centre[i].Z); }
                     }
@@ -1289,7 +1756,7 @@ namespace Automata.Pathfinding
                 using (BinaryReader r = MyAPIGateway.Utilities.ReadBinaryFileInWorldStorage(FILE_NAME, typeof(FlightLanes)))
                 {
                     int version = r.ReadInt32();
-                    if (version != 1 && version != FILE_VERSION) return;
+                    if (version != 1 && version != 3 && version != 4 && version != FILE_VERSION) return;
                     nextNumber = r.ReadInt32();
                     int n = r.ReadInt32();
                     for (int k = 0; k < n; k++)
@@ -1306,6 +1773,8 @@ namespace Automata.Pathfinding
                             int jobs = r.ReadInt32();
                             for (int i = 0; i < jobs; i++) l.OrderJobs.Add(r.ReadUInt32());
                         }
+                        if (version >= 4) { l.Width = r.ReadDouble(); l.Height = r.ReadDouble(); }
+                        if (version >= 5) { l.Confidence = r.ReadDouble(); l.Revision = r.ReadInt32(); }
                         if (l.State != LaneState.Suspended) l.State = LaneState.Active;   // (version 1: pending, checked at idle)
                         else if (l.SuspendedAt == 0) l.SuspendedAt = DateTime.UtcNow.Ticks;
                         int c = r.ReadInt32();

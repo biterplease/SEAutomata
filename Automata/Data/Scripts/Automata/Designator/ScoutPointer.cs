@@ -19,7 +19,7 @@ using Automata.VirtualNetwork;
 using Digi.NetworkLib;
 using Automata.Util.Strings;
 
-namespace Automata.Pointer
+namespace Automata.Designator
 {
     public enum PointerKind : byte { None, Combat, Industry }
 
@@ -850,7 +850,7 @@ namespace Automata.Pointer
         private sealed class OrderSink
         {
             public OrchestratorBlock Orch;
-            public Designator.TargetDesignatorBlock Designator;
+            public TargetDesignatorBlock Designator;
             public IMyCubeGrid Self;
 
             public bool IsCamera { get { return Designator != null; } }
@@ -965,7 +965,7 @@ namespace Automata.Pointer
             long identity = MyAPIGateway.Players.TryGetIdentityId(steamId);
             IMyEntity e;
             var tb = MyAPIGateway.Entities.TryGetEntityById(p.DesignatorId, out e) ? e as IMyTerminalBlock : null;
-            var designator = tb != null && tb.GameLogic != null ? tb.GameLogic.GetAs<Designator.TargetDesignatorBlock>() : null;
+            var designator = tb != null && tb.GameLogic != null ? tb.GameLogic.GetAs<TargetDesignatorBlock>() : null;
             if (designator == null || identity == 0 || !tb.HasPlayerAccess(identity))
             {
                 if (Log.DebugEnabled) Log.Debug("Pointer: [server] camera order {0} from {1}: refused (no target designator / no access)", p.Order, steamId);

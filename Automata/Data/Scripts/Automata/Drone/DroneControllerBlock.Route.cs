@@ -264,28 +264,43 @@ namespace Automata.Drone
                 if (Log.DebugEnabled) Log.Debug("Drone {0}: around the observation area ({1} waypoints)", Entity.EntityId, routeScratch.Count);
             var pm = PathfindingManager.Instance;
             // A flight lane of this drone's network from near the start to near the goal: through the slot the pathfinder
-            // gives it (its points are the route's preferred waypoints, each stretch planned and checked as usual). No slot
-            // free at the entrance yet: it holds outside and asks again (a planner that can wait only)
+            // gives it (its points are the route's preferred waypoints, each stretch planned and checked as usual). No sublane
+            // free at the entrance yet: it holds outside and asks again (a planner that can wait only); waited too long: it
+            // flies without the lane and tells the orchestrator. A hop (the first lane of a way through several, FlyRoute /
+            // docking only): the route ends at the lane's end for now, planned again there (UpdateLaneHop10). A trusted lane
+            // (flown clear end to end before): its stretches aren't checked here, nor at their start in flight; mostly safe:
+            // looked ahead in flight (an obstacle seen: the lane is checked again, LaneSuspect), trusted: not even that; another
+            // one flown end to end with nothing in the way is reported clear (UpdateLaneRide10)
+            FlightLanes.LaneLeg lane = default(FlightLanes.LaneLeg);
             string laneName = null;
-            int laneFirst = -1, laneLast = -1, laneNumber = 0;
-            bool laneAB = true;
+            int laneFirst = -1, laneLast = -1;
+            bool laneHop = false, laneTrusted = false;
+            if (laneHopOk) laneHopPending = false;
             if (routeScratch.Count == 0 && pm != null && localHullBox.Max.X >= localHullBox.Min.X)
             {
-                var join = pm.LaneRoute(jobOrchestratorId, Entity.EntityId, start, goal, localHullBox.HalfExtents, routeScratch, out laneName, out laneNumber, out laneAB);
+                var join = pm.LaneRoute(jobOrchestratorId, Entity.EntityId, start, goal, localHullBox.HalfExtents, routeScratch, laneHopOk, out lane);
                 if (join == FlightLanes.Join.Wait)
                 {
                     if (asyncPlanOk) throw PlanPendingException.Instance;
                     routeScratch.Clear();
-                    laneName = null;
+                }
+                else if (join == FlightLanes.Join.GaveUp)
+                {
+                    QueueLaneGiveUp(lane.Number, lane.AB, lane.Name);
+                    routeScratch.Clear();
                 }
                 else if (join != FlightLanes.Join.None)
                 {
+                    laneName = lane.Name;
+                    laneHop = lane.Hop;
+                    laneTrusted = lane.Relaxed && !suspectLanes.Contains(lane.Number);
                     laneFirst = 0;
                     laneLast = routeScratch.Count - 1;
-                    if (Log.DebugEnabled) Log.Debug("Drone {0}: {1} lane {2} ({3} points)", Entity.EntityId, join == FlightLanes.Join.Beside ? "beside" : "through", laneName, routeScratch.Count);
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: {1} lane {2} ({3} points{4}{5})", Entity.EntityId, join == FlightLanes.Join.Beside ? "beside" : "through", laneName, routeScratch.Count, laneHop ? ", to its end: planned again there" : "", laneTrusted ? (lane.Trusted ? ", trusted: not checked" : ", mostly safe: looked ahead only") : "");
                 }
-                else laneName = null;
             }
+            if (laneName != null && !lane.Relaxed && routeScratch.Count > 0) BeginLaneRide(lane, routeScratch[laneLast]);
+            else laneRideActive = false;
             bool usePathfinder = pm != null;
             PathQuery q = default(PathQuery);
             int now = MyAPIGateway.Session.GameplayFrameCounter;
@@ -296,6 +311,9 @@ namespace Automata.Drone
                 routeUnseen = 0;
                 routeJitArmed = true;
                 routeEscape = false;
+                trustedLanePoints.Clear();
+                relaxedLanePoints.Clear();
+                relaxedLaneNumbers.Clear();
             }
             if (usePathfinder)
             {
@@ -307,9 +325,19 @@ namespace Automata.Drone
                 pm.BeginPlan();
             }
             Vector3D from = start;
-            for (int i = 0; i <= routeScratch.Count; i++)
+            for (int i = 0; i <= routeScratch.Count - (laneHop ? 1 : 0); i++)   // (a hop: not the stretch on to the goal)
             {
                 Vector3D to = i < routeScratch.Count ? routeScratch[i] : goal;
+                if (laneTrusted && i > laneFirst && i <= laneLast)
+                {
+                    // Inside a trusted lane: straight on, unchecked
+                    points.Add(to);
+                    relaxedLanePoints.Add(to);
+                    relaxedLaneNumbers.Add(lane.Number);
+                    if (lane.Trusted) trustedLanePoints.Add(to);
+                    from = to;
+                    continue;
+                }
                 // Observation-area waypoints are only a preference: one the hull doesn't fit at (something built or
                 // parked there) is left out, the pathfinder takes the stretch to the next one
                 if (usePathfinder && i < routeScratch.Count && !pm.PointFree(ref q, to))
@@ -324,7 +352,7 @@ namespace Automata.Drone
                 // lane's orchestrator (with the way round), which redraws the lane
                 if (laneName != null && i > laneFirst && i <= laneLast && (rr == RouteResult.Blocked || points.Count > before))
                 {
-                    QueueLaneObstruction(laneNumber, laneAB, laneName, from, to, points, before, rr == RouteResult.Blocked, pm.StretchObstacle(ref q, from, to));
+                    QueueLaneObstruction(lane.Number, lane.AB, laneName, from, to, points, before, rr == RouteResult.Blocked, pm.StretchObstacle(ref q, from, to));
                     laneName = null;
                 }
                 if (usePathfinder && rr == RouteResult.Blocked)
@@ -335,6 +363,9 @@ namespace Automata.Drone
                         // the build): straight to the goal instead, rather than hovering there for good
                         if (Log.DebugEnabled) Log.Debug("Drone {0}: no way round the observation area, trying straight", Entity.EntityId);
                         routeScratch.Clear();
+                        laneHop = false;
+                        laneTrusted = false;
+                        laneRideActive = false;
                         points.RemoveRange(legOffset, points.Count - legOffset);
                         from = start;
                         pm.BeginPlan();
@@ -356,6 +387,11 @@ namespace Automata.Drone
                 from = to;
             }
             routeScratch.Clear();
+            if (laneHop && points.Count > legOffset)
+            {
+                laneHopPending = true;
+                laneHopSpot = points[points.Count - 1];
+            }
 
             // Attitudes along the route: aligned with each leg where the drone has room to turn
             routeChain.Clear();
@@ -424,9 +460,14 @@ namespace Automata.Drone
                 pass = WaypointBehavior.RunThrough;
             if (fwdIn.LengthSquared() > 0.5 && fwdOut.LengthSquared() > 0.5 && Vector3D.Dot(fwdIn, fwdOut) < (arc ? ARC_RUN_THROUGH_COS : RUN_THROUGH_COS))
                 pass = WaypointBehavior.FullStop;
-            exit = pass == WaypointBehavior.RunThrough ? Math.Min(MaxSpeed, ApproachSpeed * 2f)
+            // Between two open legs (OPEN_LEG long: a lane's, a long flight's) a run-through isn't slowed beyond what the bend and
+            // the legs after it need (ExitSpeedFor: TurnPassSpeed, StoppableSpeed); between short ones (around obstacles, the
+            // corners the planner hugs them at) twice the Approach speed at most
+            bool open = din.LengthSquared() >= OPEN_LEG * OPEN_LEG && dout.LengthSquared() >= OPEN_LEG * OPEN_LEG;
+            exit = pass == WaypointBehavior.RunThrough ? (open ? MaxSpeed : Math.Min(MaxSpeed, ApproachSpeed * 2f))
                  : pass == WaypointBehavior.SlowApproach ? ApproachSpeed : 0f;
         }
+        private const double OPEN_LEG = 200;   // m: legs this long both sides of a run-through: its speed set by the bend only
 
         /// <summary>The hull box centre, controller frame: route legs steer this point (turns about it sweep the least).</summary>
         private Vector3D HullCentreLocal
@@ -963,6 +1004,7 @@ namespace Automata.Drone
             legChecked = o;
             legsSinceUndock++;
             if (!o.Watched || routeOwner == RouteOwner.None) return;
+            if (RelaxedLaneLeg(o) != 0) return;                                      // in a trusted / mostly safe lane: flown clear before
             if (RecoverFlying) return;                                               // to a reposition spot: checked clear when chosen
             if (legsSinceUndock <= Math.Min(2, undockLegs)) return;                  // undocking (the back-out legs only)
             if (parkPhase != ParkPhase.None && o == parkOrder) return;               // landing: ends on the surface it parks on
@@ -1127,6 +1169,7 @@ namespace Automata.Drone
             var o = activeFlightOrder;
             if (o == null || !o.Watched || preflightStage != 0 || routeOwner == RouteOwner.None) return;
             if (parkPhase != ParkPhase.None && o == parkOrder) return;   // landing on the surface it parks on
+            if (TrustedLaneLeg(o)) return;                               // in a trusted lane: flown clear before
             if (++routeWatchCounter < ROUTE_WATCH_EVERY) return;
             routeWatchCounter = 0;
             var pm = PathfindingManager.Instance;
@@ -1196,6 +1239,7 @@ namespace Automata.Drone
             }
             if (!terrain && (rayLook < 1 || !pm.CheckAhead(ref q, ref legAtt, from, from + along / remaining * rayLook, out hit))) return;
             if (terrain) if (Log.DebugEnabled) Log.Debug("Drone {0}: terrain {1:F0} m ahead closer than {2:F1} m below the route", Entity.EntityId, Vector3D.Distance(from, hit), TerrainNeed());
+            LaneSuspect(o);   // in a mostly safe lane: the new route checks it
 
             lastReplanFrame = now;
             bool ok = pf.AllowRepathing() && ++routeReplans <= pf.MaxRepositionAttempts();

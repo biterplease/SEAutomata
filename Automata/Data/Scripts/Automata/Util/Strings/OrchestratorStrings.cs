@@ -50,6 +50,8 @@ namespace Automata.Util.Strings
         public static readonly MyStringId Orchestrator_DroneReportsDoneNot = MyStringId.GetOrCompute("{LOC:Orchestrator_DroneReportsDoneNot}"); // "Drone reports: {0} done, {1} not"
         public static readonly MyStringId Orchestrator_Drones = MyStringId.GetOrCompute("{LOC:Orchestrator_Drones}"); // "Drones"
         public static readonly MyStringId Orchestrator_DroneWithAnOreDetector = MyStringId.GetOrCompute("{LOC:Orchestrator_DroneWithAnOreDetector}"); // "drone with an ore detector"
+        public static readonly MyStringId Orchestrator_EnableSafeLanes = MyStringId.GetOrCompute("{LOC:Orchestrator_EnableSafeLanes}"); // "Enable safe lanes"
+        public static readonly MyStringId Orchestrator_EnableSafeLanesTooltip = MyStringId.GetOrCompute("{LOC:Orchestrator_EnableSafeLanesTooltip}"); // "Mark lanes as obstacle free once flown. Drones navigate lanes faster, but may crash, as they don't check for obstacles."
         public static readonly MyStringId Orchestrator_Error = MyStringId.GetOrCompute("{LOC:Orchestrator_Error}"); // "Error: {0}"
         public static readonly MyStringId Orchestrator_EscortingArg0 = MyStringId.GetOrCompute("{LOC:Orchestrator_EscortingArg0}"); // "Escorting {0}"
         public static readonly MyStringId Orchestrator_FarmHarvested = MyStringId.GetOrCompute("{LOC:Orchestrator_FarmHarvested}"); // "{0}: Farm plot(s) at {1} harvested, time to replant!"

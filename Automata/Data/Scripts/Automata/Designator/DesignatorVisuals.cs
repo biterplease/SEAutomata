@@ -11,7 +11,7 @@ using VRageMath;
 
 using Automata.Util.Logging;
 
-namespace Automata.Pointer
+namespace Automata.Designator
 {
     /// <summary>
     /// Client-side looks of the target designators (no gameplay): the tuner knob turning with the Reload animation, the
