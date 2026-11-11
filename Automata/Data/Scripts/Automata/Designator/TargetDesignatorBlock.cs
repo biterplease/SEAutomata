@@ -10,7 +10,6 @@ using VRage.ModAPI;
 using VRage.ObjectBuilders;
 using VRage.Utils;
 
-using Automata.Pointer;
 using Automata.Util;
 using Automata.Util.Logging;
 using Automata.VirtualNetwork;
@@ -137,7 +136,7 @@ namespace Automata.Designator
 
         protected override string SaveText()
         {
-            return BlockSave.ToText(new TargetDesignatorSaveData { Settings = settings, EntityId = Entity.EntityId });
+            return BlockSave.ToText(new TargetDesignatorSaveData { Settings = settings, EntityId = Entity.EntityId, IdCounter = idCounter });
         }
 
         protected override bool LoadSaveText(string text)
@@ -145,6 +144,7 @@ namespace Automata.Designator
             var data = BlockSave.FromText<TargetDesignatorSaveData>(text, Entity.EntityId);
             if (data == null) return false;
             settings = data.Settings ?? new TargetDesignatorSettings();
+            idCounter = Math.Max(idCounter, data.IdCounter);
             return true;
         }
 
@@ -319,10 +319,16 @@ namespace Automata.Designator
             return true;
         }
 
-        /// <summary>A job id for an order given here (unique with the block's id).</summary>
+        /// <summary>
+        /// A job id for an order given here (unique with the block's id). The counter goes into the block's storage at once:
+        /// it restarted at 0 on every load (it wasn't saved, and the world save doesn't write these blocks' storage), so
+        /// a new order's ids matched an old one's and orchestrators ignored them as known.
+        /// </summary>
         public uint NextId()
         {
-            return IdGenerator.GenerateId(ref idCounter, entityId);
+            uint id = IdGenerator.GenerateId(ref idCounter, entityId);
+            if (IsServer) WriteStorage();
+            return id;
         }
 
         // Answers of the orchestrator; orders nobody answered

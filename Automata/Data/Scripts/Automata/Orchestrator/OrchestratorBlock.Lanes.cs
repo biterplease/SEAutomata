@@ -176,7 +176,8 @@ namespace Automata.Orchestrator
         // relay network) and its job places - two get a lane unless a third is closer to both of them than they are to each
         // other (it lies between them: the way is through it), but a near-equilateral triangle (NEAR_EQUILATERAL) keeps all
         // three. A far-off base gets the lane to its nearest neighbour only; a hotspot between two bases takes their lane's
-        // place. Two natural places (asteroids, hotspots) get no lane. Lanes between two nodes that no longer qualify go (a
+        // place. Two natural places (asteroids, hotspots) get no lane. A jump-off point (a node with a lane out of its
+        // cluster) also gets a lane from every node of its cluster. Lanes between two nodes that no longer qualify go (a
         // base built in between, a place used again)
         private void TraceBaseLanes(Pathfinding.FlightLanes lanes)
         {
@@ -185,16 +186,51 @@ namespace Automata.Orchestrator
             if (nodes.Count < 2) return;
             var ids = new HashSet<long>();
             var keep = new HashSet<int>();
-            for (int i = 0; i < nodes.Count; i++) ids.Add(nodes[i].Id);
-            for (int i = 0; i < nodes.Count; i++)
-                for (int j = i + 1; j < nodes.Count; j++)
+            int c = nodes.Count;
+            for (int i = 0; i < c; i++)
+            {
+                ids.Add(nodes[i].Id);
+                if (nodes[i].Members != null) for (int m = 0; m < nodes[i].Members.Count; m++) ids.Add(nodes[i].Members[m]);   // (their old lanes go)
+            }
+            // The neighbourhood graph; a node with a lane out of its cluster (longer than JUMP_OFF_RANGE) is a jump-off point
+            var linked = new bool[c, c];
+            var jumpOff = new bool[c];
+            double far2 = JUMP_OFF_RANGE * JUMP_OFF_RANGE;
+            for (int i = 0; i < c; i++)
+                for (int j = i + 1; j < c; j++)
                 {
                     if (!Linked(nodes, i, j)) continue;
+                    linked[i, j] = linked[j, i] = true;
+                    if (Vector3D.DistanceSquared(nodes[i].Pos, nodes[j].Pos) > far2) jumpOff[i] = jumpOff[j] = true;
+                }
+            // Every node of a jump-off point's cluster (within JUMP_OFF_RANGE, room for a lane) gets a lane to it: the way
+            // out of the cluster is one lane away from anywhere in it
+            int added = 0;
+            for (int i = 0; i < c; i++)
+            {
+                if (!jumpOff[i]) continue;
+                for (int j = 0; j < c; j++)
+                {
+                    if (j == i || linked[i, j] || (nodes[i].Natural && nodes[j].Natural)) continue;
+                    double d2 = Vector3D.DistanceSquared(nodes[i].Pos, nodes[j].Pos);
+                    if (d2 > far2 || !Fits(nodes[i], nodes[j], d2)) continue;
+                    linked[i, j] = linked[j, i] = true;
+                    added++;
+                }
+            }
+            if (added > 0 && Log.DebugEnabled) Log.Debug("Orchestrator {0}: {1} lane(s) to jump-off points (nodes with a lane out of their cluster)", entityId, added);
+            for (int i = 0; i < c; i++)
+                for (int j = i + 1; j < c; j++)
+                {
+                    if (!linked[i, j]) continue;
                     int n = lanes.Trace(Entity.EntityId, nodes[i].Pos, nodes[j].Pos);
                     if (n != 0) keep.Add(n);
                 }
             lanes.DropBaseLanes(Entity.EntityId, ids, keep);
         }
+
+        // m: a lane longer than this leaves its cluster; its ends are jump-off points, linked to every node of their cluster
+        private const double JUMP_OFF_RANGE = Pathfinding.FlightLanes.LONG_LANE;
 
         // A lane graph node: a base (its grid) or a job's place
         private struct LaneNode
@@ -202,12 +238,21 @@ namespace Automata.Orchestrator
             public long Id;            // the lane place's id (a base: its grid's)
             public Vector3D Pos;
             public bool Natural;       // asteroid / hotspot: no lane to another natural place
+            public bool Base;
+            public double Radius;      // a base: its grid's bounding sphere (lanes end outside it)
+            public List<long> Members; // the grids of bases merged into one (FlightLanes.BASE_MERGE_RANGE), null: none
         }
 
         // Job places met in auctions (place id ->): nodes of the lane graph with the bases, while used
         private sealed class WorkPlace { public Vector3D Pos; public bool Natural; public long Seen; }
         private readonly Dictionary<long, WorkPlace> workPlaces = new Dictionary<long, WorkPlace>();
         private const int WORK_PLACES_MAX = 24;            // job places in the lane graph, at most (the most recently used)
+
+        private static int Root(int[] group, int i)
+        {
+            while (group[i] != i) i = group[i] = group[group[i]];
+            return i;
+        }
 
         // Places not used for the lanes' expiry time go; WORK_PLACES_MAX at most (the oldest go)
         private void TrimWorkPlaces(Pathfinding.FlightLanes lanes)
@@ -228,15 +273,59 @@ namespace Automata.Orchestrator
         {
             var nodes = new List<LaneNode>();
             var bases = LaneBases(fresh);
-            for (int i = 0; i < bases.Count; i++)
-                if (!bases[i].MarkedForClose) nodes.Add(new LaneNode { Id = bases[i].EntityId, Pos = bases[i].WorldVolume.Center });
+            // Bases BASE_MERGE_RANGE or closer (chains of them too) are one node, as FlightLanes.FindPlace makes them one
+            // place: centred between them, its radius round all of them, the place's id. No lanes among them (too short
+            // anyway), one set of lanes for all of them
+            var grids = new List<IMyCubeGrid>();
+            for (int i = 0; i < bases.Count; i++) if (!bases[i].MarkedForClose) grids.Add(bases[i]);
+            var group = new int[grids.Count];
+            for (int i = 0; i < grids.Count; i++) group[i] = i;
+            double merge2 = Pathfinding.FlightLanes.BASE_MERGE_RANGE * Pathfinding.FlightLanes.BASE_MERGE_RANGE;
+            for (int i = 0; i < grids.Count; i++)
+                for (int j = i + 1; j < grids.Count; j++)
+                {
+                    if (Vector3D.DistanceSquared(grids[i].WorldVolume.Center, grids[j].WorldVolume.Center) > merge2) continue;
+                    int a = Root(group, i), b = Root(group, j);
+                    if (a != b) group[b] = a;
+                }
+            for (int r = 0; r < grids.Count; r++)
+            {
+                if (Root(group, r) != r) continue;
+                int count = 0;
+                Vector3D centre = Vector3D.Zero;
+                for (int i = 0; i < grids.Count; i++)
+                    if (Root(group, i) == r) { centre += grids[i].WorldVolume.Center; count++; }
+                if (count == 1)
+                {
+                    nodes.Add(new LaneNode { Id = grids[r].EntityId, Pos = grids[r].WorldVolume.Center, Base = true, Radius = grids[r].WorldVolume.Radius });
+                    continue;
+                }
+                centre /= count;
+                var node = new LaneNode { Pos = centre, Base = true, Members = new List<long>() };
+                for (int i = 0; i < grids.Count; i++)
+                {
+                    if (Root(group, i) != r) continue;
+                    node.Members.Add(grids[i].EntityId);
+                    var o = grids[i].WorldVolume;
+                    node.Radius = Math.Max(node.Radius, Vector3D.Distance(centre, o.Center) + o.Radius);
+                }
+                // The id the lanes use for it (FindPlace's: the lowest grid id of the group it finds there)
+                long id;
+                bool natural, isBase;
+                var lanes = Pathfinding.PathfindingManager.Instance != null ? Pathfinding.PathfindingManager.Instance.Lanes : null;
+                node.Id = lanes != null && lanes.Locate(centre, out id, out natural, out isBase) && isBase ? id : node.Members[0];
+                if (fresh && Log.DebugEnabled)
+                    Log.Debug("Orchestrator {0}: lane graph: {1} bases within {2:F0} m of each other are one node (between them, radius {3:F0} m)", entityId, count, Pathfinding.FlightLanes.BASE_MERGE_RANGE, node.Radius);
+                nodes.Add(node);
+            }
             foreach (var kv in workPlaces) nodes.Add(new LaneNode { Id = kv.Key, Pos = kv.Value.Pos, Natural = kv.Value.Natural });
             return nodes;
         }
 
         // Nodes i and j get a lane: not both natural, and no third node lies between them (closer to both than they are to
         // each other: squared distances, no roots) unless the three make a near-equilateral triangle. A natural node between
-        // a natural one and another doesn't count (no lane from it to the natural one: no way through it)
+        // a natural one and another doesn't count (no lane from it to the natural one: no way through it), nor does one too
+        // close to either end for a lane between them (FlightLanes.LaneFits: the way through it can't be drawn)
         private static bool Linked(List<LaneNode> nodes, int i, int j)
         {
             if (nodes[i].Natural && nodes[j].Natural) return false;
@@ -250,9 +339,16 @@ namespace Automata.Orchestrator
                 double ac = Vector3D.DistanceSquared(a, c), bc = Vector3D.DistanceSquared(b, c);
                 if (ac >= ab || bc >= ab) continue;                                          // not between them
                 if (Math.Min(ac, bc) >= NEAR_EQUILATERAL * NEAR_EQUILATERAL * ab) continue;   // near-equilateral
+                if (!Fits(nodes[i], nodes[k], ac) || !Fits(nodes[k], nodes[j], bc)) continue;   // no lane through it
                 return false;
             }
             return true;
+        }
+
+        // A lane between 'a' and 'b' ('d2': their squared distance) would be long enough to be drawn
+        private static bool Fits(LaneNode a, LaneNode b, double d2)
+        {
+            return Pathfinding.FlightLanes.LaneFits(Math.Sqrt(d2), a.Base, a.Radius, b.Base, b.Radius);
         }
 
         // The player's bases (static grids with an Automata computer block) this orchestrator's relay network reaches (its

@@ -22,7 +22,9 @@ Logistics computers never watch inventories outside of its own mechanical constr
 
 ## Conveyor networks
 
-The Logistics Computer sees its grid as one or more **conveyor networks**, and it identifies conveyor networks separately within a grid.
+A conveyor network is a group of at least 1 connector and 1 cargo container.
+
+The Logistics Computer sees its grid as one or more **conveyor networks**, and it identifies each separately within a grid.
 
 Each conveyor network is mapped with its own:
 - Storage Capacity: cargo containers

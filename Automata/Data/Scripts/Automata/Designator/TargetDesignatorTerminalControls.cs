@@ -2,7 +2,6 @@ using Sandbox.ModAPI;
 using Sandbox.ModAPI.Interfaces.Terminal;
 using VRage.Utils;
 
-using Automata.Pointer;
 using Automata.Util;
 using Automata.Util.Strings;
 

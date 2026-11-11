@@ -222,7 +222,7 @@ namespace Automata.Drone
             }
             jobAbortReason = null;
             CancelPendingRoute();
-            Pointer.QuarrySites.Release(_entityId);
+            Automata.Designator.QuarrySites.Release(_entityId);
             var source = jobSource;
             currentJob = null;
             constructionOrder = null;
@@ -262,7 +262,7 @@ namespace Automata.Drone
                 ClearFlightOrder();
             }
             if (jobSource == JobSource.Orchestrator && currentJob != null) ReportJobOutcome(JobOutcome.Aborted, reason);
-            Pointer.QuarrySites.Release(_entityId);
+            Automata.Designator.QuarrySites.Release(_entityId);
             if (cPhase == ConstructionPhase.Running)
             {
                 ToolsOff();

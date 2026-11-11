@@ -2552,15 +2552,6 @@ NOTE: AI must be disabled to change.</value>
   <data name="Logistics_CnSplit" xml:space="preserve">
     <value>{0} split: {1} keeps a copy of its Min / Max list ({2} line(s))</value>
   </data>
-  <data name="Logistics_CnListCleared" xml:space="preserve">
-    <value>{0}: no connector or no cargo container: its Min / Max list cleared</value>
-  </data>
-  <data name="Logistics_CnNoConnectors" xml:space="preserve">
-    <value>{0}: no connectors: nothing can be delivered or collected there</value>
-  </data>
-  <data name="Logistics_CnNoCargo" xml:space="preserve">
-    <value>{0}: no cargo containers: no room for requests</value>
-  </data>
   <data name="Logistics_Filter" xml:space="preserve">
     <value>Filter</value>
   </data>

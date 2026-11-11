@@ -96,7 +96,8 @@ namespace Automata.Pathfinding
         private const double REDRAW_STEP = 10;
         private const double TRACE_SAMPLE = 20;          // m between the points of a traced line (trimmed at its ends, over the heightmap)
         private const double TERRAIN_ALTITUDE = 40 + BOX_HEIGHT + BOX_GAP / 2;   // m: the centre line over the heightmap (40 m under the lower box)
-        private const double LONG_LANE = 5000;           // m between its ends: a long lane, flown higher in gravity...
+        public const double BASE_MERGE_RANGE = 300;      // m between two bases' centres, at most: one place (chains too)
+        public const double LONG_LANE = 5000;            // m between its ends: a long lane, flown higher in gravity...
         private const double LONG_LANE_LIFT = 600;       // ...by this much over TERRAIN_ALTITUDE (straighter: fewer legs over the hills)...
         private const double LONG_LANE_RAMP = 1500;      // ...reached this far from its ends (a climb of ~22° out of the bases)...
         private const double LANE_AIR_MIN = 0.85;        // ...but not where the air is thinner than this (atmospheric thrusters keep ~80%)
@@ -537,8 +538,49 @@ namespace Automata.Pathfinding
                                         Kind = PlaceKind.Asteroid, Outward = s.Center };
                 }
             }
+            if (place.Kind == PlaceKind.Base && place.Id != 0) MergeBases(ref place, found);
             if (place.Id != 0) return true;
             return FindHotspot(p, out place);
+        }
+
+        private readonly List<IMyCubeGrid> mergeScratch = new List<IMyCubeGrid>();
+
+        // A base and the bases BASE_MERGE_RANGE or closer to it (centre to centre, chained) are one place: its centre the
+        // middle of theirs (a lane ends between them, not through one of them), its sphere round all of them, its id the
+        // lowest of their grids' (the same whichever of them a trace starts from), its name theirs joined
+        private void MergeBases(ref Place place, List<IMyEntity> found)
+        {
+            IMyEntity e;
+            var first = MyAPIGateway.Entities.TryGetEntityById(place.Id, out e) ? e as IMyCubeGrid : null;
+            if (first == null) return;
+            mergeScratch.Clear();
+            mergeScratch.Add(first);
+            double range2 = BASE_MERGE_RANGE * BASE_MERGE_RANGE;
+            for (int m = 0; m < mergeScratch.Count; m++)
+                for (int i = 0; i < found.Count; i++)
+                {
+                    var g = found[i] as IMyCubeGrid;
+                    if (g == null || !g.IsStatic || mergeScratch.Contains(g)) continue;
+                    if (Vector3D.DistanceSquared(g.WorldVolume.Center, mergeScratch[m].WorldVolume.Center) > range2 || !HasAutomataComputer(g)) continue;
+                    mergeScratch.Add(g);
+                }
+            if (mergeScratch.Count < 2) { mergeScratch.Clear(); return; }
+            Vector3D centre = Vector3D.Zero;
+            long id = long.MaxValue;
+            var name = new StringBuilder();
+            for (int i = 0; i < mergeScratch.Count; i++)
+            {
+                centre += mergeScratch[i].WorldVolume.Center;
+                id = Math.Min(id, mergeScratch[i].EntityId);
+                if (i > 0) name.Append(" + ");
+                name.Append(mergeScratch[i].DisplayName);
+            }
+            centre /= mergeScratch.Count;
+            double radius = 0;
+            for (int i = 0; i < mergeScratch.Count; i++)
+                radius = Math.Max(radius, Vector3D.Distance(centre, mergeScratch[i].WorldVolume.Center) + mergeScratch[i].WorldVolume.Radius);
+            place = new Place { Id = id, Name = Short(name.ToString()), Sphere = new BoundingSphereD(centre, radius), Kind = PlaceKind.Base };
+            mergeScratch.Clear();
         }
 
         private readonly List<KeyValuePair<MyStringHash, Vector3D>> depositScratch = new List<KeyValuePair<MyStringHash, Vector3D>>();
@@ -1393,6 +1435,17 @@ namespace Automata.Pathfinding
                 Log.Error("Lanes: no place found at {0}: {1}", p, ex.Message);
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Two places 'distance' m apart (centre to centre) leave room for a lane between them: MIN_LENGTH once its ends are
+        /// trimmed (BASE_MARGIN outside a base's sphere of 'radius', WORK_MARGIN short of a work place). An estimate of
+        /// MakeLane's own test, before tracing.
+        /// </summary>
+        public static bool LaneFits(double distance, bool baseA, double radiusA, bool baseB, double radiusB)
+        {
+            double ends = (baseA ? radiusA + BASE_MARGIN : WORK_MARGIN) + (baseB ? radiusB + BASE_MARGIN : WORK_MARGIN);
+            return distance - ends >= MIN_LENGTH;
         }
 
         /// <summary>Minutes an unused lane lives (FlightLaneExpirationMinutes).</summary>

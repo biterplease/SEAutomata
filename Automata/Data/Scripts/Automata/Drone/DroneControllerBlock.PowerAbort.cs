@@ -47,7 +47,7 @@ namespace Automata.Drone
             CapturePowerRemnant(job);
             Report(MyStrings.Drone_JobAbandonedLowPower);
             if (jobSource == JobSource.Orchestrator) ReportJobOutcome(JobOutcome.Aborted, reason);   // the orchestrator re-auctions it
-            Pointer.QuarrySites.Release(_entityId);
+            Automata.Designator.QuarrySites.Release(_entityId);
             // In a block / bore: straight back out first, the job cut after that
             int keep = BackOutIndex();
             jobSource = JobSource.Housekeeping;   // its own errand from here: nothing more reported, no clear trip

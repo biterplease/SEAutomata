@@ -46,7 +46,7 @@ namespace Automata.Drone
         private const int SWEEP_SKIP = 4;                   // path points skipped per retry of a resume
 
         private SweepPhase sweepPhase;
-        private readonly Automata.Pointer.SweepPlanner sweepMap = new Automata.Pointer.SweepPlanner();
+        private readonly Automata.Designator.SweepPlanner sweepMap = new Automata.Designator.SweepPlanner();
         private Orchestrator.Task sweepTask;
         private bool sweepMapping;
         private int sweepPassed;            // index of the last path point passed
@@ -109,7 +109,7 @@ namespace Automata.Drone
             {
                 if (MyAPIGateway.Session.GameplayFrameCounter < sweepLaunchAt) return TaskStatus.Running;
                 sweepLaunched = true;
-                if (SweepFocusDistance() > Automata.Pointer.SweepPlanner.MAP_RANGE)
+                if (SweepFocusDistance() > Automata.Designator.SweepPlanner.MAP_RANGE)
                 {
                     var nav = Orchestrator.Task.NavigateTo(0, SweepApproachPoint(), SweepApproachPoint(), task.NaturalGravity);
                     var failure = DispatchNavigateTo(ref nav);
@@ -131,7 +131,7 @@ namespace Automata.Drone
         // On the way: the map starts within MAP_RANGE and is made a few ms per update while the drone flies on
         private TaskStatus SweepApproach()
         {
-            if (!sweepMapping && SweepFocusDistance() <= Automata.Pointer.SweepPlanner.MAP_RANGE)
+            if (!sweepMapping && SweepFocusDistance() <= Automata.Designator.SweepPlanner.MAP_RANGE)
             {
                 var t = sweepTask;
                 Vector3I sec = t.TargetBlock.ToVector3I();
@@ -528,7 +528,7 @@ namespace Automata.Drone
                 if (v != null)
                 {
                     Vector3D o = spot - v.PositionComp.WorldAABB.Center;
-                    if (o.LengthSquared() > 1) return spot + Vector3D.Normalize(o) * (Automata.Pointer.SweepPlanner.ASTEROID_CLEARANCE + h);
+                    if (o.LengthSquared() > 1) return spot + Vector3D.Normalize(o) * (Automata.Designator.SweepPlanner.ASTEROID_CLEARANCE + h);
                 }
                 return spot;
             }
@@ -539,17 +539,17 @@ namespace Automata.Drone
                 Vector3D planeUp = spot - planet.PositionComp.GetPosition();
                 if (planeUp.LengthSquared() > 1)
                 {
-                    Vector3D p = Automata.Pointer.SweepPlanner.SpiralStart(spot, Vector3D.Normalize(planeUp), sec.X, sec.Y);
+                    Vector3D p = Automata.Designator.SweepPlanner.SpiralStart(spot, Vector3D.Normalize(planeUp), sec.X, sec.Y);
                     Vector3D s = planet.GetClosestSurfacePointGlobal(ref p);
                     Vector3D up = s - planet.PositionComp.GetPosition();
-                    if (up.LengthSquared() > 1) return s + Vector3D.Normalize(up) * (Automata.Pointer.SweepPlanner.PLANET_CLEARANCE + h);
+                    if (up.LengthSquared() > 1) return s + Vector3D.Normalize(up) * (Automata.Designator.SweepPlanner.PLANET_CLEARANCE + h);
                 }
                 return spot;
             }
             Vector3D face = sweepTask.ApproachFrom.ToVector3D() - spot;
             if (face.LengthSquared() < 1) return spot;
             face.Normalize();
-            return Automata.Pointer.SweepPlanner.SpiralStart(spot, face, sec.X, sec.Y) + face * h;
+            return Automata.Designator.SweepPlanner.SpiralStart(spot, face, sec.X, sec.Y) + face * h;
         }
     }
 }

@@ -7,7 +7,7 @@ using VRageMath;
 
 using Automata.Mining;
 
-namespace Automata.Pointer
+namespace Automata.Designator
 {
     /// <summary>
     /// Quarry mining (TODO/19): a straight shaft, Q x Q, along an axis (gravity up on a planet; on an asteroid the line

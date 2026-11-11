@@ -115,7 +115,7 @@ namespace Automata.Pathfinding
             e.SpotR = e.Axis.Normalize();
             if (e.SpotR < 1) { e.Axis = Vector3D.Up; e.SpotR = 1; }
             Vector3D e1 = Vector3D.CalculatePerpendicularVector(e.Axis), e2 = Vector3D.Cross(e.Axis, e1);
-            int orbits = Pointer.ScoutPlanner.OrbitCount(sectors);
+            int orbits = Automata.Designator.ScoutPlanner.OrbitCount(sectors);
             for (int k = 0; k < orbits; k++)
             {
                 double t = tilt + k * Math.PI / orbits;   // great circles through the spot, evenly round it

@@ -6,7 +6,7 @@ using VRageMath;
 
 using Automata.Util.Logging;
 
-namespace Automata.Pointer
+namespace Automata.Designator
 {
     /// <summary>
     /// Quarry shafts dug at the same time near each other share a site (server, runtime): the first one's axis and a grid

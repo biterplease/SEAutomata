@@ -7,7 +7,7 @@ using VRageMath;
 
 using Automata.Orchestrator;
 
-namespace Automata.Pointer
+namespace Automata.Designator
 {
     /// <summary>
     /// Task lists of scout jobs (TODO/11), server side. Spot check: a standoff point off the surface, an ore scan. Area

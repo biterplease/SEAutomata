@@ -177,13 +177,13 @@ namespace Automata.Drone
                 {
                     // A quarry planned on the way, bored instead: its section isn't held for nothing
                     quarryPlanned = false;
-                    Automata.Pointer.QuarrySites.Release(_entityId);
+                    Automata.Designator.QuarrySites.Release(_entityId);
                 }
                 return BeginBore(ToolPointWorld(), now, task.ApproachFrom.ToVector3D(), false);
             }
             if (!IsConstructionOrderActive()) { FinishMine(); return TaskStatus.Interrupted; }
             if (quarryActive) return RunQuarry(now, elapsed);
-            if (quarryDug) Automata.Pointer.QuarrySites.Refresh(_entityId);   // boring on from a quarry's floor: its section stays claimed
+            if (quarryDug) Automata.Designator.QuarrySites.Refresh(_entityId);   // boring on from a quarry's floor: its section stays claimed
             Vector3D at = ToolPointWorld();
             // Something in the bore ahead (a grid, another drone): held there, never pushed into
             TaskStatus held;
@@ -866,7 +866,7 @@ namespace Automata.Drone
             boring = false;
             quarryActive = false;
             quarryPlanned = false;
-            Automata.Pointer.QuarrySites.Release(_entityId);   // its section on a quarry site (none: nothing)
+            Automata.Designator.QuarrySites.Release(_entityId);   // its section on a quarry site (none: nothing)
             boreHold = false;
             boreHoldFrame = 0;
             boreCollecting = false;   // the survey (suppressed while collecting) runs again
@@ -978,7 +978,7 @@ namespace Automata.Drone
             if (keep >= 0)
             {
                 if (jobSource == JobSource.Orchestrator) ReportJobOutcome(JobOutcome.Aborted, Loc.T(MyStrings.Drone_RecalledLower));
-                Pointer.QuarrySites.Release(_entityId);
+                Automata.Designator.QuarrySites.Release(_entityId);
                 taskScanner.Cancel();
                 if (Log.DebugEnabled) Log.Debug("Drone {0}: recalled in a block / bore: backing out first, then home", _entityId);
                 CutJobToBackOut(keep, true);

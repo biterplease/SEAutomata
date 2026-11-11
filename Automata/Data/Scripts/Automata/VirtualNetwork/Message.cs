@@ -179,7 +179,7 @@ namespace Automata.VirtualNetwork
         [ProtoMember(21)] public uint OrderId;
         /// <summary>The player who pointed it (identity id).</summary>
         [ProtoMember(22)] public long Identity;
-        [ProtoMember(23)] public Pointer.PointerKind Kind;
+        [ProtoMember(23)] public Automata.Designator.PointerKind Kind;
         /// <summary>The order's GPS marker name.</summary>
         [ProtoMember(24)] public string Marker;
         /// <summary>What it is, for the orchestrator's log ("Spot check 2/3").</summary>

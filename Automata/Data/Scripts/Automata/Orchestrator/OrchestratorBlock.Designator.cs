@@ -9,7 +9,7 @@ using VRageMath;
 
 using Automata.Drone;
 using Automata.Inventory;
-using Automata.Pointer;
+using Automata.Designator;
 using Automata.Util;
 using Automata.Util.Logging;
 using Automata.VirtualNetwork;
