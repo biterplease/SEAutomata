@@ -501,11 +501,12 @@ namespace Automata.VirtualNetwork
         [ProtoMember(1)] public long Id;              // UTC ticks it was found (one per drone and obstruction)
         [ProtoMember(2)] public int Lane;
         [ProtoMember(3)] public bool AB;
-        [ProtoMember(4)] public byte Kind;            // Pathfinding.FlightLanes.ObstacleKind: 1 rock, 2 a tree, 3 a static grid
+        [ProtoMember(4)] public byte Kind;            // Pathfinding.FlightLanes.ObstacleKind: 1 rock, 2 a tree, 3 a static grid; FlightLanes.GAVE_UP: no obstruction, the drone gave up waiting at the lane's entrance (Id: when); FlightLanes.CLEAR: it flew the lane end to end with nothing in the way
         [ProtoMember(5)] public string What;
         [ProtoMember(6)] public Vector3DData A;       // the stretch (the lane's slot points either side)
         [ProtoMember(7)] public Vector3DData B;
         [ProtoMember(8)] public List<Vector3DData> Detour;   // the way round (null / empty: none found)
+        [ProtoMember(9)] public int Revision;         // FlightLanes.CLEAR: the lane's geometry the drone flew
     }
 
     /// <summary>A chat line for the player (PLAYER_ALERT): 'Text' is complete, it starts with the name of whoever meant to say it.</summary>

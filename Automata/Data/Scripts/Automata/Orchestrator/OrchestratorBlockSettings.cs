@@ -43,6 +43,10 @@ namespace Automata.Orchestrator
         [ProtoMember(21)] public string LaneDrawNameBA = "";
         [ProtoMember(24)] public System.Collections.Generic.List<double> LaneDrawUpAB = new System.Collections.Generic.List<double>();   // "up" at each point
         [ProtoMember(25)] public System.Collections.Generic.List<double> LaneDrawUpBA = new System.Collections.Generic.List<double>();
+        [ProtoMember(26)] public double LaneDrawWidth = Pathfinding.FlightLanes.BOX_WIDTH;    // its boxes' size
+        [ProtoMember(27)] public double LaneDrawHeight = Pathfinding.FlightLanes.BOX_HEIGHT;
+        /// <summary>Lanes flown clear are trusted fully (drones fly them unchecked), not just mostly (FlightLanes.SetSafeLanes).</summary>
+        [ProtoMember(28)] public bool SafeLanes;
         // ProtoMember 22 (DesignatorCameraId) and 23 (DesignatorLcdTag) moved to the target designator block: never reuse them.
     }
 

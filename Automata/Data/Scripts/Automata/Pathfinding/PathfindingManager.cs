@@ -181,15 +181,16 @@ namespace Automata.Pathfinding
 
         /// <summary>
         /// A route request's lane step: a flight lane of the drone's network that fits start -> goal, and the slot in it its
-        /// size gets (FlightLanes.FindLane): its line appended to 'waypoints'. Wait: no slot free at the entrance yet (the drone
-        /// holds outside and asks again). The drone only sees waypoints.
+        /// size gets (FlightLanes.FindLane): its line appended to 'waypoints'. Wait: no sublane free at the entrance yet (the
+        /// drone holds outside and asks again). 'chain': the first lane of a way through several may be given ('hop': the
+        /// drone plans again at its end; 'leg.Trusted': its stretches need no checks). The drone only sees waypoints.
         /// </summary>
         public FlightLanes.Join LaneRoute(long owner, long droneId, Vector3D start, Vector3D goal, Vector3D hullHalf, List<Vector3D> waypoints,
-                                          out string name, out int number, out bool ab)
+                                          bool chain, out FlightLanes.LaneLeg leg)
         {
-            name = null; number = 0; ab = true;
+            leg = new FlightLanes.LaneLeg { AB = true };
             if (Lanes == null) return FlightLanes.Join.None;
-            return Lanes.FindLane(owner, droneId, start, goal, hullHalf, MyAPIGateway.Session.GameplayFrameCounter, waypoints, out name, out number, out ab);
+            return Lanes.FindLane(owner, droneId, start, goal, hullHalf, MyAPIGateway.Session.GameplayFrameCounter, waypoints, chain, out leg);
         }
 
         /// <summary>What blocks the straight stretch a -> b for the query's hull (null: nothing): a lane obstruction's kind.</summary>

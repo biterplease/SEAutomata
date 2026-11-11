@@ -1199,6 +1199,25 @@
 P-Gravity: Quad-copter flight.
 Space: burn, cruise, flip-and-burn.</value>
   </data>
+  <data name="Drone_EconomyFullSpeed" xml:space="preserve">
+    <value>Full speed ({0} m/s) in {1} s</value>
+  </data>
+  <data name="Drone_EconomyFullSpeedTooltip" xml:space="preserve">
+    <value>Full speed ({0} m/s) in {1} s at current load of {2} kg (Max thrust {3}% of {4} kN).</value>
+  </data>
+  <data name="Drone_EconomyLiftTooWeak" xml:space="preserve">
+    <value>Economy: lift {0}x weight, needs {1}x</value>
+  </data>
+  <data name="Drone_EconomyLiftTooWeakTooltip" xml:space="preserve">
+    <value>Lift {0}x its weight at current load of {1} kg: economy flight needs {2}x to tilt.</value>
+  </data>
+  <data name="Drone_EconomyMinTilt" xml:space="preserve">
+    <value>Min pitch: {0}°, roll: {1}° (up to {2}°)</value>
+  </data>
+  <data name="Drone_EconomyMinTiltTooltip" xml:space="preserve">
+    <value>Min pitch: {0}°, roll: {1}° at current load of {2} kg.
+Economy flight tilts up to the smaller of the two limits; this load lets it use up to {3}° (lift {4}x its weight).</value>
+  </data>
   <data name="Drone_EnemyDetected" xml:space="preserve">
     <value>enemy detected</value>
   </data>
@@ -3121,6 +3140,12 @@ NOTE: AI must be disabled to change.</value>
   </data>
   <data name="Orchestrator_DroneWithAnOreDetector" xml:space="preserve">
     <value>drone with an ore detector</value>
+  </data>
+  <data name="Orchestrator_EnableSafeLanes" xml:space="preserve">
+    <value>Enable safe lanes</value>
+  </data>
+  <data name="Orchestrator_EnableSafeLanesTooltip" xml:space="preserve">
+    <value>Mark lanes as obstacle free once flown. Drones navigate lanes faster, but may crash, as they don't check for obstacles.</value>
   </data>
   <data name="Orchestrator_Error" xml:space="preserve">
     <value>Error: {0}</value>

@@ -30,7 +30,8 @@ namespace Automata.Orchestrator
 
         private int laneListCounter, laneListVersion = -1, laneListMinute, baseLaneCounter;
         private const int BASE_LANES_EVERY = 6 * 60 * 5;   // UpdateBeforeSimulation10 calls (5 min) between base lane passes
-        private const int BASE_LANES_MAX = 8;              // bases a pass traces lanes between, at most
+        private const int BASE_LANES_MAX = 24;             // bases a pass traces lanes between, at most
+        private const double NEAR_EQUILATERAL = 0.75;      // a triangle of bases whose shortest side is this much of its longest keeps all three lanes
         private readonly HashSet<string> appliedObstructions = new HashSet<string>();
         private string laneCommandDone = "";
 
@@ -57,6 +58,7 @@ namespace Automata.Orchestrator
                 laneListVersion = -1;
             }
             if (--baseLaneCounter <= 0) { baseLaneCounter = BASE_LANES_EVERY; TraceBaseLanes(lanes); }
+            lanes.SetSafeLanes(Entity.EntityId, settings.SafeLanes);
             // On a change, and once a minute anyway ("last N min ago")
             if (++laneListCounter < LANE_LIST_EVERY) return;
             laneListCounter = 0;
@@ -96,12 +98,13 @@ namespace Automata.Orchestrator
                     var upBA = new List<Vector3D>();
                     bool pending;
                     string nab, nba;
+                    double width, height;
                     settings.LaneDrawAB = new List<double>();
                     settings.LaneDrawBA = new List<double>();
                     settings.LaneDrawUpAB = new List<double>();
                     settings.LaneDrawUpBA = new List<double>();
                     settings.LaneDrawNumber = number;
-                    if (lanes.Geometry(Entity.EntityId, number, ab, ba, upAB, upBA, out pending, out nab, out nba))
+                    if (lanes.Geometry(Entity.EntityId, number, ab, ba, upAB, upBA, out pending, out nab, out nba, out width, out height))
                     {
                         Flatten(ab, settings.LaneDrawAB);
                         Flatten(ba, settings.LaneDrawBA);
@@ -110,6 +113,8 @@ namespace Automata.Orchestrator
                         settings.LaneDrawPending = pending;
                         settings.LaneDrawNameAB = nab;
                         settings.LaneDrawNameBA = nba;
+                        settings.LaneDrawWidth = width;
+                        settings.LaneDrawHeight = height;
                     }
                     SettingsEdited();
                     break;
@@ -118,8 +123,10 @@ namespace Automata.Orchestrator
             if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: lane command {1} {2}", entityId, parts[1], number);
         }
 
-        // An auction with a location: a lane from this orchestrator's base to the job's place (combat orders fly in formation,
-        // not in lanes); a scout job's lane is an order lane (dropped if its order finds nothing)
+        // An auction with a location: its place joins the lane graph with the bases (TraceBaseLanes' rule: lanes to the bases
+        // and places it is a neighbour of); a place met before keeps its lanes (the base lane pass upholds them). A place that
+        // is a base: nothing (the base lanes). Combat orders fly in formation, not in lanes. A scout job: an order lane from
+        // the nearest node (dropped if its order finds nothing), its spot not a node
         private void TraceJobLane(JobAnnouncement ja)
         {
             var lanes = Pathfinding.PathfindingManager.Instance != null ? Pathfinding.PathfindingManager.Instance.Lanes : null;
@@ -131,16 +138,137 @@ namespace Automata.Orchestrator
             }
             Vector3D to = ja.PositionData.ToVector3D();
             if (to.LengthSquared() < 1) return;
+            long id;
+            bool natural, isBase;
+            if (!lanes.Locate(to, out id, out natural, out isBase) || isBase) return;
             bool scout = ja.Type == JobType.DesignatorScoutArea || ja.Type == JobType.DesignatorScoutPoint;
-            lanes.Trace(Entity.EntityId, block.CubeGrid.WorldVolume.Center, to, scout ? ja.JobId : 0u);
+            if (scout)
+            {
+                var all = LaneNodes(false);
+                int near = -1;
+                double best = double.MaxValue;
+                for (int j = 0; j < all.Count; j++)
+                {
+                    if (natural && all[j].Natural) continue;
+                    double d = Vector3D.DistanceSquared(all[j].Pos, to);
+                    if (d < best) { best = d; near = j; }
+                }
+                if (near >= 0) lanes.Trace(Entity.EntityId, all[near].Pos, to, ja.JobId);
+                return;
+            }
+            WorkPlace wp;
+            bool known = workPlaces.TryGetValue(id, out wp);
+            if (!known) { wp = new WorkPlace(); workPlaces[id] = wp; }
+            wp.Pos = to;
+            wp.Natural = natural;
+            wp.Seen = DateTime.UtcNow.Ticks / TimeSpan.TicksPerMinute;
+            if (known) return;
+            TrimWorkPlaces(lanes);
+            var nodes = LaneNodes(false);
+            int me = -1;
+            for (int i = 0; i < nodes.Count && me < 0; i++) if (nodes[i].Id == id) me = i;
+            if (me < 0) return;
+            for (int j = 0; j < nodes.Count; j++)
+                if (j != me && Linked(nodes, me, j)) lanes.Trace(Entity.EntityId, nodes[j].Pos, to);
         }
 
-        // Lanes between the player's bases (static grids with an Automata computer block) this orchestrator's relay network
-        // reaches, pair by pair
+        // The lane graph's nodes and lanes: a relative neighbourhood graph over this orchestrator's bases (the player's on its
+        // relay network) and its job places - two get a lane unless a third is closer to both of them than they are to each
+        // other (it lies between them: the way is through it), but a near-equilateral triangle (NEAR_EQUILATERAL) keeps all
+        // three. A far-off base gets the lane to its nearest neighbour only; a hotspot between two bases takes their lane's
+        // place. Two natural places (asteroids, hotspots) get no lane. Lanes between two nodes that no longer qualify go (a
+        // base built in between, a place used again)
         private void TraceBaseLanes(Pathfinding.FlightLanes lanes)
         {
-            if (messaging == null || block.CubeGrid == null) return;
-            var bases = new List<IMyCubeGrid>();
+            TrimWorkPlaces(lanes);
+            var nodes = LaneNodes(true);
+            if (nodes.Count < 2) return;
+            var ids = new HashSet<long>();
+            var keep = new HashSet<int>();
+            for (int i = 0; i < nodes.Count; i++) ids.Add(nodes[i].Id);
+            for (int i = 0; i < nodes.Count; i++)
+                for (int j = i + 1; j < nodes.Count; j++)
+                {
+                    if (!Linked(nodes, i, j)) continue;
+                    int n = lanes.Trace(Entity.EntityId, nodes[i].Pos, nodes[j].Pos);
+                    if (n != 0) keep.Add(n);
+                }
+            lanes.DropBaseLanes(Entity.EntityId, ids, keep);
+        }
+
+        // A lane graph node: a base (its grid) or a job's place
+        private struct LaneNode
+        {
+            public long Id;            // the lane place's id (a base: its grid's)
+            public Vector3D Pos;
+            public bool Natural;       // asteroid / hotspot: no lane to another natural place
+        }
+
+        // Job places met in auctions (place id ->): nodes of the lane graph with the bases, while used
+        private sealed class WorkPlace { public Vector3D Pos; public bool Natural; public long Seen; }
+        private readonly Dictionary<long, WorkPlace> workPlaces = new Dictionary<long, WorkPlace>();
+        private const int WORK_PLACES_MAX = 24;            // job places in the lane graph, at most (the most recently used)
+
+        // Places not used for the lanes' expiry time go; WORK_PLACES_MAX at most (the oldest go)
+        private void TrimWorkPlaces(Pathfinding.FlightLanes lanes)
+        {
+            long minute = DateTime.UtcNow.Ticks / TimeSpan.TicksPerMinute;
+            var gone = new List<long>();
+            foreach (var kv in workPlaces) if (minute - kv.Value.Seen > lanes.ExpiryMinutes) gone.Add(kv.Key);
+            for (int i = 0; i < gone.Count; i++) workPlaces.Remove(gone[i]);
+            while (workPlaces.Count > WORK_PLACES_MAX)
+            {
+                long oldest = 0, seen = long.MaxValue;
+                foreach (var kv in workPlaces) if (kv.Value.Seen < seen) { seen = kv.Value.Seen; oldest = kv.Key; }
+                workPlaces.Remove(oldest);
+            }
+        }
+
+        private List<LaneNode> LaneNodes(bool fresh)
+        {
+            var nodes = new List<LaneNode>();
+            var bases = LaneBases(fresh);
+            for (int i = 0; i < bases.Count; i++)
+                if (!bases[i].MarkedForClose) nodes.Add(new LaneNode { Id = bases[i].EntityId, Pos = bases[i].WorldVolume.Center });
+            foreach (var kv in workPlaces) nodes.Add(new LaneNode { Id = kv.Key, Pos = kv.Value.Pos, Natural = kv.Value.Natural });
+            return nodes;
+        }
+
+        // Nodes i and j get a lane: not both natural, and no third node lies between them (closer to both than they are to
+        // each other: squared distances, no roots) unless the three make a near-equilateral triangle. A natural node between
+        // a natural one and another doesn't count (no lane from it to the natural one: no way through it)
+        private static bool Linked(List<LaneNode> nodes, int i, int j)
+        {
+            if (nodes[i].Natural && nodes[j].Natural) return false;
+            Vector3D a = nodes[i].Pos, b = nodes[j].Pos;
+            double ab = Vector3D.DistanceSquared(a, b);
+            for (int k = 0; k < nodes.Count; k++)
+            {
+                if (k == i || k == j) continue;
+                if (nodes[k].Natural && (nodes[i].Natural || nodes[j].Natural)) continue;
+                Vector3D c = nodes[k].Pos;
+                double ac = Vector3D.DistanceSquared(a, c), bc = Vector3D.DistanceSquared(b, c);
+                if (ac >= ab || bc >= ab) continue;                                          // not between them
+                if (Math.Min(ac, bc) >= NEAR_EQUILATERAL * NEAR_EQUILATERAL * ab) continue;   // near-equilateral
+                return false;
+            }
+            return true;
+        }
+
+        // The player's bases (static grids with an Automata computer block) this orchestrator's relay network reaches (its
+        // own grid first, if static); BASE_LANES_MAX at most. Found again with 'fresh' (the base lane pass) or after
+        // LANE_BASES_TICKS (the job lanes use the last list: auctions come often)
+        private List<IMyCubeGrid> laneBases;
+        private int laneBasesFrame;
+        private const int LANE_BASES_TICKS = 60 * 60;
+
+        private List<IMyCubeGrid> LaneBases(bool fresh)
+        {
+            int now = MyAPIGateway.Session.GameplayFrameCounter;
+            if (!fresh && laneBases != null && now - laneBasesFrame < LANE_BASES_TICKS) return laneBases;
+            laneBasesFrame = now;
+            var bases = laneBases = new List<IMyCubeGrid>();
+            if (messaging == null || block.CubeGrid == null) return bases;
             if (block.CubeGrid.IsStatic) bases.Add(block.CubeGrid);
             for (int k = 0; k < 4 && bases.Count < BASE_LANES_MAX; k++)
             {
@@ -157,12 +285,11 @@ namespace Automata.Orchestrator
                     bases.Add(b.CubeGrid);
                 }
             }
-            for (int i = 0; i < bases.Count; i++)
-                for (int j = i + 1; j < bases.Count; j++)
-                    lanes.Trace(Entity.EntityId, bases[i].WorldVolume.Center, bases[j].WorldVolume.Center);
+            return bases;
         }
 
-        // A drone's report (keepalive / job report) of lanes it found blocked: each redraws its lane once
+        // A drone's report (keepalive / job report) of lanes it found blocked: each redraws its lane once; of lanes it gave up
+        // waiting at (enough of them close together: the lane grows); of lanes it flew clear end to end (trusted)
         private void ApplyLaneObstructions(JobStatusReport r)
         {
             if (r.LaneObstructions == null || r.LaneObstructions.Count == 0) return;
@@ -173,6 +300,18 @@ namespace Automata.Orchestrator
             {
                 var o = r.LaneObstructions[i];
                 if (o == null || !appliedObstructions.Add(r.DroneEntityId + ":" + o.Id)) continue;
+                if (o.Kind == Pathfinding.FlightLanes.GAVE_UP)
+                {
+                    if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: drone {1} gave up waiting at an entrance of lane L{2}", entityId, r.DroneEntityId, o.Lane);
+                    pm.Lanes.GaveUp(Entity.EntityId, o.Lane, o.Id);
+                    continue;
+                }
+                if (o.Kind == Pathfinding.FlightLanes.CLEAR)
+                {
+                    if (Log.DebugEnabled) Log.Debug("Orchestrator {0}: drone {1} flew lane L{2} clear end to end", entityId, r.DroneEntityId, o.Lane);
+                    pm.Lanes.Verified(Entity.EntityId, o.Lane, o.Revision, pm);
+                    continue;
+                }
                 var detour = new List<Vector3D>();
                 if (o.Detour != null) for (int k = 0; k < o.Detour.Count; k++) detour.Add(o.Detour[k].ToVector3D());
                 pm.Lanes.Obstructed(Entity.EntityId, o.Lane, o.AB, o.A.ToVector3D(), o.B.ToVector3D(), detour, o.What ?? "something", pm);
@@ -192,6 +331,12 @@ namespace Automata.Orchestrator
 
         #region Terminal (players)
         public List<string> Terminal_Lanes { get { return settings.Lanes ?? new List<string>(); } }
+
+        public bool Terminal_SafeLanes
+        {
+            get { return settings.SafeLanes; }
+            set { if (settings.SafeLanes == value) return; settings.SafeLanes = value; SettingsEdited(); }
+        }
         public int Terminal_LaneSelected { get { return laneSelected; } set { laneSelected = value; } }
 
         private void SendLaneCommand(string what, int number)
@@ -260,8 +405,8 @@ namespace Automata.Orchestrator
             if (DateTime.UtcNow > laneDrawUntil) { StopLaneDraw(); return false; }
             float alpha = settings.LaneDrawPending ? 0.35f : 0.9f;
             float phase = (now / 60f * LANE_CRAWL) % (LANE_DASH + LANE_GAP);
-            DrawBox(settings.LaneDrawAB, settings.LaneDrawUpAB, Color.DeepSkyBlue * alpha, phase);
-            DrawBox(settings.LaneDrawBA, settings.LaneDrawUpBA, Color.Orange * alpha, phase);
+            DrawBox(settings.LaneDrawAB, settings.LaneDrawUpAB, settings.LaneDrawWidth, settings.LaneDrawHeight, Color.DeepSkyBlue * alpha, phase);
+            DrawBox(settings.LaneDrawBA, settings.LaneDrawUpBA, settings.LaneDrawWidth, settings.LaneDrawHeight, Color.Orange * alpha, phase);
             if (laneGpsNumber != laneDrawWanted) AddLaneGps();
             return true;
         }
@@ -269,14 +414,14 @@ namespace Automata.Orchestrator
         private static readonly List<double> boxEdge = new List<double>();
 
         /// <summary>
-        /// A lane's box along its line ('ups': "up" at each point): the four long edges dashed and crawling toward its end,
+        /// A lane's box ('width' x 'height') along its line ('ups': "up" at each point): the four long edges dashed and crawling toward its end,
         /// the cross-sections at both ends dashed and still (also Pathfinding.LaneOverlay's). No ups: the line alone.
         /// </summary>
-        internal static void DrawBox(List<double> flat, List<double> ups, Color color, float phase)
+        internal static void DrawBox(List<double> flat, List<double> ups, double width, double height, Color color, float phase)
         {
             int n = flat.Count / 3;
             if (n < 2 || ups == null || ups.Count < 3 * n) { DrawDashes(flat, color, phase); return; }
-            double hw = Pathfinding.FlightLanes.BOX_WIDTH / 2, hh = Pathfinding.FlightLanes.BOX_HEIGHT / 2;
+            double hw = width / 2, hh = height / 2;
             for (int c = 0; c < 4; c++)
             {
                 double sx = (c & 1) != 0 ? hw : -hw, sy = (c & 2) != 0 ? hh : -hh;

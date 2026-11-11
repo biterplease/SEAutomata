@@ -24,6 +24,8 @@ namespace Automata.Pathfinding
         [ProtoMember(5)] public bool Pending;              // suspended: drawn faint
         [ProtoMember(6)] public List<double> UpAB = new List<double>();
         [ProtoMember(7)] public List<double> UpBA = new List<double>();
+        [ProtoMember(8)] public double Width = FlightLanes.BOX_WIDTH;    // its boxes' size
+        [ProtoMember(9)] public double Height = FlightLanes.BOX_HEIGHT;
     }
 
     /// <summary>
@@ -54,7 +56,7 @@ namespace Automata.Pathfinding
                 IMyEntity e;
                 var owner = MyAPIGateway.Entities.TryGetEntityById(l.Owner, out e) ? e as IMyTerminalBlock : null;
                 if (owner == null || owner.OwnerId != identity) continue;
-                var s = new LaneShape { NameAB = l.Name(true), NameBA = l.Name(false), Pending = l.State != FlightLanes.LaneState.Active };
+                var s = new LaneShape { NameAB = l.Name(true), NameBA = l.Name(false), Pending = l.State != FlightLanes.LaneState.Active, Width = l.Width, Height = l.Height };
                 OrchestratorBlock.Flatten(l.AB, s.AB);
                 OrchestratorBlock.Flatten(l.BA, s.BA);
                 OrchestratorBlock.Flatten(l.UpAB, s.UpAB);
@@ -90,8 +92,8 @@ namespace Automata.Pathfinding
             for (int i = 0; i < shapes.Count; i++)
             {
                 float alpha = shapes[i].Pending ? 0.35f : 0.9f;
-                OrchestratorBlock.DrawBox(shapes[i].AB, shapes[i].UpAB, Color.DeepSkyBlue * alpha, phase);
-                OrchestratorBlock.DrawBox(shapes[i].BA, shapes[i].UpBA, Color.Orange * alpha, phase);
+                OrchestratorBlock.DrawBox(shapes[i].AB, shapes[i].UpAB, shapes[i].Width, shapes[i].Height, Color.DeepSkyBlue * alpha, phase);
+                OrchestratorBlock.DrawBox(shapes[i].BA, shapes[i].UpBA, shapes[i].Width, shapes[i].Height, Color.Orange * alpha, phase);
             }
             return true;
         }

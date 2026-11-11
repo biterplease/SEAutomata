@@ -617,6 +617,8 @@ namespace Automata.Drone
             AddCheckbox("Checkbox_EconomyFlight", MyStrings.Drone_EconomyFlight,
                 MyStrings.Drone_EconomyFlightTooltip,
                 l => l.Terminal_EconomyFlight, (l, v) => l.Terminal_EconomyFlight = v, multipleBlocks: true);
+            AddListbox("Listbox_EconomyInfo", MyStrings.BLANK, MyStrings.BLANK, 1, false,
+                (l, items, sel) => l.Terminal_EconomyInfoContent(items, sel), (l, sel) => { });
             AddSlider("Slider_MaxThrust", MyStrings.Drone_MaxThrust,
                 MyStrings.Drone_MaxThrustTooltip,
                 DroneControllerBlock.MAX_THRUST_MIN, DroneControllerBlock.MAX_THRUST_MAX,

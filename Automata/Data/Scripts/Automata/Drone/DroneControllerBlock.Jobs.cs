@@ -1969,9 +1969,19 @@ namespace Automata.Drone
             // Collect / harvest: the goal is right next to the target (centimetres off the plot, on the object): no berth there
             bool looseGoal = currentJob != null && taskIndex < currentJob.Tasks.Count
                              && Orchestrator.Task.KindOf(currentJob.Tasks[taskIndex].Type) == Orchestrator.TaskKind.Collect;
-            if (!(CompactFlight && TryDirectLegs(start, hullAtApproach, routePoints, looseGoal))
-                && !PlanPath(start, hullAtApproach, routePoints, jobSource == JobSource.StandAlone, true, flightState.WorldMatrix.Forward, flightState.WorldMatrix.Up, looseGoal))
+            bool planned;
+            laneHopOk = true;   // one route to one place: a lane hop is planned again at its end (Replan)
+            try
+            {
+                planned = (CompactFlight && TryDirectLegs(start, hullAtApproach, routePoints, looseGoal))
+                          || PlanPath(start, hullAtApproach, routePoints, jobSource == JobSource.StandAlone, true, flightState.WorldMatrix.Forward, flightState.WorldMatrix.Up, looseGoal);
+            }
+            finally { laneHopOk = false; }
+            if (!planned)
+            {
+                laneHopPending = false;
                 return Orchestrator.TaskFailure.Unreachable;
+            }
             if (checkApproachLine)
             {
                 // Straight in along the normal: nothing between the approach point and the work point

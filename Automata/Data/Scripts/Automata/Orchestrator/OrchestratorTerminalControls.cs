@@ -76,6 +76,8 @@ namespace Automata.Orchestrator
                 };
                 Add(c);
             }
+            Checkbox("SafeLanes", MyStrings.Orchestrator_EnableSafeLanes, MyStrings.Orchestrator_EnableSafeLanesTooltip,
+                     l => l.Terminal_SafeLanes, (l, v) => l.Terminal_SafeLanes = v, false);
             LaneButton("LaneVisualize", MyStrings.Orchestrator_ShowLane, MyStrings.Orchestrator_ShowLaneTooltip, l => l.Terminal_VisualizeLane());
             LaneButton("LaneDelete", MyStrings.Orchestrator_DeleteLane, MyStrings.BLANK, l => l.Terminal_DeleteLane());
             LaneButton("LaneResume", MyStrings.Orchestrator_ResumeLane, MyStrings.BLANK, l => l.Terminal_ResumeLane());
