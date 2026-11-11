@@ -5,7 +5,7 @@
 .DESCRIPTION
   1. Prepares a clean copy in .deploy\Automata, like deploy_steam.ps1 (New-DeployStage): modinfo.sbmi, Automata.ini,
      CREDITS.txt, thumb.png, Data, Models, Textures and Audio; under Data\Scripts only the *.cs files (no CLAUDE.md or
-     other notes), without their comments (line breaks kept: compile errors point at the repository's lines).
+     other notes), without their comments (and the lines they leave empty).
   2. Sets LogLevel in the prepared Automata.ini (default: every level, Verbose|Info|Debug|Warning|Error); the
      repository's Automata.ini keeps the shipped default.
   3. Deletes the deployed copy (so files removed from the repo don't linger in the game).

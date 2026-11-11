@@ -29,7 +29,8 @@ function Remove-NonScriptFiles {
 }
 
 # Removes the comments from the *.cs files under <Root>\Data\Scripts (tools\CommentStripper.cs: strings and char
-# literals kept; line breaks kept, so the game's compile errors point at the repository's lines).
+# literals kept; lines left empty by a removed comment go, so the game's compile errors no longer point at the
+# repository's line numbers).
 function Remove-CodeComments {
     param([Parameter(Mandatory)][string]$Root)
 

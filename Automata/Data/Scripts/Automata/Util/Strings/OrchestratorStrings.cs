@@ -127,4 +127,4 @@ namespace Automata.Util.Strings
         public static readonly MyStringId Orchestrator_WaitingForTheMod = MyStringId.GetOrCompute("{LOC:Orchestrator_WaitingForTheMod}"); // "Waiting for the mod"
         public static readonly MyStringId Orchestrator_WithdrawnByItsAnnouncer = MyStringId.GetOrCompute("{LOC:Orchestrator_WithdrawnByItsAnnouncer}"); // "withdrawn by its announcer"
     }
-}
+}
