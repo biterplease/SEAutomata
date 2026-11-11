@@ -1,7 +1,7 @@
 # Publish Automata to Steam Workshop via SEWorkshopTool.
 # Requires Automata\modinfo.sbmi with the WorkshopId, and SEWorkshopTool next to Space Engineers.
-# Pushes a clean copy of the shipped files (see $ShippedFiles / $ShippedFolders in deploy_common.ps1); under
-# Data\Scripts only the *.cs files (Remove-NonScriptFiles).
+# Pushes a clean copy of the shipped files prepared in .deploy\Automata (New-DeployStage in deploy_common.ps1); under
+# Data\Scripts only the *.cs files (Remove-NonScriptFiles), without their comments (Remove-CodeComments).
 #
 # Usage:
 #   .\deploy_steam.ps1

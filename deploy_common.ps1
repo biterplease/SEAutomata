@@ -1,4 +1,4 @@
-# Shared helpers for deploy_steam.ps1 and deploy_modio.ps1
+# Shared helpers for deploy_steam.ps1, deploy_modio.ps1 and deploy_local.ps1
 
 $script:ModName = 'Automata'
 $script:ModDir = Join-Path $PSScriptRoot $script:ModName
@@ -10,7 +10,8 @@ $script:ChangelogPath = Join-Path $script:DeployDir 'changelog.txt'
 # What ships. Everything else in the mod folder (bin, obj, *.csproj, *.mdk*.ini, ...) is development only.
 $script:ShippedFiles = @('modinfo.sbmi', 'Automata.ini', 'CREDITS.txt', 'thumb.png')
 $script:ShippedFolders = @('Data', 'Models', 'Textures', 'Audio')
-# Under Data\Scripts only the *.cs files ship (no CLAUDE.md or other notes); the rest of Data (definitions, localization) ships whole.
+# Under Data\Scripts only the *.cs files ship (no CLAUDE.md or other notes), without their comments; the rest of Data
+# (definitions, localization) ships whole.
 
 # Removes everything but *.cs from <Root>\Data\Scripts, and the folders that leaves empty. 'Root': a folder holding Data\.
 function Remove-NonScriptFiles {
@@ -25,6 +26,31 @@ function Remove-NonScriptFiles {
         Where-Object { -not (Get-ChildItem -LiteralPath $_.FullName -Force) } |
         Remove-Item -Force
     Write-Host ('Not shipped: {0} non-.cs file(s) under Data\Scripts' -f $extra.Count)
+}
+
+# Removes the comments from the *.cs files under <Root>\Data\Scripts (tools\CommentStripper.cs: strings and char
+# literals kept; line breaks kept, so the game's compile errors point at the repository's lines).
+function Remove-CodeComments {
+    param([Parameter(Mandatory)][string]$Root)
+
+    $scripts = Join-Path $Root 'Data\Scripts'
+    if (-not (Test-Path -LiteralPath $scripts)) { return }
+    if (-not ('CommentStripper' -as [type])) {
+        Add-Type -Path (Join-Path $PSScriptRoot 'tools\CommentStripper.cs')
+    }
+    $before = 0L
+    $after = 0L
+    $files = @(Get-ChildItem -LiteralPath $scripts -Recurse -File -Filter '*.cs')
+    foreach ($file in $files) {
+        $bytes = [System.IO.File]::ReadAllBytes($file.FullName)
+        $bom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
+        $text = [System.IO.File]::ReadAllText($file.FullName)
+        $stripped = [CommentStripper]::Strip($text)
+        [System.IO.File]::WriteAllText($file.FullName, $stripped, (New-Object System.Text.UTF8Encoding($bom)))
+        $before += $bytes.Length
+        $after += (Get-Item -LiteralPath $file.FullName).Length
+    }
+    Write-Host ('Comments removed from {0} script(s): {1:N0} KB -> {2:N0} KB' -f $files.Count, ($before / 1KB), ($after / 1KB))
 }
 
 function Find-SEWorkshopTool {
@@ -148,7 +174,8 @@ function Write-DeployChangelogFile {
     return $script:ChangelogPath
 }
 
-# A clean copy of the shipped files under .deploy\Automata: the push never sees bin, obj, the csproj or the local ini files.
+# A clean copy of the shipped files under .deploy\Automata (deploy_steam, deploy_modio push it, deploy_local copies it to
+# the game): never bin, obj, the csproj or the local ini files; the scripts without comments.
 function New-DeployStage {
     if (Test-Path -LiteralPath $script:StageDir) {
         Remove-Item -LiteralPath $script:StageDir -Recurse -Force
@@ -168,6 +195,7 @@ function New-DeployStage {
         else { Write-Warning "Not shipped: $name (not in the mod folder)" }
     }
     Remove-NonScriptFiles -Root $script:StageDir
+    Remove-CodeComments -Root $script:StageDir
 
     $files = @(Get-ChildItem -LiteralPath $script:StageDir -Recurse -File)
     $megabytes = ($files | Measure-Object -Property Length -Sum).Sum / 1MB
