@@ -181,6 +181,9 @@
   <data name="Common_DebugDrawLanesWithinM" xml:space="preserve">
     <value>Debug draw: {0} lane(s) of your orchestrators within {1} m.</value>
   </data>
+  <data name="Common_DebugDrawCustomRoutesWithinM" xml:space="preserve">
+    <value>Debug draw: {0} custom route(s) within {1} m.</value>
+  </data>
   <data name="Common_DebugDrawOnWithinM" xml:space="preserve">
     <value>Debug draw on within {0} m: {1} drone route(s), {2} drone field(s), {3} construction field(s), {4} parking area(s), {5} logistics computer(s) with their conveyor networks.</value>
   </data>
@@ -380,7 +383,7 @@
     <value>Update error: {0}</value>
   </data>
   <data name="Common_UsageAutomataDebugdrawDronenavDroneobs" xml:space="preserve">
-    <value>Usage: /automata debugdraw [dronenav] [droneobs] [ccobs] [park] [lanes] [cn] [range m: 300 default, 2000 max] [off] (no kind: all; off: everything you draw, anywhere)</value>
+    <value>Usage: /automata debugdraw [dronenav] [droneobs] [ccobs] [park] [lanes] [cn] [customroute] [range m: 300 default, 2000 max] [off] (no kind: all; off: everything you draw, anywhere)</value>
   </data>
   <data name="Common_UseBroadcastController" xml:space="preserve">
     <value>Use broadcast controller</value>
@@ -839,9 +842,6 @@
   </data>
   <data name="Drone_ApproachSpeedTooltip" xml:space="preserve">
     <value>Speed over the last 50 m before target location.</value>
-  </data>
-  <data name="Drone_ApproachTargetFrom" xml:space="preserve">
-    <value>Approach target from:</value>
   </data>
   <data name="Drone_Arg0ColonArg1CommaDone" xml:space="preserve">
     <value>{0}: {1}, done</value>
@@ -1819,14 +1819,8 @@ Quarry: Drone prepares the area for safer excavation before mining.</value>
   <data name="Drone_NavigateRelative" xml:space="preserve">
     <value>Navigate relative</value>
   </data>
-  <data name="Drone_NavigateToTarget" xml:space="preserve">
-    <value>Navigate to target</value>
-  </data>
   <data name="Drone_Navigating" xml:space="preserve">
     <value>Navigating</value>
-  </data>
-  <data name="Drone_NavigationTargetGPSActionTrigger" xml:space="preserve">
-    <value>Navigate</value>
   </data>
   <data name="Drone_NavInvalidTargetGPS" xml:space="preserve">
     <value>Nav: invalid target GPS</value>
@@ -1834,14 +1828,117 @@ Quarry: Drone prepares the area for safer excavation before mining.</value>
   <data name="Drone_NavM" xml:space="preserve">
     <value>Nav: {0:F0} m</value>
   </data>
+  <data name="Drone_CustomNav" xml:space="preserve">
+    <value>Custom nav</value>
+  </data>
+  <data name="Drone_CustomNavInfo" xml:space="preserve">
+    <value>Custom routes (hover for info)</value>
+  </data>
+  <data name="Drone_CustomNavInfoTooltip" xml:space="preserve">
+    <value>Custom routes for you and your faction:
+To save a custom route for all your drones
+1. Enter desired routes and approach points, in order
+2. Press Initiate route
+Route will be recorded and preferred by all your drones.</value>
+  </data>
+  <data name="Drone_NavWaypoints" xml:space="preserve">
+    <value>Navigation waypoints</value>
+  </data>
+  <data name="Drone_ApproachFrom" xml:space="preserve">
+    <value>Approach from</value>
+  </data>
+  <data name="Drone_ApproachFromTooltip" xml:space="preserve">
+    <value>point to approach navigation target from</value>
+  </data>
+  <data name="Drone_Add" xml:space="preserve">
+    <value>Add</value>
+  </data>
+  <data name="Drone_Navigate" xml:space="preserve">
+    <value>Navigate</value>
+  </data>
+  <data name="Drone_NavigateTooltip" xml:space="preserve">
+    <value>Initiates route</value>
+  </data>
+  <data name="Drone_NavWaypointFrom" xml:space="preserve">
+    <value>{0} from {1}</value>
+  </data>
+  <data name="Drone_NavInvalidApproachGPS" xml:space="preserve">
+    <value>Nav: invalid approach GPS</value>
+  </data>
+  <data name="Drone_NavNoWaypoints" xml:space="preserve">
+    <value>Nav: no waypoints in the list</value>
+  </data>
+  <data name="Drone_NavRouteFull" xml:space="preserve">
+    <value>Nav: the route is full ({0} points)</value>
+  </data>
+  <data name="Drone_NavRoute" xml:space="preserve">
+    <value>Nav: route of {0} point(s), {1:F0} m to its end</value>
+  </data>
+  <data name="Drone_ShowWaypoints" xml:space="preserve">
+    <value>Show waypoints</value>
+  </data>
+  <data name="Drone_RecordFrequencyIncrease" xml:space="preserve">
+    <value>Increase waypoint recording frequency</value>
+  </data>
+  <data name="Drone_RecordFrequencyDecrease" xml:space="preserve">
+    <value>Decrease waypoint recording frequency</value>
+  </data>
+  <data name="Drone_RecordFrequency" xml:space="preserve">
+    <value>Record frequency (s)</value>
+  </data>
+  <data name="Drone_RecordAddWaypoint" xml:space="preserve">
+    <value>Add waypoint</value>
+  </data>
+  <data name="Drone_RecordAddWaypointTooltip" xml:space="preserve">
+    <value>Adds current position as waypoint</value>
+  </data>
+  <data name="Drone_RecordStart" xml:space="preserve">
+    <value>Start recording</value>
+  </data>
+  <data name="Drone_RecordStartTooltip" xml:space="preserve">
+    <value>Start recording waypoints.</value>
+  </data>
+  <data name="Drone_RecordStop" xml:space="preserve">
+    <value>Stop recording</value>
+  </data>
+  <data name="Drone_RecordStopTooltip" xml:space="preserve">
+    <value>Stop recording waypoints.</value>
+  </data>
+  <data name="Drone_RecordCommit" xml:space="preserve">
+    <value>Commit waypoints</value>
+  </data>
+  <data name="Drone_RecordCommitTooltip" xml:space="preserve">
+    <value>Saves route to the pathfinder.</value>
+  </data>
+  <data name="Drone_NavMaxWaypoints" xml:space="preserve">
+    <value>Max waypoints reached: increase frequency</value>
+  </data>
+  <data name="Drone_NavRecordingStarted" xml:space="preserve">
+    <value>Nav: recording, a waypoint every {0:0.0} s</value>
+  </data>
+  <data name="Drone_NavRecordingStopped" xml:space="preserve">
+    <value>Nav: recording stopped ({0} waypoints in the list)</value>
+  </data>
+  <data name="Drone_NavRouteCleaned" xml:space="preserve">
+    <value>Nav: route cleaned up, {0} -&gt; {1} waypoints: sent to the pathfinder</value>
+  </data>
+  <data name="Drone_NavRouteCommitted" xml:space="preserve">
+    <value>Nav: custom route saved: {0} waypoints, {1} links</value>
+  </data>
+  <data name="Drone_NavRouteNotCommitted" xml:space="preserve">
+    <value>Nav: custom route not saved (no route memory here, or too few waypoints)</value>
+  </data>
+  <data name="Drone_NavWaypointGps" xml:space="preserve">
+    <value>WP{0}</value>
+  </data>
+  <data name="Drone_NavWaypointGpsFrom" xml:space="preserve">
+    <value>WP{0} from</value>
+  </data>
+  <data name="Drone_NavWaypointGpsDescription" xml:space="preserve">
+    <value>Custom nav waypoint of {0}</value>
+  </data>
   <data name="Drone_NavNoRouteToWaypoint" xml:space="preserve">
     <value>Nav: no route to waypoint {0}</value>
-  </data>
-  <data name="Drone_NavWaypointQueued" xml:space="preserve">
-    <value>Nav: waypoint queued ({0} in the route)</value>
-  </data>
-  <data name="Drone_NavWaypointQueueFull" xml:space="preserve">
-    <value>Nav: waypoint queue full</value>
   </data>
   <data name="Drone_NewOrder" xml:space="preserve">
     <value>new order</value>
@@ -2035,9 +2132,6 @@ NOTE: AI must be disabled to change.</value>
   </data>
   <data name="Drone_PressedAgainstSomethingOnStopped" xml:space="preserve">
     <value>Pressed against something on the way, no way round it: stopped</value>
-  </data>
-  <data name="Drone_QueueWaypoint" xml:space="preserve">
-    <value>Queue waypoint</value>
   </data>
   <data name="Drone_Recalled" xml:space="preserve">
     <value>Recalled ({0})</value>
@@ -3315,6 +3409,21 @@ Voxel: on rock near this orchestrator.</value>
   </data>
   <data name="Orchestrator_ShowLane" xml:space="preserve">
     <value>Show lane</value>
+  </data>
+  <data name="Orchestrator_CustomRoutes" xml:space="preserve">
+    <value>Custom routes</value>
+  </data>
+  <data name="Orchestrator_ShowCustomRoute" xml:space="preserve">
+    <value>Show route</value>
+  </data>
+  <data name="Orchestrator_DeleteCustomRoute" xml:space="preserve">
+    <value>Delete route</value>
+  </data>
+  <data name="Orchestrator_DeleteAllCustomRoutes" xml:space="preserve">
+    <value>Delete all routes</value>
+  </data>
+  <data name="Orchestrator_CustomRouteRow" xml:space="preserve">
+    <value>{0}: {1} waypoints, {2} m, used {3} min ago</value>
   </data>
   <data name="Orchestrator_ShowLaneTooltip" xml:space="preserve">
     <value>Draws selected lane pair.</value>

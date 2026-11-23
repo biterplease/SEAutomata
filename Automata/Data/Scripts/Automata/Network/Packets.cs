@@ -33,6 +33,8 @@ namespace Digi.NetworkLib
     [ProtoInclude(29, typeof(Automata.Network.LaneDrawPacket))]
     [ProtoInclude(30, typeof(Automata.Network.LcNetworksRequestPacket))]
     [ProtoInclude(31, typeof(Automata.Network.LcNetworksPacket))]
+    [ProtoInclude(32, typeof(Automata.Network.CustomRouteDrawRequestPacket))]
+    [ProtoInclude(33, typeof(Automata.Network.CustomRouteDrawPacket))]
     public abstract partial class PacketBase
     {
     }
@@ -103,6 +105,9 @@ namespace Automata.Network
         [ProtoMember(7)] public long Id;
         [ProtoMember(8)] public int Code;
         [ProtoMember(9)] public string Text;
+        [ProtoMember(10)] public List<Vector3DData> Points;
+        [ProtoMember(11)] public List<Vector3DData> Forwards;   // CommitRoute: the drone's attitude at each point (recorded)
+        [ProtoMember(12)] public List<Vector3DData> Ups;
 
         public override void Received(ref PacketInfo packetInfo, ulong senderSteamId)
         {
@@ -240,6 +245,46 @@ namespace Automata.Network
         {
             if (MyAPIGateway.Multiplayer.IsServer) return;
             Pathfinding.LaneOverlay.Show(Lanes, Range, TimeoutSeconds);
+        }
+    }
+
+    /// <summary>Client -> server: "/automata debugdraw customroute", the custom routes the sender's drones may use with a
+    /// stretch within Range of Centre.</summary>
+    [ProtoContract]
+    public class CustomRouteDrawRequestPacket : PacketBase
+    {
+        public CustomRouteDrawRequestPacket() { }
+
+        [ProtoMember(1)] public Vector3DData Centre;
+        [ProtoMember(2)] public double Range;
+
+        public override void Received(ref PacketInfo packetInfo, ulong senderSteamId)
+        {
+            if (!MyAPIGateway.Multiplayer.IsServer) return;
+            long identity = MyAPIGateway.Players.TryGetIdentityId(senderSteamId);
+            AutomataSession.Instance?.Net?.SendToPlayer(new CustomRouteDrawPacket
+            {
+                Routes = Pathfinding.CustomRouteOverlay.Collect(identity, Centre.ToVector3D(), Range),
+                Range = Range,
+                TimeoutSeconds = Config.ServerConfig.Instance.Drone.DebugDrawTimeoutSeconds,
+            }, senderSteamId);
+        }
+    }
+
+    /// <summary>Server -> the client that asked: the custom routes to draw.</summary>
+    [ProtoContract]
+    public class CustomRouteDrawPacket : PacketBase
+    {
+        public CustomRouteDrawPacket() { }
+
+        [ProtoMember(1)] public List<Pathfinding.RouteShape> Routes = new List<Pathfinding.RouteShape>();
+        [ProtoMember(2)] public double Range;
+        [ProtoMember(3)] public int TimeoutSeconds;          // the server's DebugDrawTimeoutSeconds
+
+        public override void Received(ref PacketInfo packetInfo, ulong senderSteamId)
+        {
+            if (MyAPIGateway.Multiplayer.IsServer) return;
+            Pathfinding.CustomRouteOverlay.Show(Routes, Range, TimeoutSeconds);
         }
     }
 

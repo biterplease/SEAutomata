@@ -167,7 +167,7 @@ namespace Automata.Orchestrator
             {
                 stagingDraw = value && settings.StagingArea && settings.ParkingMode == ParkingProtocolMode.ParkingArea;
                 stagingDrawStart = MyAPIGateway.Session.GameplayFrameCounter;
-                if (AutomataSession.Instance != null) AutomataSession.Instance.RequestDraw(this, stagingDraw || laneDraw);
+                if (AutomataSession.Instance != null) AutomataSession.Instance.RequestDraw(this, stagingDraw || laneDraw || routeDraw);
             }
         }
         #endregion
@@ -177,7 +177,8 @@ namespace Automata.Orchestrator
         {
             bool area = DrawStaging();
             bool lane = DrawLane();
-            return area || lane;
+            bool route = DrawCustomRoute();
+            return area || lane || route;
         }
 
         private bool DrawStaging()

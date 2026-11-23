@@ -99,13 +99,12 @@ namespace Automata.Drone
         }
 
         // Escape spots: the hull fits there in any attitude, or (the leg there holds the attitude) as it is, with a margin
-        private const double ESCAPE_HELD_MARGIN = 0.25;
 
         private bool EscapeSpotFits(PathfindingManager pm, ref PathQuery q, Vector3D spot, Vector3D forward, Vector3D up)
         {
             if (pm.HullFits(ref q, spot)) return true;
             MatrixD f = MatrixD.CreateWorld(Vector3D.Zero, forward, up);
-            return pm.HullFitsOriented(ref q, spot, ref f, ESCAPE_HELD_MARGIN);
+            return pm.HullFitsOriented(ref q, spot, ref f, Pathfinding.Clearances.FINE);
         }
 
         /// <summary>
@@ -121,7 +120,7 @@ namespace Automata.Drone
             PathQuery q;
             BuildPathQuery(out q);
             pm.BeginPlan();
-            return pm.ClearRun(ref q, ref q.Controller, hullCentre, dir, len, FREE_RUN_MARGIN, out blocker);
+            return pm.ClearRun(ref q, ref q.Controller, hullCentre, dir, len, Pathfinding.Clearances.WORK, out blocker);
         }
 
         // Docking / undocking: no turning to another attitude for a route (held Lazy Theta* routes), no contact replans
@@ -146,7 +145,6 @@ namespace Automata.Drone
             return false;
         }
 
-        private const double FREE_RUN_MARGIN = 0.5;   // m kept from what a back-out runs towards
         private const double BACK_OUT_MIN = 0.5;      // m: a shorter back-out isn't flown
     }
 }

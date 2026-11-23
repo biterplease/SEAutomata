@@ -39,7 +39,8 @@ namespace Automata.Config
         }
 
         private static bool _configLoaded = false;
-        private static readonly string CONFIG_FILENAME = "Automata.ini";
+        private static readonly string CONFIG_FILENAME = "Automata.ini";                // single player / a player hosting
+        private static readonly string SERVER_CONFIG_FILENAME = "Automata.server.ini";  // dedicated servers (tighter limits)
 
         public PathfindingConfig Pathfinding { get; private set; }
         public DroneControllerBlockConfig Drone { get; private set; }
@@ -140,10 +141,6 @@ namespace Automata.Config
         }
 
         public class ConstructionComputerConfig{
-            /// <summary>
-            /// Max number of block targets when scanning for construction tasks.
-            /// </summary>
-            public byte BlockLimitPerScan { get; internal set; } = 100;
              /// <summary>
             /// The Construction Computer will perform a cleanup of orphaned tasks that are no longer in its range.
             /// For whatever reason. Default is 30 minutes.
@@ -151,7 +148,6 @@ namespace Automata.Config
             public int MinScanRetryIntervalSeconds { get; internal set; } = 10; // 10 seconds
             public int MaxScanRetryIntervalSeconds { get; internal set; } = 3600; // 3600 seconds
 
-            public int MaxJobAnnouncementsPerUpdate { get; internal set; } = 10;
             /// <summary>
             /// Construction computer blocks: jobs published at once (announced and not yet awarded, on hold included).
             /// </summary>
@@ -186,13 +182,6 @@ namespace Automata.Config
             public int MaxGpsMarkers { get; internal set; } = 30;
         }
 
-        /// <summary>Scout pointers (TODO/11): the jobs players order with them, and their GPS markers.</summary>
-        public class TargetDesignatorConfig
-        {
-            /// <summary>An order whose jobs don't all have a drone this long (seconds) is cancelled and its marker removed.</summary>
-            public int ConfirmTimeoutSeconds { get; internal set; } = 10;
-        }
-
         public class OrchestratorBlockConfig
         {
             /// <summary>Auctions open at once; further job announcements wait in the orchestrator's queue.</summary>
@@ -203,11 +192,6 @@ namespace Automata.Config
             public int FailedJobHoldSeconds { get; internal set; } = 60;
 
 
-            /// <summary>
-            /// Gameplay frames a construction computer holds back a block after a drone aborted / declined it
-            /// (Unreachable: 5 min, fixed).
-            /// </summary>
-            public int BidBlacklistCooldownTicks { get; internal set; } = 3600;
         }
 
         public class LoggingConfig
@@ -218,7 +202,8 @@ namespace Automata.Config
 
         private VRage.Game.ModAPI.IMyModContext _modContext;
 
-        /// <summary>Reads Automata.ini from the mod's folder ('modContext': the session component's, so a workshop copy is found too).</summary>
+        /// <summary>Reads the config from the mod's folder ('modContext': the session component's, so a workshop copy is found too):
+        /// Automata.server.ini on a dedicated server (Automata.ini when it has none), Automata.ini otherwise.</summary>
         public void LoadConfig(VRage.Game.ModAPI.IMyModContext modContext = null)
         {
             if (_configLoaded) return;
@@ -272,24 +257,12 @@ namespace Automata.Config
                     }
                 }
 
-                if (MyAPIGateway.Utilities.FileExistsInModLocation(CONFIG_FILENAME, modItem))
+                if (MyAPIGateway.Utilities.IsDedicated)
                 {
-                    using (var reader = MyAPIGateway.Utilities.ReadFileInModLocation(CONFIG_FILENAME, modItem))
-                    {
-                        return reader.ReadToEnd();
-                    }
+                    string text = ReadConfigFile(SERVER_CONFIG_FILENAME, modItem);
+                    if (text != null) return text;
                 }
-
-                // Fallback: try to read from world storage
-                if (MyAPIGateway.Utilities.FileExistsInWorldStorage(CONFIG_FILENAME, typeof(AutomataSession)))
-                {
-                    using (var reader = MyAPIGateway.Utilities.ReadFileInWorldStorage(CONFIG_FILENAME, typeof(AutomataSession)))
-                    {
-                        return reader.ReadToEnd();
-                    }
-                }
-
-                return null;
+                return ReadConfigFile(CONFIG_FILENAME, modItem);
             }
             catch (Exception ex)
             {
@@ -298,26 +271,28 @@ namespace Automata.Config
             }
         }
 
-        private static int ReadIniIntPreferSections(MyIni ini, string primary, string legacy, string key, int defaultValue)
+        /// <summary>'name' from the mod's folder, else from the world's storage; null when neither has it.</summary>
+        private static string ReadConfigFile(string name, VRage.Game.MyObjectBuilder_Checkpoint.ModItem modItem)
         {
-            MyIniValue primaryVal = ini.Get(primary, key);
-            if (!string.IsNullOrEmpty(primaryVal.ToString()))
-                return primaryVal.ToInt32(defaultValue);
-            return ini.Get(legacy, key).ToInt32(defaultValue);
-        }
+            if (MyAPIGateway.Utilities.FileExistsInModLocation(name, modItem))
+            {
+                using (var reader = MyAPIGateway.Utilities.ReadFileInModLocation(name, modItem))
+                {
+                    Log.Info($"Config: {name} (mod folder)");
+                    return reader.ReadToEnd();
+                }
+            }
 
-        private static int ReadIniSchedulerStateInterval(
-            MyIni ini,
-            string stateSection,
-            string legacySection,
-            string nestedKey,
-            string legacyLongKey,
-            int defaultValue)
-        {
-            MyIniValue v = ini.Get(stateSection, nestedKey);
-            if (!string.IsNullOrEmpty(v.ToString()))
-                return v.ToInt32(defaultValue);
-            return ini.Get(legacySection, legacyLongKey).ToInt32(defaultValue);
+            // Fallback: try to read from world storage
+            if (MyAPIGateway.Utilities.FileExistsInWorldStorage(name, typeof(AutomataSession)))
+            {
+                using (var reader = MyAPIGateway.Utilities.ReadFileInWorldStorage(name, typeof(AutomataSession)))
+                {
+                    Log.Info($"Config: {name} (world storage)");
+                    return reader.ReadToEnd();
+                }
+            }
+            return null;
         }
 
         private void ParseConfig(string configText)
@@ -330,7 +305,6 @@ namespace Automata.Config
             }
 
             // Parse Pathfinding section
-            Pathfinding.usePlanetAwarePathfinding = ini.Get("Pathfinding", "UsePlanetAwarePathfinding").ToBoolean(Pathfinding.usePlanetAwarePathfinding);
             Pathfinding.maxRepositionAttempts = Math.Max(1, ini.Get("Pathfinding", "MaxRepositionAttempts").ToInt32(Pathfinding.maxRepositionAttempts));
             Pathfinding.maxPathNodes = Math.Max(100, ini.Get("Pathfinding", "MaxPathNodes").ToInt32(Pathfinding.maxPathNodes));
             var maxPathfindingMs = Math.Max(10, ini.Get("Pathfinding", "MaxPathfindingTimeMs").ToInt32(50));
@@ -339,14 +313,9 @@ namespace Automata.Config
             Pathfinding.requireCamerasForPathfinding = ini.Get("Pathfinding", "RequireCamerasForPathfinding").ToBoolean(Pathfinding.requireCamerasForPathfinding);
             Pathfinding.maxSimulatedCameraRaycastMeters = (float)MathHelper.Clamp(ini.Get("Pathfinding", "CameraRange").ToDouble(Pathfinding.maxSimulatedCameraRaycastMeters), 10.0, 5000.0);
             Pathfinding.SimulatedSensorRange = MathHelper.Clamp(ini.Get("Pathfinding", "SimulatedSensorRange").ToDouble(Pathfinding.SimulatedSensorRange), 1.0, 500.0);
-            Pathfinding.minAltitudeBuffer = (float)MathHelper.Clamp(ini.Get("Pathfinding", "MinAltitudeBuffer").ToDouble(Pathfinding.minAltitudeBuffer), 0.0, 1000.0);
             Pathfinding.RaysPerTick = MathHelper.Clamp(ini.Get("Pathfinding", "RaysPerTick").ToInt32(Pathfinding.RaysPerTick), 5, 1000);
-            Pathfinding.allowRepathing = ini.Get("Pathfinding", "AllowRepathing").ToBoolean(Pathfinding.allowRepathing);
-            Pathfinding.ObstacleClearance = MathHelper.Clamp(ini.Get("Pathfinding", "ObstacleClearance").ToDouble(Pathfinding.ObstacleClearance), 0.0, 20.0);
             Pathfinding.ArcMinDistance = MathHelper.Clamp(ini.Get("Pathfinding", "ArcMinDistance").ToDouble(Pathfinding.ArcMinDistance), 50.0, 100000.0);
-            Pathfinding.ArcStep = MathHelper.Clamp(ini.Get("Pathfinding", "ArcStep").ToDouble(Pathfinding.ArcStep), 25.0, 10000.0);
             Pathfinding.CruiseAltitude = MathHelper.Clamp(ini.Get("Pathfinding", "CruiseAltitude").ToDouble(Pathfinding.CruiseAltitude), 0.0, 1000.0);
-            Pathfinding.UsePathMemory = ini.Get("Pathfinding", "UsePathMemory").ToBoolean(Pathfinding.UsePathMemory);
             Pathfinding.PathMemoryMaxNodes = MathHelper.Clamp(ini.Get("Pathfinding", "PathMemoryMaxNodes").ToInt32(Pathfinding.PathMemoryMaxNodes), 100, 100000);
             Pathfinding.PathMemoryMaxAgeHours = MathHelper.Clamp(ini.Get("Pathfinding", "PathMemoryMaxAgeHours").ToDouble(Pathfinding.PathMemoryMaxAgeHours), 1.0, 8760.0);
             Pathfinding.AllowLazyTheta = ini.Get("Pathfinding", "AllowLazyTheta").ToBoolean(Pathfinding.AllowLazyTheta);
@@ -355,14 +324,12 @@ namespace Automata.Config
             Pathfinding.ThetaMaxMs = MathHelper.Clamp(ini.Get("Pathfinding", "ThetaMaxMs").ToDouble(Pathfinding.ThetaMaxMs), 1.0, 500.0);
             Pathfinding.PathSearchWorkers = MathHelper.Clamp(ini.Get("Pathfinding", "PathSearchWorkers").ToInt32(Pathfinding.PathSearchWorkers), 0, 8);
             Pathfinding.PathSearchMaxMs = MathHelper.Clamp(ini.Get("Pathfinding", "PathSearchMaxMs").ToDouble(Pathfinding.PathSearchMaxMs), 1.0, 1000.0);
-            Pathfinding.PathWarmUp = ini.Get("Pathfinding", "PathWarmUp").ToBoolean(Pathfinding.PathWarmUp);
+            Pathfinding.RealShapeConfirm = ini.Get("Pathfinding", "RealShapeConfirm").ToBoolean(Pathfinding.RealShapeConfirm);
+            Pathfinding.LatticeSearch = ini.Get("Pathfinding", "LatticeSearch").ToBoolean(Pathfinding.LatticeSearch);
+            Pathfinding.LatticeMaxMs = MathHelper.Clamp(ini.Get("Pathfinding", "LatticeMaxMs").ToDouble(Pathfinding.LatticeMaxMs), 1.0, 500.0);
             Pathfinding.StraightMaxMs = MathHelper.Clamp(ini.Get("Pathfinding", "StraightMaxMs").ToDouble(Pathfinding.StraightMaxMs), 0.0, 1000.0);
             Pathfinding.MemoryMaxMs = MathHelper.Clamp(ini.Get("Pathfinding", "MemoryMaxMs").ToDouble(Pathfinding.MemoryMaxMs), 0.0, 1000.0);
             Pathfinding.FlightLaneExpirationMinutes = MathHelper.Clamp(ini.Get("Pathfinding", "FlightLaneExpirationMinutes").ToDouble(Pathfinding.FlightLaneExpirationMinutes), 5.0, 525600.0);
-            Pathfinding.ArcSag = MathHelper.Clamp(ini.Get("Pathfinding", "ArcSag").ToDouble(Pathfinding.ArcSag), 1.0, 500.0);
-            Pathfinding.DockClearance = MathHelper.Clamp(ini.Get("Pathfinding", "DockClearance").ToDouble(Pathfinding.DockClearance), 0.1, 3.0);
-            Pathfinding.DockClearanceMin = MathHelper.Clamp(ini.Get("Pathfinding", "DockClearanceMin").ToDouble(Pathfinding.DockClearanceMin), 0.05, 3.0);
-            Pathfinding.DockCorridorMaxLength = MathHelper.Clamp(ini.Get("Pathfinding", "DockCorridorMaxLength").ToDouble(Pathfinding.DockCorridorMaxLength), 10.0, 200.0);
 
             // Parse Drone section
             Drone.ComponentCheckIntervalMinSeconds = (uint)MathHelper.Clamp(ini.Get("Drone", "ComponentCheckIntervalSeconds").ToInt32((int)Drone.ComponentCheckIntervalMinSeconds), 60, 86400);
@@ -432,14 +399,5 @@ namespace Automata.Config
 
 
 
-        public string GetConfigSummary()
-        {
-            string unlimited = Loc.T(MyStrings.Keen_Unlimited);
-            var summary = Loc.T(MyStrings.Common_AutomataServerConfig) + "\n";
-            // summary += $"Current Schedulers: {AutomataSession.Instance?.AIDroneSchedulers?.Count ?? 0}\n";
-            // summary += $"Current Drone Controllers: {AutomataSession.Instance?.AIDroneControllers?.Count ?? 0}\n";
-            summary += Loc.F(MyStrings.Common_Logistics, Loc.T(LogisticsComputer.AllowLogistics ? MyStrings.Common_Enabled : MyStrings.Keen_Disabled)) + "\n";
-            return summary;
-        }
     }
 }

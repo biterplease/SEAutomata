@@ -72,7 +72,7 @@ namespace Automata.Pathfinding
             {
                 parent = node.QueueIndex >> 1; // Divide by 2
                 T parentNode = nodes[parent];
-                if (HasHigherPriority(parentNode, node))
+                if (parentNode.Priority < node.Priority)
                     return;
 
                 // Node has lower priority than parent, swap
@@ -90,7 +90,7 @@ namespace Automata.Pathfinding
             {
                 parent >>= 1; // Divide by 2
                 T parentNode = nodes[parent];
-                if (HasHigherPriority(parentNode, node))
+                if (parentNode.Priority < node.Priority)
                     break;
 
                 // Node has lower priority than parent, swap
@@ -121,7 +121,7 @@ namespace Automata.Pathfinding
             if (childRightIndex <= numNodes)
             {
                 T childRight = nodes[childRightIndex];
-                if (HasHigherPriority(childRight, childLeft))
+                if (childRight.Priority < childLeft.Priority)
                 {
                     childLeftIndex = childRightIndex;
                     childLeft = childRight;
@@ -129,7 +129,7 @@ namespace Automata.Pathfinding
             }
 
             // If node has higher priority than best child, done
-            if (HasHigherPriority(node, childLeft))
+            if (node.Priority < childLeft.Priority)
             {
                 return;
             }
@@ -159,7 +159,7 @@ namespace Automata.Pathfinding
                 if (childRightIndex <= numNodes)
                 {
                     T childRight = nodes[childRightIndex];
-                    if (HasHigherPriority(childRight, childLeft))
+                    if (childRight.Priority < childLeft.Priority)
                     {
                         childLeftIndex = childRightIndex;
                         childLeft = childRight;
@@ -167,7 +167,7 @@ namespace Automata.Pathfinding
                 }
 
                 // If node has higher priority than best child, done
-                if (HasHigherPriority(node, childLeft))
+                if (node.Priority < childLeft.Priority)
                 {
                     node.QueueIndex = finalQueueIndex;
                     nodes[finalQueueIndex] = node;
@@ -182,10 +182,8 @@ namespace Automata.Pathfinding
             }
         }
 
-        private bool HasHigherPriority(T higher, T lower)
-        {
-            return higher.Priority < lower.Priority;
-        }
+        // (HasHigherPriority(a, b), a call per level, is a.Priority < b.Priority inline: the game's mod profiler wraps
+        // every mod method call, 2026-11-18)
 
         public T Dequeue()
         {
@@ -217,11 +215,26 @@ namespace Automata.Pathfinding
             OnNodeUpdated(node);
         }
 
+        /// <summary>In the queue: its priority changed; else queued while there is room (one call: Contains + one of them).</summary>
+        public void EnqueueOrUpdate(T node, double priority)
+        {
+            int qi = node.QueueIndex;
+            node.Priority = priority;
+            if (qi > 0 && qi <= numNodes && nodes[qi] == node) OnNodeUpdated(node);
+            else if (numNodes < nodes.Length - 1)
+            {
+                numNodes++;
+                nodes[numNodes] = node;
+                node.QueueIndex = numNodes;
+                CascadeUp(node);
+            }
+        }
+
         private void OnNodeUpdated(T node)
         {
             int parentIndex = node.QueueIndex >> 1;
 
-            if (parentIndex > 0 && HasHigherPriority(node, nodes[parentIndex]))
+            if (parentIndex > 0 && node.Priority < nodes[parentIndex].Priority)
             {
                 CascadeUp(node);
             }

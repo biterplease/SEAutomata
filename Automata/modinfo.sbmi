@@ -4,11 +4,25 @@
   <SteamIDOwner>76561198031538501</SteamIDOwner>
   <Name>Automata</Name>
   <Description>Automatons to make your life easier.
-  This mod encourages logistics-driven gameplay by offloading tasks that are commonly performed by players.</Description>
+
+This mod encourages logistics-driven gameplay by enabling drones to perform tasks that are commonly performed by players.
+
+[h2]Features[/h2]
+
+[list]
+[*]Automated drones!
+[*]Logistics oriented gameplay: no more massive bases, create small hubs with purpose, your drones will handle deliveries for you.
+[*]Weld anything: projected, hand-placed, or repairs, your welder drones will fix it.
+[*]Grind: paint anything with the grind color and watch it go away.
+[*]Mine: send your drones to scout for ores, and mine them!
+[*]Fight: control your your combat drones to engage an enemy, or escort a friendly.
+[/list]
+
+Full guide here https://steamcommunity.com/sharedfiles/filedetails/?id=3817492846</Description>
   <Authors>
     <Author>biter_please</Author>
   </Authors>
-  <Version>0.3.2</Version>
+  <Version>0.3.3</Version>
   <Tags>
     <Tag>block</Tag>
     <Tag>ai</Tag>

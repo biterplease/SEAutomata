@@ -43,6 +43,7 @@ namespace Automata.Util
         {
             if (string.IsNullOrEmpty(entry)) return;
             var parts = entry.Split('\n');
+            for (int i = 0; i < parts.Length; i++) parts[i] = TextLimits.Cut(parts[i], TextLimits.TERMINAL_LINE);
             entries.Add(parts);
             lines += parts.Length;
             while (lines > MAX_LINES && entries.Count > 1)
@@ -83,7 +84,6 @@ namespace Automata.Util
     {
         public const string FONT = "Monospace";
         private const int MAX_LINES = 40;     // newest log lines sent; a panel shows as many as fit
-        private const int MAX_CHARS = 160;    // per line
 
         private readonly LcdFeeder feeder = new LcdFeeder();
         private readonly List<string> logLines = new List<string>();
@@ -140,11 +140,7 @@ namespace Automata.Util
             PerfStats.Stop(PerfStats.LcdDraw, t);
         }
 
-        private static string Cut(string s)
-        {
-            if (s == null) return "";
-            return s.Length > MAX_CHARS ? s.Substring(0, MAX_CHARS) : s;
-        }
+        private static string Cut(string s) { return TextLimits.Cut(s, TextLimits.LCD_LINE); }
 
         /// <summary>Two columns (header tables): 'left' padded to 'width', then 'right'.</summary>
         public static string Columns(string left, string right, int width)

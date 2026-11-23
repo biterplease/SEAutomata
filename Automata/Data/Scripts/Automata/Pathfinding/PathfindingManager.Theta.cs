@@ -99,7 +99,7 @@ namespace Automata.Pathfinding
             // anywhere around the start - inside a station's frame, a hollow hull): searched again with the dock
             // corridor's clearance near the start (the escape zone), the full berth beyond it
             double left = ms - total.Elapsed.TotalMilliseconds;
-            double tight = Math.Max(THETA_ESCAPE_BERTH_MIN, config.DockClearance);
+            double tight = Math.Max(Clearances.MIN, config.DockClearance);
             if (q.EscapeRadius > 0 || thetaMaxExpanded > THETA_ESCAPE_EXPANSIONS || left < THETA_ESCAPE_MIN_MS || tight >= Berth(ref q)) return false;
             q.EscapeRadius = Math.Max(THETA_ESCAPE_RADIUS_MIN, THETA_ESCAPE_RADIUS_HULLS * HullRadius(ref q));
             q.EscapeCentre = start;
@@ -120,7 +120,6 @@ namespace Automata.Pathfinding
         private const int THETA_ESCAPE_EXPANSIONS = 32;
         private const double THETA_ESCAPE_RADIUS_MIN = 15;     // m around the start...
         private const double THETA_ESCAPE_RADIUS_HULLS = 3;    // ...or this many hull radii
-        private const double THETA_ESCAPE_BERTH_MIN = 0.1;     // m (DockClearance below this: this)
         private const double THETA_ESCAPE_MIN_MS = 1.0;        // budget left for it, at least
         private int thetaMaxExpanded;                          // most cells one search of this stage expanded
         private double thetaHullTight;                         // thetaHull / thetaBoxHalf with the escape berth

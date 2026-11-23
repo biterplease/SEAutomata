@@ -9,7 +9,7 @@ Blocks on the same grid (or rotor / piston / hinge connected grids) talk without
 The mod adds six blocks and two hand-held tools:
 
 - **Drone Controller**: The workhorse, that allows a drone to check its own capabilities, and sign up to do the work distributed by the Orchestrator. It's the only block that actually does work: weld, grind, deliveries, mining.
-- **Orchestrator**: Analyzes incoming job announcements, groups them, if needed, turns them into job auctions, picks the winning drones and gives them their orders. One network is enough.
+- **Orchestrator**: Analyzes incoming job announcements, groups them, if needed, turns them into job auctions, picks the winning drones and gives them their orders. One per network is enough.
 - **Logistics Computer**: Analyzes inventory on its grid, keeps player-configured item min/max in its memory, and dispatches jobs to keep those amounts healthy. A grid needs one to take part in logistics.
 - **Construction Computer**: Scans a large area for blocks to grind, weld, or repair, and announces them as jobs.
 - **Mining Surveyor**: It collects ore deposit data and turns ore orders into mining jobs.
@@ -17,7 +17,6 @@ The mod adds six blocks and two hand-held tools:
 - **Industrial Target Designator** and **Hostile Target Designator**: hand-held tools to send drones somewhere by pointing: ore scouting with the industrial one, combat with the hostile one.
 
 ## Example use cases
-
 
 ### 1. Distant mining outpost
 

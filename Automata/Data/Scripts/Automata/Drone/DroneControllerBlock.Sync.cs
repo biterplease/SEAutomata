@@ -79,8 +79,8 @@ namespace Automata.Drone
     public enum DroneAction : byte
     {
         None = 0,
-        NavigateTo,               // VectorA target, VectorB optional approach point
-        QueueWaypoint,            // VectorA
+        NavigateTo,               // (old terminal: unused, kept for the numbering)
+        QueueWaypoint,            // (old terminal: unused, kept for the numbering)
         Orient,                   // VectorA point to face
         PlaceMount,               // Code = mount code, VectorA target
         NavigateRelative,         // Id = anchor, VectorA offset (right, up, forward)
@@ -94,6 +94,8 @@ namespace Automata.Drone
         SelectHomeBeacon,         // Id (0 = none)
         DrawNavigation,           // Code 1 = send me the route (debug draw timeout), 0 = stop
         DebugLog,                 // the server writes the drone's state to the mod log (any mode)
+        NavigateRoute,            // Points: the custom nav route, in order (each target after its approach point, if any)
+        CommitRoute,              // Points: a recorded route (cleaned up), into the route memory as a custom route
     }
 
     /// <summary>
@@ -119,7 +121,7 @@ namespace Automata.Drone
         private bool applyingRemote;          // applying a received setting: don't send it again
         private readonly Dictionary<ulong, int> anchorListRequests = new Dictionary<ulong, int>();
         private readonly List<IMyPlayer> playerBuffer = new List<IMyPlayer>();
-        private const int MAX_QUEUED_LEGS = 50;
+        public const int MAX_ROUTE_POINTS = 512;   // custom nav: points per route (recorded ones, before the clean-up)
         private readonly List<DroneSettingKey> pendingSettings = new List<DroneSettingKey>();
         private int lastAnchorListRequestFrame = int.MinValue / 2;
         private readonly List<AnchorEntry> anchorListBuffer = new List<AnchorEntry>();
@@ -378,7 +380,8 @@ namespace Automata.Drone
                 if (Log.DebugEnabled) Log.Debug("Net: drone {0} action {1} ignored (not initialized)", Entity.EntityId, p.Action);
                 return;
             }
-            if ((p.HasVectorA && !IsFinite(p.VectorA)) || (p.HasVectorB && !IsFinite(p.VectorB)))
+            if ((p.HasVectorA && !IsFinite(p.VectorA)) || (p.HasVectorB && !IsFinite(p.VectorB)) || !PointsFinite(p.Points)
+                || !PointsFinite(p.Forwards) || !PointsFinite(p.Ups))
             {
                 if (Log.DebugEnabled) Log.Debug("Net: drone {0} action {1} from {2} rejected (bad coordinates)", Entity.EntityId, p.Action, senderSteamId);
                 return;
@@ -416,19 +419,34 @@ namespace Automata.Drone
             if (IsMovementAction(p.Action)) owesReturn = false;   // the player moves it now: no return after the last job
             switch (p.Action)
             {
-                case DroneAction.NavigateTo:
+                case DroneAction.NavigateRoute:
                 {
-                    // Through the pathfinder: the approach point (if any), then the target
-                    var wps = new List<Vector3D>();
-                    if (p.HasVectorB) wps.Add(p.VectorB.ToVector3D());
-                    wps.Add(p.VectorA.ToVector3D());
-                    if (FlyPlayerRoute(wps)) Report(MyStrings.Drone_NavM, Vector3D.Distance(flightState.Position, p.VectorA.ToVector3D()));
+                    // Custom nav: every point through the pathfinder, in order (the flight is recorded by the route memory)
+                    if (p.Points == null || p.Points.Count == 0) break;
+                    var wps = new List<Vector3D>(Math.Min(p.Points.Count, MAX_ROUTE_POINTS));
+                    for (int i = 0; i < p.Points.Count && i < MAX_ROUTE_POINTS; i++) wps.Add(p.Points[i].ToVector3D());
+                    if (FlyPlayerRoute(wps)) Report(MyStrings.Drone_NavRoute, wps.Count, Vector3D.Distance(flightState.Position, wps[wps.Count - 1]));
                     break;
                 }
-                case DroneAction.QueueWaypoint:
-                    if (queuedLegs.Count >= MAX_QUEUED_LEGS) { Report(MyStrings.Drone_NavWaypointQueueFull); break; }
-                    ExecuteQueueWaypoint(p.VectorA.ToVector3D());
+                case DroneAction.CommitRoute:
+                {
+                    var pm = Pathfinding.PathfindingManager.Instance;
+                    if (p.Points == null || p.Points.Count < 2 || pm == null || pm.Memory == null) { Report(MyStrings.Drone_NavRouteNotCommitted); break; }
+                    var pts = new List<Vector3D>(p.Points.Count);
+                    var fwds = new List<Vector3D>(p.Points.Count);
+                    var ups = new List<Vector3D>(p.Points.Count);
+                    bool att = p.Forwards != null && p.Ups != null && p.Forwards.Count == p.Points.Count && p.Ups.Count == p.Points.Count;
+                    for (int i = 0; i < p.Points.Count && i < MAX_ROUTE_POINTS; i++)
+                    {
+                        pts.Add(p.Points[i].ToVector3D());
+                        fwds.Add(att ? p.Forwards[i].ToVector3D() : Vector3D.Zero);
+                        ups.Add(att ? p.Ups[i].ToVector3D() : Vector3D.Zero);
+                    }
+                    SimplifyRecorded(pm, pts, fwds, ups);
+                    int links = pm.Memory.AddRoute(Entity.EntityId, (Entity as Sandbox.ModAPI.IMyTerminalBlock)?.CustomName, pts, fwds, ups, (float)localHullBox.HalfExtents.Length());
+                    Report(MyStrings.Drone_NavRouteCommitted, pts.Count, links);
                     break;
+                }
                 case DroneAction.Orient:
                     orientationTarget = p.VectorA.ToVector3D();
                     orientationTargetSet = true;
@@ -487,15 +505,23 @@ namespace Automata.Drone
         // Orders that make the drone move (refused with the AI off)
         private static bool IsMovementAction(DroneAction a)
         {
-            return a == DroneAction.NavigateTo || a == DroneAction.QueueWaypoint || a == DroneAction.Orient
+            return a == DroneAction.NavigateRoute || a == DroneAction.Orient
                 || a == DroneAction.PlaceMount || a == DroneAction.NavigateRelative || a == DroneAction.GoHome;
         }
 
         // The terminal's debug section (only enabled in ManagedByPlayer)
         private static bool IsDebugAction(DroneAction a)
         {
-            return a == DroneAction.NavigateTo || a == DroneAction.QueueWaypoint || a == DroneAction.Orient
+            return a == DroneAction.NavigateRoute || a == DroneAction.CommitRoute || a == DroneAction.Orient
                 || a == DroneAction.PlaceMount || a == DroneAction.NavigateRelative;
+        }
+
+        private static bool PointsFinite(List<Vector3DData> points)
+        {
+            if (points == null) return true;
+            if (points.Count > MAX_ROUTE_POINTS) return false;
+            for (int i = 0; i < points.Count; i++) if (!IsFinite(points[i])) return false;
+            return true;
         }
 
         private static bool IsFinite(Vector3DData v)

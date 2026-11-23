@@ -42,6 +42,11 @@ namespace Automata.Pathfinding
         public double MinAltitude;
         /// <summary>The goal may be right next to something (a point the player picked): no berth beyond it.</summary>
         public bool LooseGoal;
+        /// <summary>
+        /// The drone's tightest clearance: a straight line the cells shut by a static grid is swept against the real
+        /// physics too (StraightExact) - short hops between a farm's plots, a gap the voxels close.
+        /// </summary>
+        public bool ExactAtTightest;
         /// <summary>Route points are where the hull box centre goes (legs steer it); false: the controller.</summary>
         public bool HullCentred;
         /// <summary>Checks at a known work site (the construction computer knows it): not limited by the instruments.</summary>
@@ -75,6 +80,9 @@ namespace Automata.Pathfinding
         public bool HoldAttitude;
         /// <summary>Near a dock (docking / undocking): Lazy Theta* may hold the drone's attitude, never turn it to another.</summary>
         public bool NoHeldTurn;
+        /// <summary>The cheap stages only (custom routes, memory, straight line): the drone repositions before the
+        /// searches (Lazy Theta*, the lattice) are tried.</summary>
+        public bool NoSearch;
         // What the drone sees from (its real attitude) when Controller was turned to a held attitude
         internal bool EyesSet;
         internal MatrixD Eyes;
@@ -147,7 +155,7 @@ namespace Automata.Pathfinding
 
         public static PathfindingManager Instance { get; private set; }
 
-        /// <summary>Shared memory of flown links (stage 2); null when off (UsePathMemory) or not the server.</summary>
+        /// <summary>Shared memory of flown links (stage 2); null when not the server.</summary>
         public RouteMemory Memory { get; private set; }
         /// <summary>Directional flight lanes; null on clients.</summary>
         public FlightLanes Lanes { get; private set; }
@@ -162,7 +170,7 @@ namespace Automata.Pathfinding
         public static void Load(PathfindingConfig config)
         {
             Instance = new PathfindingManager(config);
-            if (config.UsePathMemory && (MyAPIGateway.Multiplayer == null || MyAPIGateway.Multiplayer.IsServer))
+            if (MyAPIGateway.Multiplayer == null || MyAPIGateway.Multiplayer.IsServer)
             {
                 Instance.Memory = new RouteMemory(config.PathMemoryMaxNodes, config.PathMemoryMaxAgeHours);
                 Instance.Memory.Load(MyAPIGateway.Session != null ? MyAPIGateway.Session.GameplayFrameCounter : 0);
@@ -176,7 +184,7 @@ namespace Automata.Pathfinding
             }
             if (config.PathSearchWorkers > 0 && config.AllowLazyTheta && (MyAPIGateway.Multiplayer == null || MyAPIGateway.Multiplayer.IsServer))
                 Instance.Searches = new PathSearchQueue(Instance, config);
-            if (Log.DebugEnabled) Log.Debug("Pathfinding: chain straight line > {0} > {1} > repositioning", config.UsePathMemory ? "memory" : "(memory off)", config.AllowLazyTheta ? "Lazy Theta*" : "(Lazy Theta* off)");
+            if (Log.DebugEnabled) Log.Debug("Pathfinding: chain straight line > {0} > {1} > repositioning", "memory", config.AllowLazyTheta ? "Lazy Theta*" : "(Lazy Theta* off)");
         }
 
         /// <summary>
@@ -215,6 +223,8 @@ namespace Automata.Pathfinding
             {
                 if (Instance.Searches != null) Instance.Searches.Shutdown();
                 Instance.liveScene.Clear();
+                foreach (var g in Instance.gridShapes.Values) UnhookWindow(g);   // (the windows' own block hooks)
+                Instance.gridShapes.Clear();
             }
             Instance = null;
         }
@@ -232,6 +242,8 @@ namespace Automata.Pathfinding
         private int planChecks;         // scene checks (box sweeps, spheres) of the current plan
         private int blocksTested;       // block boxes tested exactly by the current plan
         private int unseen;             // stretches of the current PlanRoute the drone couldn't fully see
+        /// <summary>Stretches checked since this was set to 0 that the drone couldn't fully see (assumed clear).</summary>
+        public int UnseenStretches { get { return unseen; } set { unseen = value; } }
         private int planUnseen;         // same, the whole plan (BeginPlan)
         private int frame;
         private readonly LocalScene liveScene;   // the game's scene (main thread); null in a worker's planner
@@ -247,6 +259,50 @@ namespace Automata.Pathfinding
         public bool PointFree(ref PathQuery q, Vector3D point)
         {
             return HullFits(ref q, point);
+        }
+
+        /// <summary>
+        /// Can the drone be at route goal 'goal' (a controller position, or the hull centre with q.HullCentred)? Its hull
+        /// box in q.Controller's attitude - the one every leg of the route is checked with (the last leg ends there in
+        /// it) - else in any attitude (<see cref="HullFits"/>). Any attitude alone refused a goal in a tunnel narrower
+        /// than the hull's diagonal in space (a dock's staging point 15 m out in a 5 m tunnel) that the drone fits as it is
+        /// (2026-11-13).
+        /// </summary>
+        public bool GoalFits(ref PathQuery q, Vector3D goal)
+        {
+            if (q.LocalHull.Max.X >= q.LocalHull.Min.X)
+            {
+                MatrixD att = q.Controller;
+                att.Translation = Vector3D.Zero;
+                Vector3D centre = q.HullCentred ? goal : goal + Vector3D.TransformNormal(q.LocalHull.Center, att);
+                if (HullFitsOriented(ref q, centre, ref att)) return true;
+                // It may be turned another way there (a dock's corridor, a tunnel): along the axes of the static grid in the
+                // way, the ways the hull's box lies along them (level: its up the vertical one). Hovering turned anyhow 49 m
+                // from its dock, the corridor's start "was inside" a truss in that attitude: no route home, ever
+                var hb = LastHitBlock;
+                var sg = hb != null ? hb.CubeGrid : null;
+                if (sg != null && sg.IsStatic)
+                {
+                    MatrixD gm = sg.WorldMatrix;
+                    for (int fa = 0; fa < 3; fa++)
+                        for (int ua = 0; ua < 3; ua++)
+                        {
+                            if (fa == ua) continue;
+                            Vector3D f = GridAxis(ref gm, fa), u = GridAxis(ref gm, ua);
+                            if (q.GravityUp.LengthSquared() > 0.5)
+                            {
+                                double d = Vector3D.Dot(u, q.GravityUp);
+                                if (Math.Abs(d) < 0.95) continue;
+                                if (d < 0) u = -u;
+                            }
+                            else if (Vector3D.Dot(u, att.Up) < 0) u = -u;
+                            MatrixD a2 = MatrixD.CreateWorld(Vector3D.Zero, f, u);
+                            Vector3D c2 = q.HullCentred ? goal : goal + Vector3D.TransformNormal(q.LocalHull.Center, a2);
+                            if (HullFitsOriented(ref q, c2, ref a2)) return true;
+                        }
+                }
+            }
+            return HullFits(ref q, goal);
         }
 
         /// <summary>
@@ -302,7 +358,15 @@ namespace Automata.Pathfinding
         public static string Describe(IMySlimBlock b)
         {
             if (b == null) return Loc.T(MyStrings.Common_Something);
-            return Loc.F(MyStrings.Common_AtOf, b.BlockDefinition.Id.SubtypeName, b.Min, b.CubeGrid != null ? b.CubeGrid.DisplayName : "?");
+            return Loc.F(MyStrings.Common_AtOf, BlockName(b), b.Min, b.CubeGrid != null ? b.CubeGrid.DisplayName : "?");
+        }
+
+        /// <summary>A block's subtype for the logs; blocks with none (the vanilla hangar door): its type.</summary>
+        public static string BlockName(IMySlimBlock b)
+        {
+            if (b == null) return "?";
+            var id = b.BlockDefinition.Id;
+            return !string.IsNullOrEmpty(id.SubtypeName) ? id.SubtypeName : id.TypeId.ToString().Replace("MyObjectBuilder_", "");
         }
 
         /// <summary>The block the last SegmentBlocked / HullSpaceFree hit (null: none / an asteroid). For the logs.</summary>
@@ -355,6 +419,7 @@ namespace Automata.Pathfinding
             liveScene.Update(frame);
             if (Searches != null) Searches.Update(frame);
             if (Memory != null) Memory.Update(frame);
+            ShapesUpdate();
             if (Lanes != null)
             {
                 Lanes.Update(frame);
@@ -581,6 +646,7 @@ namespace Automata.Pathfinding
             Vector3D side1, side2;
             double s1, s2;
             CrossSection(ref q, ref attitude, dir, out side1, out s1, out side2, out s2);
+            bool shapeConfirm = ShapesOn && q.RealShapeGrid == null;
             double berth = Berth(ref q);
             Vector3D halfBox = HalfBox(ref q);
             double halfAlong = HalfSizeAlong(ref attitude, ref halfBox, dir);
@@ -664,6 +730,16 @@ namespace Automata.Pathfinding
                             if (realShapeCleared.Add(slim)) RealShapeClears++;   // (a block spans several chunks: once)
                             continue;
                         }
+                        // Real shapes: a static grid's block (not a door: its own rays) is in the way only if its voxels
+                        // reach into the sweep (PathfindingManager.Shapes: measured once per kind of block, no rays here)
+                        if (t < best && shapeConfirm && entry.Static && !(slim.FatBlock is IMyDoor))
+                        {
+                            bool inWay = endsZone ? ShapeBlocks(entry, slim, ref tl) : ShapeBlocks(entry, slim, ref wl);
+#if PERF
+                            RouteStats.Shape(!inWay, true);
+#endif
+                            if (!inWay) continue;
+                        }
                         if (t < best)
                         {
                             best = t;
@@ -716,6 +792,11 @@ namespace Automata.Pathfinding
             hit = a + dir * best;
             hitEntity = bestEntity;
             LastHitBlock = bestBlock;
+#if PERF
+            if (!offThread)
+                RouteStats.Refused(bestBlock != null ? (bestBlock.CubeGrid.IsStatic && !(bestBlock.FatBlock is IMyDoor) ? RouteStats.BY_STATIC : RouteStats.BY_OTHER)
+                                   : bestEntity != null && IsAsteroid(bestEntity) ? RouteStats.BY_ROCK : RouteStats.BY_OTHER);
+#endif
             return true;
         }
 
@@ -804,7 +885,13 @@ namespace Automata.Pathfinding
             Vector3D from = a + o, to = a + o + dir * end;
             hits.Clear();
             planRays++;
+#if PERF
+            long rayT0 = RouteStats.Now();
+#endif
             MyAPIGateway.Physics.CastRay(from, to, hits);
+#if PERF
+            RouteStats.Ray(RouteStats.RAY_PLAN, rayT0);
+#endif
             for (int i = 0; i < hits.Count; i++)
             {
                 var e = hits[i].HitEntity;
@@ -888,18 +975,32 @@ namespace Automata.Pathfinding
             if (offThread) return false;   // rays: cell boxes count (searches with a real-shape grid aren't queued)
             int n1 = h1 > 0.75 ? 5 : h1 > 0.3 ? 4 : 3, n2 = h2 > 0.75 ? 5 : h2 > 0.3 ? 4 : 3;
             if (RealShapeRayBudget < n1 * n2) return false;
+            RealShapeRayBudget -= n1 * n2;
+            RealShapeRays += n1 * n2;
+            return RayGridClear(grid, ref box, ref inv, a0, dir, t0, t1, side1, -h1, h1, n1, side2, -h2, h2, n2);
+        }
+
+        // An n1 x n2 grid of rays over u0..u1 (along side1) x v0..v1 (side2), along a0 + dir * t0..t1: none hits 'grid'
+        // inside the block's cells?
+        private bool RayGridClear(IMyCubeGrid grid, ref BoundingBoxD box, ref MatrixD inv, Vector3D a0, Vector3D dir, double t0, double t1,
+                                  Vector3D side1, double u0, double u1, int n1, Vector3D side2, double v0, double v1, int n2)
+        {
             BoundingBoxD cells = box.GetInflated(0.02);
             for (int i = 0; i < n1; i++)
             {
-                double u = -1 + 2.0 * i / (n1 - 1);
+                double u = u0 + (u1 - u0) * i / (n1 - 1);
                 for (int j = 0; j < n2; j++)
                 {
-                    double v = -1 + 2.0 * j / (n2 - 1);
-                    Vector3D o = a0 + side1 * (u * h1) + side2 * (v * h2);
+                    double v = v0 + (v1 - v0) * j / (n2 - 1);
+                    Vector3D o = a0 + side1 * u + side2 * v;
                     hits.Clear();
-                    RealShapeRayBudget--;
-                    RealShapeRays++;
+#if PERF
+                    long rayT0 = RouteStats.Now();
+#endif
                     MyAPIGateway.Physics.CastRay(o + dir * t0, o + dir * t1, hits);
+#if PERF
+                    RouteStats.Ray(RouteStats.RAY_SHAPE, rayT0);
+#endif
                     for (int k = 0; k < hits.Count; k++)
                     {
                         var e = hits[k].HitEntity;
@@ -961,7 +1062,13 @@ namespace Automata.Pathfinding
                     Vector3D from = a0 + off + dir * t0, to = a0 + off + dir * t1;
                     hits.Clear();
                     planRays++;
+#if PERF
+                    long rayT0 = RouteStats.Now();
+#endif
                     MyAPIGateway.Physics.CastRay(from, to, hits);
+#if PERF
+                    RouteStats.Ray(RouteStats.RAY_PLAN, rayT0);
+#endif
                     for (int k = 0; k < hits.Count; k++)
                     {
                         var g = hits[k].HitEntity != null ? hits[k].HitEntity.GetTopMostParent() as IMyCubeGrid : null;
@@ -1193,7 +1300,7 @@ namespace Automata.Pathfinding
             BoundingBoxD wb = box.GetAABB();
             scene.Ensure(new BoundingSphereD(wb.Center, wb.HalfExtents.Length()), frame);
             scene.Overlapping(ref wb, entryBuffer, frame);
-            bool free = true;
+            bool free = true, shapes = ShapesOn && q.RealShapeGrid == null;
             for (int i = 0; i < entryBuffer.Count && free; i++)
             {
                 var entry = entryBuffer[i];
@@ -1218,6 +1325,8 @@ namespace Automata.Pathfinding
                     blocksTested++;
                     if (!local.Intersects(ref bb)) continue;
                     if (!Seen(ref q, Vector3D.Transform(bb.Center, entry.World))) continue;
+                    // (real shapes: a static grid's block counts where its voxels are, not its whole cell)
+                    if (shapes && entry.Static && !(slim.FatBlock is IMyDoor) && !ShapeBlocks(entry, slim, ref local)) continue;
                     free = false;
                     LastHitBlock = slim;
                     if (!entry.Static || slim.FatBlock is IMyDoor) planHitDynamic = true;
@@ -1244,7 +1353,13 @@ namespace Automata.Pathfinding
                 if (seen <= 0.5) continue;
                 hits.Clear();
                 planRays++;
+#if PERF
+                long rayT0 = RouteStats.Now();
+#endif
                 MyAPIGateway.Physics.CastRay(centre, centre + d * seen, hits);
+#if PERF
+                RouteStats.Ray(RouteStats.RAY_PLAN, rayT0);
+#endif
                 for (int i = 0; i < hits.Count; i++)
                 {
                     var e = hits[i].HitEntity;
@@ -1434,7 +1549,7 @@ namespace Automata.Pathfinding
                 h = h * 31 + (q.MaxPitch >= 0 ? (int)(q.MaxPitch * 100) : -1);
                 int bits = (q.HullCentred ? 1 : 0) | (q.LooseGoal ? 2 : 0) | (q.StrictEnds ? 4 : 0) | (q.NoHeldTurn ? 8 : 0)
                          | (q.AlignToRoute ? 16 : 0) | (q.SeeAll ? 32 : 0) | (q.GravityUp.LengthSquared() > 0.5 ? 64 : 0)
-                         | (q.RealShapeGrid != null ? 128 : 0) | (q.HoldAttitude ? 256 : 0) | (q.EyesSet ? 512 : 0) | (q.LevelLegs ? 1024 : 0);
+                         | (q.RealShapeGrid != null ? 128 : 0) | (q.HoldAttitude ? 256 : 0) | (q.EyesSet ? 512 : 0) | (q.LevelLegs ? 1024 : 0) | (q.NoSearch ? 2048 : 0);
                 h = h * 31 + bits;
                 if (q.IgnoreGrid != null) h = h * 31 + q.IgnoreGrid.EntityId.GetHashCode() + q.IgnoreMin.GetHashCode() * 7 + q.IgnoreMax.GetHashCode() * 13;
                 if (q.RealShapeGrid != null) h = h * 31 + q.RealShapeGrid.EntityId.GetHashCode();
@@ -1526,6 +1641,9 @@ namespace Automata.Pathfinding
         // A worker: the stretch of its answer its final check is on, and the doors met (to the main thread with the answer)
         private int searchSeg = -1;
         private readonly List<SearchDoor> searchDoors = new List<SearchDoor>();
+#if PERF
+        private string perfStage;   // the stage that found the last PlanRouteTimed's route (RouteStats)
+#endif
         #endregion
 
         #region Planning
@@ -1575,11 +1693,24 @@ namespace Automata.Pathfinding
         public RouteResult PlanRoute(ref PathQuery q, Vector3D start, Vector3D goal, List<Vector3D> waypoints)
         {
             double perf = PerfStats.Start();
+#if PERF
+            bool statsOuter = !offThread && RouteStats.BeginPlan();
+            long statsT0 = RouteStats.Now();
+            var statsQuery = q;
+            int statsChecks = planChecks, statsBlocks = blocksTested, statsCached = FailedRouteHits;
+            perfStage = null;
+#endif
             watch.Start();
             var r = PlanRouteTimed(ref q, start, goal, waypoints);
             watch.Stop();
             planUnseen += unseen;
             PerfStats.Stop(PerfStats.PathPlan, perf);
+#if PERF
+            if (!offThread)
+                RouteStats.EndPlan(statsOuter, statsT0, statsQuery.Owner, ref statsQuery, start, goal, r, perfStage, FailedRouteHits > statsCached,
+                                   planChecks - statsChecks, blocksTested - statsBlocks,
+                                   r == RouteResult.Blocked && LastHitBlock != null ? Describe(LastHitBlock) : null);
+#endif
             return r;
         }
 
@@ -1598,7 +1729,7 @@ namespace Automata.Pathfinding
             if (q.MinAltitude > 0 && Vector3D.Distance(start, goal) <= Math.Max(2 * TERRAIN_END_MARGIN, q.MinAltitude)) q.MinAltitude = 0;
             // Long flights in gravity cruise above the terrain (take-off straight up, landing straight down), instead
             // of skimming it a hull's clearance high
-            if (config.UsePlanetAwarePathfinding() && q.GravityUp.LengthSquared() > 0.5 && Vector3D.Distance(start, goal) > config.ArcMinDistance)
+            if (q.GravityUp.LengthSquared() > 0.5 && Vector3D.Distance(start, goal) > config.ArcMinDistance)
                 q.MinAltitude = Math.Max(q.MinAltitude, config.CruiseAltitude);
 
             // Asked before and no way then (nothing changed since): the same answer, nothing checked again
@@ -1613,7 +1744,7 @@ namespace Automata.Pathfinding
                 return RouteResult.Blocked;
             }
             // A goal inside something (another drone parked there, a ship) can't be reached, whatever the route
-            if (!q.LooseGoal && !HullFits(ref q, goal))
+            if (!q.LooseGoal && !GoalFits(ref q, goal))
             {
                 LastBlocker = LastHitBlock != null ? LastHitBlock.CubeGrid : null;
                 string inside = "the goal is inside " + Describe(LastHitBlock);
@@ -1622,7 +1753,7 @@ namespace Automata.Pathfinding
             }
 
             // The search queue (worker threads) when the caller can wait for it; a real-shape check needs rays all along: here
-            bool searches = q.AsyncOk && Searches != null && !offThread && ThetaAvailable && q.RealShapeGrid == null;
+            bool searches = q.AsyncOk && !q.NoSearch && Searches != null && !offThread && ThetaAvailable && q.RealShapeGrid == null;
             PathSearchResult sr = null;
             var poll = SearchPoll.Inline;
             // A search for this stretch queued before (the stages before it failed then): straight to it, they aren't run again
@@ -1630,50 +1761,123 @@ namespace Automata.Pathfinding
             if (poll == SearchPoll.Pending) return RouteResult.Pending;
 
             double t0 = watch.Elapsed.TotalMilliseconds;
-            string why1 = null, why2 = null, stage = "straight";
+            latBlocker = null;
+            string why1 = null, why2 = null, whyL = null, stage = "straight";
+            double tL = 0;
             bool shaped = false, ok = false;
             double t1 = t0, t2 = t0;
             if (poll == SearchPoll.Inline)
             {
-                ok = StraightStage(ref q, start, goal, out why1, out shaped, true);
-                t1 = t2 = watch.Elapsed.TotalMilliseconds;
-                if (!ok && Memory != null && !(searches && Searches.MemoryFailedBefore(ref q, start, goal)))
+                // By cost: 1. players' custom routes (none near: nothing to do), 2. the straight line (one check in the
+                // open), 3. the shared memory
+                IMyCubeGrid straightBlocker = null;
+                string whyC = null;
+                bool memory = Memory != null && !(searches && Searches.MemoryFailedBefore(ref q, start, goal));
+                if (memory)
                 {
                     int was = budgetBase;
                     budgetBase = planChecks + planRays;   // its own budget
-                    memoryPoints.Clear();
-                    ok = Memory.FindRoute(this, ref q, start, goal, memoryPoints, out why2, config.MemoryMaxMs);
+                    ok = MemoryStage(ref q, start, goal, true, out whyC);
                     budgetBase = was;
-                    if (!ok && searches) Searches.NoteMemoryFailed(ref q, start, goal);
-                    if (ok)
+                    if (ok) stage = "custom route";
+                }
+                t1 = watch.Elapsed.TotalMilliseconds;
+                bool blindStraight = false;
+                if (!ok)
+                {
+                    int unseen0 = unseen;
+                    ok = StraightStage(ref q, start, goal, out why1, out shaped, true);
+                    straightBlocker = LastHitBlock != null ? LastHitBlock.CubeGrid : null;   // (the lattice searches its grid)
+                    if (ok) stage = "straight";
+                    // Clear only where the drone can't see (assumed clear): a remembered way, if there is one, first - a
+                    // straight line through a maze out of view was flown into its walls, and planned again, over and over
+                    if (ok && unseen > unseen0 && memory)
                     {
-                        points.Clear();
-                        points.Add(start);
-                        for (int k = 0; k < memoryPoints.Count; k++) points.Add(q.HullCentred ? memoryPoints[k] : HullToController(ref q, memoryPoints[k]));
-                        points.Add(goal);
-                        shaped = false;
-                        stage = "memory";
+                        blindStraight = true;
+                        straightKeep.Clear();
+                        straightKeep.AddRange(points);
+                        straightShaped = shaped;
+                        ok = false;
                     }
+                }
+                t2 = watch.Elapsed.TotalMilliseconds;
+                if (!ok && memory)
+                {
+                    int was = budgetBase;
+                    budgetBase = planChecks + planRays;
+                    ok = MemoryStage(ref q, start, goal, false, out why2);
+                    budgetBase = was;
+                    if (ok) { shaped = false; stage = "memory"; }
+                    if (whyC != null && why2 != null) why2 = "custom: " + whyC + "; shared: " + why2;
+                    if (!ok && blindStraight)
+                    {
+                        // No remembered way: the straight line after all (checked again on the way)
+                        points.Clear();
+                        points.AddRange(straightKeep);
+                        shaped = straightShaped;
+                        ok = true;
+                        stage = "straight";
+                    }
+                    if (!ok && searches) Searches.NoteMemoryFailed(ref q, start, goal);
+                    t1 += watch.Elapsed.TotalMilliseconds - t2;   // (memory's time, both passes)
                     t2 = watch.Elapsed.TotalMilliseconds;
                 }
+                latBlocker = straightBlocker != null && straightBlocker.IsStatic ? straightBlocker : null;
+                if (!ok && StraightExact(ref q, start, goal, latBlocker)) { ok = true; shaped = true; stage = "straight (real shape)"; }
             }
             else why1 = "queued search";
             string why3 = null;
             double t3 = t2;
-            if (!ok && ThetaAvailable)
+            // Indoors (start or goal within a static grid: the lattice's case) the lattice comes first, before the search
+            // is queued; the search is asked only when it finds nothing - and then the lattice isn't asked again when the
+            // search's answer comes in. (In the maze the search found nothing 22 times out of 22, on a worker, the drone
+            // waiting for it each time - 2026-11-14)
+            bool indoors = !ok && LatticeAvailable && !q.NoSearch && poll == SearchPoll.Inline && LatticeIndoors(ref q, start, goal, latBlocker);
+            if (indoors)
+            {
+                double tl0 = watch.Elapsed.TotalMilliseconds;
+                budgetBase = planChecks + planRays;   // its own budget
+                bool latWait;
+                ok = LatticeStage(ref q, start, goal, latBlocker, out whyL, out latWait);
+                if (latWait) return RouteResult.Pending;   // (it goes on next tick: the drone holds)
+                if (ok) { shaped = true; stage = "lattice"; }
+                tL = watch.Elapsed.TotalMilliseconds - tl0;
+                if (!ok) { latFirstOwner = q.Owner; latFirstStart = start; latFirstGoal = goal; latFirstFrame = frame; latFirstWhy = whyL; latFirstMs = tL; }
+            }
+            else if (!ok && poll == SearchPoll.Ready && latFirstOwner == q.Owner && frame - latFirstFrame < LAT_FIRST_KEEP_TICKS
+                     && Vector3D.DistanceSquared(start, latFirstStart) < 1 && Vector3D.DistanceSquared(goal, latFirstGoal) < 1)
+            {
+                indoors = true;   // (the search's answer to an ask the lattice failed just before: not asked again)
+                whyL = latFirstWhy + " (before the search)";
+                tL = latFirstMs;
+            }
+            // 4. Lazy Theta* (queued: the drone waits; off the main thread), 5. the block lattice (main thread). Not from
+            // the escape spots round a start the searches failed from (NoSearch)
+            if (!ok && ThetaAvailable && !q.NoSearch)
             {
                 if (searches && poll == SearchPoll.Inline)
                 {
                     poll = Searches.Ask(ref q, start, goal, out sr);
-                    if (poll == SearchPoll.Pending) return RouteResult.Pending;
+                    if (poll == SearchPoll.Pending)
+                    {
+                        // Why the cheap stages gave up (the search's own failure, later, only says "queued search")
+                        if (Log.DebugEnabled) Log.Debug("Pathfinding: {0:F0} m to the search: straight: {1}; memory: {2}", Vector3D.Distance(start, goal), why1 ?? "-", why2 ?? (Memory == null ? "none" : "not tried (failed before for this ask)"));
+                        return RouteResult.Pending;
+                    }
                 }
                 if (poll == SearchPoll.Ready)
                 {
                     if (sr.Found)
                     {
                         double pa = PerfStats.Start();
+#if PERF
+                        long statsAccept = RouteStats.Now();
+#endif
                         ok = AcceptSearch(ref q, start, goal, sr, out why3);
                         PerfStats.Stop(PerfStats.PathAccept, pa);
+#if PERF
+                        RouteStats.Accepted(ok, statsAccept);
+#endif
                         if (!ok) Searches.Reject(sr, why3);
                     }
                     else why3 = sr.Why;
@@ -1687,25 +1891,123 @@ namespace Automata.Pathfinding
                 }
                 t3 = watch.Elapsed.TotalMilliseconds;
             }
+            if (!ok && LatticeAvailable && !q.NoSearch && !indoors)
+            {
+                double tl0 = watch.Elapsed.TotalMilliseconds;
+                budgetBase = planChecks + planRays;   // its own budget
+                bool latWait;
+                ok = LatticeStage(ref q, start, goal, latBlocker, out whyL, out latWait);
+                if (latWait) return RouteResult.Pending;
+                if (ok) { shaped = true; stage = "lattice"; }
+                tL = watch.Elapsed.TotalMilliseconds - tl0;
+            }
             if (!ok)
             {
-                string why = why1 + (why2 != null ? "; memory: " + why2 : "") + (why3 != null ? "; Lazy Theta*: " + why3 : "");
+                string why = why1 + (why2 != null ? "; memory: " + why2 : "") + (whyL != null ? "; lattice: " + whyL + string.Format(" ({0:F1} ms)", tL) : "") + (why3 != null ? "; Lazy Theta*: " + why3 : "");
+                // Out of time (a search's budget, the lattice's): no proof there is no way at this clearance - not
+                // remembered as what this goal needs (PlanTransient)
+                if ((whyL != null && whyL.Contains("budget")) || (why3 != null && why3.Contains("budget"))) PlanTransient = true;
                 RememberFailedRoute(ref q, start, goal, why);
-                return Fail(start, goal, why + string.Format(" [straight {0:F2} ms{1}{2}]", t1 - t0, Memory != null ? string.Format(", memory {0:F2} ms", t2 - t1) : "",
-                                                             ThetaAvailable ? string.Format(", Lazy Theta* {0:F2} ms", t3 - t2) : ""));
+                return Fail(start, goal, why + string.Format(" [{0}straight {1:F2} ms{2}]", Memory != null ? string.Format("memory {0:F2} ms, ", t1 - t0) : "", t2 - t1,
+                                                             ThetaAvailable && !q.NoSearch ? string.Format(", Lazy Theta* {0:F2} ms", t3 - t2) : ""));
             }
 
             if (stage != "straight") budgetBase = planChecks + planRays;   // straightening a searched route gets its own budget
             if (!shaped && points.Count > 3) Shortcut(ref q);
-            if (points.Count > 2) RoundCorners(ref q);
+            if (points.Count > 2 && stage != "lattice") RoundCorners(ref q);   // (the lattice's legs hold their attitudes)
             for (int k = 1; k < points.Count - 1; k++) waypoints.Add(points[k]);
             int added = points.Count - 2;
             points.Clear();
-            if (Log.DebugEnabled) Log.Debug("Pathfinding: {0:F0} m, {1} waypoints, {2} stretches not fully seen (assumed clear){7}, {3} checks, {4} blocks, {5} rays, {6:F2} ms; stage {8} (straight {9:F2} ms{10})", Vector3D.Distance(start, goal), added, unseen, planChecks, blocksTested, planRays, watch.Elapsed.TotalMilliseconds, unseen > 0 ? DescribeView(ref q, start, goal) : "", stage, t1 - t0, (stage != "straight" ? string.Format(", memory {0:F2} ms", t2 - t1) : "") + (stage.StartsWith("theta") ? string.Format(", Lazy Theta* {0:F2} ms", t3 - t2) : ""));
+#if PERF
+            perfStage = stage;
+#endif
+            if (Log.DebugEnabled) Log.Debug("Pathfinding: {0:F0} m, {1} waypoints, {2} stretches not fully seen (assumed clear){7}, {3} checks, {4} blocks, {5} rays, {6:F2} ms; stage {8} (memory {9:F2} ms{10})", Vector3D.Distance(start, goal), added, unseen, planChecks, blocksTested, planRays, watch.Elapsed.TotalMilliseconds, unseen > 0 ? DescribeView(ref q, start, goal) : "", stage, t1 - t0, string.Format(", straight {0:F2} ms", t2 - t1) + (stage.StartsWith("theta") ? string.Format(", Lazy Theta* {0:F2} ms", t3 - t2) : ""));
             return added > 0 ? RouteResult.Detour : RouteResult.Direct;
         }
 
+        // At the drone's tightest clearance (q.ExactAtTightest) a straight hop of at most EXACT_STRAIGHT_MAX m that the cells
+        // of a static grid shut: the drone's own surface swept along it against the real physics, held as it is (level
+        // in gravity). The harvesters' direct legs did this, for them alone; gone with them (2026-11-18), the hops
+        // between a farm's plots had "no way from here" and plots were skipped Unreachable (2026-11-19). Every drone.
+        private const double EXACT_STRAIGHT_MAX = 40;
+        private bool StraightExact(ref PathQuery q, Vector3D start, Vector3D goal, IMyCubeGrid blocker)
+        {
+            if (!q.ExactAtTightest || blocker == null || offThread || !q.HullCentred) return false;
+            double len2 = Vector3D.DistanceSquared(start, goal);
+            if (len2 < 0.01 || len2 > EXACT_STRAIGHT_MAX * EXACT_STRAIGHT_MAX) return false;
+            MatrixD att = q.Controller;
+            if (q.LevelLegs && q.GravityUp.LengthSquared() > 0.5)
+            {
+                Vector3D up = q.GravityUp, fwd = att.Forward - up * Vector3D.Dot(att.Forward, up);
+                if (fwd.LengthSquared() < 1e-6) fwd = Vector3D.CalculatePerpendicularVector(up);
+                att = MatrixD.CreateWorld(Vector3D.Zero, Vector3D.Normalize(fwd), up);
+            }
+            string by;
+            if (!RealSweepClear(ref q, ref att, start, goal, q.Berth, !q.LooseGoal, out by)) return false;
+            points.Clear();
+            points.Add(start);
+            points.Add(goal);
+            if (legHints.Count >= MAX_LEG_HINTS) legHints.RemoveAt(0);
+            legHints.Add(new RouteMemory.LegHint { A = start, B = goal, Fwd = att.Forward, Up = att.Up });
+            return true;
+        }
+
         private readonly List<Vector3D> memoryPoints = new List<Vector3D>();
+        private IMyCubeGrid latBlocker;
+        /// <summary>A plan's answer that needs a smaller clearance than asked (a custom route's links, checked with the
+        /// one it was recorded with): the caller flies and checks its legs with that; 0: none. The caller clears it.</summary>
+        public double PlanBerthCap;
+        // The lattice that failed before the search was queued (indoors): not asked again when the search's answer comes in
+        private long latFirstOwner;
+        private Vector3D latFirstStart, latFirstGoal;
+        private int latFirstFrame = int.MinValue / 2;
+        private string latFirstWhy;
+        private double latFirstMs;
+        private const int LAT_FIRST_KEEP_TICKS = 30 * 60;
+        /// <summary>
+        /// A plan failed for a passing reason (block shapes still being measured, the time spent on them): not a proof
+        /// there is no way at this clearance. The caller clears it.
+        /// </summary>
+        public bool PlanTransient;
+        private readonly List<Vector3D> straightKeep = new List<Vector3D>();   // a straight answer partly out of view
+        private bool straightShaped;                 // the grid the straight stage found in the way (the lattice's)
+
+        // Route memory: a way over players' custom routes only ('customOnly'), or over every link the drone may use, into
+        // 'points' (start and goal included); the legs clear only in another attitude into the leg hints
+        private bool MemoryStage(ref PathQuery q, Vector3D start, Vector3D goal, bool customOnly, out string why)
+        {
+            memoryPoints.Clear();
+            bool ok = Memory.FindRoute(this, ref q, start, goal, memoryPoints, out why, config.MemoryMaxMs, customOnly);
+            if (!ok) return false;
+            if (Memory.UsedRouteBerth) PlanBerthCap = Clearances.FINE;
+            points.Clear();
+            points.Add(start);
+            for (int k = 0; k < memoryPoints.Count; k++) points.Add(q.HullCentred ? memoryPoints[k] : HullToController(ref q, memoryPoints[k]));
+            points.Add(goal);
+            // Links clear only in another attitude: their legs fly in it (AssignAttitudes)
+            for (int k = 0; k < Memory.LegHints.Count; k++)
+            {
+                var h = Memory.LegHints[k];
+                if (!q.HullCentred) { h.A = HullToController(ref q, h.A); h.B = HullToController(ref q, h.B); }
+                if (legHints.Count >= MAX_LEG_HINTS) legHints.RemoveAt(0);
+                legHints.Add(h);
+            }
+            return true;
+        }
+        // Route memory's legs clear only in a given attitude (the latest; matched by their ends in AssignAttitudes)
+        private readonly List<RouteMemory.LegHint> legHints = new List<RouteMemory.LegHint>();
+        private const int MAX_LEG_HINTS = 256;
+
+        private bool LegHintFor(Vector3D a, Vector3D b, out Vector3D fwd, out Vector3D up)
+        {
+            for (int k = legHints.Count - 1; k >= 0; k--)
+            {
+                var h = legHints[k];
+                if (Vector3D.DistanceSquared(h.A, a) < 0.01 && Vector3D.DistanceSquared(h.B, b) < 0.01) { fwd = h.Fwd; up = h.Up; return true; }
+            }
+            fwd = up = Vector3D.Zero;
+            return false;
+        }
         private readonly List<Vector3D> roundPoints = new List<Vector3D>();   // an asteroid arc's points
         private readonly HashSet<long> arcRounded = new HashSet<long>();   // asteroids rounded in this straight stage
 
@@ -1963,7 +2265,7 @@ namespace Automata.Pathfinding
                 IMyEntity e;
                 Vector3D th;
                 if (BudgetSpent || SegmentBlocked(ref q, ref q.Controller, prev, p, 0.5, out h, out e)
-                    || (inGravity && config.UsePlanetAwarePathfinding() && TerrainTooClose(prev, p, need, out th)))
+                    || (inGravity && TerrainTooClose(prev, p, need, out th)))
                 {
                     rounded.RemoveRange(start, rounded.Count - start);
                     return false;
@@ -2050,7 +2352,7 @@ namespace Automata.Pathfinding
 
         /// <summary>
         /// Terrain between a and b (away from the ends, where work near the ground happens)? Then two points to
-        /// climb over it: above a and above b, at the highest surface seen plus MinAltitudeBuffer.
+        /// climb over it: above a and above b, at the highest surface seen plus the drone's minimum altitude (its setting).
         /// </summary>
         /// <summary>Height of 'p' over the closest planet's surface, along the local vertical (MaxValue: no planet).</summary>
         public static double HeightAboveTerrain(Vector3D p)
@@ -2068,7 +2370,7 @@ namespace Automata.Pathfinding
         {
             over1 = a;
             over2 = b;
-            if (!config.UsePlanetAwarePathfinding() || q.GravityUp.LengthSquared() < 0.5) return false;
+            if (q.GravityUp.LengthSquared() < 0.5) return false;
             double len = Vector3D.Distance(a, b);
             if (len <= 2 * TERRAIN_END_MARGIN) return false;
             Vector3D mid = (a + b) * 0.5;
@@ -2106,7 +2408,7 @@ namespace Automata.Pathfinding
                 if (Vector3D.Dot(p, up) - h < need) blocked = true;
             }
             if (!blocked) return false;
-            double height = highest + Math.Max(config.MinAltitudeBuffer(), q.MinAltitude) + hullNeed;   // MinAltitude once, not twice
+            double height = highest + q.MinAltitude + hullNeed;
             if (Vector3D.Dot(a, up) < height) over1 = a + up * (height - Vector3D.Dot(a, up));
             if (Vector3D.Dot(b, up) < height) over2 = b + up * (height - Vector3D.Dot(b, up));
             return true;
@@ -2120,7 +2422,7 @@ namespace Automata.Pathfinding
         /// </summary>
         private void ShapeForPlanet(ref PathQuery q, Vector3D start, Vector3D goal, List<Vector3D> pts)
         {
-            if (!config.UsePlanetAwarePathfinding() || q.GravityUp.LengthSquared() < 0.5) return;
+            if (q.GravityUp.LengthSquared() < 0.5) return;
             double dist = Vector3D.Distance(start, goal);
             bool arc = dist > config.ArcMinDistance;
             bool minAlt = q.MinAltitude > 0 && dist > 2 * TERRAIN_END_MARGIN;
@@ -2244,6 +2546,15 @@ namespace Automata.Pathfinding
                 Vector3D g = planet != null ? Vector3D.Normalize(a - planet.PositionComp.GetPosition()) : q.GravityUp;
                 Vector3D f, u;
                 bool aligned = false;
+                if (LegHintFor(a, b, out f, out u))
+                {
+                    // A remembered link clear only in this attitude (route memory checked it)
+                    fwd = f;
+                    up = u;
+                    forwards.Add(fwd);
+                    ups.Add(up);
+                    continue;
+                }
                 if (q.HoldAttitude)
                 {
                     // Only that attitude found a way (Lazy Theta*, held): every leg keeps it

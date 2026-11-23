@@ -42,6 +42,7 @@ namespace Automata.Util
             }
 
             string text = args.Length > 0 ? string.Format(message, args) : message;
+            text = TextLimits.Cut(text, TextLimits.TERMINAL_LINE);
             _lines.Enqueue(text);
 
             while (_lines.Count > _displayLines)

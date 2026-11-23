@@ -58,6 +58,7 @@ namespace Automata.Drone
                 for (int i = 0; i < parts.Length; i++) Add(parts[i]);
                 return;
             }
+            line = TextLimits.Cut(line, TextLimits.LCD_LINE);
             if (count < CAPACITY)
             {
                 lines[(head + count) % CAPACITY] = line;
@@ -113,9 +114,10 @@ namespace Automata.Drone
         public void SetAlert(DisplayAlertLevel level, string text)
         {
             if (text == null || level == DisplayAlertLevel.None) { text = ""; level = DisplayAlertLevel.None; }
+            text = TextLimits.Cut(text, TextLimits.LCD_LINE);
             if (level == alertLevel && text == alertText) return;
             alertLevel = level;
-            alertText = text;
+            alertText = TextLimits.Cut(text, TextLimits.LCD_LINE);
             dirty = true;
         }
 

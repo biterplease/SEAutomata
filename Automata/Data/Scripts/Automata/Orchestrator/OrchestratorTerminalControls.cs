@@ -35,9 +35,70 @@ namespace Automata.Orchestrator
                                            l => l.Terminal_UseBroadcastController, (l, v) => l.Terminal_UseBroadcastController = v);
             CreateStagingControls();
             CreateLaneControls();
+            CreateRouteControls();
         }
 
-        static IMyTerminalControlButton laneClearButton;
+        static IMyTerminalControlButton laneClearButton, routeClearButton;
+
+        // Custom routes: the owner's recorded routes (show, delete one, delete all: pressed twice)
+        static void CreateRouteControls()
+        {
+            var sep = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSeparator, IMyProgrammableBlock>("");
+            sep.Visible = Visible;
+            Add(sep);
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlListbox, IMyProgrammableBlock>(IdPrefix + "RouteList");
+                c.Title = MyStrings.Orchestrator_CustomRoutes;
+                c.Tooltip = MyStrings.BLANK;
+                c.SupportsMultipleBlocks = false;
+                c.Visible = Visible;
+                c.Multiselect = false;
+                c.VisibleRowsCount = 6;
+                c.ListContent = (b, items, selected) =>
+                {
+                    var l = GetBlock(b);
+                    if (l == null) return;
+                    var rows = l.Terminal_CustomRoutes;
+                    for (int i = 0; i < rows.Count; i++)
+                    {
+                        int bar = rows[i].IndexOf('|');
+                        int id;
+                        if (bar <= 0 || !int.TryParse(rows[i].Substring(0, bar), out id)) continue;
+                        var text = MyStringId.GetOrCompute(rows[i].Substring(bar + 1));
+                        var item = new MyTerminalControlListBoxItem(text, text, id);
+                        items.Add(item);
+                        if (id == l.Terminal_RouteSelected) selected.Add(item);
+                    }
+                };
+                c.ItemSelected = (b, selected) =>
+                {
+                    var l = GetBlock(b);
+                    if (l == null || selected.Count == 0 || !(selected[0].UserData is int)) return;
+                    l.Terminal_RouteSelected = (int)selected[0].UserData;
+                };
+                Add(c);
+            }
+            LaneButton("RouteVisualize", MyStrings.Orchestrator_ShowCustomRoute, MyStrings.BLANK, l => l.Terminal_VisualizeRoute());
+            LaneButton("RouteDelete", MyStrings.Orchestrator_DeleteCustomRoute, MyStrings.BLANK, l => l.Terminal_DeleteRoute());
+            {
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlButton, IMyProgrammableBlock>(IdPrefix + "RoutesClear");
+                c.Title = MyStrings.Orchestrator_DeleteAllCustomRoutes;
+                c.Tooltip = MyStrings.BLANK;
+                c.SupportsMultipleBlocks = false;
+                c.Visible = Visible;
+                c.Action = b =>
+                {
+                    var l = GetBlock(b);
+                    if (l == null) return;
+                    bool armed;
+                    l.Terminal_ClearRoutes(out armed);
+                    if (routeClearButton != null) routeClearButton.Title = armed ? MyStrings.Orchestrator_PressAgainToClearAll : MyStrings.Orchestrator_DeleteAllCustomRoutes;
+                    RefreshTerminal(b);
+                };
+                routeClearButton = c;
+                Add(c);
+            }
+        }
 
         static void CreateLaneControls()
         {

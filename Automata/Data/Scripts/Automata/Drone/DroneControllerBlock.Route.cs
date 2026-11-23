@@ -29,7 +29,6 @@ namespace Automata.Drone
         private const int ROUTE_REPLAN_MIN_TICKS = 60;    // at most one replan a second
         #endregion
         private const double ROUTE_LOOKAHEAD_MIN = 20.0;  // m
-        private const double WORK_SITE_BERTH = 0.5;       // m kept around the hull on the way in to a work face
         private const double WORK_STANDOFF = 0.25;        // m: the way-in check stops the hull's front this far off the face
         private const double JIT_MIN_DISTANCE = 10.0;     // m flown before parts not seen at planning are planned
 
@@ -135,9 +134,11 @@ namespace Automata.Drone
                 Cameras = cameraBlocks,
                 Sensors = sensors,
                 GravityUp = flightState.InGravity ? flightState.GravityUp : Vector3D.Zero,
-                Clearance = CompactFlight ? COMPACT_CLEARANCE : Math.Max(CONSTRUCTION_CLEARANCE, AutomataSession.GetConfig().Pathfinding.ObstacleClearance),
-                Berth = CompactFlight ? COMPACT_CLEARANCE : 0,   // (0: the server's ObstacleClearance)
+                // (every drone the same, by the clearance ladder: a harvester's routes start at its tightest step, StartFactor)
+                Clearance = AutomataSession.GetConfig().Pathfinding.ObstacleClearance * planFactor,   // (detours: the same as the checks')
+                Berth = AutomataSession.GetConfig().Pathfinding.ObstacleClearance * planFactor,   // (halved per failed plan)
                 HullCentred = true,
+                NoSearch = planNoSearch,   // (PlanPathCheap: the cheap stages only, from the spots round a start the searches failed from)
                 SleepingIds = settings != null ? settings.SleepingBlockIds : null,
                 AlignToRoute = true,
                 // In gravity the route's legs fly level: the pitch / roll limits are for work, corridors and economy tilt
@@ -148,6 +149,7 @@ namespace Automata.Drone
                 // Every flight; the planner drops it for hops shorter than the altitude (work at ground level) and the
                 // route takes off / lands straight up / down at the ends, so connectors and blocks on the ground are reached
                 MinAltitude = settings != null && !SweepIgnoresMinAltitude && !CompactFlight ? settings.MinAltitude : 0,   // (a scout sweep in gravity: low; harvesters: indoors)
+                ExactAtTightest = BerthNow(planFactor) <= Pathfinding.Clearances.MIN + 1e-6,
             };
         }
 
@@ -162,25 +164,260 @@ namespace Automata.Drone
         }
 
         /// <summary>Same; 'startForward' / 'startUp': the attitude the drone will have at 'start' (default: now).</summary>
+        // Clearance by failed plans (2026-11-13): no route to a goal with the clearance (ObstacleClearance, for the checks and
+        // the detours alike) - half of it, again, down to Pathfinding.Clearances.MIN; back to all of it for another goal. The
+        // legs of such a route fly slower where it is tight (LegSpeedByClearance).
+
+        /// <summary>
+        /// Where a drone's clearance ladder starts (a factor of ObstacleClearance): 1, the full clearance; harvesters
+        /// (indoors: a 2 m drone under a 3.5 m roof) at Pathfinding.Clearances.MIN. The only difference left between them: the same
+        /// planner chain, leg checks and ladder for every drone (2026-11-18; harvesters had their own direct legs, a fixed
+        /// clearance and their own leg checks).
+        /// </summary>
+        private double StartFactor()
+        {
+            if (!CompactFlight) return 1;
+            double full = BerthNow(1);
+            return full > Pathfinding.Clearances.MIN ? Pathfinding.Clearances.MIN / full : 1;
+        }
+
+        /// <summary>
+        /// A recorded route (server): the waypoints in line with their neighbours dropped where the shortcut is clear for
+        /// the hull at the floor clearance (in any of its profiles, PathfindingManager.LegProfile - the recorded attitude
+        /// isn't used: the route is for drones of every shape, 2026-11-14), so each link is one the planner will find clear. The legs between consecutive samples stay as flown (logged when they look blocked:
+        /// a corner cut between samples - record more often).
+        /// </summary>
+        private void SimplifyRecorded(Pathfinding.PathfindingManager pm, List<Vector3D> pts, List<Vector3D> fwds, List<Vector3D> ups)
+        {
+            double was = planFactor;
+            planFactor = Pathfinding.Clearances.MIN / Math.Max(Pathfinding.Clearances.MIN, BerthNow(1));
+            Pathfinding.PathQuery q;
+            BuildPathQuery(out q);
+            planFactor = was;
+            q.SeeAll = true;   // every known block counts: the drone (at the route's end) sees little of it - a shortcut
+                               // out of its view was "clear" and went through walls (2026-11-13)
+            pm.BeginPlan();
+            Func<Vector3D, Vector3D, Vector3D, Vector3D, bool> clear = (a, b, f, u) =>
+            {
+                if (Vector3D.DistanceSquared(a, b) < 0.01) return true;
+                MatrixD now = q.Controller, att;
+                bool tight;
+                return pm.LegProfile(ref q, a, b, 0.5, ref now, false, out att, out tight);
+            };
+            if (Log.DebugEnabled)
+                for (int i = 0; i + 1 < pts.Count; i++)
+                    if (!clear(pts[i], pts[i + 1], fwds[i], ups[i]))
+                    {
+                        var hb = pm.LastHitBlock;
+                        Log.Debug("Drone {0}: recorded leg {1} -> {2} ({3:F1} m) looks blocked at {4:F2} m clearance by {5} at {6}: kept as flown", Entity.EntityId, i, i + 1, Vector3D.Distance(pts[i], pts[i + 1]), q.Berth, hb != null ? PathfindingManager.BlockName(hb) : "?", hb != null ? hb.Position.ToString() : "?");
+                    }
+            var raw = new List<Vector3D>(pts);
+            var rawAtt = new List<KeyValuePair<Vector3D, Vector3D>>(pts.Count);
+            for (int i = 0; i < pts.Count; i++) rawAtt.Add(new KeyValuePair<Vector3D, Vector3D>(fwds[i], ups[i]));
+            var cleanAtt = new List<KeyValuePair<Vector3D, Vector3D>>(pts.Count);
+            pts.Clear();
+            CleanRoute(raw, rawAtt, pts, cleanAtt, clear);
+            fwds.Clear();
+            ups.Clear();
+            for (int i = 0; i < cleanAtt.Count; i++) { fwds.Add(cleanAtt[i].Key); ups.Add(cleanAtt[i].Value); }
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: recorded route: {1} waypoints, {2} after the clear straight stretches went", Entity.EntityId, raw.Count, pts.Count);
+        }
+        private double planFactor = 1;
+        private Vector3D planFactorGoal = new Vector3D(double.NaN);
+
+        // The clearance a route between two places needed lately (start ~10 m, goal ~2.5 m): the next plan between them
+        // starts there, not at the full clearance found too wide a moment ago (the maze benchmark: 1.0 m failed on every
+        // trip, ~45 ms each, 46% of its planning - 2026-11-14). Kept GOAL_FACTOR_TICKS; the full clearance is tried again
+        // after that (something moved away).
+        private struct GoalFactor { public double Factor; public int Frame; }
+        private readonly Dictionary<long, GoalFactor> goalFactors = new Dictionary<long, GoalFactor>();
+        private const int GOAL_FACTOR_TICKS = 10 * 60 * 60;
+        private const int GOAL_FACTORS_MAX = 32;
+
+        private static long GoalFactorKey(Vector3D start, Vector3D goal)
+        {
+            long h = 17;
+            h = h * 31 + (long)Math.Round(goal.X / 2.5);
+            h = h * 31 + (long)Math.Round(goal.Y / 2.5);
+            h = h * 31 + (long)Math.Round(goal.Z / 2.5);
+            h = h * 31 + (long)Math.Round(start.X / 10);
+            h = h * 31 + (long)Math.Round(start.Y / 10);
+            h = h * 31 + (long)Math.Round(start.Z / 10);
+            return h;
+        }
+
         private bool PlanPath(Vector3D start, Vector3D goal, List<Vector3D> points, bool avoidObservationArea, bool areaOnlyFromOutside,
                               Vector3D startForward, Vector3D startUp, bool looseGoal)
         {
+            int nowFrame = MyAPIGateway.Session.GameplayFrameCounter;
+            routeLooseGoal = looseGoal;
+            long gfKey = GoalFactorKey(start, goal);
+            if (!(Vector3D.DistanceSquared(goal, planFactorGoal) <= 4))
+            {
+                double was = planFactor;
+                planFactor = StartFactor();
+                planFactorGoal = goal;
+                GoalFactor gf;
+                if (goalFactors.TryGetValue(gfKey, out gf))
+                {
+                    if (nowFrame - gf.Frame <= GOAL_FACTOR_TICKS) planFactor = Math.Min(planFactor, gf.Factor);
+                    else goalFactors.Remove(gfKey);
+                }
+                if (Log.DebugEnabled && (was < 1 || planFactor < 1))
+                    Log.Debug("Drone {0}: another goal: route clearance {1:F2} m{2}", Entity.EntityId, BerthNow(planFactor), planFactor < 1 ? " (what a route between these places needed lately)" : "");
+            }
             int count = points.Count;
-            if (PlanPathFrom(start, goal, points, avoidObservationArea, areaOnlyFromOutside, startForward, startUp, looseGoal)) { RecoverSucceeded(); return true; }
+            var pmc = PathfindingManager.Instance;
+            if (pmc != null) { pmc.PlanBerthCap = 0; pmc.PlanTransient = false; pmc.ResetRealShape(Entity.EntityId); }   // (its own surface measured again: the exact checks)
+            double startFactor = planFactor;
+            // The escalation, by cost (2026-11-13). From here, PlanRoute's chain: 1. players' custom routes, 2. the straight
+            // line, 3. the shared memory, 4. Lazy Theta* (queued: the drone waits), 5. the block lattice - at the full
+            // clearance, then at half of it, down to Pathfinding.Clearances.MIN. No way at any: 6. from the spots round it, the way
+            // back, a reposition (PlanPathCheap: the cheap stages only, the full clearance again).
+            while (true)
+            {
+                if (PlanPathFrom(start, goal, points, avoidObservationArea, areaOnlyFromOutside, startForward, startUp, looseGoal))
+                {
+                    RecoverSucceeded();
+                    // (the clearance that worked, when the wider ones failed for good - not for want of measured shapes)
+                    if (planFactor >= StartFactor()) goalFactors.Remove(gfKey);
+                    else if (planFactor < startFactor && !(pmc != null && pmc.PlanTransient))
+                    {
+                        if (goalFactors.Count >= GOAL_FACTORS_MAX) goalFactors.Clear();
+                        goalFactors[gfKey] = new GoalFactor { Factor = planFactor, Frame = nowFrame };
+                    }
+                    // Over a custom route recorded at a smaller clearance: the leg-start check and the look-ahead use that
+                    // one (with the plan's they found its legs blocked, planned the same route again, and gave up)
+                    if (pmc != null && pmc.PlanBerthCap > 0 && BerthNow(planFactor) > pmc.PlanBerthCap + 1e-6)
+                    {
+                        planFactor = pmc.PlanBerthCap / Math.Max(pmc.PlanBerthCap, BerthNow(1));
+                        if (Log.DebugEnabled) Log.Debug("Drone {0}: route over a custom route: its legs checked with {1:F2} m clearance (as recorded)", Entity.EntityId, BerthNow(planFactor));
+                    }
+                    return true;
+                }
+                if (points.Count > count) points.RemoveRange(count, points.Count - count);
+                double berth = BerthNow(planFactor);
+                if (berth <= Pathfinding.Clearances.MIN + 1e-6) break;
+                planFactor = Math.Max(planFactor * 0.5, Pathfinding.Clearances.MIN / Math.Max(Pathfinding.Clearances.MIN, BerthNow(1)));
+                if (Log.DebugEnabled) Log.Debug("Drone {0}: no route {1:F0} m with {2:F2} m clearance: trying {3:F2} m", Entity.EntityId, Vector3D.Distance(start, goal), berth, BerthNow(planFactor));
+            }
+            // (if that finds nothing either, the next ask for this goal starts at the tightest clearance: the wider ones
+            // failed just now - unless one failed for a passing reason: block shapes being measured on the first plan
+            // made the full clearance fail, and every later ask stayed at the tightest, 2026-11-13)
+            double tightest = pmc != null && pmc.PlanTransient ? StartFactor() : planFactor;
+            planFactor = StartFactor();
+            planNoSearch = true;
+            bool moved;
+            try { moved = PlanPathCheap(start, goal, points, count, avoidObservationArea, areaOnlyFromOutside, startForward, startUp, looseGoal) > 0; }
+            finally { planNoSearch = false; }
+            if (!moved) planFactor = tightest;
+            return moved;
+        }
+
+        // The route clearance (ObstacleClearance) at 'factor'
+        private static double BerthNow(double factor)
+        {
+            return AutomataSession.GetConfig().Pathfinding.ObstacleClearance * factor;
+        }
+
+        /// <summary>
+        /// A route leg's speed by the room around it (the hull box held at f / u along a -> b, everything known): 5 m all
+        /// round - Max speed; 1 m - Approach speed; less (a route through a tight spot, its clearance halved) - Safe speed.
+        /// Returns the room: 0 - LEG_ROOM_WIDE or more, 1 - less, 2 - under LEG_ROOM_NORMAL; -1: not looked at.
+        /// </summary>
+        private int LegSpeedByClearance(FlightOrder leg, Vector3D a, Vector3D b, Vector3D f, Vector3D u, int index)
+        {
+            var pm = PathfindingManager.Instance;
+            if (pm == null) return -1;
+            if (Vector3D.DistanceSquared(a, b) < 1) return 1;   // (too short to tell: no speed cap; a turn there in place)
+            PathQuery q;
+            BuildPathQuery(out q);
+            q.SeeAll = true;
+            MatrixD att = MatrixD.CreateWorld(Vector3D.Zero, f, u);
+            // A long leg: its ends left out (the dock it leaves, the station it comes to - flown slowly there anyway,
+            // leaving from a stop and arriving): a 5.5 km leg out of a dock flew at Safe speed all the way, its scout
+            // timed out going home (2026-11-19)
+            double len = Vector3D.Distance(a, b);
+            if (len > LEG_ROOM_TRIM_FROM)
+            {
+                double trim = Math.Min(len * 0.2, LEG_ROOM_END_TRIM);
+                Vector3D dir = (b - a) / len;
+                a += dir * trim;
+                b -= dir * trim;
+            }
+            Vector3D hit;
+            VRage.ModAPI.IMyEntity e;
+            q.Berth = LEG_ROOM_WIDE;
+            if (!pm.SegmentBlocked(ref q, ref att, a, b, 0.5, out hit, out e)) return 0;   // room: Max speed
+            q.Berth = LEG_ROOM_NORMAL;
+            bool normal = !pm.SegmentBlocked(ref q, ref att, a, b, 0.5, out hit, out e);
+            double cap = normal ? ApproachSpeed : SafeSpeed;
+            if (leg.SpeedCap <= 0 || cap < leg.SpeedCap) leg.SpeedCap = cap;
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: leg {1} ({2:F0} m): {3} ({4}): {5:F1} m/s", Entity.EntityId, index, Vector3D.Distance(a, b),
+                normal ? "under 5 m of room" : "under 1 m of room", PathfindingManager.Describe(pm.LastHitBlock), normal ? "Approach speed" : "Safe speed", cap);
+            return normal ? 1 : 2;
+        }
+        private const double LEG_ROOM_WIDE = 5.0, LEG_ROOM_NORMAL = 1.0;   // m around the hull
+        private const double LEG_ROOM_TRIM_FROM = 30, LEG_ROOM_END_TRIM = 15;   // m: legs longer: their ends (up to this) not looked at
+        private static readonly double TURN_FIRST_COS = Math.Cos(MathHelperD.ToRadians(10));
+
+        /// <summary>
+        /// A route leg with little room round it ('room' from LegSpeedByClearance: 1 or 2) flies as the planner checked it:
+        /// a change of attitude at its start is a turn in place there, the leg before stopped (TurnFirst), not a turn on the
+        /// way. Under LEG_ROOM_NORMAL of room it also keeps to its line and arrives on its end point (a corridor leg's
+        /// tolerances: a route leg's loose arrival, up to CONSTRUCTION_ROUTE_TOLERANCE off, cut the corner into the wall),
+        /// and the leg before it (either kind) stops on its start, within the corridor tolerance.
+        /// </summary>
+        private void TightLeg(FlightOrder leg, FlightOrder prev, int room, Vector3D before, Vector3D at, Vector3D to,
+                              Vector3D pf, Vector3D pu, Vector3D f, Vector3D u)
+        {
+            bool turns = Vector3D.Dot(pf, f) < TURN_FIRST_COS || Vector3D.Dot(pu, u) < TURN_FIRST_COS;
+            bool precise = room >= 2;
+            float speed, tol;
+            CorridorFlight(BerthNow(planFactor), out speed, out tol);
+            if (turns) leg.TurnFirst = true;
+            if (precise)
+            {
+                leg.LooseArrival = false;
+                leg.LineTolerance = tol;
+                leg.ArrivalTolerance = tol;
+            }
+            if (prev == null || !(turns || precise)) return;
+            // The leg before stops on this one's start (also in a straight line into it): the planner checked this leg -
+            // and the turn in place - from there. Run through loosely (1.5 m off), the drone started the leg into a gate
+            // beside its line; the check from there found the gate's edge in the way, and it planned anew five times
+            // over (2026-11-14)
+            prev.Behavior = WaypointBehavior.FullStop;
+            prev.ExitSpeed = 0;
+            prev.LooseArrival = false;
+            if (prev.ArrivalTolerance > tol) prev.ArrivalTolerance = tol;
+        }
+
+        private bool planNoSearch;   // BuildPathQuery: the cheap stages only (PathQuery.NoSearch)
+        // The route was planned with a loose goal (onto an object to collect, next to a plot): its last leg's start check
+        // doesn't look past its end either (the planner didn't) - the floor in front of a plot "2.4 m ahead" had the
+        // harvester plan the same 1 m leg again and again (2026-11-19)
+        private bool routeLooseGoal;
+
+        // No route from here: the escape spots round it, the way back, a reposition (cheap stages only): 1 found (or
+        // repositioning), -1 the goal is taken, 0 none
+        private int PlanPathCheap(Vector3D start, Vector3D goal, List<Vector3D> points, int count, bool avoidObservationArea, bool areaOnlyFromOutside,
+                                  Vector3D startForward, Vector3D startUp, bool looseGoal)
+        {
             // No way from here (boxed in where it hovers: under / beside the build, between drones): reposition - a free
             // spot it can reach in a straight line - and plan from there; the move there becomes the route's first leg
             var pm = PathfindingManager.Instance;
-            if (pm == null) return false;
+            if (pm == null) return -1;
             RefreshDroneGrids();
             PathQuery q;
             BuildPathQuery(out q);
             pm.BeginPlan();
-            if (!looseGoal && !pm.HullFits(ref q, goal)) return false;   // the goal itself is taken: moving won't help
+            if (!looseGoal && !pm.GoalFits(ref q, goal)) return -1;   // the goal itself is taken: moving won't help
             // Wedged in (the hull doesn't fit here in any attitude: it got in through precise checks): back the way it
             // came first; escape spots around a tight spot rarely fit
             bool tight = !pm.HullFits(ref q, start);
             if (tight && TryRetrace(start, goal, points, count, avoidObservationArea, areaOnlyFromOutside, startForward, startUp, looseGoal, pm, ref q))
-                return true;
+                return 1;
             EscapeCandidates(start, ref q);
             int planned = 0;
             for (int i = 0; i < escapeSpots.Count && planned < ESCAPE_PLANS_MAX; i++)
@@ -198,15 +435,15 @@ namespace Automata.Drone
                 if (Log.DebugEnabled) Log.Debug("Drone {0}: no way from where it is; repositioning {1:F0} m ({2}) and going on from there", Entity.EntityId, Vector3D.Distance(start, s), escapeWhy[i]);
                 escapeSpots.Clear();
                 RecoverSucceeded();
-                return true;
+                return 1;
             }
             if (points.Count > count) points.RemoveRange(count, points.Count - count);
             escapeSpots.Clear();
             if (Log.DebugEnabled) Log.Debug("Drone {0}: no way from here or from {1} spots around it{2}", Entity.EntityId, escapeWhy.Count, tight ? " (the hull doesn't fit here in every attitude)" : "");
             if (!tight && TryRetrace(start, goal, points, count, avoidObservationArea, areaOnlyFromOutside, startForward, startUp, looseGoal, pm, ref q))
-                return true;
+                return 1;
             // Stuck (a dock / home trip, a NavigateTo, a replan): fly to a spot nearby and plan again there
-            return TryRecoverRoute(start, goal, points, count, startForward, startUp, pm, ref q);
+            return TryRecoverRoute(start, goal, points, count, startForward, startUp, pm, ref q) ? 1 : 0;
         }
 
         // Boxed in at the start: the search kept the dock corridor's clearance near it (PathQuery.EscapeRadius). The legs
@@ -497,7 +734,7 @@ namespace Automata.Drone
             bool move = n > 0 || Vector3D.DistanceSquared(hullNow, turnAt) > CONSTRUCTION_ROUTE_TOLERANCE * CONSTRUCTION_ROUTE_TOLERANCE;
             int total = n + (move ? 1 : 0) + 1;
             FlightOrder first = null;
-            Vector3D before = hullNow, at = hullNow, pf = flightState.WorldMatrix.Forward;
+            Vector3D before = hullNow, at = hullNow, pf = flightState.WorldMatrix.Forward, pu = flightState.WorldMatrix.Up;
             for (int k = 0; k < total; k++)
             {
                 Vector3D point, f, u;
@@ -526,6 +763,8 @@ namespace Automata.Drone
                     WaypointBehavior pass;
                     float exit;
                     PassWaypoint(before, at, point, ref pf, ref f, out pass, out exit);
+                    // (a roll: the same forward, another up)
+                    if (pu.LengthSquared() > 0.5 && u.LengthSquared() > 0.5 && Vector3D.Dot(pu, u) < RUN_THROUGH_COS) { pass = WaypointBehavior.FullStop; exit = 0f; }
                     leg = QueueGoTo(point, pass, exit);
                 }
                 leg.ReferenceOffset = Vector3DData.FromVector3D(hc);
@@ -534,10 +773,16 @@ namespace Automata.Drone
                 leg.LooseArrival = true;   // the final work / dock order settles position and attitude precisely
                 if (k < backOuts) MakeCorridorLeg(leg, backOutSpeedCap, backOutLineTol);   // out of a dock / hangar: precise, slow
                 else if (k < n + (move ? 1 : 0) && InRouteEscape(at)) MakeEscapeLeg(leg);   // boxed in: out of it with corridor clearance
+                else if (k < n + (move ? 1 : 0))
+                {
+                    int room = LegSpeedByClearance(leg, at, point, f, u, k + 1);
+                    if (room >= 1) TightLeg(leg, legsOut.Count > 0 ? legsOut[legsOut.Count - 1] : null, room, before, at, point, pf, pu, f, u);
+                }
                 legsOut.Add(leg);
                 before = at;
                 at = point;
                 pf = f;
+                pu = u;
             }
             return first;
         }
@@ -597,7 +842,7 @@ namespace Automata.Drone
             PathQuery q;
             BuildPathQuery(out q);
             q.SeeAll = true;
-            q.Berth = WORK_SITE_BERTH;
+            q.Berth = Pathfinding.Clearances.WORK;
             q.StrictEnds = true;
             q.IgnoreGrid = targetGrid;   // the block worked on (its cells): the tool reaches into it
             q.IgnoreMin = targetMin;
@@ -605,7 +850,7 @@ namespace Automata.Drone
             MatrixD att = frame;
             Vector3D h;
             VRage.ModAPI.IMyEntity e;
-            // Straight in, the hull (plus WORK_SITE_BERTH around it) from the approach point to where it works, its
+            // Straight in, the hull (plus Pathfinding.Clearances.WORK around it) from the approach point to where it works, its
             // front WORK_STANDOFF off the face plane: neighbours flush with the face don't count, anything sticking out
             // within the berth does (another block, another drone)
             Vector3D hullWork = sphereCentre + hullFromTool;
@@ -637,7 +882,7 @@ namespace Automata.Drone
             if (flightState.InGravity && Vector3D.Dot(dirA, flightState.GravityUp) < -0.3)
             {
                 Vector3D gUp = flightState.GravityUp;
-                double below = PathfindingManager.HullHalfSizeAlong(ref q, ref att, gUp) + WORK_SITE_BERTH;
+                double below = PathfindingManager.HullHalfSizeAlong(ref q, ref att, gUp) + Pathfinding.Clearances.WORK;
                 double atWork = PathfindingManager.HeightAboveTerrain(hullWork) - below;
                 double atApproach = PathfindingManager.HeightAboveTerrain(approach + hullFromTool) - below;
                 if (atWork < 0 || atApproach < 0)
@@ -650,14 +895,13 @@ namespace Automata.Drone
         }
 
         #region Weld sites by shape
-        private const double SHAPE_BERTH = 0.3;                  // m around each shape box on the way in (flight precision)
         private const int REAL_SHAPE_RAYS_PER_DISPATCH = 600;    // rays the neighbours' real-shape checks may spend per site choice
         private bool siteWeld;       // the site being chosen is a weld site (shape checks apply)
         private int siteByShape;     // sites accepted by the drone's shape (bounding box refused) this choice
 
         /// <summary>
         /// The drone's real shape (HullShape boxes) straight in from the approach point to the work position: each box
-        /// swept on its own (berth SHAPE_BERTH), the front WORK_STANDOFF off the face as for the bounding box. 'q' is a
+        /// swept on its own (berth Pathfinding.Clearances.FINE), the front WORK_STANDOFF off the face as for the bounding box. 'q' is a
         /// copy (its hull box is replaced per shape box). True: no box hits anything.
         /// </summary>
         private bool ShapeWayInFree(Pathfinding.PathfindingManager pm, PathQuery q, ref MatrixD att, ref ToolMount mount, ref MatrixD frame,
@@ -683,7 +927,7 @@ namespace Automata.Drone
             if (limited && frontGap < 0) q.IgnoreGrid = null;
             else if (frontGap < WORK_STANDOFF && (along >= 0.999 || frontGap >= 0))
                 ctrlWork += dirA * ((WORK_STANDOFF - frontGap) / Math.Max(0.5, along));
-            q.Berth = SHAPE_BERTH;
+            q.Berth = Pathfinding.Clearances.FINE;
             q.HullCentred = false;
             Vector3D h;
             for (int i = 0; i < shape.Count; i++)
@@ -709,7 +953,7 @@ namespace Automata.Drone
 
         /// <summary>
         /// m out from the sphere centre along 'dirA' where the hull, in the work attitude, clears the face plane by
-        /// TURN_ROOM_MARGIN: the first approach point tried (WithTurnRoom moves it out until the turn there is free).
+        /// Pathfinding.Clearances.WORK: the first approach point tried (WithTurnRoom moves it out until the turn there is free).
         /// </summary>
         private double ClosestApproach(Vector3D point, Vector3D dirW, Vector3D dirA, Vector3D sphereCentre, Vector3D hullFromTool, ref MatrixD frame)
         {
@@ -717,7 +961,7 @@ namespace Automata.Drone
             double halfAlongW = PathfindingManager.HalfSizeAlong(ref frame, ref half, dirW);
             double centreOut = Vector3D.Dot(sphereCentre + hullFromTool - point, dirW);   // hull centre over the face, working
             double along = Math.Max(0.3, Vector3D.Dot(dirA, dirW));
-            double d = (halfAlongW + TURN_ROOM_MARGIN - centreOut) / along;
+            double d = (halfAlongW + Pathfinding.Clearances.WORK - centreOut) / along;
             return MathHelperD.Clamp(d, MIN_APPROACH_RUN, ManoeuvreDistance());
         }
 
@@ -742,7 +986,7 @@ namespace Automata.Drone
             double offFace = 0, aside = 0;
             if (hitBlock != null)
             {
-                what = string.Format("{0} at {1}", hitBlock.BlockDefinition.Id.SubtypeName, hitBlock.Min);
+                what = string.Format("{0} at {1}", PathfindingManager.BlockName(hitBlock), hitBlock.Min);
                 Vector3D c = grid.GridIntegerToWorld(hitBlock.Position);
                 offFace = Vector3D.Dot(c - facePoint, normal);
                 aside = Vector3D.Reject(c - facePoint, normal).Length();
@@ -765,7 +1009,6 @@ namespace Automata.Drone
             return WithTurnRoom(point, outward, hullFromPoint, ref frame, out free);
         }
 
-        private const double TURN_ROOM_MARGIN = 0.5;   // m around the hull for turning in place (route legs keep ObstacleClearance)
         private const double TURN_ROOM_STEP = 2.5;     // m per step out
         private const int TURN_ROOM_STEPS = 4;         // steps (docks: 10 m out at most)
         private const double TURN_ROOM_FINE_STEP = 1.0;   // work sites: 1 m steps over the first metres (closest first)...
@@ -791,12 +1034,12 @@ namespace Automata.Drone
             PathQuery q;
             BuildPathQuery(out q);
             q.SeeAll = true;   // the work site / dock is known, not only what the instruments see from here
-            q.Berth = TURN_ROOM_MARGIN;
+            q.Berth = Pathfinding.Clearances.WORK;
             pm.BeginPlan();
             double moved = 0;
             while (true)
             {
-                if (pm.TurnSweepFree(ref q, point + hullFromPoint, ref frame, TURN_ROOM_MARGIN)) return point;
+                if (pm.TurnSweepFree(ref q, point + hullFromPoint, ref frame, Pathfinding.Clearances.WORK)) return point;
                 if (moved >= maxOut - 1e-3) break;
                 double step = Math.Min(moved < fineSpan - 1e-3 ? TURN_ROOM_FINE_STEP : TURN_ROOM_STEP, maxOut - moved);
                 point += outward * step;
@@ -890,6 +1133,7 @@ namespace Automata.Drone
                 leg.Watched = i >= backOuts;   // not the back-out: the base is right beside it
                 if (i < backOuts) MakeCorridorLeg(leg, backOutSpeedCap, backOutLineTol);
                 else if (InRouteEscape(i == 0 ? hullNow : pts[i - 1])) MakeEscapeLeg(leg);   // boxed in: out with corridor clearance
+                else LegSpeedByClearance(leg, i == 0 ? hullNow : pts[i - 1], pts[i], fwds[i], ups[i], i + 1);
                 leg.PlayerWaypoint = isPlayer[i];
                 if (isPlayer[i]) leg.ArrivalTolerance = WaypointTol;
             }
@@ -991,7 +1235,11 @@ namespace Automata.Drone
             {
                 var target = AnchorDirectory.Resolve(block, dockReplanTargetId) as IMyShipConnector;
                 if (target == null || dockReplanMount >= connectorMounts.Count) return false;
-                return StartDocking(target, dockReplanMount, dockReplanOffset, dockReplanForward, dockReplanUp, true);
+                int replans = routeReplans;   // StartDocking starts a new count: keep this flight's (it re-planned the same
+                                              // blocked leg every 10 s without end, 2026-11-14)
+                bool ok = StartDocking(target, dockReplanMount, dockReplanOffset, dockReplanForward, dockReplanUp, true);
+                routeReplans = replans;
+                return ok;
             }
             return false;
         }
@@ -1020,13 +1268,25 @@ namespace Automata.Drone
             if (len < 1) return;
             PathQuery q;
             BuildPathQuery(out q);
+            // Within the clearance of where the leg was planned to start (arrived a little off it): the leg as planned -
+            // its check covers the hull getting back onto its line. From where the hull is, the sweep cut across the line
+            // into the edge of the gate it was planned through, and the drone planned the same leg again and again
+            // (2026-11-14). Further off: from where it is.
+            Vector3D planned = o.TransitStart.ToVector3D() + (from - ReferencePoint(o));
+            double plannedOff = Vector3D.Distance(planned, from);
+            bool havePlanned = Vector3D.DistanceSquared(planned, to) >= 1;
+            if (havePlanned && plannedOff > 0.01 && plannedOff <= q.Berth)
+            {
+                from = planned;
+                len = Vector3D.Distance(from, to);
+            }
             Vector3D hit;
             VRage.ModAPI.IMyEntity hitEntity;
             bool scene = len <= LEG_CHECK_SCENE_MAX;
             // The last leg of a player route (debug orders, combat, escort, parking) was planned with a loose goal (no check
             // past its end): checked the same way, or the surface it lands on counts as "in the way" (a park on a grid
             // re-planned its 1 m leg over and over, then gave up)
-            bool looseEnd = routeOwner == RouteOwner.Player && nextLeg == null && queuedLegs.Count == 0;
+            bool looseEnd = (routeOwner == RouteOwner.Player || routeLooseGoal) && nextLeg == null && queuedLegs.Count == 0;
             // A docking route's legs end at its staging point / turn point, right in front of the station (a corridor's
             // turn point can be 0.5 m off it): nothing past the end counts (the corridor / turn checks cleared that
             // spot), or the station itself blocked the leg and the drone replanned until it gave up
@@ -1036,23 +1296,8 @@ namespace Automata.Drone
             // Checked in the leg's own attitude (the one the planner checked it with: a held attitude turned to at the
             // start of the route isn't the drone's yet when the leg starts)
             MatrixD legAtt = LegAttitude(o, ref q);
-            // Harvesters, indoors: the leg against the real physics with the drone's real shape, as its direct legs and the
-            // harvest's line were planned (cell boxes with the berth: a farm room is one grid, its floor, plots and windows
-            // within the berth of every leg; each leg start was "blocked 0.5 m ahead" until the replans ran out). The work
-            // order (in along the beam's line, onto the object): to its end, no berth past it.
-            if (CompactFlight)
-            {
-                bool cWork = o == constructionOrder;
-                string cBy;
-                double cAlong;
-                if (pm.RealSweepClear(ref q, ref legAtt, from, to, cWork ? HARVEST_LINE_BERTH : DIRECT_BERTH, !looseEnd && !cWork, out cBy, out cAlong))
-                {
-                    if (routeWaitFor != 0) EndYield("the leg is clear");
-                    return;
-                }
-                RealShapeBlocked(string.Format("leg start ({0:F0} m, real shape): {1}", len, cBy), cAlong);
-                return;
-            }
+            // A job's final move in (the work order): with its tool's room (WorkBerth), as its site was chosen
+            if (o == constructionOrder) q.Berth = WorkBerth();
             // The final order of a work route ends at the work point itself - a mining bore's entry is the rock: nothing
             // past its end counts and its end zone (the hull's front half plus the berth) isn't checked. It counted the
             // rock being mined as "in the way": 10 replans at the approach point, route error, the deposit skipped
@@ -1076,12 +1321,42 @@ namespace Automata.Drone
                 scene = false;
             }
             if (!blocked) { if (routeWaitFor != 0) EndYield("the leg is clear"); return; }
+            // Further off its line than the clearance (a leg flown into at speed, round a corner): the leg as planned is
+            // clear - the drone flies back onto its line (the look-ahead watches the way). Not a tight spot to turn for,
+            // nor a new route (an open course: 12 turns onto another side, 22 new routes, 2026-11-14)
+            if (scene && havePlanned && plannedOff > q.Berth && o != constructionOrder)
+            {
+                Vector3D h2;
+                VRage.ModAPI.IMyEntity e2;
+                if (!pm.SegmentBlocked(ref q, ref legAtt, planned, to, 0.5, out h2, out e2, !looseEnd))
+                {
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: leg start ({1:F0} m): {2:F1} m off its line, the leg as planned is clear: flying back onto it", Entity.EntityId, len, plannedOff);
+                    if (routeWaitFor != 0) EndYield("the leg is clear");
+                    return;
+                }
+            }
+            // By the cells / voxels blocked, by the real physics clear (a tight spot, the work order): flown as planned
+            if (scene && ExactlyClear(pm, ref q, ref legAtt, from, to, !looseEnd, o == constructionOrder, string.Format("leg start ({0:F0} m)", len)))
+            {
+                if (routeWaitFor != 0) EndYield("the leg is clear");
+                return;
+            }
             if (RouteWaitForDrone(hitEntity)) return;   // a drone in the way near the work site: held until it clears
+            // A tight spot (the hull's box doesn't fit along the leg as planned): another side of the hull - turned to here,
+            // in place - before a new route (PathfindingManager.LegProfile, 2026-11-14)
+            if (scene && o != constructionOrder && LegOnAnotherSide(pm, o, ref q, from, to)) return;
             if (routeWaitFor != 0) EndYield("something else in the way");
             var pf = AutomataSession.GetConfig().Pathfinding;
             lastReplanFrame = MyAPIGateway.Session.GameplayFrameCounter;
-            bool ok = pf.AllowRepathing() && ++routeReplans <= pf.MaxRepositionAttempts();
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: leg start ({1:F0} m, {2}): {3} {4:F1} m ahead, {5}", Entity.EntityId, len, scene ? "scene" : "rays", hitEntity != null ? (hitEntity.DisplayName ?? hitEntity.GetType().Name) : "obstacle", Vector3D.Distance(from, hit), ok ? "new route" : "giving up");
+            bool ok = ++routeReplans <= pf.MaxRepositionAttempts();
+            if (Log.DebugEnabled)
+            {
+                var hb = pm.LastHitBlock;
+                double turnDeg = MathHelperD.ToDegrees(Math.Acos(MathHelperD.Clamp(Vector3D.Dot(legAtt.Forward, flightState.WorldMatrix.Forward), -1, 1)));
+                Log.Debug("Drone {0}: leg start ({1:F0} m, {2}): {3}{6} {4:F1} m ahead (clearance {7:F2} m, the leg's attitude {8:F0}° from the drone's, {9:F1} m/s), {5}", Entity.EntityId, len, scene ? "scene" : "rays",
+                          hitEntity != null ? (hitEntity.DisplayName ?? hitEntity.GetType().Name) : "obstacle", Vector3D.Distance(from, hit), ok ? "new route" : "giving up",
+                          hb != null ? string.Format(" ({0} at {1})", PathfindingManager.BlockName(hb), hb.Position) : "", q.Berth, turnDeg, flightState.LinearVelocity.Length());
+            }
             if (ok && Replan()) return;
             RouteStopped(Loc.F(MyStrings.Drone_RouteBlockedMAheadStopped, Vector3D.Distance(from, hit)));
         }
@@ -1108,6 +1383,33 @@ namespace Automata.Drone
         }
 
         private bool memoryChained;
+
+        // The frame the route memory records in: the order's anchor block only on a grid that can move; on a static grid
+        // world positions (they don't move): a docking route's points (anchored to the connector) and a route's (world)
+        // were separate frames that never merge, and the remembered points didn't connect (2026-11-13)
+        private static long MemoryAnchor(long anchorId)
+        {
+            if (anchorId == 0) return 0;
+            VRage.ModAPI.IMyEntity e;
+            var b = MyAPIGateway.Entities.TryGetEntityById(anchorId, out e) ? e as IMyCubeBlock : null;
+            return b != null && b.CubeGrid != null && b.CubeGrid.IsStatic ? 0 : anchorId;
+        }
+        private Func<Vector3D, Vector3D, bool> memoryLinkClear;
+
+        // A link the route memory would record between two hull centres: clear for this drone's hull box in its attitude
+        // now (the drone was at both ends; the cell boxes and the berth, as the memory's own check of a link it offers)
+        private bool MemoryLinkClear(Vector3D a, Vector3D b)
+        {
+            var pm = PathfindingManager.Instance;
+            if (pm == null) return false;
+            PathQuery q;
+            BuildPathQuery(out q);
+            q.SeeAll = true;
+            pm.BeginPlan();
+            Vector3D hit;
+            VRage.ModAPI.IMyEntity e;
+            return !pm.SegmentBlocked(ref q, a, b, 0.5, out hit, out e);
+        }
         private double laneSpeedCap = double.MaxValue;   // the safe following speed in a flight lane (double.MaxValue: none)
         private Vector3D lastFlightVelocity;
         private bool lastFlightVelocitySet;
@@ -1136,7 +1438,8 @@ namespace Automata.Drone
             }
             Vector3D pos = HullCentreWorld;
             double hull = localHullBox.HalfExtents.Length();
-            if (pm.Memory != null) pm.Memory.Record(Entity.EntityId, o.AnchorEntityId, pos, hull, now);
+            if (pm.Memory != null) pm.Memory.Record(Entity.EntityId, MemoryAnchor(o.AnchorEntityId), pos, hull, now, memoryLinkClear ?? (memoryLinkClear = MemoryLinkClear),
+                                                    routeOwner == RouteOwner.Player);
             memoryChained = true;
             if (pm.Lanes == null) return;
             Vector3D vel = flightState.LinearVelocity;
@@ -1183,7 +1486,7 @@ namespace Automata.Drone
             var pf = AutomataSession.GetConfig().Pathfinding;
             // Just in time: parts of the route the drone couldn't see when it planned it are planned once it has
             // flown far enough to see them
-            if (routeUnseen > 0 && pf.AllowRepathing() && !EconomyHoldsRoute())   // economy flight: not while it turns / brakes / corrects
+            if (routeUnseen > 0 && !EconomyHoldsRoute())   // economy flight: not while it turns / brakes / corrects
             {
                 IMyTerminalBlock anchor = o.AnchorEntityId == 0 ? null
                     : anchorBlock != null && anchorBlock.EntityId == o.AnchorEntityId ? anchorBlock : AnchorDirectory.Resolve(block, o.AnchorEntityId);
@@ -1200,6 +1503,17 @@ namespace Automata.Drone
                 {
                     lastReplanFrame = now;
                     routeJitForce = false;
+                    // The route as planned, checked now that more of it is in view: clear - kept. (Planned anew from
+                    // here - mid-corridor, off its line - the plan swapped the lattice's way for a custom route's, then
+                    // found none from the tight spot that left it in: stuck, 2026-11-14)
+                    int stillUnseen;
+                    if (RouteAheadClear(pm, o, from, out stillUnseen))
+                    {
+                        if (Log.DebugEnabled) Log.Debug("Drone {0}: the route ahead is in view now: still clear, kept ({1} stretch(es) not in view yet)", Entity.EntityId, stillUnseen);
+                        routeUnseen = stillUnseen;
+                        routeJitFrom = here;
+                        return;
+                    }
                     if (Log.DebugEnabled) Log.Debug("Drone {0}: the route ahead is in view now, planning it", Entity.EntityId);
                     if (Replan()) return;
                     RouteStopped(Loc.T(MyStrings.Drone_NoRouteAheadStopped));
@@ -1207,6 +1521,17 @@ namespace Automata.Drone
                 }
             }
             Vector3D to = o.Target.ToVector3D() + (from - ReferencePoint(o));   // the leg's end, for the hull centre
+            // Within the clearance of the leg's planned line: looked along from the line (see CheckLegStart)
+            {
+                Vector3D ts = o.TransitStart.ToVector3D() + (from - ReferencePoint(o)), line = to - ts;
+                double l2 = line.LengthSquared();
+                if (l2 > 1)
+                {
+                    Vector3D onLine = ts + line * MathHelperD.Clamp(Vector3D.Dot(from - ts, line) / l2, 0, 1);
+                    double off = Vector3D.Distance(onLine, from);
+                    if (off > 0.01 && off <= BerthNow(planFactor)) from = onLine;
+                }
+            }
             Vector3D along = to - from;
             double remaining = along.Length();
             if (remaining < 1) return;
@@ -1217,16 +1542,7 @@ namespace Automata.Drone
             BuildPathQuery(out q);
             // The leg's attitude (as the planner checked it); a work route's final order: not its end zone (CheckLegStart)
             MatrixD legAtt = LegAttitude(o, ref q);
-            if (CompactFlight)
-            {
-                // Harvesters: the real physics, as CheckLegStart (the work order: to its end, no berth past it)
-                bool wWork = o == constructionOrder;
-                string wBy;
-                double wLook = wWork ? remaining : look, wAlong;
-                if (pm.RealSweepClear(ref q, ref legAtt, from, from + along / remaining * wLook, wWork ? HARVEST_LINE_BERTH : DIRECT_BERTH, false, out wBy, out wAlong)) return;
-                RealShapeBlocked("real shape: " + wBy + " ahead", wAlong);
-                return;
-            }
+            if (o == constructionOrder) q.Berth = WorkBerth();   // (as CheckLegStart)
             double rayLook = look;
             if (o == constructionOrder) rayLook = Math.Min(look, remaining - pm.EndZoneLength(ref q, ref legAtt, along / remaining));
             Vector3D hit = Vector3D.Zero;
@@ -1238,25 +1554,141 @@ namespace Automata.Drone
                 terrain = PathfindingManager.TerrainTooClose(from, tEnd, TerrainNeed(), out hit);
             }
             if (!terrain && (rayLook < 1 || !pm.CheckAhead(ref q, ref legAtt, from, from + along / remaining * rayLook, out hit))) return;
+            if (!terrain && ExactlyClear(pm, ref q, ref legAtt, from, from + along / remaining * rayLook, false, o == constructionOrder, "the look-ahead")) return;
             if (terrain) if (Log.DebugEnabled) Log.Debug("Drone {0}: terrain {1:F0} m ahead closer than {2:F1} m below the route", Entity.EntityId, Vector3D.Distance(from, hit), TerrainNeed());
             LaneSuspect(o);   // in a mostly safe lane: the new route checks it
 
             lastReplanFrame = now;
-            bool ok = pf.AllowRepathing() && ++routeReplans <= pf.MaxRepositionAttempts();
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: obstacle {1:F1} m ahead, {2}", Entity.EntityId, Vector3D.Distance(from, hit), ok ? "new route" : "giving up");
+            bool ok = ++routeReplans <= pf.MaxRepositionAttempts();
+            if (Log.DebugEnabled)
+            {
+                var hb = terrain ? null : pm.LastHitBlock;
+                Log.Debug("Drone {0}: obstacle {1:F1} m ahead{3}, {2}", Entity.EntityId, Vector3D.Distance(from, hit), ok ? "new route" : "giving up",
+                          hb != null ? string.Format(" ({0} at {1} of {2}, clearance {3:F2} m)", PathfindingManager.BlockName(hb), hb.Position, hb.CubeGrid.DisplayName, q.Berth) : "");
+            }
             if (ok && Replan()) return;
             RouteStopped(Loc.F(MyStrings.Drone_RouteBlockedMAheadStopped, Vector3D.Distance(from, hit)));
         }
 
-        // Harvesters: a leg the real-shape check found blocked 'ahead' m on ('what', for the log): a new route from here, or stopped
-        private void RealShapeBlocked(string what, double ahead)
+        private readonly List<FlightOrder> aheadLegs = new List<FlightOrder>();
+
+        // CheckLegStart: the leg 'from' -> 'to' blocked in its attitude - one of the hull's profiles it fits in (the one it
+        // is turned now first; another needs room to turn into it here): the leg flies in it, turning first. False: none.
+        private bool LegOnAnotherSide(PathfindingManager pm, FlightOrder o, ref PathQuery q, Vector3D from, Vector3D to)
         {
-            var pf = AutomataSession.GetConfig().Pathfinding;
-            lastReplanFrame = MyAPIGateway.Session.GameplayFrameCounter;
-            bool ok = pf.AllowRepathing() && ++routeReplans <= pf.MaxRepositionAttempts();
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: {1}, {2}", Entity.EntityId, what, ok ? "new route" : "giving up");
-            if (ok && Replan()) return;
-            RouteStopped(Loc.F(MyStrings.Drone_RouteBlockedMAheadStopped, ahead));
+            MatrixD now = flightState.WorldMatrix;
+            now.Translation = Vector3D.Zero;
+            MatrixD alt;
+            bool tight;
+            if (!pm.LegProfile(ref q, from, to, 0.5, ref now, true, out alt, out tight)) return false;
+            IMyTerminalBlock anchor = null;
+            if (o.AnchorEntityId != 0)
+            {
+                anchor = anchorBlock != null && anchorBlock.EntityId == o.AnchorEntityId ? anchorBlock : AnchorDirectory.Resolve(block, o.AnchorEntityId);
+                if (anchor == null) return false;
+            }
+            MatrixD am = anchor != null ? anchor.WorldMatrix : MatrixD.Identity;
+            SetExplicitAttitude(o, anchor == null, ref am, alt.Forward, alt.Up);
+            o.TurnFirst = true;
+            if (nextLeg != null) nextLeg.TurnFirst = true;   // (the next leg was planned from the old attitude: turned to before it too)
+            if (Log.DebugEnabled)
+            {
+                double deg = MathHelperD.ToDegrees(Math.Acos(MathHelperD.Clamp(Vector3D.Dot(alt.Forward, now.Forward), -1, 1)));
+                Log.Debug("Drone {0}: leg start ({1:F0} m): its box doesn't fit as planned: flown on another side of the hull ({2:F0}° from how it is turned now)", Entity.EntityId, Vector3D.Distance(from, to), deg);
+            }
+            if (routeWaitFor != 0) EndYield("the leg is clear");
+            return true;
+        }
+
+        /// <summary>
+        /// The route still ahead (the leg flown from where the hull is now, then the queued legs, each in its attitude,
+        /// at the route's clearance - as the planner and CheckLegStart check them): clear? Up to the docking / work /
+        /// landing order (their own checks). 'notSeen': stretches still out of view.
+        /// </summary>
+        private bool RouteAheadClear(PathfindingManager pm, FlightOrder o, Vector3D from, out int notSeen)
+        {
+            notSeen = 0;
+            aheadLegs.Clear();
+            aheadLegs.Add(o);
+            if (nextLeg != null) aheadLegs.Add(nextLeg);
+            foreach (var l in queuedLegs) aheadLegs.Add(l);
+            PathQuery q;
+            BuildPathQuery(out q);
+            bool looseAll = (routeOwner == RouteOwner.Docking && dockingOrder != null) || routeOwner == RouteOwner.Sweep;
+            pm.BeginPlan();
+            pm.UnseenStretches = 0;
+            Vector3D a = from;
+            try
+            {
+                for (int i = 0; i < aheadLegs.Count; i++)
+                {
+                    var leg = aheadLegs[i];
+                    if (leg == dockingOrder || leg == constructionOrder || (parkPhase != ParkPhase.None && leg == parkOrder)) break;
+                    Vector3D b = leg.Target.ToVector3D() + (from - ReferencePoint(leg));
+                    if (leg.Watched && Vector3D.DistanceSquared(a, b) >= 1)
+                    {
+                        MatrixD att = LegAttitude(leg, ref q);
+                        bool loose = looseAll || (routeOwner == RouteOwner.Player && i == aheadLegs.Count - 1);
+                        Vector3D hit;
+                        VRage.ModAPI.IMyEntity e;
+                        // (the leg flown now: from its line where the hull is close to it - see CheckLegStart - and as
+                        // planned when the hull is further off and the way from here is blocked)
+                        Vector3D ts = i == 0 ? leg.TransitStart.ToVector3D() + (from - ReferencePoint(leg)) : a;
+                        if (i == 0)
+                        {
+                            Vector3D line = b - ts;
+                            double l2 = line.LengthSquared();
+                            if (l2 > 1)
+                            {
+                                Vector3D onLine = ts + line * MathHelperD.Clamp(Vector3D.Dot(a - ts, line) / l2, 0, 1);
+                                if (Vector3D.Distance(onLine, a) <= q.Berth) a = onLine;
+                            }
+                        }
+                        if (pm.SegmentBlocked(ref q, ref att, a, b, i == 0 ? 0.5 : 0, out hit, out e, !loose)
+                            && (i > 0 || Vector3D.DistanceSquared(ts, b) < 1 || pm.SegmentBlocked(ref q, ref att, ts, b, 0.5, out hit, out e, !loose)))
+                        {
+                            var hb = pm.LastHitBlock;
+                            if (Log.DebugEnabled) Log.Debug("Drone {0}: the route ahead: leg {1} of {2} blocked by {3}{4} {5:F1} m along it", Entity.EntityId, i + 1, aheadLegs.Count,
+                                                            e != null ? e.DisplayName : "?", hb != null ? string.Format(" ({0} at {1})", PathfindingManager.BlockName(hb), hb.Position) : "", Vector3D.Distance(a, hit));
+                            return false;
+                        }
+                    }
+                    a = b;
+                }
+                notSeen = pm.UnseenStretches;
+                return true;
+            }
+            finally { aheadLegs.Clear(); }
+        }
+
+        /// <summary>
+        /// A leg the cell / voxel checks found blocked (pm.LastHitBlock): clear by the real physics - the drone's own surface
+        /// swept along it, RealSweepClear - with 'q.Berth'? Asked at a route's tightest clearance and for a job's final move
+        /// in only, against static grids' blocks (voxels are up to half a block coarse: a gap the hull fits by centimetres
+        /// looks shut). Every drone (2026-11-18; only harvesters checked legs this way, every leg).
+        /// </summary>
+        private bool ExactlyClear(PathfindingManager pm, ref PathQuery q, ref MatrixD att, Vector3D from, Vector3D to, bool ahead, bool work, string what)
+        {
+            if (!work && BerthNow(planFactor) > Pathfinding.Clearances.MIN + 1e-6) return false;
+            var hb = pm.LastHitBlock;
+            if (hb == null || hb.CubeGrid == null || !hb.CubeGrid.IsStatic) return false;   // drones, ships, rock: as they are
+            if (Vector3D.DistanceSquared(from, to) < 0.01) return false;
+            string by;
+            if (!pm.RealSweepClear(ref q, ref att, from, to, q.Berth, ahead, out by)) return false;
+            if (Log.DebugEnabled) Log.Debug("Drone {0}: {1}: {2} in the way by its cells, clear by the real physics ({3:F2} m)", Entity.EntityId, what, PathfindingManager.BlockName(hb), q.Berth);
+            return true;
+        }
+
+        /// <summary>
+        /// The room round the hull on a job's final move in, by tool (one table): collectors - the beam's line,
+        /// Pathfinding.Clearances.TOUCH (centimetres off a plot); welders, grinders, drills - Pathfinding.Clearances.WORK, as their site check.
+        /// </summary>
+        private double WorkBerth()
+        {
+            if (currentJob != null)
+                for (int i = Math.Max(0, taskIndex - 1); i < currentJob.Tasks.Count && i <= taskIndex + 1; i++)
+                    if (Orchestrator.Task.KindOf(currentJob.Tasks[i].Type) == Orchestrator.TaskKind.Collect) return Pathfinding.Clearances.TOUCH;
+            return Pathfinding.Clearances.WORK;
         }
 
         // The attitude the planner checked a leg with: its explicit one, else the drone's own

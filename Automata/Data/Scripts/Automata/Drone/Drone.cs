@@ -258,6 +258,11 @@ namespace Automata.Drone
         /// </summary>
         public bool LooseArrival;
         /// <summary>
+        /// Turns to its attitude in place before it moves along its line (a route leg with little room round it: the
+        /// planner checked the turn at the leg's start and the leg in that attitude, not a turn on the way). Runtime only.
+        /// </summary>
+        public bool TurnFirst;
+        /// <summary>
         /// Escort (station keeping): Target is the entity's centre + FollowOffset every tick, the drone matching the
         /// entity's velocity and looking at it (a grid or a character: no ownership / range rules as for anchors, the
         /// escort job checked the target). Runtime only: the escort task issues it again after a load.

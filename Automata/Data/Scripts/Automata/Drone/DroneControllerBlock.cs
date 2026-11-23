@@ -153,6 +153,15 @@ namespace Automata.Drone
         private FlightOrder activeFlightOrder;
         private Vector3D? navDebugTarget;
         private Vector3D? navDebugTargetApproachFrom;
+        private bool navDebugApproachInvalid;    // text in "Approach from" that isn't a GPS / coordinates
+        // Custom nav (terminal, this machine; not saved): the route's entries, each a target and the point to approach it from
+        private readonly List<KeyValuePair<Vector3D, Vector3D?>> customNav = new List<KeyValuePair<Vector3D, Vector3D?>>();
+        // ...and the drone's attitude (forward, up) where each was recorded (zero: typed in, none)
+        private readonly List<KeyValuePair<Vector3D, Vector3D>> customNavAtt = new List<KeyValuePair<Vector3D, Vector3D>>();
+        // ...and each one's number (kept: removing some doesn't renumber the rest), the ones selected
+        private readonly List<int> customNavIds = new List<int>();
+        private readonly HashSet<int> customNavSel = new HashSet<int>();
+        private int customNavNext = 1;
 
         // Leg chaining (pathfinding hand-over): the manager answers NextLegRequested by calling EnqueueLeg().
         public event Action<DroneControllerBlock> NextLegRequested;
@@ -441,6 +450,7 @@ namespace Automata.Drone
                     return;
                 }
                 FlushSettingSync();
+                RecordWaypoints10();   // custom nav recording (the player's machine)
                 if (IsServer) SendNavigationRoutes();
                 if (!IsServer)
                 {
@@ -559,6 +569,7 @@ namespace Automata.Drone
         {
             try
             {
+                HideNavGps();
                 UnregisterDrone(this);
                 if (IsServer)
                 {
@@ -2301,6 +2312,8 @@ namespace Automata.Drone
                 ? MathHelperD.Clamp(2.0 - xt / o.LineTolerance, 0, 1)          // strict: full speed within tolerance, stop at 2x
                 : MathHelperD.Clamp(1.0 - xt / (XT_CAPTURE * 4), 0, 1);
             if (stopping && remaining < FINAL_LEG && orientationError > (o.LooseArrival ? LOOSE_ORIENT_GATE : ORIENT_GATE)) gate = 0;
+            // A tight route leg: turned to its attitude where it starts, then along it (TurnFirst)
+            if (o.TurnFirst && o.Phase == FlightPhase.Approach && orientationError > LOOSE_ORIENT_GATE) gate = 0;
             if (!ecoActive && !flightState.InGravity && o.Watched && routeOwner != RouteOwner.None && !o.HoldAttitudeInTransit && len > 1e-3 && preflightStage == 0)
             {
                 if (!ReferenceEquals(faceOrder, o)) { faceOrder = o; faceTicks = 0; faceCheck = 0; faceSeen = true; }
@@ -3152,14 +3165,14 @@ namespace Automata.Drone
         {
             RequestAction(new DroneActionPacket { Action = DroneAction.Orient, VectorA = Vector3DData.FromVector3D(orientationTargetDebug), HasVectorA = true });
         }
-       public StringBuilder Textbox_Debug_NavigationTargetGPS
+        public StringBuilder Textbox_Debug_NavigationTargetGPS
         {
             get {
                 return navDebugTarget.HasValue ? new StringBuilder(ConvertVectorToGPS("DebugNavTarget", navDebugTarget.Value)) : new StringBuilder();
             }
             set { navDebugTarget = ParseGPSString(value != null ? value.ToString() : null); }
         }
-       public StringBuilder Textbox_Debug_NavigationTargetGPSApproachFrom
+        public StringBuilder Textbox_Debug_NavigationTargetGPSApproachFrom
         {
             get
             {
@@ -3170,36 +3183,336 @@ namespace Automata.Drone
             set
             {
                 if (settings == null) return;
-                navDebugTargetApproachFrom = ParseGPSString(value != null ? value.ToString() : null);
+                string text = value != null ? value.ToString() : null;
+                navDebugTargetApproachFrom = ParseGPSString(text);
+                navDebugApproachInvalid = !navDebugTargetApproachFrom.HasValue && !string.IsNullOrWhiteSpace(text);
             }
         }
 
-        public void Terminal_Debug_NavigateToTarget()
+        #region Terminal - custom nav (debug)
+        // The line under the label: what custom routes are (its tooltip; a label has none)
+        public void Terminal_CustomNavInfoContent(List<MyTerminalControlListBoxItem> items, List<MyTerminalControlListBoxItem> selected)
         {
-            if (!navDebugTarget.HasValue) { Feedback(MyStrings.Drone_NavInvalidTargetGPS); return; }
-            var p = new DroneActionPacket { Action = DroneAction.NavigateTo, VectorA = Vector3DData.FromVector3D(navDebugTarget.Value), HasVectorA = true };
-            if (navDebugTargetApproachFrom.HasValue)
+            items.Add(new MyTerminalControlListBoxItem(MyStringId.GetOrCompute(Loc.T(MyStrings.Drone_CustomNavInfo)),
+                                                      MyStringId.GetOrCompute(Loc.T(MyStrings.Drone_CustomNavInfoTooltip)), null));
+        }
+
+        // The list: "GPS ..." from "GPS ..." per entry, by its number
+        public void Terminal_CustomNavContent(List<MyTerminalControlListBoxItem> items, List<MyTerminalControlListBoxItem> selected)
+        {
+            for (int i = 0; i < customNav.Count; i++)
             {
-                p.VectorB = Vector3DData.FromVector3D(navDebugTargetApproachFrom.Value);
-                p.HasVectorB = true;
+                var e = customNav[i];
+                int id = customNavIds[i];
+                string target = ConvertVectorToGPS("WP" + id, e.Key);
+                string text = e.Value.HasValue ? Loc.F(MyStrings.Drone_NavWaypointFrom, target, ConvertVectorToGPS("WP" + id + " from", e.Value.Value)) : target;
+                var item = new MyTerminalControlListBoxItem(MyStringId.GetOrCompute(text), MyStringId.NullOrEmpty, id);
+                items.Add(item);
+                if (customNavSel.Contains(id)) selected.Add(item);
             }
-            RequestAction(p);
         }
 
-        public void Terminal_Debug_QueueWaypoint()
+        public void Terminal_CustomNavSelect(List<MyTerminalControlListBoxItem> selected)
+        {
+            customNavSel.Clear();
+            if (selected == null) return;
+            for (int i = 0; i < selected.Count; i++) if (selected[i].UserData is int) customNavSel.Add((int)selected[i].UserData);
+        }
+
+        // A waypoint at the end of the list: its number, its attitude (zero: none)
+        private void AddCustomNav(Vector3D target, Vector3D? from, Vector3D fwd, Vector3D up)
+        {
+            customNav.Add(new KeyValuePair<Vector3D, Vector3D?>(target, from));
+            customNavAtt.Add(new KeyValuePair<Vector3D, Vector3D>(fwd, up));
+            customNavIds.Add(customNavNext++);
+        }
+
+        private void ClearCustomNav()
+        {
+            customNav.Clear();
+            customNavAtt.Clear();
+            customNavIds.Clear();
+            customNavSel.Clear();
+            customNavNext = 1;
+        }
+
+        public void Terminal_CustomNavAdd()
         {
             if (!navDebugTarget.HasValue) { Feedback(MyStrings.Drone_NavInvalidTargetGPS); return; }
-            RequestAction(new DroneActionPacket { Action = DroneAction.QueueWaypoint, VectorA = Vector3DData.FromVector3D(navDebugTarget.Value), HasVectorA = true });
+            if (navDebugApproachInvalid) { Feedback(MyStrings.Drone_NavInvalidApproachGPS); return; }
+            if (CustomNavPoints() + (navDebugTargetApproachFrom.HasValue ? 2 : 1) > MAX_ROUTE_POINTS) { Feedback(MyStrings.Drone_NavRouteFull, MAX_ROUTE_POINTS); return; }
+            AddCustomNav(navDebugTarget.Value, navDebugTargetApproachFrom, Vector3D.Zero, Vector3D.Zero);
+            navDebugTarget = null;
+            navDebugTargetApproachFrom = null;
+            navDebugApproachInvalid = false;
+            RefreshTerminal();
         }
 
-        // Appends to the player's route and plans it again from here (pathfinder); a new route when there is none
-        private void ExecuteQueueWaypoint(Vector3D target)
+        /// <summary>Remove: the selected waypoints (one or more); the others keep their numbers.</summary>
+        public void Terminal_CustomNavRemove()
         {
-            var wps = new List<Vector3D>();
-            if (activeFlightOrder != null && routeOwner == RouteOwner.Player) RemainingPlayerWaypoints(wps);
-            wps.Add(target);
-            if (FlyPlayerRoute(wps)) Report(MyStrings.Drone_NavWaypointQueued, wps.Count);
+            if (customNavSel.Count == 0) return;
+            for (int i = customNav.Count - 1; i >= 0; i--)
+            {
+                if (!customNavSel.Contains(customNavIds[i])) continue;
+                customNav.RemoveAt(i);
+                customNavAtt.RemoveAt(i);
+                customNavIds.RemoveAt(i);
+            }
+            customNavSel.Clear();
+            RefreshTerminal();
         }
+
+        public void Terminal_CustomNavClear()
+        {
+            ClearCustomNav();
+            RefreshTerminal();
+        }
+
+        // The list as one route, in order: each target after its approach point
+        // ---- Recording (this machine; not saved): the drone's hull centre every few seconds while the player flies it ----
+        private const float RECORD_SECONDS_MIN = 0.5f, RECORD_SECONDS_MAX = 10f, RECORD_SECONDS_STEP = 0.5f;
+        private const double MERGE_WITHIN = 0.5;        // m: commit merges waypoints closer than this into their midpoint (duplicates)
+        private const double STRAIGHT_TOLERANCE = 1.0;  // m: commit drops a waypoint within this of the line past it
+        private bool recording;
+        private float recordSeconds = 2f;
+        private int recordLast = int.MinValue / 2;
+        // Show waypoints: the list as temporary GPS markers of this player's (hashes), until then
+        private readonly List<int> navGps = new List<int>();
+        private long navGpsIdentity;
+        private int navGpsUntil;
+
+        public float Terminal_RecordSeconds
+        {
+            get { return recordSeconds; }
+            set { recordSeconds = MathHelper.Clamp(value, RECORD_SECONDS_MIN, RECORD_SECONDS_MAX); }
+        }
+
+        public bool RecordControlsEnabled { get { return IsManagedByPlayer; } }
+
+        /// <summary>The record frequency one step (0.5 s) up / down (toolbar); nothing past the ends or while the
+        /// controls are off.</summary>
+        public void Terminal_RecordSecondsStep(int sign)
+        {
+            if (!RecordControlsEnabled) return;
+            float v = recordSeconds + RECORD_SECONDS_STEP * Math.Sign(sign);
+            if (v < RECORD_SECONDS_MIN - 0.001f || v > RECORD_SECONDS_MAX + 0.001f) return;
+            recordSeconds = MathHelper.Clamp(v, RECORD_SECONDS_MIN, RECORD_SECONDS_MAX);
+            RefreshTerminal();
+        }
+
+        public void Terminal_RecordAddWaypoint()
+        {
+            if (!RecordControlsEnabled) return;
+            AddRecordedWaypoint(true);
+        }
+
+        public void Terminal_RecordStart()
+        {
+            if (!RecordStartEnabled) return;
+            recording = true;
+            recordLast = int.MinValue / 2;   // a waypoint where it is now: joined to the last one by a straight line
+            Feedback(MyStrings.Drone_NavRecordingStarted, recordSeconds);
+            RefreshTerminal();
+        }
+
+        public void Terminal_RecordStop()
+        {
+            if (!RecordStopEnabled) return;
+            recording = false;
+            Feedback(MyStrings.Drone_NavRecordingStopped, customNav.Count);
+            RefreshTerminal();
+        }
+
+        public bool RecordStartEnabled { get { return RecordControlsEnabled && !recording; } }
+        public bool RecordStopEnabled { get { return RecordControlsEnabled && recording; } }
+        public bool RecordCommitEnabled { get { return RecordControlsEnabled && !recording && customNav.Count > 0; } }
+
+        private void RecordWaypoints10()
+        {
+            if (navGps.Count > 0 && MyAPIGateway.Session.GameplayFrameCounter > navGpsUntil) { HideNavGps(); RefreshTerminal(); }
+            if (!recording) return;
+            int now = MyAPIGateway.Session.GameplayFrameCounter;
+            if (now - recordLast < recordSeconds * 60) return;
+            recordLast = now;
+            AddRecordedWaypoint(false);
+        }
+
+        // The drone's hull centre as a waypoint (target only); not within half a metre of the last one (hovering)
+        private void AddRecordedWaypoint(bool manual)
+        {
+            Vector3D here = localHullBox.Max.X >= localHullBox.Min.X ? Entity.GetPosition() + Vector3D.TransformNormal(localHullBox.Center, Entity.WorldMatrix)
+                                                                    : (Entity as IMyCubeBlock).CubeGrid.WorldAABB.Center;
+            if (!manual && customNav.Count > 0 && Vector3D.DistanceSquared(customNav[customNav.Count - 1].Key, here) < 0.25) return;
+            if (CustomNavPoints() + 1 > MAX_ROUTE_POINTS)
+            {
+                recording = false;
+                NavNotice(MyStrings.Drone_NavMaxWaypoints);
+                RefreshTerminal();
+                return;
+            }
+            AddCustomNav(here, null, Entity.WorldMatrix.Forward, Entity.WorldMatrix.Up);   // its attitude as the player flies it
+            if (manual || customNav.Count == 1 || customNav.Count % 10 == 0) RefreshTerminal();   // (the list: not at every sample)
+        }
+
+        private int CustomNavPoints()
+        {
+            int points = 0;
+            for (int i = 0; i < customNav.Count; i++) points += customNav[i].Value.HasValue ? 2 : 1;
+            return points;
+        }
+
+        // A message for the drone's LCD where it can go there (the server: single player, the host), else the terminal
+        private void NavNotice(MyStringId format, params object[] args)
+        {
+            if (IsServer) Report(format, args);
+            else Feedback(format, args);
+        }
+
+        /// <summary>
+        /// Commit: the list as one route (each target after its approach point), cleaned up - duplicates out, waypoints
+        /// within MERGE_WITHIN of each other merged into their midpoint - into the route memory as a custom route of the
+        /// player's (server: there the ones (almost) in line with their neighbours go, STRAIGHT_TOLERANCE, where the
+        /// shortcut is clear). The list empties.
+        /// </summary>
+        public void Terminal_RecordCommit()
+        {
+            if (!RecordCommitEnabled) return;
+            var raw = new List<Vector3D>();
+            var rawAtt = new List<KeyValuePair<Vector3D, Vector3D>>();
+            for (int i = 0; i < customNav.Count; i++)
+            {
+                if (customNav[i].Value.HasValue) { raw.Add(customNav[i].Value.Value); rawAtt.Add(customNavAtt[i]); }
+                raw.Add(customNav[i].Key);
+                rawAtt.Add(customNavAtt[i]);
+            }
+            var clean = new List<Vector3D>();
+            var cleanAtt = new List<KeyValuePair<Vector3D, Vector3D>>();
+            CleanRoute(raw, rawAtt, clean, cleanAtt, null);
+            if (clean.Count < 2) { Feedback(MyStrings.Drone_NavNoWaypoints); return; }
+            var points = new List<Vector3DData>(clean.Count);
+            var fwds = new List<Vector3DData>(clean.Count);
+            var ups = new List<Vector3DData>(clean.Count);
+            for (int i = 0; i < clean.Count; i++)
+            {
+                points.Add(Vector3DData.FromVector3D(clean[i]));
+                fwds.Add(Vector3DData.FromVector3D(cleanAtt[i].Key));
+                ups.Add(Vector3DData.FromVector3D(cleanAtt[i].Value));
+            }
+            RequestAction(new DroneActionPacket { Action = DroneAction.CommitRoute, Points = points, Forwards = fwds, Ups = ups });
+            Feedback(MyStrings.Drone_NavRouteCleaned, raw.Count, clean.Count);
+            ClearCustomNav();
+            HideNavGps();
+            RefreshTerminal();
+        }
+
+        // The waypoints cleaned up (into 'outPts'), each with its recorded attitude (a merged run: its first one's).
+        // 'clear' (a, b, forward, up: the hull flying a -> b in that attitude is clear): straight stretches are dropped
+        // only where the shortcut is; null: duplicates only (the client: the server has the scene)
+        private static void CleanRoute(List<Vector3D> raw, List<KeyValuePair<Vector3D, Vector3D>> rawAtt, List<Vector3D> outPts,
+                                       List<KeyValuePair<Vector3D, Vector3D>> outAtt, Func<Vector3D, Vector3D, Vector3D, Vector3D, bool> clear)
+        {
+            // Duplicates; then runs of waypoints within MERGE_WITHIN of the run's first: their midpoint
+            var merged = new List<Vector3D>();
+            var mergedAtt = new List<KeyValuePair<Vector3D, Vector3D>>();
+            int i = 0;
+            while (i < raw.Count)
+            {
+                Vector3D sum = raw[i];
+                int n = 1, j = i + 1;
+                while (j < raw.Count && Vector3D.DistanceSquared(raw[j], raw[i]) < MERGE_WITHIN * MERGE_WITHIN) { sum += raw[j]; n++; j++; }
+                Vector3D mid = sum / n;
+                if (merged.Count == 0 || Vector3D.DistanceSquared(merged[merged.Count - 1], mid) > 0.01) { merged.Add(mid); mergedAtt.Add(rawAtt[i]); }
+                i = j;
+            }
+            // Straight stretches: a waypoint within STRAIGHT_TOLERANCE of the line between the ones kept around it goes
+            // (Douglas-Peucker, iterative)
+            if (merged.Count < 3 || clear == null) { outPts.AddRange(merged); outAtt.AddRange(mergedAtt); return; }
+            var keep = new bool[merged.Count];
+            keep[0] = keep[merged.Count - 1] = true;
+            var stack = new Stack<KeyValuePair<int, int>>();
+            stack.Push(new KeyValuePair<int, int>(0, merged.Count - 1));
+            while (stack.Count > 0)
+            {
+                var s = stack.Pop();
+                if (s.Value - s.Key < 2) continue;
+                int far = -1;
+                double farD = -1;
+                Vector3D a = merged[s.Key], ab = merged[s.Value] - a;
+                double len2 = ab.LengthSquared();
+                for (int k = s.Key + 1; k < s.Value; k++)
+                {
+                    double t = len2 > 1e-6 ? MathHelperD.Clamp(Vector3D.Dot(merged[k] - a, ab) / len2, 0, 1) : 0;
+                    double d = Vector3D.DistanceSquared(merged[k], a + ab * t);
+                    if (d > farD) { farD = d; far = k; }
+                }
+                // In line, and the shortcut clear (in the attitude flown at its start): the ones between go
+                if (farD <= STRAIGHT_TOLERANCE * STRAIGHT_TOLERANCE && clear(a, merged[s.Value], mergedAtt[s.Key].Key, mergedAtt[s.Key].Value)) continue;
+                keep[far] = true;
+                stack.Push(new KeyValuePair<int, int>(s.Key, far));
+                stack.Push(new KeyValuePair<int, int>(far, s.Value));
+            }
+            for (int k = 0; k < merged.Count; k++)
+                if (keep[k]) { outPts.Add(merged[k]); outAtt.Add(mergedAtt[k]); }
+        }
+
+        /// <summary>Show waypoints (a switch): the list's waypoints as temporary GPS markers of this player's, by their
+        /// numbers (added silently); off again by itself after the debug draw time.</summary>
+        public bool Terminal_ShowWaypoints
+        {
+            get { return navGps.Count > 0; }
+            set
+            {
+                if (!IsManagedByPlayer || value == (navGps.Count > 0)) return;   // (the switch is off outside debug)
+                HideNavGps();
+                if (value) ShowWaypoints();
+                RefreshTerminal();
+            }
+        }
+
+        private void ShowWaypoints()
+        {
+            if (customNav.Count == 0 || MyAPIGateway.Session == null || MyAPIGateway.Session.Player == null || MyAPIGateway.Session.GPS == null) return;
+            navGpsIdentity = MyAPIGateway.Session.Player.IdentityId;
+            var tb = Entity as Sandbox.ModAPI.IMyTerminalBlock;
+            string tag = Loc.F(MyStrings.Drone_NavWaypointGpsDescription, tb != null ? tb.CustomName : "");
+            for (int i = 0; i < customNav.Count; i++)
+            {
+                int id = customNavIds[i];
+                if (customNav[i].Value.HasValue) ShowNavGps(Loc.F(MyStrings.Drone_NavWaypointGpsFrom, id), tag, customNav[i].Value.Value);
+                ShowNavGps(Loc.F(MyStrings.Drone_NavWaypointGps, id), tag, customNav[i].Key);
+            }
+            navGpsUntil = MyAPIGateway.Session.GameplayFrameCounter + DebugDrawTimeoutTicks;
+        }
+
+        private void ShowNavGps(string name, string description, Vector3D at)
+        {
+            var gps = MyAPIGateway.Session.GPS.Create(name, description, at, true, true);   // temporary: not saved
+            gps.GPSColor = Color.Cyan;
+            MyAPIGateway.Session.GPS.AddGps(navGpsIdentity, gps);                     // hidden: no sound
+            MyAPIGateway.Session.GPS.SetShowOnHud(navGpsIdentity, gps.Hash, true);    // shown: no sound either
+            navGps.Add(gps.Hash);
+        }
+
+        private void HideNavGps()
+        {
+            if (navGps.Count == 0 || MyAPIGateway.Session == null || MyAPIGateway.Session.GPS == null) { navGps.Clear(); return; }
+            for (int i = 0; i < navGps.Count; i++) MyAPIGateway.Session.GPS.RemoveGps(navGpsIdentity, navGps[i]);
+            navGps.Clear();
+        }
+
+        public void Terminal_CustomNavNavigate()
+        {
+            if (customNav.Count == 0) { Feedback(MyStrings.Drone_NavNoWaypoints); return; }
+            var points = new List<Vector3DData>();
+            for (int i = 0; i < customNav.Count; i++)
+            {
+                if (customNav[i].Value.HasValue) points.Add(Vector3DData.FromVector3D(customNav[i].Value.Value));
+                points.Add(Vector3DData.FromVector3D(customNav[i].Key));
+            }
+            RequestAction(new DroneActionPacket { Action = DroneAction.NavigateRoute, Points = points });
+        }
+        #endregion
 
         #region Terminal - place mount (debug)
         public void Terminal_Debug_MountListContent(List<MyTerminalControlListBoxItem> items, List<MyTerminalControlListBoxItem> selected)

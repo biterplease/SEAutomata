@@ -139,7 +139,8 @@ namespace Automata.Drone
                 ClearRouteError();
                 return;
             }
-            if (routeErrorPending != null)
+            // (not while a route search is queued: the plan isn't over - other clearances, the searches - yet)
+            if (routeErrorPending != null && !routePending)
             {
                 string why = routeErrorPending;
                 routeErrorPending = null;

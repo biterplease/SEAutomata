@@ -1615,7 +1615,7 @@ namespace Automata.Mining
                 info.Append(new string('-', 40)).Append('\n');
                 log.AppendTo(info);
             }
-            sb.Append(info);
+            TextLimits.AppendCut(sb, info);
         }
         #endregion
 

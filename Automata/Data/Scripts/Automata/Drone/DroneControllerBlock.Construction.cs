@@ -53,7 +53,6 @@ namespace Automata.Drone
         private const int CONSTRUCTION_LEG_SETTLE_TICKS = 3 * 60;    // a detour leg hovering close by: good enough
         #endregion
         private const double CONSTRUCTION_LEG_CLOSE = 3.0;           // m: "close by" for that
-        private const double CONSTRUCTION_CLEARANCE = 2.0;           // m: kept between the hull and anything when detouring
         private const float CONSTRUCTION_ROUTE_TOLERANCE = 1.5f;     // m: arrival at detour / back-out points
         #region Timing
         public const int CONSTRUCTION_STOP_PAUSE_TICKS = 120 * 60;   // "Stop" pauses stand-alone work for 2 min

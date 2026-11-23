@@ -1,0 +1,77 @@
+[h2]Experimental alpha build[/h2]
+
+The mod [i]mostly[/i] works, but there's some features that need polishing and cleanup. Some features might be tagged as experimental, and might get removed later on.
+
+[h1]Automata[/h1]
+
+Automatons to make your life easier.
+
+This mod enables you to configure drones to perform tasks that are commonly performed by players.
+
+Logistics driven gameplay is encouraged, as you now can have a number of independent grids, that your drones will keep in sync, as configured by the Automata Computer blocks.
+
+Automata Computer blocks perform analysis, and they are your gateway to management; but a drone is required to do any "Actual work". You can give a preference for certain types of jobs, based on the Drone's Behavior Profile.
+
+What "actual work" means, is activities like:
+
+[list]
+[*][b]Logistics[/b]: [i]Cargo drone[/i] or [i]Ore hauler[/i] move inventory between 2 completely separate grids.
+[list]
+[*][b]Cargo drone[/b]: Prefers logistics that don't involve carrying ore. Needs a standard connector.
+[*][b]Ore hauler[/b]: Prefers logistic jobs that only involve Ores or Ice. Can use both a large or a small connector.
+[*][b]Tanker (planned, not implemented)[/b]: Gas hauler, takes on jobs to move Hydrogen or Oxygen.
+[/list]
+[*][b]Mining surveys[/b]: [b]Ore Scout[/b] drones can fly an area and survey for ores. Can do "Spot checks" as well as "Area sweeps"
+[*][b]Mining[/b]: [b]Mining drones[/b] mine ores or ice. Can do "spot checks" for ore surveys.
+[*][b]Construction[/b]: Welder or Grinder drones can, well, weld or grind. There are 5 construction profiles:
+[list]
+[*][b]Welder:All[/b]: All kinds of weld jobs
+[*][b]Welder:Projected[/b]: Prefers projection jobs, but can still take repair or unbuilt
+[*][b]Welder:Unbuilt[/b]: Prefers unbuilt block jobs, but can still take projected or repair
+[*][b]Welder:Repair[/b]: Prefers repair jobs, but can still take projected or unbuilt
+[*][b]Grinder[/b]: Grind jobs. Blocks need to be painted with grind color for it to target them.
+[*][b]Construction[/b]: Combination of [i]Welder:All[/i] and [i]Grinder[/i]
+[/list]
+[*][b]Farming[/b]: [i]Harvester[/i] drone prefers farming crops from farm plots, but can also take trash pickup
+[*][b]Trash pickup[/b]: [i]Janitor[/i] drone prefers trash pickup, but can also take farming.
+[*][b]Combat[/b]: Works with vanilla AI Offensive, AI Defensive, and AI flight, to give your combat drones additional, non-combat capabilities
+[list]
+[*]The Drone Controller will handle undocking, out-of-combat navigation, and docking for your drones
+[*]The drone controller "listens" to the signal from the AI defensive, when it detects an enemy.
+[*]The drone controller then hands control over to the AI Flight, AI Offensive, and AI Defensive, to take over.
+[*]Once no more targets are detected, or a signal to flee is received from the AI Defensive, the drone will leave combat
+[*](Planned, not implemented) Combat formations: Your combat drones will follow formation to the target's location.
+[/list]
+[/list]
+
+Needless to say, each behavior profile needs the proper tools for the job, i.e. a Mining drone with no drills cannot mine. Most drones need cargo.
+
+For a drone to be able to navigate, it needs:
+
+[list]
+[*]Camera: to see obstacles far away, in the direction the camera is pointing
+[*]Sensor: to "sense" obstacles nearby, all around.
+[*]Antenna: to communicate with the computer blocks
+[*]Tools appropiate for the job, i.e. Mining drone needs drills, a Welder drone needs (gasp!) a welder
+[*]Enough cargo for its needs: Harvester drones can get away with a few tiny small cargos, Cargo drones might need larger ones
+[/list]
+
+[h2]Blocks[/h2]
+
+The mod introduces 5 blocks that lets you scale your activities, 3 of them specialize on checking for a specific types of jobs, and the [b]Orchestrator[/b] collects those jobs, and hands them to the drones best suited for them.
+
+Blocks on the same grid (or rotor / piston / hinge connected grids) talk without an antenna. Between grids, everything talks over your antennas: a broadcasting radio antenna on each grid within range of the other, or laser antennas linked to each other. Docked drone are able to talk to the grid its connected without an antenna.
+
+The mod adds six blocks and two hand-held tools:
+
+[list]
+[*][b]Drone Controller[/b]: The workhorse, that allows a drone to check its own capabilities, and sign up to do the work distributed by the Orchestrator. It's the only block that actually does work: weld, grind, deliveries, mining.
+[*][b]Orchestrator[/b]: Analyzes incoming job announcements, groups them, if needed, turns them into job auctions, picks the winning drones and gives them their orders. One per network is enough.
+[*][b]Logistics Computer[/b]: Analyzes inventory on its grid, keeps player-configured item min/max in its memory, and dispatches jobs to keep those amounts healthy. A grid needs one to take part in logistics.
+[*][b]Construction Computer[/b]: Scans a large area for blocks to grind, weld, or repair, and announces them as jobs.
+[*][b]Mining Surveyor[/b]: It collects ore deposit data and turns ore orders into mining jobs.
+[*][b]Target Designator[/b]: a block that points a camera and sends the designator orders (see below).
+[*][b]Industrial Target Designator[/b] and [b]Hostile Target Designator[/b]: hand-held tools to assign tasks by pointing: ore scouting with the industrial one, combat with the hostile one.
+[/list]
+
+Full guide here https://steamcommunity.com/sharedfiles/filedetails/?id=3817492846
