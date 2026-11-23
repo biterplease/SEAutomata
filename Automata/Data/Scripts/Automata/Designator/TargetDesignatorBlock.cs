@@ -222,13 +222,17 @@ namespace Automata.Designator
             if (net != null) net.SendToServer(new DesignatorCameraPacket { DesignatorId = Entity.EntityId, Order = order });
         }
 
+        private readonly System.Text.StringBuilder info = new System.Text.StringBuilder();
+
         private void AppendInfo(IMyTerminalBlock b, System.Text.StringBuilder target)
         {
             if (!ready) return;
             IMyEntity e;
             var cam = settings.CameraId != 0 && MyAPIGateway.Entities.TryGetEntityById(settings.CameraId, out e) ? e as IMyCameraBlock : null;
-            target.AppendLoc(MyStrings.Designator_DesignatorCamera, cam != null && !cam.Closed ? cam.CustomName : Loc.T(MyStrings.Keen_None)).Append('\n');
-            if (pending.Count > 0) target.AppendLoc(MyStrings.Designator_OrdersWaitingForAnAnswer, pending.Count).Append('\n');
+            info.Clear();
+            info.AppendLoc(MyStrings.Designator_DesignatorCamera, cam != null && !cam.Closed ? cam.CustomName : Loc.T(MyStrings.Keen_None)).Append('\n');
+            if (pending.Count > 0) info.AppendLoc(MyStrings.Designator_OrdersWaitingForAnAnswer, pending.Count).Append('\n');
+            TextLimits.AppendCut(target, info);
         }
         #endregion
 

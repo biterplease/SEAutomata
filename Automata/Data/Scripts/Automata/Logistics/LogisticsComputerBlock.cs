@@ -1489,7 +1489,7 @@ namespace Automata.Logistics
             for (int i = 0; i < header.Count; i++) info.Append(header[i]).Append('\n');
             info.Append(new string('-', 40)).Append('\n');
             log.AppendTo(info);
-            sb.Append(info);
+            TextLimits.AppendCut(sb, info);
         }
 
         private static void AppendJob(StringBuilder sb, MyStringId label, OpenJob job)

@@ -505,7 +505,7 @@ namespace Automata.Drone
         {
             public IMyShipConnector Target;
             public int Mi, Frame;
-            public bool Compact;   // a harvester's approach point, worked out against the real physics (no staging out past it)
+            public bool Compact;   // an approach point worked out against the real physics (no corridor; no staging out past it)
             public Vector3D OrigOffset, OrigForward, OrigUp;      // what StartDocking was called with
             public Vector3DData DockOffset, DockForward, DockUp;  // the pose (a corridor may turn its heading)
             public MatrixD Hm, DockFrame;
@@ -542,7 +542,20 @@ namespace Automata.Drone
                 prep.Frame = MyAPIGateway.Session.GameplayFrameCounter;
                 if (Log.DebugEnabled) Log.Debug("Drone {0}: docking at {1}: its corridor / approach as worked out before", Entity.EntityId, target.CustomName);
             }
-            else prep = PrepareDock(target, mi, dockOffset, dockForward, dockUp);
+            else
+            {
+#if PERF
+                bool statsOuter = Pathfinding.RouteStats.BeginDock();
+                long statsT0 = Pathfinding.RouteStats.Now();
+#endif
+                prep = PrepareDock(target, mi, dockOffset, dockForward, dockUp);
+#if PERF
+                Pathfinding.PathQuery statsQuery;
+                BuildPathQuery(out statsQuery);
+                Pathfinding.RouteStats.EndDock(statsOuter, statsT0, ref statsQuery, flightState.WorldMatrix.Translation, target.GetPosition(), prep != null,
+                                               prep == null ? null : prep.Corridor ? "corridor" : prep.Compact ? "compact" : "approach line");   // (the reason: the dock's log line)
+#endif
+            }
             if (prep == null) return false;
             dockPrepCurrent = prep;
             return FinishDock(prep);
@@ -622,29 +635,33 @@ namespace Automata.Drone
                 approachLocal = connectorLocal + WorldToAnchorDir(ref hm, aH) * CORRIDOR_SLIDE;
                 if (Log.DebugEnabled) Log.Debug("Drone {0}: dock corridor at {1}{2}: {3}", Entity.EntityId, target.CustomName, heading > 0 ? string.Format(" (heading turned {0}°)", heading * 90) : "", corridorHow);
             }
-            else if (CompactFlight && CompactDockApproach(p0World + hullFromConnector, Vector3D.Normalize(aH), ref dockFrame, out compactOut, out compactWhy))
-            {
-                // Harvesters, indoors: out along the axis only as far as the real physics leaves room (a port between farm
-                // plots: their cells are boxes, their planters knee high; a storage bin 2 m out)
-                approachLocal = connectorLocal + WorldToAnchorDir(ref hm, Vector3D.Normalize(aH)) * compactOut;
-                prep.Compact = true;
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: no dock corridor at {1}: approach point {2:F1} m out, clear by the drone's real shape", Entity.EntityId, target.CustomName, compactOut);
-            }
             else
             {
-                if (compactWhy != null && Log.DebugEnabled) Log.Debug("Drone {0}: dock at {1}: no approach by the real shape either: {2}", Entity.EntityId, target.CustomName, compactWhy);
                 // The old way: the approach point out along the axis, further out until there is room to turn there -
                 // only when that line is clear (it used to be flown through a hangar's roof)
                 approachLocal = connectorLocal + WorldToAnchorDir(ref hm, aH) * DockApproachDistance;
                 approachLocal = WorldToAnchorPoint(ref hm, WithTurnRoom(AnchorToWorldPoint(ref hm, approachLocal), aH, hullFromConnector, ref dockFrame));
                 string lineBlocker;
-                if (!ApproachLineClear(p0World + hullFromConnector, AnchorToWorldPoint(ref hm, approachLocal) + hullFromConnector, ref dockFrame, out lineBlocker))
+                if (ApproachLineClear(p0World + hullFromConnector, AnchorToWorldPoint(ref hm, approachLocal) + hullFromConnector, ref dockFrame, out lineBlocker))
                 {
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: no dock corridor at {1} ({2}): approach point {3:F1} m out", Entity.EntityId, target.CustomName, corridorHow, Vector3D.Distance(approachLocal, connectorLocal));
+                }
+                else if (CompactDockApproach(p0World + hullFromConnector, Vector3D.Normalize(aH), ref dockFrame, out compactOut, out compactWhy))
+                {
+                    // Out along the axis only as far as the real physics leaves room (a port between farm plots: their
+                    // cells are boxes, their planters knee high; a storage bin 2 m out). Every drone (harvesters only, and
+                    // before the old way, until 2026-11-18)
+                    approachLocal = connectorLocal + WorldToAnchorDir(ref hm, Vector3D.Normalize(aH)) * compactOut;
+                    prep.Compact = true;
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: no dock corridor at {1} ({2}), the approach line blocked by {3}: approach point {4:F1} m out, clear by the drone's real shape", Entity.EntityId, target.CustomName, corridorHow, lineBlocker, compactOut);
+                }
+                else
+                {
+                    if (Log.DebugEnabled) Log.Debug("Drone {0}: dock at {1}: no approach by the real shape either: {2}", Entity.EntityId, target.CustomName, compactWhy);
                     corridorIgnore = null;
                     Report(MyStrings.Drone_DockNoWay, target.CustomName, lineBlocker, corridorHow);
                     return null;
                 }
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: no dock corridor at {1} ({2}): approach point {3:F1} m out", Entity.EntityId, target.CustomName, corridorHow, Vector3D.Distance(approachLocal, connectorLocal));
             }
             corridorIgnore = null;
             prep.DockOffset = dockOffset;
@@ -709,8 +726,7 @@ namespace Automata.Drone
             dockAreaCentre = target.GetPosition();
             bool planned;
             laneHopOk = true;   // one route to one place: a lane hop is planned again at its end (Replan)
-            try { planned = (CompactFlight && TryDirectLegs(start, staged ? staging : hullAtApproach, dockRoutePoints, false))
-                            || PlanPath(start, staged ? staging : hullAtApproach, dockRoutePoints, areaDetour, false); }
+            try { planned = PlanPath(start, staged ? staging : hullAtApproach, dockRoutePoints, areaDetour, false); }
             finally { dockAreaSet = false; laneHopOk = false; }
             if (!planned)
             {
@@ -799,7 +815,7 @@ namespace Automata.Drone
             MatrixD box;
             Vector3D half;
             if (!TryGetObservationArea(out box, out half)) return false;
-            Vector3D h = half + new Vector3D(DroneRadius() + CONSTRUCTION_CLEARANCE);
+            Vector3D h = half + new Vector3D(DroneRadius() + BerthNow(1));   // (the route clearance)
             Vector3D c = box.Translation;
             Vector3D s = WorldToAnchorDir(ref box, start - c), g = WorldToAnchorDir(ref box, goal - c);
             if (!SegmentHitsBox(s, g, h)) return false;

@@ -105,7 +105,13 @@ namespace Automata.Pathfinding
         {
             depth = 0;
             sweepHits.Clear();
+#if PERF
+            long rayT0 = RouteStats.Now();
+#endif
             MyAPIGateway.Physics.CastRay(from, from + dir * max, sweepHits);
+#if PERF
+            RouteStats.Ray(RouteStats.RAY_SHAPE, rayT0);
+#endif
             double best = double.MaxValue;
             for (int k = 0; k < sweepHits.Count; k++)
             {
@@ -165,7 +171,13 @@ namespace Automata.Pathfinding
                         Vector3D o = face + axes[f1] * u + axes[f2] * v - n * dd;
                         if (ahead) o += n * berth;
                         sweepHits.Clear();
+#if PERF
+                        long rayT0 = RouteStats.Now();
+#endif
                         MyAPIGateway.Physics.CastRay(o, o + d * len, sweepHits);
+#if PERF
+                        RouteStats.Ray(RouteStats.RAY_SHAPE, rayT0);
+#endif
                         for (int k = 0; k < sweepHits.Count; k++)
                         {
                             var e = sweepHits[k].HitEntity;
@@ -177,7 +189,7 @@ namespace Automata.Pathfinding
                             {
                                 var slim = g.GetCubeBlock(g.WorldToGridInteger(sweepHits[k].Position + d * 0.02));
                                 blocker = slim != null && slim.FatBlock != null ? "'" + slim.FatBlock.DisplayNameText + "'"
-                                        : slim != null ? slim.BlockDefinition.Id.SubtypeName : g.DisplayName;
+                                        : slim != null ? BlockName(slim) : g.DisplayName;
                             }
                             else blocker = top != null ? top.DisplayName ?? top.GetType().Name : "?";
                             along = Vector3D.Dot(sweepHits[k].Position - o, d);

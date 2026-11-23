@@ -133,7 +133,6 @@ namespace Automata.Pathfinding
         }
 
         private readonly PathfindingManager manager;
-        private readonly PathfindingConfig config;
         private readonly Worker[] workers;
         private readonly List<Job> queue = new List<Job>();      // Queued, FIFO
         private readonly List<Job> active = new List<Job>();     // Preparing / Running
@@ -157,14 +156,13 @@ namespace Automata.Pathfinding
         public PathSearchQueue(PathfindingManager manager, PathfindingConfig config)
         {
             this.manager = manager;
-            this.config = config;
             workers = new Worker[Math.Max(1, config.PathSearchWorkers)];
             for (int i = 0; i < workers.Length; i++)
             {
                 var scene = new SnapshotScene();
                 workers[i] = new Worker { Scene = scene, Planner = new PathfindingManager(config, scene) };
             }
-            if (Log.DebugEnabled) Log.Debug("Pathfinding: Lazy Theta* searches on {0} worker thread(s), up to {1:F0} ms each{2}", workers.Length, config.PathSearchMaxMs, config.PathWarmUp ? ", scene warm-up on" : "");
+            if (Log.DebugEnabled) Log.Debug("Pathfinding: Lazy Theta* searches on {0} worker thread(s), up to {1:F0} ms each{2}", workers.Length, config.PathSearchMaxMs, ", scene warm-up on");
         }
 
         #region Asking (the drone's planner)
@@ -219,6 +217,9 @@ namespace Automata.Pathfinding
             };
             queue.Add(job);
             Queued++;
+#if PERF
+            RouteStats.SearchQueued();
+#endif
             if (Log.DebugEnabled) Log.Debug("Pathfinding: search queued for drone {0}: {1:F0} m ({2} waiting, {3} running)", q.Owner, Vector3D.Distance(start, goal), queue.Count, active.Count);
             return SearchPoll.Pending;
         }
@@ -323,7 +324,7 @@ namespace Automata.Pathfinding
         {
             frame = now;
             if (shutdown) return;
-            if (config.PathWarmUp) warmUp.Update(now, this);
+            warmUp.Update(now, this);
             // Expire
             for (int i = results.Count - 1; i >= 0; i--)
             {
@@ -439,6 +440,9 @@ namespace Automata.Pathfinding
             Run++;
             PerfStats.Record(PerfStats.PathSearch, r.Ms);
             PerfStats.Record(PerfStats.PathSearchWait, r.WaitMs);
+#if PERF
+            RouteStats.SearchDone(r);
+#endif
             if (Log.DebugEnabled) Log.Debug("Pathfinding: search for drone {0}: {1} in {2:F1} ms on a worker ({3:F0} ms from queued; {4} probes, {5} checks, {6} blocks){7}", job.Owner, r.Found ? (r.Points.Count + " points") : ("none: " + r.Why), r.Ms, r.WaitMs, r.Probes, r.Checks, r.Blocks, r.Found && r.Hold ? ", holding the drone's attitude" : "");
         }
 

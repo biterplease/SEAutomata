@@ -29,7 +29,7 @@ Not blocks, but the handhelds [b]Industrial Target Designator[/b] and [b]Hostile
 
 [olist]
 [*]Build a basic welder drone, add a Drone Controller. Set behavior profile to [i]Welder:All[/i].
-[*]Set a drone's construction field through its home connector and GPS.
+[*]Set a drone's construction field through its home connector, or GPS.
 [*]You can visualize the area in the terminal or using [i]/automata debugdraw dronenav[/i].
 [*]Place a block or project in the area, drone will build it, if you have the materials.
 [/olist]

@@ -41,6 +41,9 @@ namespace Automata.Drone
         const string ICON_ON = @"Textures\GUI\Icons\Actions\SwitchOn.dds";
         const string ICON_OFF = @"Textures\GUI\Icons\Actions\SwitchOff.dds";
         const string ICON_START = @"Textures\GUI\Icons\Actions\Start.dds";
+        const string ICON_STOP = @"Textures\GUI\Icons\Actions\SwitchOff.dds";
+        const string ICON_PLUS = @"Textures\GUI\Icons\HUD 2017\plus.dds";
+        const string ICON_DASH = @"Textures\GUI\Icons\HUD 2017\Dash.dds";
 
         /// <summary>Toolbar / button panel / PB actions. Same code paths as the terminal controls (synced there).</summary>
         static void CreateActions()
@@ -52,6 +55,16 @@ namespace Automata.Drone
                 l => l.Terminal_ObservationAreaDraw, (l, v) => l.Terminal_ObservationAreaDraw = v);
             AddAction("GoHome", Loc.T(MyStrings.Drone_GoHome), ICON_START, l => l.Terminal_GoHome(), null);
             AddAction("Stop", Loc.T(MyStrings.Keen_Stop), ICON_START, l => l.Terminal_StopOrders(), null);
+            // Recording (nothing where the terminal's control is greyed out)
+            AddAction("RecordAddWaypoint", Loc.T(MyStrings.Drone_RecordAddWaypoint), ICON_PLUS, l => l.Terminal_RecordAddWaypoint(), null);
+            Action<DroneControllerBlock, StringBuilder> recState = (l, sb) => sb.AppendLoc(l.RecordStopEnabled ? MyStrings.Drone_On : MyStrings.Drone_Off);
+            AddAction("RecordStart", Loc.T(MyStrings.Drone_RecordStart), ICON_START, l => l.Terminal_RecordStart(), recState);
+            AddAction("RecordStop", Loc.T(MyStrings.Drone_RecordStop), ICON_STOP, l => l.Terminal_RecordStop(), recState);
+            AddAction("RecordCommit", Loc.T(MyStrings.Drone_RecordCommit), ICON_START, l => l.Terminal_RecordCommit(), null);
+            AddToggleActions("ShowWaypoints", MyStrings.Drone_ShowWaypoints, l => l.Terminal_ShowWaypoints, (l, v) => l.Terminal_ShowWaypoints = v);
+            Action<DroneControllerBlock, StringBuilder> recSeconds = (l, sb) => sb.Append(l.Terminal_RecordSeconds.ToString("0.0")).Append(" s");
+            AddAction("RecordFrequencyIncrease", Loc.T(MyStrings.Drone_RecordFrequencyIncrease), ICON_PLUS, l => l.Terminal_RecordSecondsStep(1), recSeconds);
+            AddAction("RecordFrequencyDecrease", Loc.T(MyStrings.Drone_RecordFrequencyDecrease), ICON_DASH, l => l.Terminal_RecordSecondsStep(-1), recSeconds);
         }
 
         // 'id' (toggle), 'id'_On, 'id'_Off; the toolbar slot shows On / Off
@@ -346,16 +359,12 @@ namespace Automata.Drone
 
             foreach (IMyTerminalControl c in controls)
             {
-                if (Log.DebugEnabled) Log.Debug("init print actions: action {0}", c.Id);
                 if (defaultExplicitRemoveControls.Contains(c.Id) || c.Id != null && c.Id.StartsWith(IdPrefix))
                 {
                     c.Visible = TerminalChainedDelegate.Create(c.Visible, AppendedCondition);    
                     continue;
                 }
-                else if (defaultControlIdsToKeep.Contains(c.Id) || (c.Id != null && c.Id.StartsWith(IdPrefix)))
-                {
-                    continue;
-                }
+                if (defaultControlIdsToKeep.Contains(c.Id)) continue;
                 c.Visible = TerminalChainedDelegate.Create(c.Visible, AppendedCondition);
             }
         }
@@ -445,6 +454,20 @@ namespace Automata.Drone
             c.ItemSelected = (b, selected) => { var l = GetBlock(b); if (l != null) select(l, selected); };
             c.SupportsMultipleBlocks = multipleBlocks;
             MyAPIGateway.TerminalControls.AddControl<IMyRemoteControl>(c);
+        }
+
+        private static bool RecordCondition(IMyTerminalBlock b)
+        {
+            var logic = GetBlock(b);
+            return logic != null && logic.RecordControlsEnabled;
+        }
+
+        private static void SetVisible(string id, Func<IMyTerminalBlock, bool> visible)
+        {
+            List<IMyTerminalControl> controls;
+            MyAPIGateway.TerminalControls.GetControls<IMyRemoteControl>(out controls);
+            foreach (var c in controls)
+                if (c.Id == IdPrefix + id) { c.Visible = visible; return; }
         }
 
         private static void SetEnabled(string id, Func<IMyTerminalBlock, bool> enabled)
@@ -916,15 +939,41 @@ namespace Automata.Drone
                 l => l.Terminal_Debug_SetOrientationTargetInput, (l, v) => l.Terminal_Debug_SetOrientationTargetInput = v, DebugCondition);
             AddButton("Button_Debug_SetOrientationTargetAction", MyStrings.Drone_SetOrientationTargetAction, MyStrings.BLANK,
                 l => l.Terminal_Debug_SetOrientationTarget(), DebugCondition);
-            AddTextbox("Textbox_Debug_NavigationTargetGPS", MyStrings.Drone_NavigateToTarget, MyStrings.BLANK,
+            // Custom nav: a route of the player's, flown in order (and learned by the route memory)
+            AddLabel("Label_Debug_CustomNav", MyStrings.Drone_CustomNav);
+            SetVisible("Label_Debug_CustomNav", b => CustomVisibleCondition(b) && DebugCondition(b));   // (a label can't be greyed out: hidden)
+            AddListbox("Listbox_Debug_CustomNavInfo", MyStrings.BLANK, MyStrings.BLANK, 1, false,
+                (l, items, sel) => l.Terminal_CustomNavInfoContent(items, sel), (l, sel) => { }, DebugCondition);
+            AddListbox("Listbox_Debug_CustomNav", MyStrings.Drone_NavWaypoints, MyStrings.BLANK,
+                5, true, (l, items, sel) => l.Terminal_CustomNavContent(items, sel), (l, sel) => l.Terminal_CustomNavSelect(sel), DebugCondition);
+            // Show waypoints: a switch, off again by itself after the debug draw time
+            AddCheckbox("Checkbox_Debug_ShowWaypoints", MyStrings.Drone_ShowWaypoints, MyStrings.BLANK,
+                l => l.Terminal_ShowWaypoints, (l, v) => l.Terminal_ShowWaypoints = v, false);
+            SetEnabled("Checkbox_Debug_ShowWaypoints", DebugCondition);
+            AddButton("Button_Debug_CustomNavRemove", MyStrings.Keen_Remove, MyStrings.BLANK,
+                l => l.Terminal_CustomNavRemove(), DebugCondition);
+            AddButton("Button_Debug_CustomNavClear", MyStrings.Drone_ClearAll, MyStrings.BLANK,
+                l => l.Terminal_CustomNavClear(), DebugCondition);
+            AddTextbox("Textbox_Debug_NavigationTargetGPS", MyStrings.Drone_Target, MyStrings.BLANK,
                 l => l.Textbox_Debug_NavigationTargetGPS, (l, v) => l.Textbox_Debug_NavigationTargetGPS = v, DebugCondition);
-            AddTextbox("Textbox_Debug_NavigationTargetGPSApproachFrom", MyStrings.Drone_ApproachTargetFrom, MyStrings.BLANK,
+            AddTextbox("Textbox_Debug_NavigationTargetGPSApproachFrom", MyStrings.Drone_ApproachFrom, MyStrings.Drone_ApproachFromTooltip,
                 l => l.Textbox_Debug_NavigationTargetGPSApproachFrom, (l, v) => l.Textbox_Debug_NavigationTargetGPSApproachFrom = v, DebugCondition);
-            AddButton("Button_Debug_NavigationTargetGPSActionTrigger", MyStrings.Drone_NavigationTargetGPSActionTrigger, MyStrings.BLANK,
-                l => l.Terminal_Debug_NavigateToTarget(), DebugCondition);
-            AddButton("Button_Debug_QueueWaypoint", MyStrings.Drone_QueueWaypoint,
-                MyStrings.BLANK,
-                l => l.Terminal_Debug_QueueWaypoint(), DebugCondition);
+            AddButton("Button_Debug_CustomNavAdd", MyStrings.Drone_Add, MyStrings.BLANK,
+                l => l.Terminal_CustomNavAdd(), DebugCondition);
+            AddButton("Button_Debug_CustomNavNavigate", MyStrings.Drone_Navigate, MyStrings.Drone_NavigateTooltip,
+                l => l.Terminal_CustomNavNavigate(), DebugCondition);
+            // Recording: the player flies the route, the drone takes its position every few seconds (this machine)
+            AddSlider("Slider_Debug_RecordSeconds", MyStrings.Drone_RecordFrequency, MyStrings.BLANK, 0.5f, 10f,
+                l => l.Terminal_RecordSeconds, (l, v) => l.Terminal_RecordSeconds = v, (l, sb) => sb.AppendLoc(MyStrings.Drone_Seconds, l.Terminal_RecordSeconds.ToString("0.0")));
+            SetEnabled("Slider_Debug_RecordSeconds", RecordCondition);
+            AddButton("Button_Debug_RecordAdd", MyStrings.Drone_RecordAddWaypoint, MyStrings.Drone_RecordAddWaypointTooltip,
+                l => l.Terminal_RecordAddWaypoint(), RecordCondition);
+            AddButton("Button_Debug_RecordStart", MyStrings.Drone_RecordStart, MyStrings.Drone_RecordStartTooltip,
+                l => l.Terminal_RecordStart(), b => { var l = GetBlock(b); return l != null && l.RecordStartEnabled; });
+            AddButton("Button_Debug_RecordStop", MyStrings.Drone_RecordStop, MyStrings.Drone_RecordStopTooltip,
+                l => l.Terminal_RecordStop(), b => { var l = GetBlock(b); return l != null && l.RecordStopEnabled; });
+            AddButton("Button_Debug_RecordCommit", MyStrings.Drone_RecordCommit, MyStrings.Drone_RecordCommitTooltip,
+                l => l.Terminal_RecordCommit(), b => { var l = GetBlock(b); return l != null && l.RecordCommitEnabled; });
             AddListbox("Listbox_Debug_Mount", MyStrings.Drone_MountToPlace,
                 MyStrings.BLANK,
                 4, false, (l, items, sel) => l.Terminal_Debug_MountListContent(items, sel), (l, sel) => l.Terminal_Debug_SelectMount(sel), DebugCondition);

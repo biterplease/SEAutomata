@@ -6,6 +6,8 @@
 		<GenerateAssemblyInfo>false</GenerateAssemblyInfo>
 		<Configurations>Release;Debug</Configurations>
 		<Platforms>x64</Platforms>
+		<!-- The measurement code (#if PERF blocks) compiled here; deploy_local keeps it, the published mod has none -->
+		<DefineConstants>$(DefineConstants);PERF</DefineConstants>
 	</PropertyGroup>
 	<ItemGroup>
 		<PackageReference Include="Mal.Mdk2.ModAnalyzers" Version="2.1.12">

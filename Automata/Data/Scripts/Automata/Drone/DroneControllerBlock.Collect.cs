@@ -42,7 +42,6 @@ namespace Automata.Drone
         private const double COLLECT_DOWN_TILT = 35;        // degrees: in gravity a floor object needs the box facing down within this
 
         // Harvesters fly indoors (crops need pressure): close margins, no minimum altitude, short docking staging
-        private const double COMPACT_CLEARANCE = 0.5;      // m kept from obstacles on the route (vs ObstacleClearance): a 2 m drone under a 3.5 m roof
         private const double COMPACT_STAGING = 5.0;        // m: the docking staging point at most this far out
         private const double HARVEST_LIFT_CLEAR = 1.0;     // m: after a plot, up until the beam's tip is this far off it
         private bool CompactFlight { get { return settings != null && settings.BehaviourProfile == BehaviourProfile.IsHarvesterDrone; } }
@@ -53,7 +52,6 @@ namespace Automata.Drone
         private static readonly double[] HARVEST_LINE_REACH = { 0.4, 0.25, 0.1 };   // m: along the beam's line, its tip this far past the target (deepest first)
         private const double HARVEST_LINE_BACK = 3.0;      // m: the stand-off at most this far back along the line from the work point
         private const double HARVEST_LINE_RUN = 0.5;       // m: ...and this much further back (a straight run in along the line)
-        private const double HARVEST_LINE_BERTH = 0.03;    // m: the way in along the line, swept against the real physics this clear
         private const double HARVEST_MIN_INTO = 0.25;      // the beam's slope into the face (sine), at least
         private static readonly double[] HARVEST_TILTS = { 60, 45, 35, 25, 15 };   // degrees below level: a beam that can't point down
 
@@ -736,11 +734,11 @@ namespace Automata.Drone
                 if (back > HARVEST_LINE_BACK) { why = string.Format("no stand-off on the beam's line within {0:F0} m with the drone clear over the plot", HARVEST_LINE_BACK); continue; }
                 standoff = work - beam * (back + HARVEST_LINE_RUN);
                 string blocker;
-                if (!pm.RealSweepClear(ref q, ref frame, standoff - off, work - off, HARVEST_LINE_BERTH, true, out blocker)) { why = "in along the beam's line: " + blocker + " in the way"; continue; }
+                if (!pm.RealSweepClear(ref q, ref frame, standoff - off, work - off, Pathfinding.Clearances.TOUCH, true, out blocker)) { why = "in along the beam's line: " + blocker + " in the way"; continue; }
                 // The drone gets to the stand-off level (its direct legs checked that), then turns to the work attitude
                 // there: a long drone tilting nose down swings its nose down and its tail up (a roof, the plots)
                 MatrixD level = LevelAttitude();
-                if (!pm.RealTurnClear(ref q, ref level, ref frame, standoff - off, HARVEST_LINE_BERTH, out blocker)) { why = "turning to the work attitude at the stand-off: " + blocker + " in the way"; continue; }
+                if (!pm.RealTurnClear(ref q, ref level, ref frame, standoff - off, Pathfinding.Clearances.TOUCH, out blocker)) { why = "turning to the work attitude at the stand-off: " + blocker + " in the way"; continue; }
                 return true;
             }
             return false;
@@ -761,13 +759,13 @@ namespace Automata.Drone
             if (!RealShapeQuery(out pm, out q)) return false;
             string blocker;
             double run;
-            if (!pm.RealSweepClear(ref q, ref dockFrame, dockedHull, dockedHull + axis * COMPACT_DOCK_OUT, DIRECT_BERTH, true, out blocker, out run))
+            if (!pm.RealSweepClear(ref q, ref dockFrame, dockedHull, dockedHull + axis * COMPACT_DOCK_OUT, Pathfinding.Clearances.FINE, true, out blocker, out run))
                 run = Math.Max(0, run - 0.05);
             if (run < COMPACT_DOCK_MIN) { why = "straight out along the axis: " + blocker + " in the way"; return false; }
             MatrixD level = LevelAttitude();
             for (double d = run; d >= COMPACT_DOCK_MIN - 1e-6; d -= 0.25)
             {
-                if (pm.RealTurnClear(ref q, ref level, ref dockFrame, dockedHull + axis * d, HARVEST_LINE_BERTH, out blocker)) { outDist = d; return true; }
+                if (pm.RealTurnClear(ref q, ref level, ref dockFrame, dockedHull + axis * d, Pathfinding.Clearances.TOUCH, out blocker)) { outDist = d; return true; }
                 why = string.Format("turning to the dock attitude {0:F1} m out: {1} in the way", d, blocker);
             }
             return false;
@@ -822,80 +820,9 @@ namespace Automata.Drone
             if (Log.DebugEnabled) Log.Debug("Drone {0}: harvest: backing off {1:F2} m (the beam's tip {2:F1} m clear)", Entity.EntityId, lift, HARVEST_LIFT_CLEAR);
         }
 
-        #region Indoor legs (harvesters)
-        private const double DIRECT_BERTH = 0.25;   // m kept clear on the direct legs (the drone held level, a known room)
-        private const double DIRECT_LIFT_STEP = 0.5;   // m: up, across, down: the cruise height over the higher end in these steps
-        private const double DIRECT_LIFT_MAX = 4.0;    // ...up to this
-
-        /// <summary>
-        /// Harvesters, indoors: before the grid search (its cells and the sphere round the hull are too coarse for a room),
-        /// plain legs with the drone held level and its heading as it is: straight to the goal; level across over it, then
-        /// straight down (or up); straight up (or down) to its height, then level across. Each leg swept with the drone's
-        /// own box against the real physics (SweepClear), DIRECT_BERTH clear. True: 'points' has the waypoints between (goal
-        /// excluded) and the legs' attitudes are set.
-        /// </summary>
-        private bool TryDirectLegs(Vector3D start, Vector3D goal, List<Vector3D> points, bool looseGoal)
-        {
-            PathfindingManager pm;
-            PathQuery q;
-            if (!RealShapeQuery(out pm, out q)) return false;
-            pm.ResetRealShape(Entity.EntityId);
-            MatrixD att = LevelAttitude();
-            Vector3D up = att.Up, fwd = att.Forward;
-            Vector3D rise = up * Vector3D.Dot(goal - start, up);
-            var mids = new List<Vector3D>();
-            for (int shape = 0; shape < 3; shape++)
-            {
-                mids.Clear();
-                if (shape == 1) mids.Add(goal - rise);          // level across first
-                else if (shape == 2) mids.Add(start + rise);    // up / down first
-                if (mids.Count > 0 && (Vector3D.DistanceSquared(mids[0], start) < 0.25 || Vector3D.DistanceSquared(mids[0], goal) < 0.25)) continue;
-                bool clear = true;
-                Vector3D a = start;
-                string why = null;
-                for (int i = 0; i <= mids.Count && clear; i++)
-                {
-                    Vector3D b = i < mids.Count ? mids[i] : goal;
-                    bool last = i == mids.Count;
-                    if (!pm.RealSweepClear(ref q, ref att, a, b, DIRECT_BERTH, !(last && looseGoal), out why)) clear = false;
-                    a = b;
-                }
-                if (!clear)
-                {
-                    if (Log.DebugEnabled) Log.Debug("Drone {0}: direct legs ({1}): blocked by {2}", Entity.EntityId, shape == 0 ? "straight" : shape == 1 ? "across, then down / up" : "down / up, then across", why);
-                    continue;
-                }
-                legOffset = points.Count;
-                legForwards.Clear();
-                legUps.Clear();
-                points.AddRange(mids);
-                for (int i = 0; i <= mids.Count; i++) { legForwards.Add(fwd); legUps.Add(up); }
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: direct legs ({1}), {2:F1} m, the drone held level", Entity.EntityId, shape == 0 ? "straight" : shape == 1 ? "across, then down / up" : "down / up, then across", Vector3D.Distance(start, goal));
-                return true;
-            }
-            // Over what is in the way (the plots between, the drone low beside one after a side harvest): up, level across
-            // at a cruise height over the higher end, down
-            double hGoal = Vector3D.Dot(goal - start, up), over = Math.Max(0, hGoal);
-            string liftWhy = null;
-            for (double lift = DIRECT_LIFT_STEP; lift <= DIRECT_LIFT_MAX + 1e-6; lift += DIRECT_LIFT_STEP)
-            {
-                Vector3D a1 = start + up * (over + lift), b1 = goal + up * (over + lift - hGoal);
-                if (!pm.RealSweepClear(ref q, ref att, start, a1, DIRECT_BERTH, true, out liftWhy)) { liftWhy = "going up: " + liftWhy; break; }   // a ceiling: no higher
-                if (!pm.RealSweepClear(ref q, ref att, a1, b1, DIRECT_BERTH, true, out liftWhy)) { liftWhy = "across: " + liftWhy; continue; }
-                if (!pm.RealSweepClear(ref q, ref att, b1, goal, DIRECT_BERTH, !looseGoal, out liftWhy)) { liftWhy = "coming down: " + liftWhy; break; }
-                legOffset = points.Count;
-                legForwards.Clear();
-                legUps.Clear();
-                points.Add(a1);
-                points.Add(b1);
-                for (int i = 0; i < 3; i++) { legForwards.Add(fwd); legUps.Add(up); }
-                if (Log.DebugEnabled) Log.Debug("Drone {0}: direct legs (up {1:F1} m, across, down), {2:F1} m, the drone held level", Entity.EntityId, over + lift, Vector3D.Distance(start, goal));
-                return true;
-            }
-            if (Log.DebugEnabled) Log.Debug("Drone {0}: direct legs (up, across, down): blocked {1}", Entity.EntityId, liftWhy ?? "?");
-            return false;
-        }
-        #endregion
+        // (Indoor legs - straight / across-then-down / up-across-down with the drone held level, swept against the real
+        // physics - were the harvesters' own stage before the planner: gone 2026-11-18, harvesters plan as every drone -
+        // the lattice for rooms, the real physics confirming a leg its voxels shut, ExactlyClear)
 
         // Every cell outside the block's face 'n' is free (no neighbour in the way of the beam / the drone)
         private static bool FaceExposed(IMyCubeGrid grid, Vector3I min, Vector3I max, Vector3I n)

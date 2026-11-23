@@ -103,7 +103,7 @@ namespace Automata.Construction
         #region Timing
         private const int UNREACHABLE_COOLDOWN_TICKS = 5 * 60 * 60;   // after "Unreachable"
         private const int UNREACHABLE_COOLDOWN_MAX_TICKS = 30 * 60 * 60;   // a block reported unreachable again and again: doubled each time up to this
-        // after any other abort / decline: BidBlacklistCooldownTicks (server config, 3600 = 60 s)
+        // after any other abort / decline: OrchestratorBlock.BID_BLACKLIST_COOLDOWN_TICKS
         #endregion
 
         private bool CoolingDown(KeyValuePair<long, Vector3I> key, int now)
@@ -275,6 +275,9 @@ namespace Automata.Construction
             {
                 scanKey = key;
                 lastScan = int.MinValue / 2;   // scan with the new settings next step (not for nickname / LCD edits)
+                scanning = false;              // (one going on over ticks: dropped, started again with them)
+                entityBuffer.Clear();
+                targets.Clear();
             }
             CheckRetryRequest();
         }
@@ -384,7 +387,13 @@ namespace Automata.Construction
             ReadJobReports(now);
             ReadKeepalives(now);
             droneWatch.Check(now, block, false, "CC {0}", entityId, AddEvent);
-            if (now - lastScan >= settings.ScanIntervalSeconds * 60)
+            if (scanning)
+            {
+                double t = PerfStats.Start();
+                ScanStep(now);
+                PerfStats.Stop(PerfStats.CcScan, t);
+            }
+            else if (now - lastScan >= settings.ScanIntervalSeconds * 60)
             {
                 lastScan = now;
                 // Grid groups that didn't change come from the cache; everything is looked at again every two minutes
@@ -396,7 +405,8 @@ namespace Automata.Construction
                     scanCache.Flush();
                 }
                 double t = PerfStats.Start();
-                Scan(now);
+                BeginScan(now);
+                ScanStep(now);
                 PerfStats.Stop(PerfStats.CcScan, t);
             }
             ExpireJobs(now);
@@ -441,35 +451,54 @@ namespace Automata.Construction
             halfExtents = new Vector3D(settings.FieldSizeX, settings.FieldSizeY, settings.FieldSizeZ) * (AREA_UNIT * 0.5);
         }
 
-        private void Scan(int now)
+        // A scan goes over several ticks, a grid group at a time (one not in the cache costs ~1 ms, a big base's first ~60 ms;
+        // the scan of 15 grids took 85 ms in one tick at load, 2026-11-19): grid groups until CC_SCAN_SLICE_MS is spent,
+        // the rest next tick. What it finds is kept by id and cell (ConstructionTarget), not by block: safe across ticks.
+        // (Not on a worker thread: the block, paint, projector and ownership reads are the game's, main thread only.)
+        private const double CC_SCAN_SLICE_MS = 3;
+        private bool scanning;
+        private int scanEntity, scanGroups, scanCached, scanTicks;
+        private double scanMs;
+        private MatrixD scanArea;
+        private Vector3D scanHalf;
+        private BoundingBoxD scanBox;
+        private Color scanGrindColor, scanWeldIgnoreColor;
+
+        private void BeginScan(int now)
         {
             if (computer == null) computer = new ConstructionComputer(Entity);
-            MatrixD area;
-            Vector3D half;
-            GetArea(out area, out half);
-            var obb = new MyOrientedBoundingBoxD(area.Translation, half, Quaternion.CreateFromRotationMatrix(area));
-            var box = obb.GetAABB();
-            var grindColor = new Color(settings.GrindColor);
-            var weldIgnoreColor = new Color(settings.WeldIgnoreColor);
-            double watch = PerfStats.Start();
-            scanCache.Begin(ref area, ref half, settings.WorkModes, grindColor, weldIgnoreColor, settings.WorkPriority);
-
+            GetArea(out scanArea, out scanHalf);
+            var obb = new MyOrientedBoundingBoxD(scanArea.Translation, scanHalf, Quaternion.CreateFromRotationMatrix(scanArea));
+            scanBox = obb.GetAABB();
+            scanGrindColor = new Color(settings.GrindColor);
+            scanWeldIgnoreColor = new Color(settings.WeldIgnoreColor);
+            scanCache.Begin(ref scanArea, ref scanHalf, settings.WorkModes, scanGrindColor, scanWeldIgnoreColor, settings.WorkPriority);
             // Every grid group reaching the area (each scanned once, from any of its grids)
             targets.Clear();
             scannedGrids.Clear();
             refusedGrids.Clear();
             entityBuffer.Clear();
-            entityBuffer.AddRange(MyAPIGateway.Entities.GetEntitiesInAABB(ref box));
-            int groups = 0, cached = 0;
+            entityBuffer.AddRange(MyAPIGateway.Entities.GetEntitiesInAABB(ref scanBox));
+            scanEntity = scanGroups = scanCached = scanTicks = 0;
+            scanMs = 0;
+            scanning = true;
+        }
+
+        // The scan's grid groups, on from where the last tick stopped; all done: FinishScan
+        private void ScanStep(int now)
+        {
+            double t0 = PerfStats.Start();
+            scanTicks++;
             bool projections = (settings.WorkModes & WorkModes.WeldProjectedBlocks) != 0;
-            for (int i = 0; i < entityBuffer.Count && targets.Count < MAX_TARGETS_PER_SCAN; i++)
+            for (; scanEntity < entityBuffer.Count && targets.Count < MAX_TARGETS_PER_SCAN; scanEntity++)
             {
-                var grid = entityBuffer[i] as IMyCubeGrid;
-                if (grid == null || grid.Physics == null || scannedGrids.Contains(grid.EntityId)) continue;
+                if (scanGroups > 0 && PerfStats.Since(t0) > CC_SCAN_SLICE_MS) { scanMs += PerfStats.Since(t0); return; }
+                var grid = entityBuffer[scanEntity] as IMyCubeGrid;
+                if (grid == null || grid.Physics == null || grid.Closed || grid.MarkedForClose || scannedGrids.Contains(grid.EntityId)) continue;
                 gridBuffer.Clear();
                 grid.GetGridGroup(GridLinkTypeEnum.Physical).GetGrids(gridBuffer);
                 for (int g = 0; g < gridBuffer.Count; g++) scannedGrids.Add(gridBuffer[g].EntityId);
-                groups++;
+                scanGroups++;
                 int limit = MAX_TARGETS_PER_SCAN - targets.Count;
                 double tg = PerfStats.Start();
                 long groupKey;
@@ -477,17 +506,32 @@ namespace Automata.Construction
                 gridBuffer.Clear();
                 if (scanCache.TryGet(groupKey, signature, limit, targets))
                 {
-                    cached++;
+                    scanCached++;
                     PerfStats.Stop(PerfStats.CcGroupCached, tg);
                     continue;
                 }
                 int first = targets.Count;
-                computer.ScanArea(grid, ref area, ref half, settings.WorkModes, grindColor, weldIgnoreColor, null, limit, targets, RefuseGrid,
+                computer.ScanArea(grid, ref scanArea, ref scanHalf, settings.WorkModes, scanGrindColor, scanWeldIgnoreColor, null, limit, targets, RefuseGrid,
                                   settings.WorkPriority, null, true, Math.Max(0, settings.BlocksPerJob - 1));
                 scanCache.Store(groupKey, signature, limit, targets, first);
                 PerfStats.Stop(PerfStats.CcGroup, tg);
             }
+            scanMs += PerfStats.Since(t0);
+            scanning = false;
             entityBuffer.Clear();
+            double tf = PerfStats.Start();
+            FinishScan(now, scanArea, scanHalf, scanBox);
+            scanMs += PerfStats.Since(tf);
+            if (Log.DebugEnabled) Log.Debug("CC {0}: scan {1:F1} ms over {2} tick(s): {3} grid group(s) ({4} unchanged), {5} block(s) ({6} weld, {7} grind), {8} new job(s), {9} open, {10} block(s) waiting to batch",
+                                            entityId, scanMs, scanTicks, scanGroups, scanCached, lastFound, lastWeld, lastGrind, lastCreated, jobs.Count, lastWaiting);
+            targets.Clear();
+        }
+
+        private int lastCreated, lastWaiting;   // the last scan's (its log line)
+
+        // The scan done: open jobs whose blocks it no longer finds are done; new jobs from what it found
+        private void FinishScan(int now, MatrixD area, Vector3D half, BoundingBoxD box)
+        {
             SortByPriority(targets);
             scanCache.End(targets);
 
@@ -556,8 +600,8 @@ namespace Automata.Construction
             for (int c = 0; c < lastCategory.Length; c++) lastCategory[c] = 0;
             for (int t = 0; t < targets.Count; t++)
                 if (targets[t].Type == Orchestrator.JobType.Weld && (int)targets[t].Category < lastCategory.Length) lastCategory[(int)targets[t].Category]++;
-            if (Log.DebugEnabled) Log.Debug("CC {0}: scan {1:F1} ms: {2} grid group(s) ({8} unchanged), {3} block(s) ({4} weld, {5} grind), {6} new job(s), {7} open, {9} block(s) waiting to batch", entityId, PerfStats.Since(watch), groups, targets.Count, weld, grind, created, jobs.Count, cached, waiting);
-            targets.Clear();
+            lastCreated = created;
+            lastWaiting = waiting;
         }
 
         private readonly List<ConstructionTarget> sortBuffer = new List<ConstructionTarget>();
@@ -1003,7 +1047,7 @@ namespace Automata.Construction
             for (int i = 0; i < header.Count; i++) info.Append(header[i]).Append('\n');
             info.Append(new string('-', 40)).Append('\n');
             log.AppendTo(info);
-            sb.Append(info);
+            TextLimits.AppendCut(sb, info);
         }
         #endregion
 

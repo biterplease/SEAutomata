@@ -47,6 +47,16 @@ namespace Automata.Orchestrator
         [ProtoMember(27)] public double LaneDrawHeight = Pathfinding.FlightLanes.BOX_HEIGHT;
         /// <summary>Lanes flown clear are trusted fully (drones fly them unchecked), not just mostly (FlightLanes.SetSafeLanes).</summary>
         [ProtoMember(28)] public bool SafeLanes;
+
+        // Custom routes (players' recorded routes, RouteMemory). Written by the server: the owner's routes ("id|text") and the
+        // points of the one a player asked to see. Written by a player: one command at a time ("ticks|delete|3", clear, draw).
+        [ProtoMember(29)] public System.Collections.Generic.List<string> CustomRoutes = new System.Collections.Generic.List<string>();
+        [ProtoMember(30)] public string CustomRouteCommand = "";
+        [ProtoMember(31)] public int CustomRouteDrawId;
+        [ProtoMember(32)] public System.Collections.Generic.List<double> CustomRouteDraw = new System.Collections.Generic.List<double>();
+        [ProtoMember(33)] public string CustomRouteDrawName = "";
+        [ProtoMember(34)] public System.Collections.Generic.List<double> CustomRouteDrawFwd = new System.Collections.Generic.List<double>();   // each point's attitude
+        [ProtoMember(35)] public System.Collections.Generic.List<double> CustomRouteDrawUp = new System.Collections.Generic.List<double>();
         // ProtoMember 22 (DesignatorCameraId) and 23 (DesignatorLcdTag) moved to the target designator block: never reuse them.
     }
 

@@ -20,7 +20,7 @@ namespace Automata.Drone
     /// Entry corridors (TODO/16): docking in tight spaces (a hangar, a bay, a ship's dock) and undocking out of them.
     ///
     /// Docking used to need a clear column of 10 m+ out along the connector axis, with room to turn at its end, and
-    /// flew the route to it with ObstacleClearance (3 m) on every side: no hangar with a roof, no door with a metre to
+    /// flew the route to it with ObstacleClearance (then 3 m) on every side: no hangar with a roof, no door with a metre to
     /// spare. Now the dock pose P0 is worked out backwards:
     ///  - P1: P0 moved CORRIDOR_SLIDE out along the target connector's axis: the final slide onto the connector.
     ///  - The corridor: from P1, holding the dock attitude, straight out along the axis, or out along the axis and then
@@ -110,7 +110,7 @@ namespace Automata.Drone
             int count = gravity ? 3 : 1;
             double bestLen = 0;
             Vector3D best = turnAt;
-            double clearance = CompactFlight ? COMPACT_CLEARANCE : cfg.Pathfinding.ObstacleClearance;
+            double clearance = BerthNow(StartFactor());   // (where the drone's clearance ladder starts)
             double stageMin = CompactFlight ? 1.5 : DOCK_STAGING_MIN;
             for (int i = 0; i < count; i++)
             {
@@ -158,7 +158,7 @@ namespace Automata.Drone
             PathfindingManager pm;
             if (!CorridorQuery(out q, out pm)) { how = Loc.T(MyStrings.Drone_NoPathfinder); return false; }
             Vector3D exitDir;
-            if (!pm.FindCorridorAny(ref q, p0, axis, ref att, ref frame, TURN_ROOM_MARGIN, pts, out how, out berth, out exitDir)) return false;
+            if (!pm.FindCorridorAny(ref q, p0, axis, ref att, ref frame, Pathfinding.Clearances.WORK, pts, out how, out berth, out exitDir)) return false;
             corridorExitDir = exitDir;
             return true;
         }

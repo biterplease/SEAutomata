@@ -14,11 +14,12 @@ namespace Automata
 {
     /// <summary>
     /// Chat commands (clients / single player / host; registered in AutomataSession.LoadData).
-    /// /automata debugdraw [dronenav] [droneobs] [ccobs] [park] [lanes] [cn] [range m] [off]: this player's debug overlays on
+    /// /automata debugdraw [dronenav] [droneobs] [ccobs] [park] [lanes] [cn] [customroute] [range m] [off]: this player's debug overlays on
     /// the Automata blocks they own (not faction) within the range (DEBUGDRAW_RANGE_METERS, at most DEBUGDRAW_RANGE_MAX);
     /// "lanes": the flight lanes of the orchestrators they own with a line within the range (Pathfinding.LaneOverlay: the
     /// lanes live on the server, a multiplayer client asks it); "cn": the conveyor networks of the logistics computers
-    /// (each outlined in green, LogisticsComputerBlock.Networks). No kind = all. "off": every overlay this player has on, wherever it is (kinds and range ignored; overlays are
+    /// (each outlined in green, LogisticsComputerBlock.Networks); "customroute": the recorded custom routes their drones may
+    /// use with a stretch within the range (Pathfinding.CustomRouteOverlay, from the server like the lanes). No kind = all. "off": every overlay this player has on, wherever it is (kinds and range ignored; overlays are
     /// local to the player's client: nobody else's change). The overlays switch off after the server's
     /// DebugDrawTimeoutSeconds, like the terminal toggles.
     /// </summary>
@@ -35,13 +36,14 @@ namespace Automata
         private const string DD_PARK = "park";
         private const string DD_LANES = "lanes";
         private const string DD_CN = "cn";
+        private const string DD_CUSTOMROUTE = "customroute";
         private const string DD_OFF = "off";
         private const double DEBUGDRAW_RANGE_METERS = 300;
         private const double DEBUGDRAW_RANGE_MAX = 2000;
         private const double DEBUGDRAW_RANGE_MIN = 10;
 
         [Flags]
-        private enum DrawKinds { None = 0, DroneNav = 1, DroneObs = 2, CcObs = 4, Park = 8, Lanes = 16, Cn = 32, All = 63 }
+        private enum DrawKinds { None = 0, DroneNav = 1, DroneObs = 2, CcObs = 4, Park = 8, Lanes = 16, Cn = 32, CustomRoute = 64, All = 127 }
 
         private readonly List<IMyEntity> entityBuffer = new List<IMyEntity>();
 
@@ -102,6 +104,7 @@ namespace Automata
                     case DD_PARK: kinds |= DrawKinds.Park; break;
                     case DD_LANES: kinds |= DrawKinds.Lanes; break;
                     case DD_CN: kinds |= DrawKinds.Cn; break;
+                    case DD_CUSTOMROUTE: kinds |= DrawKinds.CustomRoute; break;
                     case DD_OFF: on = false; break;
                     default:
                         MyAPIGateway.Utilities.ShowMessage(AutomataSession.MOD_NAME, Loc.T(MyStrings.Common_UsageAutomataDebugdrawDronenavDroneobs));
@@ -132,6 +135,15 @@ namespace Automata
                 else if (AutomataSession.Instance != null && AutomataSession.Instance.Net != null)
                     AutomataSession.Instance.Net.SendToServer(new Network.LaneDrawRequestPacket { Centre = Vector3DData.FromVector3D(pos), Range = range });
                 if (kinds == DrawKinds.Lanes) return;
+            }
+            if ((kinds & DrawKinds.CustomRoute) != 0)
+            {
+                // The routes are the server's, like the lanes
+                if (MyAPIGateway.Multiplayer.IsServer) Pathfinding.CustomRouteOverlay.Show(Pathfinding.CustomRouteOverlay.Collect(me, pos, range), range,
+                                                                                        Config.ServerConfig.Instance.Drone.DebugDrawTimeoutSeconds);
+                else if (AutomataSession.Instance != null && AutomataSession.Instance.Net != null)
+                    AutomataSession.Instance.Net.SendToServer(new Network.CustomRouteDrawRequestPacket { Centre = Vector3DData.FromVector3D(pos), Range = range });
+                if ((kinds & ~(DrawKinds.Lanes | DrawKinds.CustomRoute)) == 0) return;
             }
 
             entityBuffer.Clear();

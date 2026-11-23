@@ -132,6 +132,25 @@ namespace Automata.Util.Logging
         private Type _typeOfMod;
 
         private System.IO.TextWriter _writer = null;
+
+        // The last session's log copied to <name>.prev<ext> before this session's starts over it (a reload no longer
+        // erases the run to look at). One generation.
+        private void KeepPreviousLog()
+        {
+            try
+            {
+                if (!MyAPIGateway.Utilities.FileExistsInLocalStorage(_logFilename, _typeOfMod)) return;
+                string text;
+                using (var reader = MyAPIGateway.Utilities.ReadFileInLocalStorage(_logFilename, _typeOfMod)) text = reader.ReadToEnd();
+                int dot = _logFilename.LastIndexOf('.');
+                string prev = dot > 0 ? _logFilename.Substring(0, dot) + ".prev" + _logFilename.Substring(dot) : _logFilename + ".prev";
+                using (var writer = MyAPIGateway.Utilities.WriteFileInLocalStorage(prev, _typeOfMod)) writer.Write(text);
+            }
+            catch (Exception e)
+            {
+                MyLog.Default.WriteLineAndConsole(_modName + ": keeping the previous log failed: " + e.Message);
+            }
+        }
         private IMyHudNotification _notify = null;
         private int _indent = 0;
         private StringBuilder _cache = new StringBuilder();
@@ -248,6 +267,7 @@ namespace Automata.Util.Logging
 
                     if (_writer == null && MyAPIGateway.Utilities != null)
                     {
+                        KeepPreviousLog();
                         _writer = MyAPIGateway.Utilities.WriteFileInLocalStorage(_logFilename, _typeOfMod);
                     }
 

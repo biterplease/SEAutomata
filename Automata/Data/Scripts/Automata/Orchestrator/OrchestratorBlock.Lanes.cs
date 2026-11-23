@@ -33,7 +33,7 @@ namespace Automata.Orchestrator
         private const int BASE_LANES_MAX = 24;             // bases a pass traces lanes between, at most
         private const double NEAR_EQUILATERAL = 0.75;      // a triangle of bases whose shortest side is this much of its longest keeps all three lanes
         private readonly HashSet<string> appliedObstructions = new HashSet<string>();
-        private string laneCommandDone = "";
+        private string laneCommandDone;   // null: not read yet (the saved command was done before the world was saved)
 
         // Client side: the player's selection, the drawing, the armed "Clear all"
         private int laneSelected;
@@ -51,6 +51,7 @@ namespace Automata.Orchestrator
             if (lanes == null) return;
             // A player's command (once)
             string cmd = settings.LaneCommand ?? "";
+            if (laneCommandDone == null) laneCommandDone = cmd;   // (not again on load)
             if (cmd.Length > 0 && cmd != laneCommandDone)
             {
                 laneCommandDone = cmd;

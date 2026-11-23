@@ -7,9 +7,6 @@ namespace Automata.Config
         bool RequireSensorsForPathfinding();
         bool RequireCamerasForPathfinding();
         float MaxSimulatedCameraRaycastMeters();
-        bool UsePlanetAwarePathfinding();
-        bool AllowRepathing();
-        float MinAltitudeBuffer();
         int MaxRepositionAttempts();
         int MaxPathNodes();
         TimeSpan MaxPathfindingTime();
@@ -41,8 +38,6 @@ namespace Automata.Config
         /// a drone will travel an arc around the planet's center, to its target.
         /// If disabled, a drone may crash into the planet, by drawing a straight line to the target.
         /// </summary>
-        public bool usePlanetAwarePathfinding { get; internal set; } = true;
-        public bool UsePlanetAwarePathfinding() => usePlanetAwarePathfinding;
         /// <summary>
         /// This gives different behaviors to the different pathfinding methods.
         ///
@@ -55,10 +50,6 @@ namespace Automata.Config
         /// 
         /// If disabled, drones will simply go into error states and hover.
         /// </summary>
-        public bool allowRepathing { get; internal set; } = true;
-        public bool AllowRepathing() => allowRepathing;
-        public float minAltitudeBuffer { get; internal set; } = 50f;
-        public float MinAltitudeBuffer() => minAltitudeBuffer;
         public int maxRepositionAttempts { get; internal set; } = 10;
         public int MaxRepositionAttempts() => maxRepositionAttempts;
 
@@ -77,32 +68,32 @@ namespace Automata.Config
         public double SimulatedSensorRange { get; internal set; } = 100.0;
         /// <summary>Look-ahead rays per tick shared by all drones (5 per check).</summary>
         public int RaysPerTick { get; internal set; } = 60;
-        /// <summary>m kept between the hull and obstacles by route checks (ray bundle margin, turn room).</summary>
-        public double ObstacleClearance { get; internal set; } = 3.0;
+        // ---- Mod-defined (not in the ini, 2026-11-13) ----
+        /// <summary>m kept between the hull and obstacles by route checks (ray bundle margin, turn room). Was 3.0 (ini):
+        /// a 12.5 m tunnel had no room for a 4.5 m drone.</summary>
+        public double ObstacleClearance { get; } = 1.0;
         /// <summary>m: on planets, stretches longer than this follow the planet's curve...</summary>
         public double ArcMinDistance { get; internal set; } = 300;
         /// <summary>m: ...as straight chords at least this long (and see ArcSag).</summary>
-        public double ArcStep { get; internal set; } = 200;
+        public double ArcStep { get; } = 200;
         /// <summary>m a chord of a planet arc may sag below its ends (sets the chord length: sqrt(8 r sag)); the chord
         /// ends are then lifted until the whole chord clears the terrain. Bigger: fewer, longer straight lines.</summary>
-        public double ArcSag { get; internal set; } = 25;
+        public double ArcSag { get; } = 25;
         /// <summary>m kept between the hull and the hangar / dock walls in a dock's entry corridor (and when undocking
         /// through one). The rest of the route keeps ObstacleClearance.</summary>
-        public double DockClearance { get; internal set; } = 0.25;
+        public double DockClearance { get; } = Pathfinding.Clearances.FINE;
         /// <summary>m: the corridor is searched again with this clearance when none is found with DockClearance (tight doors);
         /// flown at half the corridor speed, the line held within half the clearance.</summary>
-        public double DockClearanceMin { get; internal set; } = 0.1;
+        public double DockClearanceMin { get; } = Pathfinding.Clearances.MIN;
         /// <summary>m: how far from the connector the entry corridor is searched (to a point with room to turn).</summary>
-        public double DockCorridorMaxLength { get; internal set; } = 40;
+        public double DockCorridorMaxLength { get; } = 40;
         /// <summary>m above the terrain long flights in gravity cruise at (routes longer than ArcMinDistance): take-off
         /// straight up to it, landing straight down from it.</summary>
         public double CruiseAltitude { get; internal set; } = 40;
-        /// <summary>Shared memory of the links drones have flown (planner stage 2), saved with the world.</summary>
-        public bool UsePathMemory { get; internal set; } = true;
         /// <summary>Most remembered points; the least recently used go first.</summary>
         public int PathMemoryMaxNodes { get; internal set; } = 4000;
         /// <summary>Hours a remembered link may go unused before it is dropped.</summary>
-        public double PathMemoryMaxAgeHours { get; internal set; } = 24;
+        public double PathMemoryMaxAgeHours { get; internal set; } = 2;
         /// <summary>Lazy Theta* search (planner stage 3) where the straight line and the memory find nothing.</summary>
         public bool AllowLazyTheta { get; internal set; } = true;
         /// <summary>m: the search covers about this far around the stretch that failed.</summary>
@@ -115,12 +106,24 @@ namespace Automata.Config
         public int PathSearchWorkers { get; internal set; } = 2;
         /// <summary>Most milliseconds one search on a worker thread may take (the expansion limit scales with it).</summary>
         public double PathSearchMaxMs { get; internal set; } = 50;
-        /// <summary>Searches queued while nobody asks: the scene of the areas expected to be busy is prepared ahead.</summary>
-        public bool PathWarmUp { get; internal set; } = true;
         /// <summary>Most ms the straight-line stage (detours) may take before the later stages take over (0: no limit).</summary>
         public double StraightMaxMs { get; internal set; } = 10;
         /// <summary>Most ms the route-memory stage may take (0: no limit).</summary>
         public double MemoryMaxMs { get; internal set; } = 10;
+        /// <summary>
+        /// Real-shape navigation (TODO/27): a static grid's block counts where it really is - its shape measured with rays
+        /// once per kind of block and kept as voxels (PathfindingManager.Shapes) - not as its whole cell: in the box checks
+        /// of the main thread (a leg, a pose) and in the block lattice search. Off: cell boxes everywhere. The queued
+        /// searches (worker threads) keep the cell boxes either way.
+        /// </summary>
+        public bool RealShapeConfirm { get; internal set; } = false;
+        /// <summary>
+        /// The block lattice stage (PathfindingManager.Lattice): indoors, when the other stages fail, a search on the
+        /// lattice of the static grid in the way, with the hull's lie in the state.
+        /// </summary>
+        public bool LatticeSearch { get; internal set; } = true;
+        /// <summary>Most ms one lattice search may take.</summary>
+        public double LatticeMaxMs { get; internal set; } = 40;
         /// <summary>Minutes a flight lane may go unused before it is dropped.</summary>
         public double FlightLaneExpirationMinutes { get; internal set; } = 240;
     }

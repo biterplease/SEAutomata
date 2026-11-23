@@ -40,8 +40,8 @@ namespace Automata.Drone
 
         private const double MINE_SITE_RADIUS = 40;
         private const int MINE_SITE_MAX_CELLS = 64;
-        private const double MINE_COLLECT_DOWN = 5.0;      // m from the nearest ore voxel (drill point): collecting from here on
-        private const double MINE_COLLECT_ANGLED = 5.0;     // the same for angled bores
+        private const double MINE_COLLECT_DOWN = 2.5;      // m from the nearest ore voxel (drill point): collecting from here on
+        private const double MINE_COLLECT_ANGLED = 2.5;     // the same for angled bores
         private const double MINE_NEAR_RADIUS = 16;        // m around the drill point read for the nearest ore voxel
         private const double MINE_BORE_EXTEND = 8;         // m further along the bore line per extension, until full
         private const int MINE_BORE_EXTENSIONS = 12;       // at most (~100 m past the deposit): then it takes what it has
@@ -111,7 +111,6 @@ namespace Automata.Drone
         private int boreHoldFrame, boreHoldLast;   // holding (a grid ahead / for another drone) since, last held; 0: not
         private int boreAheadCheck;            // RunMine calls until the next look along the bore
         private const int BORE_AHEAD_EVERY = 2;            // RunMine calls between looks along the bore ahead (20 ticks)
-        private const double BORE_CHECK_BERTH = 0.5;       // m kept round the hull by the checks along a bore (pooled bores run close)
         #region Timing
         private const int BORE_HOLD_MAX_TICKS = 90 * 60;   // held in the bore this long (something stays ahead): the bore ends there
         #endregion
@@ -454,7 +453,7 @@ namespace Automata.Drone
         private bool ClimbOut(ref Vector3D start, double hull, List<Vector3D> points)
         {
             if (!flightState.InGravity) return false;
-            double need = hull + CONSTRUCTION_CLEARANCE;
+            double need = hull + BerthNow(1);   // (the route clearance)
             double h = PathfindingManager.HeightAboveTerrain(start);
             if (h == double.MaxValue || h >= need) return false;
             Vector3D up = flightState.GravityUp;
@@ -552,7 +551,7 @@ namespace Automata.Drone
 
         /// <summary>
         /// A grid in the bore from the drill point at 'from' to 'to' (not the drone's own; the rock it bores doesn't
-        /// count): the hull swept along it at its attitude, BORE_CHECK_BERTH round it, its front past the end, as far as
+        /// count): the hull swept along it at its attitude, Pathfinding.Clearances.WORK round it, its front past the end, as far as
         /// the drone's instruments see. 'what': its name.
         /// </summary>
         private bool BoreBlockedAhead(Vector3D from, Vector3D to, out string what)
@@ -564,7 +563,7 @@ namespace Automata.Drone
             PathQuery q;
             BuildPathQuery(out q);
             q.NoVoxels = true;
-            q.Berth = BORE_CHECK_BERTH;
+            q.Berth = Pathfinding.Clearances.WORK;
             pm.BeginPlan();
             Vector3D off = HullCentreWorld - from;
             Vector3D hit;
@@ -612,7 +611,7 @@ namespace Automata.Drone
                 PathQuery q;
                 BuildPathQuery(out q);
                 q.NoVoxels = true;
-                q.Berth = BORE_CHECK_BERTH;
+                q.Berth = Pathfinding.Clearances.WORK;
                 Vector3D off = HullCentreWorld - here;
                 Vector3D from = here;
                 for (int i = 0; i < pts.Count; i++)
@@ -633,7 +632,7 @@ namespace Automata.Drone
                         double len = dir.Length();
                         dir /= len;
                         double half = PathfindingManager.HullHalfSizeAlong(ref q, ref q.Controller, dir);
-                        double run = MathHelper.Clamp(Vector3D.Dot(hit - (from + off), dir) - half - FREE_RUN_MARGIN, 0, len);
+                        double run = MathHelper.Clamp(Vector3D.Dot(hit - (from + off), dir) - half - Pathfinding.Clearances.WORK, 0, len);
                         pts.RemoveRange(i, pts.Count - i);
                         if (run >= BACK_OUT_MIN) pts.Add(from + dir * run);
                         if (Log.DebugEnabled) Log.Debug("Drone {0}: back-out along the bore shortened: {1} behind", Entity.EntityId, name);
@@ -864,6 +863,9 @@ namespace Automata.Drone
         private void FinishMine()
         {
             boring = false;
+            // The rock it took: read again by the next lattice over it (RockLattice)
+            var rockPm = Pathfinding.PathfindingManager.Instance;
+            if (rockPm != null) rockPm.ForgetRock(flightState.Position, 100);
             quarryActive = false;
             quarryPlanned = false;
             Automata.Designator.QuarrySites.Release(_entityId);   // its section on a quarry site (none: nothing)

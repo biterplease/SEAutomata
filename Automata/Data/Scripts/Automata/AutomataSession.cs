@@ -105,11 +105,6 @@ namespace Automata
 
         // Mod-wide settings and management
         private bool isInitialized = false;
-        private long _lastUpdateFrame = 0;
-        private int updateCounter = 0;
-        #region Timing
-        private const int UPDATE_INTERVAL = 60;
-        #endregion
 
         // _messageQueue
         private int messageQueueCleanupIntervalTicks = 600;
@@ -259,7 +254,6 @@ namespace Automata
                 LogisticsComputerTerminalControls.DoOnce(ModContext);
                 // DroneControllerTerminalControls.DoOnce(ModContext);
 
-                QueueTerminalDumps();   // property ids to the SE log (see LogTerminalControls)
 
 
                 isInitialized = true;
@@ -270,70 +264,6 @@ namespace Automata
             }
         }
 
-
-        // Terminal controls / actions of block types, written once to the SE log (Space Engineers' own log file): the
-        // property ids we read or switch on blocks we don't own the code of (AI blocks: "ActivateBehavior"...). A
-        // type's controls exist only once a block of that type was created, so an empty list is retried later.
-        #region Timing
-        private const int TERMINAL_DUMP_RETRY_TICKS = 600;
-        #endregion
-        private const int TERMINAL_DUMP_MAX_TRIES = 60;
-        private sealed class TerminalDump { public string Title; public Func<int> Dump; public int Tries; }
-        private readonly List<TerminalDump> terminalDumps = new List<TerminalDump>();
-        private int lastTerminalDumpFrame;
-
-        private void QueueTerminalDumps()
-        {
-            terminalDumps.Add(new TerminalDump { Title = "AI DEFENSIVE (IMyDefensiveCombatBlock)", Dump = () => LogTerminalControls<IMyDefensiveCombatBlock>("AI DEFENSIVE (IMyDefensiveCombatBlock)") });
-            terminalDumps.Add(new TerminalDump { Title = "AI OFFENSIVE (IMyOffensiveCombatBlock)", Dump = () => LogTerminalControls<IMyOffensiveCombatBlock>("AI OFFENSIVE (IMyOffensiveCombatBlock)") });
-            terminalDumps.Add(new TerminalDump { Title = "AI FLIGHT (IMyFlightMovementBlock)", Dump = () => LogTerminalControls<IMyFlightMovementBlock>("AI FLIGHT (IMyFlightMovementBlock)") });
-            terminalDumps.Add(new TerminalDump { Title = "PROGRAMMABLE BLOCK", Dump = () => LogTerminalControls<IMyProgrammableBlock>("PROGRAMMABLE BLOCK") });
-            terminalDumps.Add(new TerminalDump { Title = "REMOTE CONTROL", Dump = () => LogTerminalControls<IMyRemoteControl>("REMOTE CONTROL") });
-        }
-
-        private void RunTerminalDumps(int now)
-        {
-            if (terminalDumps.Count == 0 || now - lastTerminalDumpFrame < TERMINAL_DUMP_RETRY_TICKS)
-                return;
-            lastTerminalDumpFrame = now;
-            for (int i = terminalDumps.Count - 1; i >= 0; i--)
-            {
-                var d = terminalDumps[i];
-                int count = 0;
-                try { count = d.Dump(); }
-                catch (Exception ex) { MyLog.Default.WriteLine("Automata: terminal dump " + d.Title + " failed: " + ex.Message); }
-                if (count > 0 || ++d.Tries >= TERMINAL_DUMP_MAX_TRIES)
-                {
-                    if (count == 0) MyLog.Default.WriteLine("Automata: [DEV] " + d.Title + ": no terminal controls (no such block was created this session)");
-                    terminalDumps.RemoveAt(i);
-                }
-            }
-        }
-
-        // Returns how many controls there were (0: the type's controls aren't created yet; nothing written)
-        private static int LogTerminalControls<T>(string title)
-        {
-            List<IMyTerminalControl> controls;
-            MyAPIGateway.TerminalControls.GetControls<T>(out controls);
-            if (controls == null || controls.Count == 0) return 0;
-            MyLog.Default.WriteLine("Automata: [DEV] ===== " + title + " TERMINAL CONTROLS (" + controls.Count + ") =====");
-            foreach (IMyTerminalControl c in controls)
-            {
-                var titled = c as IMyTerminalControlTitleTooltip;
-                string name = titled != null ? MyTexts.GetString(titled.Title) : "N/A";
-                var property = c as ITerminalProperty;
-                string valueType = property != null ? property.TypeName : "N/A";
-                MyLog.Default.WriteLine("Automata: [DEV] terminal property: id='" + c.Id + "'; type='" + c.GetType().Name + "'; valueType='" + valueType
-                                        + "'; displayName='" + name + "'");
-            }
-            List<IMyTerminalAction> actions;
-            MyAPIGateway.TerminalControls.GetActions<T>(out actions);
-            if (actions != null)
-                foreach (IMyTerminalAction a in actions)
-                    MyLog.Default.WriteLine("Automata: [DEV] toolbar action: id='" + a.Id + "'; displayName='" + a.Name + "'");
-            MyLog.Default.WriteLine("Automata: [DEV] ===== end of " + title + " =====");
-            return controls.Count;
-        }
 
         // Clients, every frame (also paused): scout pointer input
         public override void HandleInput()
@@ -371,8 +301,10 @@ namespace Automata
                 Pathfinding.PathfindingManager.Instance?.Update();   // look-ahead ray budget
                 Automata.Designator.ScoutPointer.Update();                       // pointers' magazines kept full (no vanilla reload)
                 if (MyAPIGateway.Multiplayer == null || MyAPIGateway.Multiplayer.IsServer) Automata.Designator.ScoutPointer.UpdateServer();
-                RunTerminalDumps(MyAPIGateway.Session.GameplayFrameCounter);
                 if (MyAPIGateway.Multiplayer == null || MyAPIGateway.Multiplayer.IsServer) Util.PerfStats.Update(MyAPIGateway.Session.GameplayFrameCounter);
+#if PERF
+                if (MyAPIGateway.Multiplayer == null || MyAPIGateway.Multiplayer.IsServer) Pathfinding.RouteStats.Update(MyAPIGateway.Session.GameplayFrameCounter);
+#endif
 
                 var currentFrame = MyAPIGateway.Session.GameplayFrameCounter;
                 if ((currentFrame - lastMessageQueueCleanupFrame) > messageQueueCleanupIntervalTicks)
@@ -383,11 +315,6 @@ namespace Automata
                 if (_messageQueue != null && (MyAPIGateway.Multiplayer == null || MyAPIGateway.Multiplayer.IsServer))
                     _messageQueue.Relays.Update(currentFrame);   // every REBUILD_TICKS
 
-                _lastUpdateFrame = currentFrame;
-
-
-                // Optional: Log active AI block counts
-                updateCounter++;
             }
             catch (Exception ex)
             {
@@ -460,6 +387,9 @@ namespace Automata
                 if (MyAPIGateway.Utilities != null) MyAPIGateway.Utilities.MessageEntered -= commands.MessageEntered;
                 itemsIndexed = false;   // statics outlive the session (next world in the same game process)
                 Pathfinding.PathfindingManager.Unload();
+#if PERF
+                Pathfinding.RouteStats.Close();
+#endif
                 Automata.Designator.QuarrySites.Clear();
                 Logistics.LogisticsComputerTerminalControls.Unload();
                 Construction.BuildPlanner.ClearFrames();

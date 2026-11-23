@@ -70,3 +70,36 @@ The operation mode can only be changed while the drone's AI is off.
 Drones managed by an Orchestrator fly in lanes, like air corridors.
 
 See the [Orchestrator: Flight Lanes](./6-Orchestrator.md#flight-lanes) for more details.
+
+## Pathfinding
+
+The drone interacts with the mod's pathfinder, in order to navigate to where it needs to be.
+
+This happenes in a "fall forward" manner, where it tries the simplest form of navigation first, and if it fails, it increases the complexity of the method, until it succeeds:
+1. Known paths are recorded by the pathfinder, and are found immediately if they have been successful. If no known path succeeds, then the following happens:
+2. If direct pathfinding: a line from where the drone is to where it wants to be
+3. Reposition: reposition to one of: left, right, up, up-left, up-right, retry.
+4. Once retries are exhausted, a "proper pathfinding" method takes over, and finds a route for the drone.
+5. Once a route is found and is successfully flown, it gets recorded, and re-used in step 1.
+
+Initial pathfinding comes at a cost, but that cost gets reduced significantly once the routes are recorded.
+
+Recorded routes are saved with the world save, so they get reloaded when the server restarts.
+
+Routes are also separated by Faction, and Player, preventing other players from accessing your own routes.
+
+## Custom routes
+
+If you would prefer to define your own routes, you can do it by following the steps below. Tts actually better for server simulation simulation speed!
+
+1. Disable drone AI "Enable AI => OFF"
+2. Set the drone to "Managed by player"
+3. Enable drone AI "Enable AI => ON"
+4. In the drone controller terminal, scroll down to "DEBUG" section
+5. Check the box to display the debug options
+6. Under "Custom nav", enter the waypoints you want for your route, in order.
+7. (Optional) You can set the orientation you want the drone to have to each waypoint, by adding a second GPS point under "Orient From". The drone will orient itself along the vector traced from "Orient from" to "Target".
+8. With all waypoints entered, press Navigate
+
+The drone will fly the route you entered, and this route will always be preferred by your drones or your faction's drones.
+

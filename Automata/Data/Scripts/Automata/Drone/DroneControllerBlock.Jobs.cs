@@ -1845,20 +1845,23 @@ namespace Automata.Drone
                 double len = dir.Length();
                 dir /= len;
                 string blocker;
-                double run;
-                if (CompactFlight)
+                double run = FreeRun(HullCentreWorld, dir, len, out blocker);
+                if (blocker != null)
                 {
-                    // Harvesters: the real shape against the real physics (out of a plot's cell, the nose over its soil: the
-                    // cell box had it blocked at once and the drone stayed there)
+                    // Blocked by the cells: the real shape against the real physics decides (out of a plot's cell, the nose
+                    // over its soil: the cell box had it blocked at once and the drone stayed there). Every tool, with its
+                    // room (WorkBerth; harvesters only, before 2026-11-18)
                     MatrixD att = flightState.WorldMatrix;
                     Pathfinding.PathfindingManager rpm;
                     Pathfinding.PathQuery rq;
-                    blocker = null;
-                    run = len;
-                    if (RealShapeQuery(out rpm, out rq) && !rpm.RealSweepClear(ref rq, ref att, HullCentreWorld, HullCentreWorld + dir * len, HARVEST_LINE_BERTH, true, out blocker, out run))
-                        run = Math.Max(0, run - 0.1);
+                    string rBlocker;
+                    double rRun;
+                    if (RealShapeQuery(out rpm, out rq))
+                    {
+                        if (rpm.RealSweepClear(ref rq, ref att, HullCentreWorld, HullCentreWorld + dir * len, WorkBerth(), true, out rBlocker, out rRun)) { blocker = null; run = len; }
+                        else if (rRun - 0.1 > run) { run = Math.Max(0, rRun - 0.1); blocker = rBlocker; }
+                    }
                 }
-                else run = FreeRun(HullCentreWorld, dir, len, out blocker);
                 if (blocker != null)
                 {
                     if (run < BACK_OUT_MIN)
@@ -1908,7 +1911,7 @@ namespace Automata.Drone
         private const double MANOEUVRE_MARGIN = 2.5;
 
         // m: room a work site needs in front of the face for the drone to turn in place (hull radius + margin)
-        private double TurnRoomOut { get { return Math.Min(ManoeuvreDistance(), HullRadius + TURN_ROOM_MARGIN); } }
+        private double TurnRoomOut { get { return Math.Min(ManoeuvreDistance(), HullRadius + Pathfinding.Clearances.WORK); } }
 
         /// <summary>
         /// Orders the flight to 'target' (the point 'referenceOffset' is placed on), in along approach -> target with
@@ -1973,8 +1976,7 @@ namespace Automata.Drone
             laneHopOk = true;   // one route to one place: a lane hop is planned again at its end (Replan)
             try
             {
-                planned = (CompactFlight && TryDirectLegs(start, hullAtApproach, routePoints, looseGoal))
-                          || PlanPath(start, hullAtApproach, routePoints, jobSource == JobSource.StandAlone, true, flightState.WorldMatrix.Forward, flightState.WorldMatrix.Up, looseGoal);
+                planned = PlanPath(start, hullAtApproach, routePoints, jobSource == JobSource.StandAlone, true, flightState.WorldMatrix.Forward, flightState.WorldMatrix.Up, looseGoal);
             }
             finally { laneHopOk = false; }
             if (!planned)

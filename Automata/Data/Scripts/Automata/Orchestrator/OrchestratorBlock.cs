@@ -155,7 +155,7 @@ namespace Automata.Orchestrator
         {
             base.UpdateBeforeSimulation10();
             if (!ready) return;
-            if (MyAPIGateway.Multiplayer.IsServer) { UpdateAI(); UpdateLanes10(); }
+            if (MyAPIGateway.Multiplayer.IsServer) { UpdateAI(); UpdateLanes10(); UpdateCustomRoutes10(); }
             if (++infoCounter >= 10)
             {
                 infoCounter = 0;
@@ -2114,7 +2114,7 @@ namespace Automata.Orchestrator
             for (int i = 0; i < header.Count; i++) sb.Append(header[i]).Append('\n');
             sb.Append(new string('-', 40)).Append('\n');
             log.AppendTo(sb);
-            target.Append(sb);
+            TextLimits.AppendCut(target, sb);
         }
         #endregion
 
